@@ -90,3 +90,13 @@ shell / file / network / service / log 基础能力
 5. [系统架构](docs/04-system-architecture.md)
 6. [架构决策 0001](docs/decisions/0001-first-stage-alpine-qemu.md)
 
+## 第一阶段本地验证
+
+当前仓库已经提供 Alpine rootfs 构建和验证脚本。Windows 宿主建议通过 WSL 执行：
+
+```powershell
+wsl bash -lc "cd /mnt/e/main/ai-in-linux && bash scripts/build-alpine-rootfs.sh --arch x86_64 --force"
+wsl bash -lc "cd /mnt/e/main/ai-in-linux && bash scripts/verify-alpine-rootfs.sh --rootfs artifacts/rootfs/alpine-x86_64"
+```
+
+这一步验证的是最小 Linux userspace 能力，不等于 Android APK 或 QEMU VM 已完成。QEMU 启动链路是下一阶段。

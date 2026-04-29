@@ -14,3 +14,22 @@
 
 脚本必须可重复运行，不能依赖未记录的手工步骤。
 
+## 当前脚本
+
+```sh
+bash scripts/build-alpine-rootfs.sh --arch x86_64 --force
+bash scripts/verify-alpine-rootfs.sh --rootfs artifacts/rootfs/alpine-x86_64
+```
+
+Windows 宿主建议通过 WSL 执行：
+
+```powershell
+wsl bash -lc "cd /mnt/e/main/ai-in-linux && bash scripts/build-alpine-rootfs.sh --arch x86_64 --force"
+wsl bash -lc "cd /mnt/e/main/ai-in-linux && bash scripts/verify-alpine-rootfs.sh --rootfs artifacts/rootfs/alpine-x86_64"
+```
+
+说明：
+
+- `x86_64` 用于当前开发机 chroot 验证。
+- `aarch64` 是 Android/QEMU 目标架构，但跨架构安装包需要额外 emulator/binfmt 支持。
+- 构建产物输出到 `artifacts/`，默认不提交 git。
