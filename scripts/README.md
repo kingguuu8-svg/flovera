@@ -33,3 +33,12 @@ wsl bash -lc "cd /mnt/e/main/ai-in-linux && bash scripts/verify-alpine-rootfs.sh
 - `x86_64` 用于当前开发机 chroot 验证。
 - `aarch64` 是 Android/QEMU 目标架构，但跨架构安装包需要额外 emulator/binfmt 支持。
 - 构建产物输出到 `artifacts/`，默认不提交 git。
+
+## QEMU VM 验证
+
+```powershell
+wsl bash -lc "cd /mnt/e/main/ai-in-linux && bash scripts/build-qemu-image.sh --rootfs artifacts/rootfs/alpine-x86_64 --force"
+wsl bash -lc "cd /mnt/e/main/ai-in-linux && bash scripts/verify-qemu-vm.sh --image artifacts/qemu/ai-linux-x86_64.ext4"
+```
+
+QEMU 验证会通过 SSH 跨 VM 边界重复检查 shell、网络、包管理、Python、Git、Node、`/workspace` 和 HTTP 服务。

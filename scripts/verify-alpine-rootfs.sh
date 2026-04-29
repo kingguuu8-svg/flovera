@@ -93,7 +93,7 @@ run_guest "/sbin/apk --version"
 run_guest "/sbin/apk update >/dev/null"
 pass "apk package manager works"
 
-run_guest "curl -fsSI https://example.com | head -n 1"
+run_guest "curl -fsS -o /dev/null -w '%{http_code}\n' https://example.com"
 pass "HTTPS network works"
 
 run_guest "python3 --version"

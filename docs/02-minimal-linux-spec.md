@@ -39,6 +39,7 @@
 | `git` | 强烈建议 | 版本、diff、回滚 |
 | `nodejs` | 建议 | Web 工具和前端生态 |
 | `openssh-client` | 可后置 | 远程连接和私有仓库 |
+| `dropbear` | VM 验证阶段需要 | 轻量 SSH server，用作宿主到 guest 的命令桥 |
 
 ## 不包含内容
 
@@ -61,4 +62,3 @@ curl -I https://example.com
 mkdir -p /workspace && echo ok > /workspace/test.txt
 python3 -m http.server 8000
 ```
-

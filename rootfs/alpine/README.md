@@ -11,6 +11,7 @@ python3
 git
 nodejs
 openssh-client
+dropbear
 ```
 
 `busybox` 和 `sh` 来自 Alpine minirootfs 基线，不在 `packages.txt` 中重复声明。

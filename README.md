@@ -100,3 +100,12 @@ wsl bash -lc "cd /mnt/e/main/ai-in-linux && bash scripts/verify-alpine-rootfs.sh
 ```
 
 这一步验证的是最小 Linux userspace 能力，不等于 Android APK 或 QEMU VM 已完成。QEMU 启动链路是下一阶段。
+
+## QEMU 边界验证
+
+```powershell
+wsl bash -lc "cd /mnt/e/main/ai-in-linux && bash scripts/build-qemu-image.sh --rootfs artifacts/rootfs/alpine-x86_64 --force"
+wsl bash -lc "cd /mnt/e/main/ai-in-linux && bash scripts/verify-qemu-vm.sh --image artifacts/qemu/ai-linux-x86_64.ext4 --timeout 150"
+```
+
+这一步通过 QEMU 启动 ext4 镜像，并通过 SSH 跨 VM 边界重复验证 shell、网络、包管理、Python、Git、Node、`/workspace` 和 HTTP 服务。

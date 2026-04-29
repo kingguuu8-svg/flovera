@@ -24,8 +24,7 @@ Result:
 | Alpine version | `3.23.4` |
 | Rootfs output | `artifacts/rootfs/alpine-x86_64` |
 | Tarball output | `artifacts/tarballs/alpine-x86_64-ai-linux-rootfs.tar.gz` |
-| Installed size | `128M` |
-| Compressed tarball size | `48M` |
+| Installed size | `129M` |
 
 Packages installed from `rootfs/alpine/packages.txt`:
 
@@ -36,6 +35,7 @@ python3
 git
 nodejs
 openssh-client
+dropbear
 ```
 
 ## Verification
