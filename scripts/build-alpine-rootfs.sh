@@ -21,8 +21,7 @@ Environment:
 
 Notes:
   Package installation uses chroot and therefore requires root on the host.
-  Cross-architecture package installation requires a configured emulator/binfmt
-  and is intentionally not hidden by this script.
+  Cross-architecture package installation requires qemu-user-static/binfmt.
 USAGE
 }
 
@@ -122,7 +121,14 @@ if [ "$SKIP_PACKAGES" -eq 0 ]; then
   [ "$(id -u)" -eq 0 ] || fail "package installation requires root"
   require_cmd chroot
   if [ "$ARCH" != "$HOST_ARCH" ]; then
-    fail "cannot chroot $ARCH rootfs on $HOST_ARCH host without a configured cross-arch emulator; rerun with --skip-packages or build native arch first"
+    case "$ARCH" in
+      aarch64)
+        require_cmd qemu-aarch64-static
+        ;;
+      *)
+        fail "cross-arch chroot is not configured for arch: $ARCH"
+        ;;
+    esac
   fi
 fi
 
@@ -130,10 +136,10 @@ mkdir -p "$DOWNLOAD_DIR" "$REPORT_DIR" "$TARBALL_DIR" "$ARTIFACT_ROOT"
 
 METADATA_URL="$MIRROR/alpine/latest-stable/releases/$ARCH/latest-releases.yaml"
 METADATA="$(curl -fsSL "$METADATA_URL")"
-BRANCH="$(printf '%s\n' "$METADATA" | awk '/branch: / {print $2; exit}')"
-VERSION="$(printf '%s\n' "$METADATA" | awk '/version: / {print $2; exit}')"
+BRANCH="$(printf '%s\n' "$METADATA" | awk '/branch: / {branch=$2} /flavor: alpine-minirootfs/ {print branch; exit}')"
+VERSION="$(printf '%s\n' "$METADATA" | awk '/version: / {version=$2} /flavor: alpine-minirootfs/ {print version; exit}')"
 FILE="$(printf '%s\n' "$METADATA" | awk '/file: alpine-minirootfs-/ {print $2; exit}')"
-SHA256="$(printf '%s\n' "$METADATA" | awk '/sha256: / {print $2; exit}')"
+SHA256="$(printf '%s\n' "$METADATA" | awk '/flavor: alpine-minirootfs/ {found=1} found && /sha256: / {print $2; exit}')"
 
 [ -n "$BRANCH" ] || fail "failed to parse Alpine branch from $METADATA_URL"
 [ -n "$VERSION" ] || fail "failed to parse Alpine version from $METADATA_URL"
@@ -164,6 +170,11 @@ EOF
 
 cp /etc/resolv.conf "$OUT_DIR/etc/resolv.conf"
 mkdir -p "$OUT_DIR/workspace" "$OUT_DIR/usr/local/bin" "$OUT_DIR/etc/profile.d"
+
+if [ "$SKIP_PACKAGES" -eq 0 ] && [ "$ARCH" != "$HOST_ARCH" ]; then
+  mkdir -p "$OUT_DIR/usr/bin"
+  cp "$(command -v qemu-aarch64-static)" "$OUT_DIR/usr/bin/qemu-aarch64-static"
+fi
 
 cat > "$OUT_DIR/etc/profile.d/ai-workspace.sh" <<'EOF'
 export AI_WORKSPACE=/workspace
@@ -197,6 +208,7 @@ if [ "$SKIP_PACKAGES" -eq 0 ]; then
   chroot "$OUT_DIR" /bin/sh -c "/sbin/apk add --no-cache $PACKAGES"
   chroot "$OUT_DIR" /bin/sh -c "update-ca-certificates"
   rm -rf "$OUT_DIR/var/cache/apk/"*
+  rm -f "$OUT_DIR/usr/bin/qemu-aarch64-static"
 fi
 
 TARBALL="$TARBALL_DIR/alpine-$ARCH-ai-linux-rootfs.tar.gz"

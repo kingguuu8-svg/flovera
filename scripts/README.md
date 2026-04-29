@@ -19,6 +19,9 @@
 ```sh
 bash scripts/build-alpine-rootfs.sh --arch x86_64 --force
 bash scripts/verify-alpine-rootfs.sh --rootfs artifacts/rootfs/alpine-x86_64
+
+bash scripts/build-alpine-rootfs.sh --arch aarch64 --force
+bash scripts/verify-alpine-rootfs.sh --rootfs artifacts/rootfs/alpine-aarch64 --emulator /usr/bin/qemu-aarch64-static
 ```
 
 Windows 宿主建议通过 WSL 执行：
@@ -31,7 +34,7 @@ wsl bash -lc "cd /mnt/e/main/ai-in-linux && bash scripts/verify-alpine-rootfs.sh
 说明：
 
 - `x86_64` 用于当前开发机 chroot 验证。
-- `aarch64` 是 Android/QEMU 目标架构，但跨架构安装包需要额外 emulator/binfmt 支持。
+- `aarch64` 是 Android/QEMU 目标架构，跨架构安装包和 chroot 验证需要 `qemu-user-static`/`binfmt` 支持。
 - 构建产物输出到 `artifacts/`，默认不提交 git。
 
 ## QEMU VM 验证
@@ -39,6 +42,10 @@ wsl bash -lc "cd /mnt/e/main/ai-in-linux && bash scripts/verify-alpine-rootfs.sh
 ```powershell
 wsl bash -lc "cd /mnt/e/main/ai-in-linux && bash scripts/build-qemu-image.sh --rootfs artifacts/rootfs/alpine-x86_64 --force"
 wsl bash -lc "cd /mnt/e/main/ai-in-linux && bash scripts/verify-qemu-vm.sh --image artifacts/qemu/ai-linux-x86_64.ext4"
+
+wsl bash -lc "cd /mnt/e/main/ai-in-linux && bash scripts/download-alpine-qemu-kernel.sh --arch aarch64 --force"
+wsl bash -lc "cd /mnt/e/main/ai-in-linux && bash scripts/build-qemu-initramfs.sh --arch aarch64 --rootfs artifacts/rootfs/alpine-aarch64 --modloop artifacts/qemu/kernel/aarch64/boot/modloop-virt --force"
+wsl bash -lc "cd /mnt/e/main/ai-in-linux && bash scripts/verify-qemu-vm.sh --arch aarch64 --initramfs-root --initrd artifacts/qemu/initramfs/ai-linux-aarch64.cpio.gz --kernel artifacts/qemu/kernel/aarch64/boot/vmlinuz-virt --timeout 240"
 ```
 
 QEMU 验证会通过 SSH 跨 VM 边界重复检查 shell、网络、包管理、Python、Git、Node、`/workspace` 和 HTTP 服务。

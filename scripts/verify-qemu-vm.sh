@@ -7,11 +7,14 @@ Boot the AI Linux image under QEMU and verify through the VM boundary.
 
 Usage:
   bash scripts/verify-qemu-vm.sh --image FILE [options]
+  bash scripts/verify-qemu-vm.sh --arch aarch64 --initramfs-root --initrd FILE --kernel FILE [options]
 
 Options:
   --image FILE       ext4 disk image created by build-qemu-image.sh.
+  --arch ARCH        VM architecture. Default: x86_64.
   --kernel FILE      Linux kernel. Default: latest /boot/vmlinuz-*.
   --initrd FILE      Initramfs. Default: matching /boot/initrd.img-* if available.
+  --initramfs-root   Treat --initrd as the guest root filesystem.
   --ssh-key FILE     SSH private key. Default: artifacts/qemu/ssh/ai_linux_vm_ed25519.
   --ssh-port PORT    Host port forwarded to guest SSH. Default: auto-select.
   --http-port PORT   Host port forwarded to guest HTTP test. Default: auto-select.
@@ -48,18 +51,25 @@ PY
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 IMAGE=""
+ARCH="x86_64"
 KERNEL=""
 INITRD=""
 SSH_KEY="$REPO_ROOT/artifacts/qemu/ssh/ai_linux_vm_ed25519"
 SSH_PORT=""
 HTTP_PORT=""
 TIMEOUT=90
+INITRAMFS_ROOT=0
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --image)
       [ "$#" -ge 2 ] || fail "--image requires a value"
       IMAGE="$2"
+      shift 2
+      ;;
+    --arch)
+      [ "$#" -ge 2 ] || fail "--arch requires a value"
+      ARCH="$2"
       shift 2
       ;;
     --kernel)
@@ -71,6 +81,10 @@ while [ "$#" -gt 0 ]; do
       [ "$#" -ge 2 ] || fail "--initrd requires a value"
       INITRD="$2"
       shift 2
+      ;;
+    --initramfs-root)
+      INITRAMFS_ROOT=1
+      shift
       ;;
     --ssh-key)
       [ "$#" -ge 2 ] || fail "--ssh-key requires a value"
@@ -102,14 +116,22 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-[ -n "$IMAGE" ] || fail "--image is required"
-IMAGE="$(realpath -m "$IMAGE")"
+case "$ARCH" in
+  x86_64 | aarch64) ;;
+  *) fail "unsupported QEMU VM arch: $ARCH" ;;
+esac
+[ -n "$IMAGE" ] || [ "$INITRAMFS_ROOT" -eq 1 ] || fail "--image is required unless --initramfs-root is used"
+if [ -n "$IMAGE" ]; then
+  IMAGE="$(realpath -m "$IMAGE")"
+fi
 SSH_KEY="$(realpath -m "$SSH_KEY")"
-KERNEL="${KERNEL:-$(latest_file /boot/vmlinuz-*)}"
+if [ -z "$KERNEL" ] && [ "$ARCH" = "x86_64" ]; then
+  KERNEL="$(latest_file /boot/vmlinuz-*)"
+fi
 [ -n "$KERNEL" ] || fail "no kernel found; pass --kernel"
 KERNEL="$(realpath -m "$KERNEL")"
 
-if [ -z "$INITRD" ]; then
+if [ -z "$INITRD" ] && [ "$ARCH" = "x86_64" ]; then
   VERSION="${KERNEL##*/vmlinuz-}"
   if [ -f "/boot/initrd.img-$VERSION" ]; then
     INITRD="/boot/initrd.img-$VERSION"
@@ -118,11 +140,17 @@ if [ -z "$INITRD" ]; then
   fi
 fi
 
-[ -f "$IMAGE" ] || fail "image does not exist: $IMAGE"
+if [ -n "$IMAGE" ]; then
+  [ -f "$IMAGE" ] || fail "image does not exist: $IMAGE"
+fi
 [ -f "$KERNEL" ] || fail "kernel does not exist: $KERNEL"
 [ -f "$SSH_KEY" ] || fail "SSH key does not exist: $SSH_KEY"
 
-require_cmd qemu-system-x86_64
+if [ "$ARCH" = "aarch64" ]; then
+  require_cmd qemu-system-aarch64
+else
+  require_cmd qemu-system-x86_64
+fi
 require_cmd ssh
 require_cmd curl
 require_cmd python3
@@ -144,7 +172,9 @@ chmod 600 "$SECURE_SSH_KEY"
 
 exec > >(tee "$REPORT") 2>&1
 
-QEMU_ARGS=(
+if [ "$ARCH" = "x86_64" ]; then
+  QEMU_BIN="qemu-system-x86_64"
+  QEMU_ARGS=(
   -machine accel=tcg
   -cpu max
   -m 512M
@@ -159,7 +189,36 @@ QEMU_ARGS=(
   -daemonize
   -serial "file:$LOG"
   -display none
-)
+  )
+else
+  APPEND="console=ttyAMA0 earlycon panic=1"
+  if [ "$INITRAMFS_ROOT" -eq 1 ]; then
+    APPEND="$APPEND rdinit=/usr/local/sbin/ai-vm-init"
+  else
+    APPEND="root=/dev/vda rw $APPEND"
+    APPEND="$APPEND init=/usr/local/sbin/ai-vm-init"
+  fi
+  QEMU_BIN="qemu-system-aarch64"
+  QEMU_ARGS=(
+    -machine virt,accel=tcg
+    -cpu cortex-a57
+    -m 768M
+    -smp 1
+    -no-reboot
+    -bios /usr/share/qemu-efi-aarch64/QEMU_EFI.fd
+    -kernel "$KERNEL"
+    -append "$APPEND"
+    -netdev "user,id=net0,hostfwd=tcp:127.0.0.1:$SSH_PORT-:22,hostfwd=tcp:127.0.0.1:$HTTP_PORT-:8000"
+    -device virtio-net-pci,netdev=net0
+    -pidfile "$PIDFILE"
+    -daemonize
+    -serial "file:$LOG"
+    -display none
+  )
+  if [ -n "$IMAGE" ]; then
+    QEMU_ARGS+=(-drive "file=$IMAGE,format=raw,if=virtio")
+  fi
+fi
 
 if [ -n "$INITRD" ] && [ -f "$INITRD" ]; then
   QEMU_ARGS+=(-initrd "$INITRD")
@@ -201,7 +260,7 @@ printf 'http_port=%s\n' "$HTTP_PORT"
 printf 'qemu_log=%s\n' "$LOG"
 printf 'started_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-qemu-system-x86_64 "${QEMU_ARGS[@]}"
+"$QEMU_BIN" "${QEMU_ARGS[@]}"
 
 SSH_BASE=(
   ssh

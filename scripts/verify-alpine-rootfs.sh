@@ -11,6 +11,7 @@ Usage:
 Options:
   --rootfs DIR      Rootfs directory to verify.
   --port PORT       Port for the HTTP service check. Default: auto-select.
+  --emulator FILE   Optional qemu-user-static binary for cross-arch chroot.
   -h, --help        Show this help.
 
 Checks:
@@ -31,6 +32,7 @@ require_cmd() {
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ROOTFS=""
 PORT=""
+EMULATOR=""
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -42,6 +44,11 @@ while [ "$#" -gt 0 ]; do
     --port)
       [ "$#" -ge 2 ] || fail "--port requires a value"
       PORT="$2"
+      shift 2
+      ;;
+    --emulator)
+      [ "$#" -ge 2 ] || fail "--emulator requires a value"
+      EMULATOR="$2"
       shift 2
       ;;
     -h | --help)
@@ -64,6 +71,13 @@ require_cmd chroot
 require_cmd curl
 require_cmd python3
 require_cmd realpath
+
+if [ -n "$EMULATOR" ]; then
+  EMULATOR="$(realpath -m "$EMULATOR")"
+  [ -x "$EMULATOR" ] || fail "emulator does not exist or is not executable: $EMULATOR"
+  mkdir -p "$ROOTFS/usr/bin"
+  cp "$EMULATOR" "$ROOTFS/usr/bin/"
+fi
 
 REPORT_DIR="$REPO_ROOT/artifacts/reports"
 mkdir -p "$REPORT_DIR"
@@ -167,6 +181,9 @@ pass "Python HTTP service is reachable from host on port $PORT"
 cleanup
 trap - EXIT
 run_guest "rm -rf /workspace/.verify-rootfs /var/cache/apk/"'*'
+if [ -n "$EMULATOR" ]; then
+  rm -f "$ROOTFS/usr/bin/$(basename "$EMULATOR")"
+fi
 
 printf 'finished_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 printf 'status=ok\n'

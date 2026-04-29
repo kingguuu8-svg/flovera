@@ -26,6 +26,20 @@ Result:
 | Tarball output | `artifacts/tarballs/alpine-x86_64-ai-linux-rootfs.tar.gz` |
 | Installed size | `129M` |
 
+The same build was repeated for the Android-relevant target architecture:
+
+```sh
+bash scripts/build-alpine-rootfs.sh --arch aarch64 --force
+```
+
+| Item | Value |
+|---|---|
+| Status | OK |
+| Architecture | `aarch64` |
+| Rootfs output | `artifacts/rootfs/alpine-aarch64` |
+| Tarball output | `artifacts/tarballs/alpine-aarch64-ai-linux-rootfs.tar.gz` |
+| Installed size | `129M` |
+
 Packages installed from `rootfs/alpine/packages.txt`:
 
 ```text
@@ -44,6 +58,7 @@ Command:
 
 ```sh
 bash scripts/verify-alpine-rootfs.sh --rootfs artifacts/rootfs/alpine-x86_64
+bash scripts/verify-alpine-rootfs.sh --rootfs artifacts/rootfs/alpine-aarch64 --emulator /usr/bin/qemu-aarch64-static
 ```
 
 Passed checks:
@@ -74,7 +89,7 @@ Observed versions:
 
 ## Decision Impact
 
-The first-stage minimal Linux userspace is viable. The next blocking question is VM boot, not package selection.
+The first-stage minimal Linux userspace is viable on both `x86_64` and `aarch64`. The next blocking question is VM boot, not package selection.
 
 Next implementation target:
 

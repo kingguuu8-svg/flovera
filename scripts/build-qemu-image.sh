@@ -10,7 +10,8 @@ Usage:
 
 Options:
   --rootfs DIR         Source rootfs directory.
-  --out FILE           Output image. Default: artifacts/qemu/ai-linux-x86_64.ext4
+  --arch ARCH          VM architecture. Default: x86_64.
+  --out FILE           Output image. Default: artifacts/qemu/ai-linux-ARCH.ext4
   --size SIZE          Image size. Default: 512M.
   --ssh-key FILE       SSH private key path. Default: artifacts/qemu/ssh/ai_linux_vm_ed25519
   --force              Replace an existing output image under artifacts/qemu.
@@ -50,7 +51,8 @@ safe_remove_output() {
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ROOTFS=""
-OUT="$REPO_ROOT/artifacts/qemu/ai-linux-x86_64.ext4"
+ARCH="x86_64"
+OUT=""
 SIZE="512M"
 SSH_KEY="$REPO_ROOT/artifacts/qemu/ssh/ai_linux_vm_ed25519"
 FORCE=0
@@ -61,6 +63,11 @@ while [ "$#" -gt 0 ]; do
     --rootfs)
       [ "$#" -ge 2 ] || fail "--rootfs requires a value"
       ROOTFS="$2"
+      shift 2
+      ;;
+    --arch)
+      [ "$#" -ge 2 ] || fail "--arch requires a value"
+      ARCH="$2"
       shift 2
       ;;
     --out)
@@ -93,6 +100,11 @@ while [ "$#" -gt 0 ]; do
 done
 
 [ -n "$ROOTFS" ] || fail "--rootfs is required"
+case "$ARCH" in
+  x86_64 | aarch64) ;;
+  *) fail "unsupported QEMU image arch: $ARCH" ;;
+esac
+OUT="${OUT:-$REPO_ROOT/artifacts/qemu/ai-linux-$ARCH.ext4}"
 ROOTFS="$(realpath -m "$ROOTFS")"
 OUT="$(realpath -m "$OUT")"
 SSH_KEY="$(realpath -m "$SSH_KEY")"
@@ -133,7 +145,7 @@ cleanup() {
 trap cleanup EXIT
 
 truncate -s "$SIZE" "$OUT"
-mkfs.ext4 -q -F "$OUT"
+mkfs.ext4 -q -F -O ^64bit "$OUT"
 mount -o loop "$OUT" "$MOUNT_DIR"
 
 tar --numeric-owner -C "$ROOTFS" -cpf - . | tar --numeric-owner -C "$MOUNT_DIR" -xpf -
@@ -213,6 +225,7 @@ REPORT="$REPORT_DIR/build-qemu-image.txt"
 {
   echo "status=ok"
   echo "rootfs=$ROOTFS"
+  echo "arch=$ARCH"
   echo "image=$OUT"
   echo "size=$SIZE"
   echo "ssh_key=$SSH_KEY"

@@ -30,4 +30,23 @@ DHCP + dropbear SSH
 host verifies commands over forwarded SSH
 ```
 
-本阶段用宿主侧 Ubuntu 内核做测试内核，目的是先验证 VM 边界和 guest userspace。后续 Android/aarch64 阶段需要替换为目标架构内核与镜像。
+```text
+Alpine virt kernel
+  ↓
+QEMU aarch64 TCG
+  ↓
+generated initramfs root copied from Alpine aarch64 rootfs
+  ↓
+/usr/local/sbin/ai-vm-init
+  ↓
+static QEMU usernet address + dropbear SSH
+  ↓
+host verifies commands over forwarded SSH
+```
+
+本阶段保留两条链路：
+
+- `x86_64`：用宿主侧 Ubuntu 内核和 ext4 镜像快速验证 VM 边界。
+- `aarch64`：用 Alpine `virt` 内核和 initramfs root 验证更接近 Android 目标架构的最小 Linux 工作空间。
+
+当前 `aarch64` 选择 initramfs root，不是最终磁盘方案。原因是 Alpine netboot initramfs 在当前 QEMU 参数下没有直接挂载这个最小 ext4 rootfs；为了先证明 VM 边界，先把 rootfs 打成 initramfs，并只注入网络验证必需模块。
