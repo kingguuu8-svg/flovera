@@ -1,0 +1,26 @@
+# Generated VM/rootfs artifacts
+artifacts/*
+!artifacts/README.md
+*.img
+*.qcow2
+*.raw
+*.iso
+*.tar
+*.tar.gz
+*.tar.xz
+
+# Local caches and backups
+.backups/
+.cache/
+tmp/
+
+# Logs
+*.log
+logs/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
