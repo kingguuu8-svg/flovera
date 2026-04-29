@@ -9,8 +9,7 @@ artifacts/*
 *.tar.gz
 *.tar.xz
 
-# Local caches and backups
-.backups/
+# Local caches
 .cache/
 tmp/
 
@@ -23,4 +22,3 @@ logs/
 Thumbs.db
 .idea/
 .vscode/
-
