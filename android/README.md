@@ -1,15 +1,11 @@
 # android
 
-这里用于未来 Android App 包装层。
+这里放 Android 侧控制层。
 
-当前阶段不实现 APK。
+当前已落地的子工程在 [spike/](spike/)：
 
-未来职责：
+- 单屏 `AI Linux VM Spike`
+- `Prepare Assets` / `Start VM` / `Stop VM` / `Run echo ready`
+- 资产释放、子进程控制、日志收集、SSH readiness probe
 
-- 打包或下载 Linux 镜像
-- 启动和停止 VM
-- 显示 VM 状态
-- 读取日志
-- 转发端口
-- 暴露命令和文件控制接口
-
+这不是完整工作台，也不承诺 WebView 或复杂 Agent 层。

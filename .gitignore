@@ -12,6 +12,12 @@ artifacts/*
 # Local caches
 .cache/
 tmp/
+.gradle/
+**/build/
+**/.cxx/
+**/local.properties
+android/spike/**/*.apk
+android/spike/**/*.ap_
 
 # Logs
 *.log
