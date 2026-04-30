@@ -41,6 +41,8 @@ $env:PATH="$env:JAVA_HOME\bin;$env:PATH"
 .\android\spike\gradlew.bat -p android\spike assembleDebug
 ```
 
+More local toolchain notes are recorded in [TOOLCHAIN.md](TOOLCHAIN.md), including the current `android describe` workaround.
+
 ## Verification
 
 Run from this directory:
