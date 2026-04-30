@@ -82,3 +82,26 @@ If an offline emulator is left behind:
 
 This is an emulator/host tooling blocker, not evidence that the spike APK has
 crashed.
+
+## Android QEMU Runtime
+
+The current temporary QEMU source is the Termux
+`qemu-system-aarch64-headless` package line. Stage an app-local runtime with:
+
+```powershell
+wsl --cd /mnt/e/main/ai-in-linux bash scripts/stage-termux-qemu-runtime.sh
+```
+
+Output:
+
+```text
+artifacts/qemu-runtime/app-local/
+```
+
+The staged binary is patched to use `$ORIGIN/../lib`, so for the current spike
+layout push:
+
+```text
+app-local/bin/qemu-system-aarch64 -> files/ai-linux-spike/inputs/qemu-system-aarch64
+app-local/lib/                    -> files/ai-linux-spike/lib/
+```
