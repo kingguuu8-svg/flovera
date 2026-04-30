@@ -1,5 +1,8 @@
 # Android QEMU runtime staging - 2026-04-30
 
+> Superseded by [Android QEMU device verification](2026-04-30-android-qemu-device-verification.md).
+> The earlier filesDir execution route was rejected because target API 29+ cannot exec app-writable home directory files; the current route bundles the runtime into APK native libs.
+
 ## Scope
 
 This record verifies a computer-side staging path for a Termux-derived Android
@@ -28,7 +31,7 @@ Result:
 | Staged tree size | `428M` |
 | QEMU binary size | `29M` |
 | QEMU binary SHA256 | `87cd952d0c44dcd96c0ebb2f2bffc2dc5db8e292de6c5f1fa5075e9a5cf57063` |
-| RUNPATH | `$ORIGIN/../lib` |
+| RUNPATH | `$ORIGIN` |
 | Missing direct libraries | `none` |
 
 ## What Changed During Staging
@@ -42,11 +45,11 @@ RUNPATH /data/data/com.termux/files/usr/lib
 The staged binary is patched with `patchelf` to:
 
 ```text
-RUNPATH $ORIGIN/../lib
+RUNPATH $ORIGIN
 ```
 
-This lets the runtime use an app-local layout instead of the Termux package
-prefix.
+This lets the runtime use an app-local layout where the QEMU executable and
+its shared libraries sit together in the app's `nativeLibraryDir`.
 
 ## Staged Layout
 
@@ -69,10 +72,10 @@ For the next real-device test, push:
 
 ```text
 artifacts/qemu-runtime/app-local/bin/qemu-system-aarch64
-  -> /data/user/0/com.example.ailinuxvmspike/files/ai-linux-spike/inputs/qemu-system-aarch64
+  -> app's resolved nativeLibraryDir path as libqemu-system-aarch64.so
 
-artifacts/qemu-runtime/app-local/lib/
-  -> /data/user/0/com.example.ailinuxvmspike/files/ai-linux-spike/lib/
+artifacts/qemu-runtime/app-local/lib/*.so*
+  -> alongside libqemu-system-aarch64.so in nativeLibraryDir
 ```
 
 Keep the existing VM inputs:
@@ -84,11 +87,8 @@ ai-linux-aarch64.cpio.gz
 id_ed25519
 ```
 
-Because the binary lives in `inputs/`, `$ORIGIN/../lib` resolves to:
-
-```text
-/data/user/0/com.example.ailinuxvmspike/files/ai-linux-spike/lib
-```
+Because the binary lives in `nativeLibraryDir`, `$ORIGIN` resolves to that
+directory and the loader finds the colocated libraries there.
 
 ## Risks
 

@@ -23,6 +23,8 @@ Use this file to record the actual build and verification results for the spike.
 - `android run --apks ...`
 - `android layout`
 - `android screen capture`
+- `bash scripts/build-android-spike-apk.sh --runtime-root artifacts/qemu-runtime/app-local --force`
+- `bash scripts/verify-android-spike-device.sh --apk android/spike/app/build/outputs/apk/debug/app-debug.apk`
 - `wsl bash scripts/build-alpine-rootfs.sh --arch aarch64 --force`
 - `wsl bash scripts/build-qemu-initramfs.sh --arch aarch64 --rootfs artifacts/rootfs/alpine-aarch64 --modloop artifacts/qemu/kernel/aarch64/boot/modloop-virt --force`
 - `wsl bash scripts/verify-qemu-vm.sh --arch aarch64 --initramfs-root --initrd artifacts/qemu/initramfs/ai-linux-aarch64.cpio.gz --kernel artifacts/qemu/kernel/aarch64/boot/vmlinuz-virt --timeout 240`
@@ -41,8 +43,13 @@ Use this file to record the actual build and verification results for the spike.
 - `android run`: blocked by no online emulator
 - `android layout`: blocked by no online emulator
 - `android screen capture`: blocked by no online emulator
+- Android spike APK runtime staging: uses `artifacts/qemu-runtime/app-local` as source, injects `libqemu-system-aarch64.so` and shared libraries into `android/spike/app/src/main/jniLibs/arm64-v8a`, then rebuilds `app-debug.apk`
+- Android spike APK runtime staging preview: PASS with `bash scripts/build-android-spike-apk.sh --runtime-root artifacts/qemu-runtime/app-local --force`; produced a debug APK and staged 353 native runtime libraries with QEMU `RUNPATH=$ORIGIN`
+- Android spike device verification: preflights `adb` online state, SDK >= 31, `arm64-v8a`, battery >= 25 unless overridden, and `run-as` support; then installs the rebuilt APK and stages firmware/kernel/initramfs/key into the app-private inputs directory
+- Android spike device verification preview while phone disconnected: PASS-safe; script stopped at `adb device is not online` before install or private-directory writes
+- Git tracked large-file scan: PASS; generated JNI libs, APK, and reports remain ignored
 - Host QEMU regression: PASS after rebuilding the aarch64 initramfs with `modloop-virt`
-- Expected Android real-device inputs now include `qemu-system-aarch64`, `QEMU_EFI.fd`, `vmlinuz-virt`, `ai-linux-aarch64.cpio.gz`, and `id_ed25519`
+- Expected Android real-device inputs now include `QEMU_EFI.fd`, `vmlinuz-virt`, `ai-linux-aarch64.cpio.gz`, and `id_ed25519`
 - Android manifest includes `android.permission.INTERNET` because JSch connects to forwarded local SSH and QEMU usernet uses sockets on real devices
 - QEMU process monitoring now waits for `process.waitFor()` and updates `vmRunning=false`, `vmExitCode`, and the exit log when the current process exits
 

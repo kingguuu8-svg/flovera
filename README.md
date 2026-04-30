@@ -41,6 +41,7 @@ Android 侧的最小控制面会以独立 spike 工程推进，入口在 `androi
 │   ├── 02-minimal-linux-spec.md
 │   ├── 03-implementation-routes.md
 │   ├── 04-system-architecture.md
+│   ├── 05-open-questions.md
 │   └── decisions/
 │       └── 0001-first-stage-alpine-qemu.md
 ├── rootfs/
@@ -90,7 +91,8 @@ shell / file / network / service / log 基础能力
 3. [最小 Linux 规格](docs/02-minimal-linux-spec.md)
 4. [实现路线区别](docs/03-implementation-routes.md)
 5. [系统架构](docs/04-system-architecture.md)
-6. [架构决策 0001](docs/decisions/0001-first-stage-alpine-qemu.md)
+6. [待解决问题](docs/05-open-questions.md)
+7. [架构决策 0001](docs/decisions/0001-first-stage-alpine-qemu.md)
 
 ## 第一阶段本地验证
 

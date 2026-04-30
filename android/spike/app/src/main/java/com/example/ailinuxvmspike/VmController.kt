@@ -40,6 +40,7 @@ data class VmInputs(
 
 private const val ASSET_TEMPLATE_DIR = "spike"
 private const val RUNTIME_ROOT = "ai-linux-spike"
+private const val BUNDLED_QEMU_NAME = "libqemu-system-aarch64.so"
 
 class VmController(
   private val context: Context,
@@ -47,6 +48,11 @@ class VmController(
 ) : Closeable {
   private val stateFlow = MutableStateFlow(VmUiState())
   val state: StateFlow<VmUiState> = stateFlow.asStateFlow()
+  private val nativeLibraryDir = File(
+    requireNotNull(context.applicationInfo.nativeLibraryDir) {
+      "Application nativeLibraryDir is not available."
+    },
+  )
   private val baseDir = File(context.filesDir, RUNTIME_ROOT)
   private val assetsDir = File(baseDir, "released-assets")
   private val inputsDir = File(baseDir, "inputs")
@@ -68,8 +74,9 @@ class VmController(
     }
     appendLog(
       "Prepared assets under ${assetsDir.absolutePath}",
-      "Expected external inputs live in ${inputsDir.absolutePath}",
-      "QEMU binary may be missing on emulator; the app will report that explicitly.",
+      "Bundled QEMU executable is expected at ${File(nativeLibraryDir, BUNDLED_QEMU_NAME).absolutePath}",
+      "Runtime inputs live in ${inputsDir.absolutePath}: QEMU_EFI.fd, vmlinuz-virt, ai-linux-aarch64.cpio.gz, id_ed25519",
+      "Runtime libraries must be co-located with QEMU in ${nativeLibraryDir.absolutePath} with RUNPATH=\$ORIGIN.",
     )
     updateState { it.copy(assetsPrepared = true) }
   }
@@ -87,29 +94,25 @@ class VmController(
     if (missing.isNotEmpty()) {
       appendLog("VM start blocked.")
       missing.forEach { appendLog("Missing: $it") }
-      appendLog("This is expected on emulator until external QEMU inputs are copied.")
+      appendLog("This is expected on emulator until the external firmware/kernel/initramfs/key inputs are copied.")
       updateState { it.copy(vmRunning = false, vmExitCode = null) }
       return@launch
     }
 
     withContext(Dispatchers.IO) {
-      if (!inputs.qemuBinary.setExecutable(true, true)) {
-        appendLog("VM start blocked: failed to mark QEMU binary executable at ${inputs.qemuBinary.absolutePath}")
-        updateState { it.copy(vmRunning = false, vmExitCode = null) }
-        return@withContext
-      }
       if (!inputs.qemuBinary.canExecute()) {
         appendLog("VM start blocked: QEMU binary is still not executable at ${inputs.qemuBinary.absolutePath}")
         updateState { it.copy(vmRunning = false, vmExitCode = null) }
         return@withContext
       }
 
+      inputsDir.mkdirs()
       val builder = ProcessBuilder(launchCommand)
-      builder.directory(baseDir)
-      builder.environment()["HOME"] = baseDir.absolutePath
-      builder.environment()["TERM"] = "linux"
+      builder.directory(inputsDir)
       builder.redirectErrorStream(false)
       appendLog("Launching VM:")
+      appendLog("Executable: ${inputs.qemuBinary.absolutePath}")
+      appendLog("Working dir: ${inputsDir.absolutePath}")
       appendLog(launchCommand.joinToString(" "))
 
       try {
@@ -234,7 +237,7 @@ class VmController(
   }
 
   private suspend fun buildInputs(): VmInputs {
-    val qemuBinary = File(inputsDir, "qemu-system-aarch64")
+    val qemuBinary = File(nativeLibraryDir, BUNDLED_QEMU_NAME)
     val firmwareImage = File(inputsDir, "QEMU_EFI.fd")
     val kernelImage = File(inputsDir, "vmlinuz-virt")
     val initramfs = File(inputsDir, "ai-linux-aarch64.cpio.gz")
@@ -249,7 +252,10 @@ class VmController(
   }
 
   private fun validateInputs(inputs: VmInputs): List<String> = buildList {
-    if (!inputs.qemuBinary.isFile) add("QEMU binary: ${inputs.qemuBinary.absolutePath}")
+    if (!inputs.qemuBinary.isFile) add("Bundled QEMU executable: ${inputs.qemuBinary.absolutePath}")
+    if (inputs.qemuBinary.isFile && !inputs.qemuBinary.canExecute()) {
+      add("QEMU executable is not executable: ${inputs.qemuBinary.absolutePath}")
+    }
     if (!inputs.firmwareImage.isFile) add("UEFI firmware: ${inputs.firmwareImage.absolutePath}")
     if (!inputs.kernelImage.isFile) add("Kernel image: ${inputs.kernelImage.absolutePath}")
     if (!inputs.initramfs.isFile) add("Initramfs: ${inputs.initramfs.absolutePath}")
@@ -315,11 +321,16 @@ class VmController(
       """
       This directory is created by Prepare Assets.
 
-      Put external Android spike inputs into:
+      QEMU executable is expected here:
+      ${File(nativeLibraryDir, BUNDLED_QEMU_NAME).absolutePath}
+
+      Runtime libraries must live alongside the QEMU executable in nativeLibraryDir.
+      Expected RUNPATH: ${'$'}ORIGIN
+
+      Put the remaining Android spike inputs into:
       ${inputsDir.absolutePath}
 
       Required names:
-      - qemu-system-aarch64
       - QEMU_EFI.fd
       - vmlinuz-virt
       - ai-linux-aarch64.cpio.gz

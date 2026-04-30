@@ -11,6 +11,9 @@
 - 验证网络
 - 验证 `/workspace` 持久化
 - 验证 HTTP 服务
+- 将 `artifacts/qemu-runtime/app-local` 注入 `android/spike/app/src/main/jniLibs/arm64-v8a`
+- 重建 Android spike APK
+- 通过 adb 将设备输入放入 app 私有目录并做真机验收
 
 脚本必须可重复运行，不能依赖未记录的手工步骤。
 
@@ -49,3 +52,38 @@ wsl bash -lc "cd /mnt/e/main/ai-in-linux && bash scripts/verify-qemu-vm.sh --arc
 ```
 
 QEMU 验证会通过 SSH 跨 VM 边界重复检查 shell、网络、包管理、Python、Git、Node、`/workspace` 和 HTTP 服务。
+
+## Android spike runtime 注入
+
+先把已验证的 QEMU runtime 注入 APK native libs，再重建 debug APK：
+
+```bash
+bash scripts/build-android-spike-apk.sh --runtime-root artifacts/qemu-runtime/app-local --force
+```
+
+该脚本会把：
+
+- `artifacts/qemu-runtime/app-local/bin/qemu-system-aarch64`
+- `artifacts/qemu-runtime/app-local/lib/*.so*`
+
+复制到 `android/spike/app/src/main/jniLibs/arm64-v8a/`，并把 QEMU 的
+`RUNPATH` 改成 `$ORIGIN`，然后执行 Gradle `assembleDebug`。
+
+`android/spike/app/src/main/jniLibs/arm64-v8a/` 被 `.gitignore` 忽略，所以
+不会把大二进制提交进仓库。
+
+## Android 真机验收
+
+安装重建后的 APK，并把设备输入放进 app 私有目录：
+
+```bash
+bash scripts/verify-android-spike-device.sh --apk android/spike/app/build/outputs/apk/debug/app-debug.apk
+```
+
+验收脚本只会操作：
+
+- APK 安装
+- `/data/user/0/com.example.ailinuxvmspike/files/ai-linux-spike/inputs`
+- app 启动提示
+
+它不会 root、不会 fastboot、不会改系统分区，也不会卸载 app。

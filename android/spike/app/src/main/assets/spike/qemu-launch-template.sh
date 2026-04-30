@@ -1,5 +1,8 @@
 #!/system/bin/sh
-exec qemu-system-aarch64 \
+# QEMU is expected at:
+# ${APP_NATIVE_LIBRARY_DIR}/libqemu-system-aarch64.so
+: "${APP_NATIVE_LIBRARY_DIR:?set APP_NATIVE_LIBRARY_DIR to the app nativeLibraryDir}"
+exec "${APP_NATIVE_LIBRARY_DIR}/libqemu-system-aarch64.so" \
   -machine virt,accel=tcg \
   -cpu cortex-a57 \
   -m 768M \

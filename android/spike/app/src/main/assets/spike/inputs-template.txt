@@ -1,11 +1,14 @@
 AI Linux VM Spike
 
-Place external inputs into this directory on-device:
-- qemu-system-aarch64
+The QEMU executable is expected in the app nativeLibraryDir:
+- libqemu-system-aarch64.so
+
+Place the remaining external inputs into this directory on-device:
 - QEMU_EFI.fd
 - vmlinuz-virt
 - ai-linux-aarch64.cpio.gz
 - id_ed25519
 
-The app never commits these files. Emulator runs may stop with a clear error
-until the files are provided.
+Runtime libraries must live alongside the QEMU executable and use RUNPATH
+`$ORIGIN`. The app never commits these files. Emulator runs may stop with a
+clear error until the files are provided.

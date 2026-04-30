@@ -105,6 +105,10 @@ The Termux binary is not self-contained for our app sandbox:
 - The binary expects Termux-provided shared libraries.
 - A normal app private directory is not the same path, so the binary will not run unchanged after copying into our APK's files directory.
 
+For the spike app, the executable is now expected to live in the app's
+`nativeLibraryDir` as `libqemu-system-aarch64.so`, with the shared libraries
+co-located there and `RUNPATH` set to `$ORIGIN`.
+
 So for the next real-device验收 there are two valid sub-options:
 
 1. Ship the Termux binary plus the Termux-compatible shared library set in the APK-private runtime area and patch the search path.

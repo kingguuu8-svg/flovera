@@ -16,6 +16,8 @@ class VmControllerTest {
       val baseDir = context.filesDir.resolve("ai-linux-spike")
       assertTrue(baseDir.resolve("released-assets/inputs-template.txt").isFile)
       assertTrue(baseDir.resolve("released-assets/qemu-launch-template.sh").isFile)
+      assertTrue(baseDir.resolve("released-assets/README.txt").readText().contains("libqemu-system-aarch64.so"))
+      assertTrue(baseDir.resolve("released-assets/README.txt").readText().contains("RUNPATH"))
     } finally {
       controller.close()
     }
