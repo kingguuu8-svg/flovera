@@ -15,4 +15,4 @@ exec "${APP_NATIVE_LIBRARY_DIR}/libqemu-system-aarch64.so" \
   -initrd ai-linux-aarch64.cpio.gz \
   -append "console=ttyAMA0 earlycon panic=1 rdinit=/usr/local/sbin/ai-vm-init" \
   -netdev user,id=net0,hostfwd=tcp:127.0.0.1:2222-:22 \
-  -device virtio-net-pci,netdev=net0
+  -device virtio-net-pci,netdev=net0,romfile=

@@ -24,10 +24,16 @@ Use this file to record the actual build and verification results for the spike.
 - `android layout`
 - `android screen capture`
 - `bash scripts/build-android-spike-apk.sh --runtime-root artifacts/qemu-runtime/app-local --force`
-- `bash scripts/verify-android-spike-device.sh --apk android/spike/app/build/outputs/apk/debug/app-debug.apk`
+- `bash scripts/verify-android-spike-device.sh --device e9512097 --apk android/spike/app/build/outputs/apk/debug/app-debug.apk`
 - `wsl bash scripts/build-alpine-rootfs.sh --arch aarch64 --force`
-- `wsl bash scripts/build-qemu-initramfs.sh --arch aarch64 --rootfs artifacts/rootfs/alpine-aarch64 --modloop artifacts/qemu/kernel/aarch64/boot/modloop-virt --force`
-- `wsl bash scripts/verify-qemu-vm.sh --arch aarch64 --initramfs-root --initrd artifacts/qemu/initramfs/ai-linux-aarch64.cpio.gz --kernel artifacts/qemu/kernel/aarch64/boot/vmlinuz-virt --timeout 240`
+- `wsl bash scripts/build-qemu-initramfs.sh --arch aarch64 --rootfs artifacts/rootfs/alpine-aarch64 --modloop artifacts/qemu/kernel/aarch64/boot/modloop-virt --ssh-key artifacts/qemu/ssh/ai_linux_vm_ecdsa --force`
+- `wsl bash scripts/verify-qemu-vm.sh --arch aarch64 --initramfs-root --initrd artifacts/qemu/initramfs/ai-linux-aarch64.cpio.gz --kernel artifacts/qemu/kernel/aarch64/boot/vmlinuz-virt --ssh-key artifacts/qemu/ssh/ai_linux_vm_ecdsa --timeout 240`
+- `android layout --device=e9512097 --pretty`
+- `adb -s e9512097 shell input tap 540 120`
+- `adb -s e9512097 shell input tap 540 300`
+- `adb -s e9512097 shell input tap 540 660`
+- `adb -s e9512097 shell uiautomator dump /sdcard/ai-linux-layout.xml`
+- `adb -s e9512097 shell screencap -p /sdcard/ai-linux-screen.png`
 
 ## Results
 
@@ -48,14 +54,21 @@ Use this file to record the actual build and verification results for the spike.
 - Android spike device verification: preflights `adb` online state, SDK >= 31, `arm64-v8a`, battery >= 25 unless overridden, and `run-as` support; then installs the rebuilt APK and stages firmware/kernel/initramfs/key into the app-private inputs directory
 - Android spike device verification preview while phone disconnected: PASS-safe; script stopped at `adb device is not online` before install or private-directory writes
 - Git tracked large-file scan: PASS; generated JNI libs, APK, and reports remain ignored
-- Host QEMU regression: PASS after rebuilding the aarch64 initramfs with `modloop-virt`
+- Host QEMU regression: PASS after rebuilding the aarch64 initramfs with `modloop-virt` and the ECDSA SSH key
 - Expected Android real-device inputs now include `QEMU_EFI.fd`, `vmlinuz-virt`, `ai-linux-aarch64.cpio.gz`, and `id_ed25519`
 - Android manifest includes `android.permission.INTERNET` because JSch connects to forwarded local SSH and QEMU usernet uses sockets on real devices
 - QEMU process monitoring now waits for `process.waitFor()` and updates `vmRunning=false`, `vmExitCode`, and the exit log when the current process exits
+- Android real-device preflight: PASS on `e9512097`, model `RMX3841`, SDK `36`, ABI `arm64-v8a`, USB powered, battery above the required threshold
+- Android real-device UI layout: PASS; `Prepare Assets`, `Start VM`, `Stop VM`, `Run echo ready`, and the log area were visible through `android layout --device=e9512097 --pretty`
+- Android real-device VM start: PASS; the ordinary app process launched bundled `libqemu-system-aarch64.so`, booted the aarch64 Alpine initramfs, brought up QEMU usernet through static fallback, and started dropbear
+- Android real-device SSH probe: PASS; App-side JSch loaded a PEM ECDSA key from bytes, authenticated with dropbear publickey auth, ran `echo ready`, and logged `Ready probe succeeded.`
+- Android real-device SSH mode: PASS with dropbear password login disabled through `-s`; the verified initramfs does not rely on a fixed root password
+- Android real-device cleanup: PASS; `Stop VM` terminated the QEMU child process, leaving no matching `qemu`, `ailinux`, or app VM child process in `adb shell ps -A`
+- Android real-device evidence files: `artifacts/android-spike/real-device-layout.xml` and `artifacts/android-spike/real-device-screen.png`
 
 ## Root causes and blockers
 
 - `android describe` is blocked by the Windows-side Android CLI launcher path, not by the spike project.
 - Emulator boot never reached an online `adb` state in this environment; the log showed the guest booting but hanging before the ADB-ready phase.
 - The aarch64 QEMU failure was caused by a missing `modloop-virt` bundle in the first initramfs build; rebuilding with `--modloop` fixed the SSH readiness path.
-- Real-device VM execution remains blocked until an Android 12+ arm64 device and the external QEMU/firmware/kernel/initramfs inputs are available.
+- The previous Android-side SSH failure was caused by the JSch/private-key loading path. Loading the PEM ECDSA private key from bytes and logging the JSch negotiation fixed the real-device `Run echo ready` probe.

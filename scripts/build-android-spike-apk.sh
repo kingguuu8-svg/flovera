@@ -18,13 +18,15 @@ Options:
 
 Expected staged runtime layout:
   RUNTIME_ROOT/bin/qemu-system-aarch64
-  RUNTIME_ROOT/lib/*.so*
+  RUNTIME_ROOT/lib/*.so
 
 The script copies the QEMU executable to:
   android/spike/app/src/main/jniLibs/arm64-v8a/libqemu-system-aarch64.so
 
 and copies the runtime libraries into the same directory so the binary can use
-RUNPATH=$ORIGIN inside the APK-installed nativeLibraryDir.
+RUNPATH=$ORIGIN inside the APK-installed nativeLibraryDir. Versioned NEEDED
+entries such as libz.so.1 are rewritten to unversioned libz.so because Android
+Gradle native library packaging only installs standard lib*.so entries.
 USAGE
 }
 
@@ -134,7 +136,32 @@ copied_libs=0
 while IFS= read -r -d '' lib; do
   cp -L "$lib" "$JNI_DIR/"
   copied_libs=$((copied_libs + 1))
-done < <(find "$RUNTIME_LIB_DIR" -mindepth 1 -maxdepth 1 \( -type f -o -type l \) -name '*.so*' -print0)
+done < <(find "$RUNTIME_LIB_DIR" -mindepth 1 -maxdepth 1 \( -type f -o -type l \) -name '*.so' -print0)
+
+patched_needed=0
+patched_missing_replacement=0
+while IFS= read -r -d '' elf; do
+  if ! readelf -h "$elf" >/dev/null 2>&1; then
+    continue
+  fi
+  patchelf --set-soname "$(basename "$elf")" "$elf" || true
+  patchelf --set-rpath '$ORIGIN' "$elf" || true
+  while IFS= read -r needed; do
+    case "$needed" in
+      *.so.*)
+        replacement="${needed%%.so.*}.so"
+        if [ -e "$JNI_DIR/$replacement" ]; then
+          patchelf --replace-needed "$needed" "$replacement" "$elf"
+          patched_needed=$((patched_needed + 1))
+        else
+          patchelf --replace-needed "$needed" "$replacement" "$elf"
+          patched_needed=$((patched_needed + 1))
+          patched_missing_replacement=$((patched_missing_replacement + 1))
+        fi
+        ;;
+    esac
+  done < <(readelf -d "$elf" | awk '/NEEDED/ {gsub(/.*\[/,""); gsub(/\].*/,""); print}')
+done < <(find "$JNI_DIR" -maxdepth 1 -type f -name 'lib*.so' -print0)
 
 runpath_line="$(readelf -d "$TARGET_BIN" | awk '/RUNPATH/ { print; exit }')"
 case "$runpath_line" in
@@ -165,5 +192,7 @@ fi
   echo "runtime_binary_sha256=$(sha256sum "$TARGET_BIN" | awk '{print $1}')"
   echo "runtime_binary_runpath=$runpath_line"
   echo "runtime_library_count=$copied_libs"
+  echo "patched_versioned_needed=$patched_needed"
+  echo "patched_missing_replacement=$patched_missing_replacement"
   echo "apk_path=$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
 } | tee "$REPORT"

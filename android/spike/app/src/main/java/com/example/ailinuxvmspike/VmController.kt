@@ -3,6 +3,7 @@ package com.example.ailinuxvmspike
 import android.content.Context
 import com.jcraft.jsch.ChannelExec
 import com.jcraft.jsch.JSch
+import com.jcraft.jsch.Logger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -173,7 +174,8 @@ class VmController(
       val output = ByteArrayOutputStream()
       val errors = ByteArrayOutputStream()
       val session = try {
-        val jsch = JSch().apply { addIdentity(inputs.sshPrivateKey.absolutePath) }
+        val jsch = JSch().apply { installJschLogger() }
+        loadSshIdentity(jsch, inputs.sshPrivateKey)
         jsch.getSession("root", "127.0.0.1", inputs.sshPort).apply {
           setConfig("StrictHostKeyChecking", "no")
           setConfig("PreferredAuthentications", "publickey")
@@ -287,7 +289,7 @@ class VmController(
     "-netdev",
     "user,id=net0,hostfwd=tcp:127.0.0.1:${inputs.sshPort}-:22",
     "-device",
-    "virtio-net-pci,netdev=net0",
+    "virtio-net-pci,netdev=net0,romfile=",
   )
 
   private suspend fun appendLog(vararg lines: String) {
@@ -306,6 +308,51 @@ class VmController(
     withContext(Dispatchers.Main.immediate) {
       stateFlow.update(update)
     }
+  }
+
+  private fun installJschLogger() {
+    JSch.setLogger(object : Logger {
+      override fun isEnabled(level: Int): Boolean = true
+
+      override fun log(level: Int, message: String) {
+        scope.launch(Dispatchers.IO) {
+          appendLog("[jsch/${jschLogLevelName(level)}] $message")
+        }
+      }
+    })
+  }
+
+  private fun jschLogLevelName(level: Int): String = when (level) {
+    Logger.DEBUG -> "DEBUG"
+    Logger.INFO -> "INFO"
+    Logger.WARN -> "WARN"
+    Logger.ERROR -> "ERROR"
+    Logger.FATAL -> "FATAL"
+    else -> level.toString()
+  }
+
+  private suspend fun loadSshIdentity(jsch: JSch, keyFile: File) {
+    val keyBytes = keyFile.readBytes()
+    val keyHeader = keyFile.bufferedReader().use { reader ->
+      reader.lineSequence().firstOrNull()?.trim().orEmpty()
+    }
+    appendLog("Loading SSH identity from ${keyFile.absolutePath}")
+    appendLog("SSH key size=${keyBytes.size} bytes")
+    if (keyHeader.isNotEmpty()) {
+      appendLog("SSH key header: $keyHeader")
+    }
+
+    runCatching {
+      jsch.addIdentity(keyFile.name, keyBytes, null, null)
+    }.onSuccess {
+      appendLog("SSH identity loaded from bytes.")
+      return
+    }.onFailure { exception ->
+      appendLog("SSH identity load from bytes failed: ${exception.message}")
+    }
+
+    jsch.addIdentity(keyFile.absolutePath)
+    appendLog("SSH identity loaded from path fallback.")
   }
 
   private suspend fun copyBundledAsset(assetName: String, destination: File) {

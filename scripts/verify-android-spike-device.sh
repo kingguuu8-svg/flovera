@@ -13,6 +13,7 @@ Options:
   --package NAME         Android package name. Default: com.example.ailinuxvmspike
   --inputs-root DIR      Source directory for device inputs. Default: artifacts/android-spike/real-device-inputs
   --adb PATH             adb binary. Default: auto-detect adb/adb.exe
+  --device SERIAL        adb device serial. Auto-selects the only online device if omitted.
   --allow-low-battery    Skip the battery >= 25 check.
   -h, --help             Show this help.
 
@@ -33,7 +34,7 @@ require_cmd() {
 }
 
 adb_shell() {
-  "$ADB" shell "$@"
+  "$ADB" "${ADB_ARGS[@]}" shell "$@"
 }
 
 adb_runas() {
@@ -45,6 +46,8 @@ APK="$REPO_ROOT/android/spike/app/build/outputs/apk/debug/app-debug.apk"
 PACKAGE="com.example.ailinuxvmspike"
 INPUTS_ROOT="$REPO_ROOT/artifacts/android-spike/real-device-inputs"
 ADB=""
+ADB_DEVICE=""
+ADB_ARGS=()
 ALLOW_LOW_BATTERY=0
 
 while [ "$#" -gt 0 ]; do
@@ -67,6 +70,11 @@ while [ "$#" -gt 0 ]; do
     --adb)
       [ "$#" -ge 2 ] || fail "--adb requires a value"
       ADB="$2"
+      shift 2
+      ;;
+    --device)
+      [ "$#" -ge 2 ] || fail "--device requires a value"
+      ADB_DEVICE="$2"
       shift 2
       ;;
     --allow-low-battery)
@@ -119,6 +127,19 @@ fi
 [ -x "$ADB" ] || fail "adb is not executable: $ADB"
 
 ADB_APK="$APK"
+adb_host_path() {
+  local path="$1"
+  case "$ADB" in
+    *.exe)
+      if command -v wslpath >/dev/null 2>&1; then
+        wslpath -w "$path"
+        return
+      fi
+      ;;
+  esac
+  printf '%s\n' "$path"
+}
+
 case "$ADB" in
   *.exe)
     if command -v wslpath >/dev/null 2>&1; then
@@ -134,7 +155,19 @@ esac
 [ -f "$INPUTS_ROOT/ai-linux-aarch64.cpio.gz" ] || fail "missing input file: $INPUTS_ROOT/ai-linux-aarch64.cpio.gz"
 [ -f "$INPUTS_ROOT/id_ed25519" ] || fail "missing input file: $INPUTS_ROOT/id_ed25519"
 
-device_state="$("$ADB" get-state 2>/dev/null || true)"
+if [ -z "$ADB_DEVICE" ]; then
+  online_devices="$("$ADB" devices | awk 'NR > 1 && $2 == "device" { print $1 }')"
+  online_count="$(printf '%s\n' "$online_devices" | sed '/^$/d' | wc -l | awk '{ print $1 }')"
+  case "$online_count" in
+    0) fail "adb has no online device" ;;
+    1) ADB_DEVICE="$(printf '%s\n' "$online_devices" | sed '/^$/d')" ;;
+    *) fail "adb has multiple online devices; pass --device SERIAL" ;;
+  esac
+fi
+
+ADB_ARGS=(-s "$ADB_DEVICE")
+
+device_state="$("$ADB" "${ADB_ARGS[@]}" get-state 2>/dev/null | tr -d '\r' || true)"
 [ "$device_state" = "device" ] || fail "adb device is not online: ${device_state:-<unknown>}"
 
 sdk_level="$(adb_shell getprop ro.build.version.sdk | tr -d '\r')"
@@ -156,33 +189,44 @@ if [ "$battery_level" -lt 25 ] && [ "$ALLOW_LOW_BATTERY" -ne 1 ]; then
 fi
 
 printf 'Installing APK: %s\n' "$APK"
-"$ADB" install -r -t "$ADB_APK"
+"$ADB" "${ADB_ARGS[@]}" install -r -t "$ADB_APK"
 
 if ! adb_runas id >/dev/null 2>&1; then
   fail "run-as failed for package $PACKAGE; install a debuggable build"
 fi
 
-if ! adb_runas sh -c 'command -v tar >/dev/null 2>&1'; then
-  fail "device run-as shell does not provide tar"
+if ! adb_runas cp --help >/dev/null 2>&1; then
+  fail "device run-as shell does not provide cp"
 fi
 
 printf 'Staging inputs into /data/user/0/%s/files/ai-linux-spike/inputs\n' "$PACKAGE"
-adb_runas sh -c 'mkdir -p files/ai-linux-spike/inputs'
+adb_runas mkdir -p files/ai-linux-spike/inputs
 
-tar -C "$INPUTS_ROOT" -cf - \
-  QEMU_EFI.fd \
-  vmlinuz-virt \
-  ai-linux-aarch64.cpio.gz \
-  id_ed25519 \
-  | adb_runas sh -c 'tar -xf - -C files/ai-linux-spike/inputs'
+TMP_INPUTS="/data/local/tmp/${PACKAGE}.ai-linux-inputs.$$"
+"$ADB" "${ADB_ARGS[@]}" shell rm -rf "$TMP_INPUTS" >/dev/null
+"$ADB" "${ADB_ARGS[@]}" shell mkdir -p "$TMP_INPUTS" >/dev/null
+for name in QEMU_EFI.fd vmlinuz-virt ai-linux-aarch64.cpio.gz id_ed25519; do
+  "$ADB" "${ADB_ARGS[@]}" push "$(adb_host_path "$INPUTS_ROOT/$name")" "$TMP_INPUTS/$name" >/dev/null
+done
+"$ADB" "${ADB_ARGS[@]}" shell chmod 755 "$TMP_INPUTS" >/dev/null
+"$ADB" "${ADB_ARGS[@]}" shell chmod 644 "$TMP_INPUTS"/QEMU_EFI.fd "$TMP_INPUTS"/vmlinuz-virt "$TMP_INPUTS"/ai-linux-aarch64.cpio.gz "$TMP_INPUTS"/id_ed25519 >/dev/null
 
-adb_runas sh -c 'chmod 700 files/ai-linux-spike files/ai-linux-spike/inputs && chmod 600 files/ai-linux-spike/inputs/id_ed25519'
+for name in QEMU_EFI.fd vmlinuz-virt ai-linux-aarch64.cpio.gz id_ed25519; do
+  adb_runas cp "$TMP_INPUTS/$name" "files/ai-linux-spike/inputs/$name"
+done
+"$ADB" "${ADB_ARGS[@]}" shell rm -rf "$TMP_INPUTS" >/dev/null
+
+adb_runas chmod 700 files/ai-linux-spike files/ai-linux-spike/inputs
+adb_runas chmod 600 files/ai-linux-spike/inputs/id_ed25519
 
 printf 'Launching app: %s/.MainActivity\n' "$PACKAGE"
-"$ADB" shell am start -n "$PACKAGE/.MainActivity" >/dev/null
+"$ADB" "${ADB_ARGS[@]}" shell am start -n "$PACKAGE/.MainActivity" >/dev/null
 
 cat <<EOF
 Device preflight passed.
+
+Device:
+  $ADB_DEVICE
 
 Next step:
   Open the app if it is not already visible, then press Start VM.
