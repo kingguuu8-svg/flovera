@@ -90,6 +90,19 @@ python3 -m http.server 8000
 - `/workspace` 的持久化策略符合当前版本定义。
 - 出错时能看到用户可理解的错误，而不是裸 QEMU 参数。
 
+## Guest 镜像路线
+
+第一版 guest 优先使用官方 Ubuntu 24.04 arm64 cloud image：
+
+```text
+Ubuntu arm64 cloud image
+  -> NoCloud seed 注入 SSH key、/workspace 和 readiness marker
+  -> QEMU host 验证
+  -> Android QEMU 输入适配
+```
+
+这条路线比自制 rootfs 更接近 VPS。Alpine 路线继续保留为轻量对照，但不作为 Hermes Agent 第一版优先路线。
+
 ## 第一阶段不做
 
 - 不做 Linux 桌面。

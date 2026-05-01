@@ -5,7 +5,9 @@
 后续脚本应覆盖：
 
 - 下载 Alpine rootfs
-- 安装最小包集合
+- 下载 Ubuntu arm64 cloud image
+- 生成 Ubuntu NoCloud seed
+- 生成 guest 首启配置
 - 生成 ext4 或 qcow2 镜像
 - 启动 QEMU
 - 验证网络
@@ -52,6 +54,29 @@ wsl bash -lc "cd /mnt/e/main/ai-in-linux && bash scripts/verify-qemu-vm.sh --arc
 ```
 
 QEMU 验证会通过 SSH 跨 VM 边界重复检查 shell、网络、包管理、Python、Git、Node、`/workspace` 和 HTTP 服务。
+
+## Ubuntu arm64 guest 工作机验证
+
+Ubuntu cloud image 路线用于更接近 VPS 的第一阶段体验：
+
+```powershell
+wsl bash -lc "cd /mnt/e/main/ai-in-linux && bash scripts/download-ubuntu-cloud-image.sh"
+wsl bash -lc "cd /mnt/e/main/ai-in-linux && bash scripts/build-ubuntu-nocloud-seed.sh --force"
+wsl bash -lc "cd /mnt/e/main/ai-in-linux && bash scripts/verify-ubuntu-cloud-vm.sh --image artifacts/cloud-images/ubuntu/noble-server-cloudimg-arm64.img --seed artifacts/qemu/ubuntu/seed/seed.iso --timeout 900"
+```
+
+该验证会启动官方 Ubuntu arm64 cloud image，并检查：
+
+- SSH terminal 通道
+- cloud-init 完成
+- `aarch64` 架构
+- HTTPS、Python、Git
+- Node 可选；缺失时留给后续 guest 内 provisioning，不阻塞首启验收
+- `/workspace` 可写
+- guest HTTP 服务可通过 hostfwd 预览
+- QMP `query-status` / `stop` / `cont`
+
+下载镜像、seed、overlay、报告和日志全部输出到 `artifacts/`，默认不提交 git。
 
 ## Android spike runtime 注入
 

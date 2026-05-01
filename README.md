@@ -9,7 +9,7 @@
 构建一个可重复启动的 QEMU Linux 工作机，使 AI 具备基础操作空间：
 
 - QEMU 启动固定 aarch64 Linux guest
-- guest 内预装 agent、shell、Git、curl、Python、Node 和证书
+- guest 提供 shell、SSH、Git、curl、Python、证书和 `/workspace`；Node/agent 作为后续 guest 内 provisioning 目标
 - agent 默认操作 `/workspace`
 - guest 可联网访问 HTTPS
 - guest 可启动本地服务并通过 QEMU 端口转发预览
@@ -52,6 +52,8 @@ Android 侧的最小控制面会以独立 spike 工程推进，入口在 `androi
 │   │   ├── round-timeline.md
 │   │   ├── development-findings.md
 │   │   └── idea-backlog.md
+│   ├── verification/
+│   │   └── 2026-05-01-ubuntu-cloud-guest.md
 │   └── decisions/
 │       └── 0001-first-stage-alpine-qemu.md
 ├── rootfs/
@@ -139,3 +141,15 @@ wsl bash -lc "cd /mnt/e/main/ai-in-linux && bash scripts/verify-qemu-vm.sh --ima
 ```
 
 这一步通过 QEMU 启动 ext4 镜像，并通过 SSH 跨 VM 边界重复验证 shell、网络、包管理、Python、Git、Node、`/workspace` 和 HTTP 服务。它是 guest 工作机运行时基线，不等于最终 agent 工作层。
+
+## Ubuntu Guest 工作机验证
+
+第一阶段优先复用官方 Ubuntu 24.04 arm64 cloud image，避免从零设计 VPS 风格镜像：
+
+```powershell
+wsl bash -lc "cd /mnt/e/main/ai-in-linux && bash scripts/download-ubuntu-cloud-image.sh"
+wsl bash -lc "cd /mnt/e/main/ai-in-linux && bash scripts/build-ubuntu-nocloud-seed.sh --force"
+wsl bash -lc "cd /mnt/e/main/ai-in-linux && bash scripts/verify-ubuntu-cloud-vm.sh --image artifacts/cloud-images/ubuntu/noble-server-cloudimg-arm64.img --seed artifacts/qemu/ubuntu/seed/seed.iso --timeout 900"
+```
+
+这条链路验证 SSH terminal、HTTPS、Python、Git、`/workspace`、HTTP 预览和 QMP 暂停/恢复。Node 如已存在会记录版本；否则作为后续 guest 内 provisioning 项，不阻塞首启验收。

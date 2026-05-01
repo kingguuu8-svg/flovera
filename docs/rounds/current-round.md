@@ -2,41 +2,44 @@
 
 ## Round Goal
 
-固化第一阶段 Android 本地 Linux 电脑体验。
+新增 Ubuntu arm64 guest 工作机流水线。
 
 ## Why Now
 
-当前讨论已经明确：用户侧不应该感知 QEMU、SSH、端口转发、日志归集等底层细节。第一阶段要呈现的是“Android 上的一台本地 Linux 电脑”：可以开机、暂停、恢复、关机，并像连接 VPS 一样操作终端。
+第一阶段目标已经收缩为 Android 上的一台本地 Linux 电脑。继续沿用自制 Alpine rootfs 会增加镜像设计成本；更短路径是复用官方 Ubuntu arm64 cloud image，先在 host QEMU 中验证 terminal、网络、workspace 和暂停/恢复能力。Node/agent 等工具链安装放到后续 guest 内 provisioning，不阻塞首启验收。
 
 ## Scope
 
-- 新增第一阶段 Android Linux 电脑体验文档。
-- 更新 README 推荐阅读顺序。
-- 更新项目边界、系统架构和 QEMU guest runtime 文档中的用户侧目标。
-- 更新 AGENTS 项目原则，避免后续 agent 把后台实现细节暴露成用户概念。
+- 新增 Ubuntu arm64 cloud image 下载脚本。
+- 新增 NoCloud seed 生成脚本，用于注入 SSH key、`/workspace` 和 readiness marker。
+- 新增 Ubuntu arm64 QEMU guest 验证脚本。
+- 更新脚本文档和 QEMU/guest 文档，说明 Ubuntu cloud image 路线。
 - 更新本轮时间线和开发结论。
 
 ## Non-Goals
 
 - 不修改 Android/QEMU/rootfs 实现。
-- 不实现 terminal UI、QMP、SSH session 或 pause/resume 代码。
-- 不改变已有验证脚本行为。
+- 不实现 Android terminal UI。
+- 不安装或打包 Hermes Agent 到仓库。
+- 不提交下载得到的 cloud image、seed、overlay、日志或截图。
 - 不提交 artifacts、APK、二进制、日志或截图。
 - 不承诺多机型 Android 兼容。
 
 ## Acceptance Criteria
 
-- [x] 文档明确第一阶段用户侧只需要 Start、Pause、Resume、Shutdown、Terminal 和基础状态。
-- [x] 文档明确日志、端口、网络、QEMU 参数、SSH/QMP 都是后台实现细节。
-- [x] 文档明确终端体验应像 VPS：用户直接输入 Linux 命令，而不是操作 QEMU 管理面板。
-- [x] README 能导航到第一阶段体验定义。
-- [x] 本轮只修改文档，不改变 Android/QEMU/rootfs 行为。
+- [x] 脚本能下载并校验 Ubuntu 24.04 arm64 cloud image。
+- [x] 脚本能生成 NoCloud seed，注入 SSH key、`/workspace` 和 readiness marker。
+- [x] 验证脚本能启动 arm64 QEMU guest，并检查 SSH terminal、HTTPS、Python、Git、`/workspace`、HTTP 预览。
+- [x] 验证脚本覆盖 QMP `stop` / `cont` / `query-status`。
+- [x] 本轮不提交 artifacts 或 Android/QEMU 大二进制。
 
 ## Planned Commit
 
-`docs: define first stage linux computer ux`
+`guest: add ubuntu cloud runtime pipeline`
 
 ## Notes
 
-- 第一阶段体验定义优先级高于内部实现命名。
-- 后续 Android spike 改造应从技术验证按钮转向用户语义按钮。
+- 本轮先完成 host 侧 guest 基线；Android UI 改造放到下一轮。
+- Hermes Agent 安装先作为后续 provisioning 目标，不把第三方安装脚本直接固化到第一版验证脚本。
+- 验证记录见 `docs/verification/2026-05-01-ubuntu-cloud-guest.md`。
+- 首启 cloud-init 不再联网安装 Node；Node 缺失时记录为 optional，后续通过 guest 内 provisioning 处理。

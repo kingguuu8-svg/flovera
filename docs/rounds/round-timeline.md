@@ -29,3 +29,10 @@
 - 结果：新增 `docs/08-first-stage-android-linux-computer-ux.md`，并把 README、AGENTS、项目边界、系统架构、QEMU runtime、bridge 和 QEMU 模块说明接入该体验定义。
 - 验收：确认本轮只修改文档，不修改 Android/QEMU/rootfs 行为，不提交 artifacts。
 - 后续影响：后续 Android spike 改造应优先实现 Start Linux、Pause、Resume、Shutdown、Terminal 和基础状态，而不是暴露 QEMU/SSH/QMP 等内部概念。
+
+## 2026-05-01 - pending - guest: add ubuntu cloud runtime pipeline
+
+- 目标：新增官方 Ubuntu 24.04 arm64 cloud image 的 guest 工作机流水线。
+- 结果：新增镜像下载、NoCloud seed 生成和 host 侧 QEMU 验证脚本，并把 Ubuntu guest 路线接入 README、QEMU 文档和第一阶段体验文档。
+- 验收：`scripts/verify-ubuntu-cloud-vm.sh` 通过 SSH terminal、cloud-init、`aarch64`、HTTPS、Python、Git、`/workspace`、HTTP preview 和 QMP pause/resume 检查；验证记录见 `docs/verification/2026-05-01-ubuntu-cloud-guest.md`。
+- 后续影响：下一轮可以在 Android 侧接入 terminal 和 Linux 生命周期按钮；Node/agent 安装应作为 guest 内 provisioning，而不是首启 cloud-init 阻塞项。

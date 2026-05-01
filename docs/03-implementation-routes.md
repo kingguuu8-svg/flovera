@@ -57,6 +57,23 @@ QEMU runtime
 
 第一阶段不再寻找第二套沙箱引擎。其他路线只作为参考或长期备选。
 
+## Ubuntu cloud image
+
+Ubuntu 24.04 arm64 cloud image 是第一阶段“像 VPS 一样使用 Linux”的优先 guest 镜像来源。
+
+优点：
+
+- 官方 arm64 cloud image 可直接作为 QEMU guest 基线。
+- glibc 兼容性好。
+- SSH、cloud-init、apt 和常见工具链更接近 VPS。
+- 更适合后续安装 Hermes Agent。
+
+缺点：
+
+- 比 Alpine 大。
+- 首次通过 apt 安装大量工具会很慢，尤其在 TCG 下。
+- NoCloud seed 只注入 SSH key、`/workspace` 和 readiness marker；Node/agent 等工具链放到后续 guest 内 provisioning。
+
 ## AVF/pKVM
 
 AVF 是 Android 官方虚拟化方向，适合长期关注。
@@ -75,7 +92,7 @@ AVF 是 Android 官方虚拟化方向，适合长期关注。
 
 ## Alpine
 
-Alpine 是第一阶段推荐 Linux 发行版。
+Alpine 是第一阶段轻量对照路线。
 
 优点：
 

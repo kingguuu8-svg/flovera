@@ -1,6 +1,6 @@
 # QEMU Guest Workspace Runtime
 
-本文把第一阶段路线收缩为一个更窄的目标：在 Android 上启动一台由 QEMU 承载的 Linux 工作机，并在 guest 内预装 agent 和工具链。
+本文把第一阶段路线收缩为一个更窄的目标：在 Android 上启动一台由 QEMU 承载的 Linux 工作机，并提供后续安装 agent 和工具链的稳定 guest 空间。
 
 第一阶段不是重新制作操作系统，也不是先设计完整沙箱平台。更准确的定义是：
 
@@ -17,7 +17,9 @@ Android App controls QEMU
 
 `QEMU` 是第一阶段唯一成熟执行底座。它负责把 Linux guest 跑起来，并提供 VM 边界、网络转发、磁盘/镜像和串口/stdout 等基础通道。
 
-`Linux guest image` 是真正的工作系统。它应该预装 agent、shell、git、curl、python、node、证书和最小服务能力，并暴露一个固定的 `/workspace`。
+`Linux guest image` 是真正的工作系统。第一版优先提供 shell、SSH、git、curl、python、证书和固定 `/workspace`。Node、Hermes Agent 或 Codex-compatible worker 属于后续 guest 内 provisioning，不阻塞首启验收。
+
+第一版 guest 镜像优先复用官方 Ubuntu 24.04 arm64 cloud image，而不是继续手工设计完整 rootfs。Ubuntu 更接近 VPS 体验，glibc 兼容性也更适合后续安装 Hermes Agent 或其他 agent。
 
 `Android App` 只是薄控制层。它负责准备输入、启动 QEMU、停止 QEMU、显示日志、打开预览端口、展示错误和触发恢复，不承担 Linux GUI，也不直接实现 workspace 语义。
 
@@ -44,8 +46,8 @@ QEMU runtime
 
 Linux guest workspace
   ├── /workspace
-  ├── shell / python / node / git / curl
-  ├── agent or Codex-compatible worker
+  ├── shell / python / git / curl
+  ├── optional node / agent / Codex-compatible worker
   ├── project files and services
   └── git commits / workspace logs
 ```
@@ -128,3 +130,15 @@ QEMU 级 snapshot 可以作为底层兜底，但不等同于用户理解的项�
 - 不支持多 agent 平台。
 
 可交付目标是“可安装、可启动、可观察、可恢复的 QEMU Linux 工作机”，不是通用 Android 虚拟化产品。
+
+## Host 侧基线流水线
+
+在 Android UI 改造前，先用 host QEMU 验证 Ubuntu guest 工作机：
+
+```text
+download-ubuntu-cloud-image.sh
+  -> build-ubuntu-nocloud-seed.sh
+  -> verify-ubuntu-cloud-vm.sh
+```
+
+该流水线验证 terminal、网络、`/workspace`、HTTP 预览和 QMP 暂停/恢复。通过后，再把同一套 guest 输入适配到 Android spike。

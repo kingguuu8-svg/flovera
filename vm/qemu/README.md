@@ -55,6 +55,26 @@ host verifies guest readiness over forwarded SSH
 
 当前 `aarch64` 选择 initramfs root，不是最终磁盘方案。原因是 Alpine netboot initramfs 在当前 QEMU 参数下没有直接挂载这个最小 ext4 rootfs；为了先证明 VM 边界，先把 rootfs 打成 initramfs，并只注入网络验证必需模块。
 
+## Ubuntu cloud guest 路线
+
+第一阶段体验目标更接近 VPS，因此新增 Ubuntu arm64 cloud image 路线：
+
+```text
+official Ubuntu 24.04 arm64 cloud image
+  ↓
+NoCloud seed injects SSH key, /workspace, readiness marker
+  ↓
+QEMU aarch64 TCG
+  ↓
+SSH terminal + HTTP preview + QMP pause/resume
+```
+
+对应脚本：
+
+- `scripts/download-ubuntu-cloud-image.sh`
+- `scripts/build-ubuntu-nocloud-seed.sh`
+- `scripts/verify-ubuntu-cloud-vm.sh`
+
 ## 收缩后的主线
 
 ```text

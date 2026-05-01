@@ -35,3 +35,17 @@
 - 结论：第一阶段用户侧体验应是一台 Android 本地 Linux 电脑，而不是 QEMU 管理面板。
 - 证据：`docs/08-first-stage-android-linux-computer-ux.md` 将用户能力限定为 Start Linux、Pause、Resume、Shutdown、Terminal 和基础状态，并把 QEMU、SSH、QMP、端口、日志和网络归为后台实现细节。
 - 对后续开发的影响：后续 Android UI、控制器和验收流程应优先围绕 terminal 和 Linux 生命周期设计，不把技术验证按钮作为用户产品语义。
+
+## Finding 5
+
+- 来源轮次：2026-05-01 `guest: add ubuntu cloud runtime pipeline`
+- 结论：第一阶段 guest 首启应优先快而稳定，不能把 Node/agent 等工具链安装放进 cloud-init 阻塞路径。
+- 证据：`docs/verification/2026-05-01-ubuntu-cloud-guest.md` 记录了 Ubuntu arm64 cloud guest 在不首启安装大包的情况下通过 SSH terminal、HTTPS、Python、Git、`/workspace`、HTTP preview 和 QMP pause/resume 验证；Node 缺失被记录为 optional。
+- 对后续开发的影响：后续工具链扩展应走 guest 内 provisioning 或预烘焙镜像版本，不应拖慢或破坏第一阶段 Start Linux 到 terminal 可用的主链路。
+
+## Finding 6
+
+- 来源轮次：2026-05-01 `guest: add ubuntu cloud runtime pipeline`
+- 结论：QEMU 验证运行时文件应放在 Linux 原生文件系统中，不能默认把 overlay、QMP socket 和 seed 运行时副本放在 Windows 挂载盘上。
+- 证据：验证脚本将运行时 image copy、seed copy、qcow2 overlay、PID file 和 QMP socket 放入 WSL `/tmp` 后，host 侧 Ubuntu arm64 guest 验收通过。
+- 对后续开发的影响：Android 侧也应使用 app 私有原生路径承载运行时文件，不要把 VM 热路径放在慢速或语义不完整的外部/桥接文件系统上。
