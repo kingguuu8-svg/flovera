@@ -12,6 +12,8 @@ QEMU 是第一阶段唯一执行底座。
 - 端口转发策略
 - 日志输出方式
 - 启停命令
+- 暂停和恢复控制方式
+- terminal 通道
 - guest agent 启动方式
 
 第一阶段目标不是性能最优，而是把 QEMU 固化成一台可重复启动的 Linux 工作机。workspace、文件、命令、项目日志和 git 版本优先由 guest 内 agent 处理。
@@ -62,7 +64,15 @@ fixed Linux guest image
   ↓
 agent starts in /workspace
   ↓
-Android observes logs and preview ports
+Android exposes terminal, lifecycle state, logs, and preview ports
 ```
 
 SSH/JSch/dropbear 当前只是 readiness probe 和验收通道。它可以继续用于 spike，但不代表长期业务协议。
+
+第一阶段用户侧对应关系：
+
+- QEMU 进程启动对应 `Start Linux`。
+- QMP `stop` 对应 `Pause`。
+- QMP `cont` 对应 `Resume`。
+- guest 关机或 QEMU 进程停止对应 `Shutdown`。
+- SSH、串口或 guest agent 对应 `Terminal`。

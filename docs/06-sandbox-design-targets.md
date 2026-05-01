@@ -4,6 +4,8 @@
 
 本轮之后，“沙箱”只作为执行边界的简称。第一阶段正式目标收缩为 [QEMU Guest Workspace Runtime](07-qemu-guest-workspace-runtime.md)：Android 启动一台固定的 QEMU Linux guest，guest 内预装 agent 和工具链，Android 只做薄控制和观察。
 
+用户侧体验进一步由 [第一阶段 Android Linux 电脑体验](08-first-stage-android-linux-computer-ux.md) 固化：Android App 只呈现开机、暂停、恢复、关机、终端和基础状态。
+
 ## 当前设计目标
 
 第一阶段不是完整安全产品，也不是桌面 Linux。它的目标是给 AI agent 一台可启动、可观察、可恢复的 Linux 工作机。
@@ -14,7 +16,7 @@
 - 执行环境与宿主 UI 分离，Linux guest 不承担 GUI。
 - QEMU 是第一阶段唯一成熟执行底座，不再继续寻找第二套沙箱引擎。
 - guest 镜像承担 workspace、agent、工具链和项目版本语义。
-- Android 只管理 QEMU 生命周期、日志、预览端口和恢复入口。
+- Android 只管理 Linux 开机/暂停/恢复/关机、terminal、日志、预览端口和恢复入口。
 - 生成产物和用户工作区分离，`artifacts/`、APK、runtime、kernel、initramfs 和私钥不进 git。
 - 每个非平凡变更必须有轮次记录、验收标准和可回滚 commit。
 
@@ -32,6 +34,8 @@
 Android thin controller
   ├── prepare inputs
   ├── start / stop QEMU
+  ├── pause / resume QEMU
+  ├── terminal view
   ├── show process and serial logs
   ├── open forwarded preview ports
   └── trigger restore from known image
@@ -55,7 +59,10 @@ Linux guest workspace
 ```text
 prepareInputs()
 startVm()
+pauseVm()
+resumeVm()
 stopVm()
+openTerminal()
 showLogs()
 openPreviewPort(port)
 runReadinessProbe()
@@ -91,7 +98,7 @@ restoreKnownImage()
 
 ### 1. 控制面和工作面分离
 
-Android 侧只管理 QEMU 生命周期、日志、端口和恢复入口。Linux guest 负责 agent、workspace、文件、命令和项目版本。
+Android 侧只管理 Linux 开机/暂停/恢复/关机、terminal、日志、端口和恢复入口。Linux guest 负责 agent、workspace、文件、命令和项目版本。
 
 错误做法：
 

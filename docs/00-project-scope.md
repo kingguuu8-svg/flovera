@@ -6,6 +6,8 @@
 
 这个 Linux 工作机不是给人使用的桌面系统，而是给 AI 使用的 guest workspace。它需要提供命令行、文件系统、网络、进程、日志、git 版本和持久化能力。
 
+用户侧体验按 [第一阶段 Android Linux 电脑体验](08-first-stage-android-linux-computer-ux.md) 固化：Android 上的一台本地 Linux 电脑，可以开机、暂停、恢复、关机，并像连接 VPS 一样操作终端。
+
 ## 第一阶段目标
 
 第一阶段只证明一件事：
@@ -26,6 +28,7 @@
 - 本地 HTTP 服务启动能力
 - 日志和退出码可被宿主读取
 - Android 侧可启动、停止、观察和打开预览
+- Android 侧可直接操作 Linux terminal
 
 ## 第一阶段不做
 
@@ -47,7 +50,7 @@
 阶段 1：最小 Linux guest
 阶段 2：QEMU 启动和网络/存储验证
 阶段 3：预装 agent、工具链和 /workspace
-阶段 4：Android 薄控制层
-阶段 5：日志、预览和恢复体验
+阶段 4：Android 薄控制层和 terminal
+阶段 5：暂停、恢复、日志、预览和恢复体验
 阶段 6：可视化对象工作台
 ```

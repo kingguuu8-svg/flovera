@@ -7,6 +7,7 @@
 当前 bridge 只需要支持：
 
 - readiness probe
+- terminal session
 - VM/agent 日志读取
 - 预览端口暴露
 - 少量人工触发的 guest 命令
@@ -20,3 +21,5 @@
 - HTTP/gRPC guest agent
 
 这些 transport 都不能成为业务层协议。业务语义优先留在 guest 内 agent；只有当 guest 内 agent 稳定后，再决定是否把 bridge 扩展为结构化 action/event 协议。
+
+第一阶段用户侧不暴露 bridge 概念。用户看到的是 Linux terminal；bridge 只是后台把 Android terminal 和 guest shell 接起来。

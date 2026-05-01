@@ -14,6 +14,7 @@
 
 - 第一阶段主线是 QEMU guest workspace runtime：Android 控制 QEMU，QEMU 启动固定 Linux guest，guest 内 agent 管理 `/workspace`。
 - 第一阶段不做可发布 APK、不做 Linux GUI、不做完整可视化工作台；Android spike 只作为薄控制层和验收通道。
+- 第一阶段用户侧体验是一台本地 Linux 电脑：Start Linux、Pause、Resume、Shutdown、Terminal 和基础状态；QEMU、SSH、QMP、端口、日志和网络是后台实现细节。
 - Android 12+ 是目标兼容范围，但当前只承诺参考真机和模拟器验收，不承诺多机型适配。
 - 主线为 Alpine minimal guest + QEMU system VM + guest agent workspace。
 - `proot` 只作为快速验证和对照路线。

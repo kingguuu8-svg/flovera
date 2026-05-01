@@ -8,8 +8,10 @@
 Android App controls QEMU
   -> QEMU boots a fixed Linux guest image
   -> the guest runs an agent inside /workspace
-  -> Android observes logs, preview ports, and lifecycle state
+  -> Android exposes start/pause/resume/shutdown and terminal
 ```
+
+用户侧体验由 [第一阶段 Android Linux 电脑体验](08-first-stage-android-linux-computer-ux.md) 固化。简单说，用户打开 Android App 后，应感觉自己在使用一台本地 Linux 电脑，而不是在操作 QEMU 管理面板。
 
 ## 核心定位
 
@@ -27,6 +29,8 @@ Android App controls QEMU
 Android thin controller
   ├── prepare inputs
   ├── start / stop QEMU
+  ├── pause / resume QEMU
+  ├── terminal session
   ├── show stdout / stderr
   ├── open forwarded preview ports
   └── trigger coarse restore actions
@@ -73,13 +77,18 @@ QEMU 不负责产品语义：
 
 - `prepareInputs`
 - `startVm`
+- `pauseVm`
+- `resumeVm`
 - `stopVm`
+- `openTerminal`
 - `showLogs`
 - `openPreviewPort`
 - `runReadinessProbe`
 - `restoreKnownImage`
 
-`runReadinessProbe` 当前可以继续使用 SSH/JSch/dropbear，也可以以后替换成串口命令、HTTP endpoint、vsock 或 guest agent。它只是确认 guest 和 agent 可用的控制通道，不是完整业务协议。
+`openTerminal` 是用户侧主体验。当前可以通过 SSH/JSch/dropbear 或串口实现，后续也可以替换成 HTTP endpoint、vsock 或 guest agent。用户不应该感知这些实现差异。
+
+`runReadinessProbe` 只是确认 guest 和 agent 可用的后台控制通道，不是完整业务协议。
 
 ## Workspace 和版本
 

@@ -22,3 +22,10 @@
 - 结果：新增 `docs/07-qemu-guest-workspace-runtime.md`，并更新 README、项目边界、系统架构、沙箱边界、bridge、rootfs、QEMU 和 ADR 文档。
 - 验收：确认本轮只修改文档，不修改 Android/QEMU/rootfs 行为，不提交 artifacts。
 - 后续影响：后续开发优先固化 QEMU runtime、guest 镜像、agent 和 `/workspace`，不先扩展完整 bridge/action 平台。
+
+## 2026-05-01 - pending - docs: define first stage linux computer ux
+
+- 目标：固化第一阶段用户侧体验为 Android 上的一台本地 Linux 电脑。
+- 结果：新增 `docs/08-first-stage-android-linux-computer-ux.md`，并把 README、AGENTS、项目边界、系统架构、QEMU runtime、bridge 和 QEMU 模块说明接入该体验定义。
+- 验收：确认本轮只修改文档，不修改 Android/QEMU/rootfs 行为，不提交 artifacts。
+- 后续影响：后续 Android spike 改造应优先实现 Start Linux、Pause、Resume、Shutdown、Terminal 和基础状态，而不是暴露 QEMU/SSH/QMP 等内部概念。

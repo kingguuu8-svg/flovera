@@ -6,6 +6,8 @@
 Android thin controller
   ├── input preparer
   ├── QEMU process manager
+  ├── pause / resume controller
+  ├── terminal view
   ├── log viewer
   ├── preview port opener
   └── restore trigger
@@ -46,12 +48,17 @@ Linux guest
 ```text
 prepareInputs()
 startVm()
+pauseVm()
+resumeVm()
 stopVm()
+openTerminal()
 showLogs()
 openPreviewPort(port)
 runReadinessProbe()
 restoreKnownImage()
 ```
+
+终端是第一阶段主体验。Android 可以通过 SSH、串口或后续 guest agent 呈现 terminal，但用户侧只感知“正在操作 Linux 终端”，不感知具体通道。
 
 文件读写、命令执行、项目日志和 git 版本优先由 guest 内 agent 和 `/workspace` 负责。Android 不重新实现一套 workspace 管理系统。
 

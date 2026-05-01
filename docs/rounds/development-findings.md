@@ -28,3 +28,10 @@
 - 结论：第一阶段主线应表述为 QEMU guest workspace runtime，而不是完整沙箱平台。
 - 证据：`docs/07-qemu-guest-workspace-runtime.md` 将职责拆为 Android thin controller、QEMU runtime 和 Linux guest workspace，并明确 workspace 语义由 guest 内 agent、Linux 工具链和 git 承担。
 - 对后续开发的影响：后续优先固化 QEMU 版本、guest 镜像、agent 启动和 `/workspace`，bridge 只保留 readiness/log/preview 等最小通道，直到 guest 工作机稳定。
+
+## Finding 4
+
+- 来源轮次：2026-05-01 `docs: define first stage linux computer ux`
+- 结论：第一阶段用户侧体验应是一台 Android 本地 Linux 电脑，而不是 QEMU 管理面板。
+- 证据：`docs/08-first-stage-android-linux-computer-ux.md` 将用户能力限定为 Start Linux、Pause、Resume、Shutdown、Terminal 和基础状态，并把 QEMU、SSH、QMP、端口、日志和网络归为后台实现细节。
+- 对后续开发的影响：后续 Android UI、控制器和验收流程应优先围绕 terminal 和 Linux 生命周期设计，不把技术验证按钮作为用户产品语义。

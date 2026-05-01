@@ -13,7 +13,9 @@
 - agent 默认操作 `/workspace`
 - guest 可联网访问 HTTPS
 - guest 可启动本地服务并通过 QEMU 端口转发预览
-- Android 侧可启动/停止 VM、读取日志、打开预览和触发恢复
+- Android 侧可开启、暂停、恢复、关闭 Linux，并直接操作 terminal
+
+第一阶段用户体验定义为：Android 上的一台本地 Linux 电脑。用户可以像连接 VPS 一样使用终端；QEMU、SSH、QMP、端口转发、日志和网络配置都属于后台实现细节。
 
 ## 非目标
 
@@ -43,6 +45,7 @@ Android 侧的最小控制面会以独立 spike 工程推进，入口在 `androi
 │   ├── 05-open-questions.md
 │   ├── 06-sandbox-design-targets.md
 │   ├── 07-qemu-guest-workspace-runtime.md
+│   ├── 08-first-stage-android-linux-computer-ux.md
 │   ├── rounds/
 │   │   ├── README.md
 │   │   ├── current-round.md
@@ -101,8 +104,9 @@ Android thin controller
 6. [待解决问题](docs/05-open-questions.md)
 7. [沙箱设计目标与参考案例](docs/06-sandbox-design-targets.md)
 8. [QEMU Guest Workspace Runtime](docs/07-qemu-guest-workspace-runtime.md)
-9. [开发轮次流程](docs/rounds/README.md)
-10. [架构决策 0001](docs/decisions/0001-first-stage-alpine-qemu.md)
+9. [第一阶段 Android Linux 电脑体验](docs/08-first-stage-android-linux-computer-ux.md)
+10. [开发轮次流程](docs/rounds/README.md)
+11. [架构决策 0001](docs/decisions/0001-first-stage-alpine-qemu.md)
 
 ## 开发轮次流程
 
