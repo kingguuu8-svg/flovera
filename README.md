@@ -1,20 +1,19 @@
 # AI in Linux
 
-本仓库用于实现一个面向 AI Agent 的 Android 侧最小 Linux 执行环境。
+本仓库用于实现一个面向 AI Agent 的 QEMU guest workspace runtime。
 
-第一阶段不做 APK、不做图形化界面、不做完整 AI 工作台。当前目标是先把一个可被 AI 操作的最小 Linux 系统定义清楚，并逐步做成可启动、可联网、可持久化、可执行命令的基础运行环境。
+第一阶段不做通用 Android 虚拟化产品，也不重新制作沙箱操作系统。当前目标是把 QEMU 固定为成熟执行底座，启动一台预装 agent 和工具链的 Linux guest，让它像一台可被 Android 控制的轻量 Linux 工作机。
 
 ## 当前阶段目标
 
-构建一个最小可用 Linux 系统，使 AI 具备基础操作空间：
+构建一个可重复启动的 QEMU Linux 工作机，使 AI 具备基础操作空间：
 
-- 可执行 shell 命令
-- 可读写持久化工作目录
-- 可联网访问 HTTPS
-- 可安装或扩展基础软件包
-- 可运行 Python/Node 小工具
-- 可启动本地服务
-- 可被 Android 侧或宿主控制层读取日志、状态和退出码
+- QEMU 启动固定 aarch64 Linux guest
+- guest 内预装 agent、shell、Git、curl、Python、Node 和证书
+- agent 默认操作 `/workspace`
+- guest 可联网访问 HTTPS
+- guest 可启动本地服务并通过 QEMU 端口转发预览
+- Android 侧可启动/停止 VM、读取日志、打开预览和触发恢复
 
 ## 非目标
 
@@ -23,9 +22,9 @@
 - 不做多用户系统
 - 不做 systemd 依赖
 - 不做 Docker 编排
-- 不做 APK 打包
 - 不做完整前端可视化工作台
 - 不把 AVF 作为 Android 12+ 普适主线
+- 不承诺多机型 Android 兼容
 
 Android 侧的最小控制面会以独立 spike 工程推进，入口在 `android/spike`。它只负责资产释放、QEMU 进程控制和最小验收，不代表完整工作台。
 
@@ -43,6 +42,7 @@ Android 侧的最小控制面会以独立 spike 工程推进，入口在 `androi
 │   ├── 04-system-architecture.md
 │   ├── 05-open-questions.md
 │   ├── 06-sandbox-design-targets.md
+│   ├── 07-qemu-guest-workspace-runtime.md
 │   ├── rounds/
 │   │   ├── README.md
 │   │   ├── current-round.md
@@ -76,13 +76,13 @@ Android 侧的最小控制面会以独立 spike 工程推进，入口在 `androi
 第一阶段主线：
 
 ```text
-Alpine minimal rootfs
+Fixed Linux guest image
   ↓
 QEMU system VM
   ↓
-shell / file / network / service / log 基础能力
+guest agent + /workspace + git
   ↓
-后续再接 Android App 控制层
+Android thin controller
 ```
 
 备用路线：
@@ -100,8 +100,9 @@ shell / file / network / service / log 基础能力
 5. [系统架构](docs/04-system-architecture.md)
 6. [待解决问题](docs/05-open-questions.md)
 7. [沙箱设计目标与参考案例](docs/06-sandbox-design-targets.md)
-8. [开发轮次流程](docs/rounds/README.md)
-9. [架构决策 0001](docs/decisions/0001-first-stage-alpine-qemu.md)
+8. [QEMU Guest Workspace Runtime](docs/07-qemu-guest-workspace-runtime.md)
+9. [开发轮次流程](docs/rounds/README.md)
+10. [架构决策 0001](docs/decisions/0001-first-stage-alpine-qemu.md)
 
 ## 开发轮次流程
 
@@ -124,7 +125,7 @@ wsl bash -lc "cd /mnt/e/main/ai-in-linux && bash scripts/build-alpine-rootfs.sh 
 wsl bash -lc "cd /mnt/e/main/ai-in-linux && bash scripts/verify-alpine-rootfs.sh --rootfs artifacts/rootfs/alpine-x86_64"
 ```
 
-这一步验证的是最小 Linux userspace 能力，不等于 Android APK 或 QEMU VM 已完成。QEMU 启动链路是下一阶段。
+这一步验证的是最小 Linux userspace 能力，不等于完整 QEMU guest 工作机已完成。
 
 ## QEMU 边界验证
 
@@ -133,4 +134,4 @@ wsl bash -lc "cd /mnt/e/main/ai-in-linux && bash scripts/build-qemu-image.sh --r
 wsl bash -lc "cd /mnt/e/main/ai-in-linux && bash scripts/verify-qemu-vm.sh --image artifacts/qemu/ai-linux-x86_64.ext4 --timeout 150"
 ```
 
-这一步通过 QEMU 启动 ext4 镜像，并通过 SSH 跨 VM 边界重复验证 shell、网络、包管理、Python、Git、Node、`/workspace` 和 HTTP 服务。
+这一步通过 QEMU 启动 ext4 镜像，并通过 SSH 跨 VM 边界重复验证 shell、网络、包管理、Python、Git、Node、`/workspace` 和 HTTP 服务。它是 guest 工作机运行时基线，不等于最终 agent 工作层。

@@ -2,7 +2,7 @@
 
 ## 设计目标
 
-目标不是做体积极限最小的 Linux，而是做 AI 可用的最小 Linux。
+目标不是做体积极限最小的 Linux，而是做 AI 可用的最小 guest 工作系统。
 
 判断标准：
 
@@ -11,8 +11,8 @@
 + 能联网
 + 能安装/扩展
 + 能运行脚本和小服务
-+ 能被宿主控制
-= 最小可用 AI Linux
++ 能启动 agent
+= 最小可用 QEMU guest workspace
 ```
 
 ## 必备能力
@@ -26,7 +26,8 @@
 | 包管理 | 允许后续按需扩展工具 |
 | 运行时 | 至少内置 Python，Node 可作为增强项 |
 | 版本管理 | 用 Git 支撑 diff、快照、回滚 |
-| 日志 | stdout/stderr/exit code 可被宿主侧读取 |
+| Agent 工作层 | guest 内负责 `/workspace`、命令、文件和项目日志 |
+| 日志 | stdout/stderr/exit code 可被 Android 侧读取 |
 
 ## 推荐基础包
 
@@ -40,6 +41,8 @@
 | `nodejs` | 建议 | Web 工具和前端生态 |
 | `openssh-client` | 可后置 | 远程连接和私有仓库 |
 | `dropbear` | VM 验证阶段需要 | 轻量 SSH server，用作宿主到 guest 的命令桥 |
+
+Agent 或 Codex 兼容 worker 暂不写入 `packages.txt`。它属于 guest 镜像定制层，等 QEMU guest 工作机路线固定后再决定安装方式。
 
 ## 不包含内容
 

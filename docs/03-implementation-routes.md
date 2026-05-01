@@ -5,7 +5,7 @@
 | 路线 | 是否真 VM | Android 12+ 普适性 | 轻量性 | 兼容性 | 第一阶段判断 |
 |---|---:|---:|---:|---:|---|
 | `proot` | 否 | 高 | 高 | 中 | 备用验证 |
-| QEMU | 是 | 中高 | 中 | 高 | 主线 |
+| QEMU | 是 | 中高 | 中 | 高 | 唯一第一阶段主线 |
 | AVF/pKVM | 是 | 低 | 高 | 中 | 长期预留 |
 | Buildroot | 取决于承载 | 高 | 极高 | 低 | 后期瘦身 |
 
@@ -37,13 +37,25 @@ QEMU 路线在 Android App 进程中运行虚拟机。
 - 可自带 kernel 和 rootfs
 - 不依赖 AVF 系统权限
 - 适合 Android 12+ 普通设备路线
-- 后续可替换底层而不改变上层控制接口
+- 可直接复用成熟 QEMU 引擎，把复杂度压到 guest 镜像和 agent
 
 缺点：
 
 - 无 KVM 时性能较弱
 - 启动和资源消耗高于 proot
-- 网络和端口转发需要额外设计
+- Android 侧需要固定 runtime、启动参数和输入文件布局
+- workspace 语义需要由 guest 内 agent、Linux 工具链和 git 承担
+
+当前判断：
+
+```text
+QEMU runtime
+  -> fixed Linux guest image
+  -> guest agent + /workspace
+  -> Android thin controller
+```
+
+第一阶段不再寻找第二套沙箱引擎。其他路线只作为参考或长期备选。
 
 ## AVF/pKVM
 
@@ -94,7 +106,7 @@ Debian slim 是兼容性优先路线。
 
 ## Buildroot
 
-Buildroot 适合后期固化 runtime。
+Buildroot 适合后期固化 guest 镜像。
 
 优点：
 
@@ -107,4 +119,3 @@ Buildroot 适合后期固化 runtime。
 - 默认没有通用包管理
 - 初期迭代慢
 - 对 AI 自主扩展不友好
-

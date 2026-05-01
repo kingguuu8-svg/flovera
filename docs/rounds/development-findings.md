@@ -21,3 +21,10 @@
 - 结论：本项目沙箱应优先复用成熟工程中的抽象边界，而不是复制平台实现。
 - 证据：`docs/06-sandbox-design-targets.md` 将 AVF、Firecracker、gVisor、Flatpak、Crostini/Termina 拆成生命周期、控制面、文件桥、权限、VM 边界和宿主集成等可迁移抽象。
 - 对后续开发的影响：后续 bridge、Android spike 和 UI 工作台不得把 QEMU、SSH、dropbear、JSch 或 WebView 细节写成长期核心协议。
+
+## Finding 3
+
+- 来源轮次：2026-05-01 `docs: narrow qemu guest workspace runtime`
+- 结论：第一阶段主线应表述为 QEMU guest workspace runtime，而不是完整沙箱平台。
+- 证据：`docs/07-qemu-guest-workspace-runtime.md` 将职责拆为 Android thin controller、QEMU runtime 和 Linux guest workspace，并明确 workspace 语义由 guest 内 agent、Linux 工具链和 git 承担。
+- 对后续开发的影响：后续优先固化 QEMU 版本、guest 镜像、agent 启动和 `/workspace`，bridge 只保留 readiness/log/preview 等最小通道，直到 guest 工作机稳定。

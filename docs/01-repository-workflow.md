@@ -89,7 +89,7 @@
 docs: define phase 1 linux runtime scope
 build: add alpine rootfs builder
 vm: add qemu launch script
-bridge: add command execution protocol
+guest: add agent startup plan
 ```
 
 ## 验证流程

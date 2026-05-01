@@ -3,21 +3,28 @@
 ## 第一阶段抽象
 
 ```text
-Host / Android future wrapper
-  ├── VM manager
-  ├── command bridge
-  ├── file bridge
-  ├── log bridge
-  ├── port forwarder
-  └── artifact manager
+Android thin controller
+  ├── input preparer
+  ├── QEMU process manager
+  ├── log viewer
+  ├── preview port opener
+  └── restore trigger
+
+QEMU runtime
+  ├── qemu-system-aarch64
+  ├── fixed launch arguments
+  ├── kernel / firmware / initramfs or disk image
+  ├── user networking and hostfwd
+  └── serial / stdout / stderr output
 
 Linux guest
   ├── /workspace
+  ├── agent or Codex-compatible worker
   ├── shell
   ├── package manager
   ├── python/node/git/curl
   ├── lightweight service process
-  └── stdout/stderr logs
+  └── workspace logs and git commits
 ```
 
 ## 模块职责
@@ -26,29 +33,26 @@ Linux guest
 |---|---|
 | `rootfs/` | 定义和构建 Linux 文件系统 |
 | `vm/` | 定义虚拟机启动方式 |
-| `bridge/` | 未来定义宿主和 guest 的控制协议 |
-| `android/` | 未来放 Android 包装层 |
+| `bridge/` | 记录 Android 与 guest 的最小可替换控制通道 |
+| `android/` | 放 Android 薄控制层和 spike |
 | `scripts/` | 放可复现构建和验证脚本 |
 | `examples/` | 放最小验证用例 |
 | `artifacts/` | 放本地生成产物，不进 git |
 
-## 未来控制接口
+## 第一阶段控制边界
 
-后续 Android 或宿主侧不应直接依赖 QEMU 细节，而应依赖抽象接口：
+第一阶段不先设计完整产品级 bridge。Android 只需要控制 VM 生命周期、显示日志、打开预览端口，并用一个可替换通道确认 guest 和 agent 可用。
 
 ```text
-init()
-start()
-stop()
-exec(command)
-writeFile(path, content)
-readFile(path)
-listFiles(path)
-getLogs()
-forwardPort(guestPort, hostPort)
-snapshot()
-rollback(snapshotId)
+prepareInputs()
+startVm()
+stopVm()
+showLogs()
+openPreviewPort(port)
+runReadinessProbe()
+restoreKnownImage()
 ```
 
-这样底层可以从 QEMU 替换为 AVF、crosvm、proot 或其他方案。
+文件读写、命令执行、项目日志和 git 版本优先由 guest 内 agent 和 `/workspace` 负责。Android 不重新实现一套 workspace 管理系统。
 
+长期如果需要结构化自动化，再把 `bridge/` 扩展为 action/event 协议。扩展之前，QEMU guest 镜像和 agent 是主线，不把 Android 控制层做成新的操作系统。

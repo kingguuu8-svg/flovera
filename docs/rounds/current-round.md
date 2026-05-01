@@ -2,40 +2,41 @@
 
 ## Round Goal
 
-规划沙箱设计目标，并列出可参考的成熟工程案例。
+把仓库表述统一收缩为 QEMU guest workspace runtime。
 
 ## Why Now
 
-`docs/05-open-questions.md` 已明确“借鉴成熟实现而不是照抄”是当前开放问题。继续扩展实现前，需要先把沙箱目标、边界和可借鉴案例写清，减少自创设计空间。
+当前讨论已经明确：第一阶段不是重新制作沙箱操作系统，而是把 QEMU 简化为“Android 可控制的一台预装 agent 的 Linux 工作机”。继续沿用完整 sandbox/bridge 平台叙事会放大个人开发者不需要承担的设计空间。
 
 ## Scope
 
-- 新增沙箱设计目标文档。
-- 列出 Android AVF、Firecracker、gVisor、Flatpak、Crostini/Termina 等参考案例。
-- 在根 README 加入沙箱设计目标入口。
-- 更新本轮时间线和必要的开发结论。
+- 新增 QEMU guest workspace runtime 主线文档。
+- 更新 AGENTS、README、项目边界、系统架构和 bridge 说明。
+- 调整沙箱设计文档，使其服从更窄的 QEMU guest 工作机口径。
+- 更新 `docs/05-open-questions.md` 中与执行环境定位相关的判断。
+- 更新本轮时间线和开发结论。
 
 ## Non-Goals
 
-- 不实现新的 sandbox 代码。
-- 不修改 Android/QEMU/rootfs 行为。
-- 不把任何参考案例照抄成当前方案。
+- 不修改 Android/QEMU/rootfs 实现。
+- 不实现新的 bridge、agent 或 workspace 代码。
+- 不改变已有验证脚本行为。
 - 不提交 artifacts、APK、二进制、日志或截图。
-- 不改写 `docs/05-open-questions.md` 的内容。
+- 不承诺多机型 Android 兼容。
 
 ## Acceptance Criteria
 
-- [x] 文档明确第一阶段沙箱设计目标和非目标。
-- [x] 文档列出可参考工程案例，并区分“借鉴什么”和“不照抄什么”。
-- [x] 文档明确 SSH/JSch/dropbear 只是当前验收控制通道，不是长期协议。
-- [x] README 能导航到沙箱设计目标文档。
-- [x] 本轮只修改文档，不改变 Android/QEMU 行为。
+- [x] README 明确第一阶段主线是 QEMU guest workspace runtime。
+- [x] 文档明确 Android 端只是薄控制层，QEMU 跑预配置 Linux guest，guest 内 agent 负责 workspace。
+- [x] bridge 被降级为最小命令/日志/预览通道，不再表述成完整产品协议前置条件。
+- [x] 文档明确 QEMU 不自动实现产品语义，产品语义来自 guest 镜像、agent、git 和固定启动配置。
+- [x] 本轮只修改文档，不改变 Android/QEMU/rootfs 行为。
 
 ## Planned Commit
 
-`docs: define sandbox design targets`
+`docs: narrow qemu guest workspace runtime`
 
 ## Notes
 
-- `docs/05-open-questions.md` 当前已有用户认可的未提交改动，本轮不触碰。
-- 参考案例只吸收抽象和边界，不复制平台实现。
+- 本轮会包含此前已认可但未提交的 `docs/05-open-questions.md` 内容，并在其上做口径收缩。
+- “沙箱”仍可作为安全边界俗称，但第一阶段正式主语改为 QEMU guest workspace runtime。

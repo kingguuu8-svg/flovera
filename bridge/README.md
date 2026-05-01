@@ -1,19 +1,22 @@
 # bridge
 
-这里用于未来定义宿主侧和 Linux guest 之间的控制桥。
+这里记录 Android thin controller 与 Linux guest 之间的最小可替换通道。
 
-桥接能力包括：
+第一阶段不先实现完整产品级 bridge。主线是 QEMU 启动固定 Linux guest，guest 内 agent 负责 `/workspace`、文件、命令、日志和 git 版本。
 
-- 执行命令
-- 写文件
-- 读文件
-- 列目录
-- 读取日志
-- 启动服务
-- 停止服务
-- 端口转发
-- 创建快照
-- 回滚快照
+当前 bridge 只需要支持：
 
-第一阶段可以先用串口、SSH、vsock 或临时 agent 方案验证，不在当前文档阶段绑定实现。
+- readiness probe
+- VM/agent 日志读取
+- 预览端口暴露
+- 少量人工触发的 guest 命令
 
+可选 transport：
+
+- SSH/JSch/dropbear
+- 串口命令
+- vsock
+- virtio-serial
+- HTTP/gRPC guest agent
+
+这些 transport 都不能成为业务层协议。业务语义优先留在 guest 内 agent；只有当 guest 内 agent 稳定后，再决定是否把 bridge 扩展为结构化 action/event 协议。

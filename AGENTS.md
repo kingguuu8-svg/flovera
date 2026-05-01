@@ -12,9 +12,10 @@
 
 ## 项目原则
 
-- 第一阶段只做最小 Linux 执行环境，不做 APK、不做 GUI、不做完整工作台。
-- Android 12+ 是目标兼容范围，但当前仓库先在开发环境中制作和验证 Linux 系统。
-- 主线为 Alpine minimal rootfs + QEMU system VM。
+- 第一阶段主线是 QEMU guest workspace runtime：Android 控制 QEMU，QEMU 启动固定 Linux guest，guest 内 agent 管理 `/workspace`。
+- 第一阶段不做可发布 APK、不做 Linux GUI、不做完整可视化工作台；Android spike 只作为薄控制层和验收通道。
+- Android 12+ 是目标兼容范围，但当前只承诺参考真机和模拟器验收，不承诺多机型适配。
+- 主线为 Alpine minimal guest + QEMU system VM + guest agent workspace。
 - `proot` 只作为快速验证和对照路线。
 - AVF/pKVM 只作为长期路线预留，不作为第一阶段阻塞点。
 - PyTorch 如后续需要，只允许使用 CUDA 版；当前阶段默认不引入 PyTorch。

@@ -2,6 +2,8 @@
 
 本目录用于 Alpine minimal rootfs 路线。
 
+在收缩后的主线里，Alpine 是 QEMU guest 工作机的基础系统。它不负责产品 UI，也不内置完整工作台；它只需要给 guest 内 agent 提供稳定的 `/workspace`、命令行、网络和基础工具。
+
 目标包集合：
 
 ```text

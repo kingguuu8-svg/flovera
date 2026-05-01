@@ -1,19 +1,20 @@
-# 沙箱设计目标与参考案例
+# QEMU 工作机边界与参考案例
 
 本文落实 `05-open-questions.md` 中“借鉴成熟实现而不是照抄”的第二个开放问题。
 
-目标不是重新发明沙箱，而是把成熟工程里的稳定抽象迁移到本项目的 Android 普通 App 约束下。
+本轮之后，“沙箱”只作为执行边界的简称。第一阶段正式目标收缩为 [QEMU Guest Workspace Runtime](07-qemu-guest-workspace-runtime.md)：Android 启动一台固定的 QEMU Linux guest，guest 内预装 agent 和工具链，Android 只做薄控制和观察。
 
 ## 当前设计目标
 
-第一阶段沙箱不是完整安全产品，也不是桌面 Linux。它的目标是给 AI agent 一个可执行、可观察、可回滚、可替换底层的最小 Linux 工作空间。
+第一阶段不是完整安全产品，也不是桌面 Linux。它的目标是给 AI agent 一台可启动、可观察、可恢复的 Linux 工作机。
 
 必须满足：
 
 - 普通 Android App 可运行，不依赖 root、fastboot、系统分区修改或 Linux 桌面。
 - 执行环境与宿主 UI 分离，Linux guest 不承担 GUI。
-- 所有长期控制能力抽象成接口，不把 QEMU、SSH、dropbear、JSch 写成产品协议。
-- 文件、命令、网络、日志、端口、版本和错误都必须可被宿主侧观察。
+- QEMU 是第一阶段唯一成熟执行底座，不再继续寻找第二套沙箱引擎。
+- guest 镜像承担 workspace、agent、工具链和项目版本语义。
+- Android 只管理 QEMU 生命周期、日志、预览端口和恢复入口。
 - 生成产物和用户工作区分离，`artifacts/`、APK、runtime、kernel、initramfs 和私钥不进 git。
 - 每个非平凡变更必须有轮次记录、验收标准和可回滚 commit。
 
@@ -23,54 +24,54 @@
 - Linux 桌面、systemd、Docker 编排或完整包管理平台。
 - 自动权限市场、插件系统、长期记忆或多 agent。
 - 直接复制 AVF、Firecracker、gVisor、Flatpak、Crostini 的平台实现。
+- 先设计完整 action/event bridge 平台。
 
-## 沙箱边界模型
+## 工作机边界模型
 
 ```text
-Android / Host control plane
-  ├── VM lifecycle manager
-  ├── action / bridge interface
-  ├── file import / export boundary
-  ├── log and event collector
-  ├── port forward registry
-  ├── resource policy
-  └── snapshot / rollback controller
+Android thin controller
+  ├── prepare inputs
+  ├── start / stop QEMU
+  ├── show process and serial logs
+  ├── open forwarded preview ports
+  └── trigger restore from known image
 
-Linux execution sandbox
-  ├── minimal rootfs
+QEMU runtime
+  ├── qemu-system-aarch64
+  ├── fixed launch arguments
+  ├── fixed kernel / firmware / initramfs or disk image
+  └── user networking / hostfwd
+
+Linux guest workspace
   ├── /workspace
+  ├── agent or Codex-compatible worker
   ├── shell / python / node / git / curl
   ├── lightweight service process
-  ├── guest agent or temporary SSH bridge
-  └── stdout / stderr / status output
+  └── workspace logs and git commits
 ```
 
-长期接口应围绕能力定义，而不是围绕具体命令定义：
+第一阶段 Android 端控制面应保持很小：
 
 ```text
-start()
-stop()
-status()
-exec(action)
-writeFile(path, content)
-readFile(path)
-listFiles(path)
-getLogs()
-forwardPort(guestPort)
-snapshot()
-rollback(snapshotId)
+prepareInputs()
+startVm()
+stopVm()
+showLogs()
+openPreviewPort(port)
+runReadinessProbe()
+restoreKnownImage()
 ```
 
-当前 SSH 只能归类为 readiness probe 和临时控制通道。后续可以替换为 vsock、virtio-serial、HTTP/gRPC guest agent 或其他 bridge。
+当前 SSH 只能归类为 readiness probe 和临时控制通道。后续可以替换为串口命令、vsock、virtio-serial、HTTP/gRPC guest agent 或其他最小通道。它不承担完整 workspace 协议。
 
 ## 可参考工程案例
 
 | 工程案例 | 借鉴什么 | 不照抄什么 | 对本项目的适配 |
 |---|---|---|---|
-| Android Virtualization Framework / Microdroid | VM 生命周期管理、每个 VM 独立进程、宿主通过服务接口 start/monitor/stop、vsock 通信、debug/production 模式分离。 | 不把 AVF 作为 Android 12+ 普通 App 第一阶段依赖；不依赖系统权限、pKVM、AIDL 系统服务或 Microdroid OS image。 | 保留 `VM manager + bridge + event` 抽象；当前用 QEMU 子进程模拟，未来可替换为 AVF/crosvm。 |
+| Android Virtualization Framework / Microdroid | VM 生命周期管理、每个 VM 独立进程、宿主通过服务接口 start/monitor/stop、vsock 通信、debug/production 模式分离。 | 不把 AVF 作为 Android 12+ 普通 App 第一阶段依赖；不依赖系统权限、pKVM、AIDL 系统服务或 Microdroid OS image。 | 借鉴生命周期和宿主/guest 分层；当前固定为 QEMU 子进程。 |
 | Firecracker | 极简 VMM、显式控制面、jailer/资源限制思路、小设备模型、减少攻击面。 | 不复制 KVM、jailer、cgroups、Linux namespace 实现；Android 普通 App 没有这些宿主权限。 | 借鉴“只暴露必要设备和 API”的设计；QEMU 参数必须被 VM manager 封装，不能泄漏到业务层。 |
-| gVisor | 把 guest 行为和 host syscall 面隔离，使用 Sentry/Gofer 分层处理执行与文件系统访问。 | 不实现用户态内核，不重写 Linux syscall 层。 | 借鉴“执行面”和“文件桥”分层：guest 内命令执行不能直接等同于宿主文件权限。 |
-| Flatpak | 静态权限最小化、portal 作为受控越界访问、避免 blanket filesystem access。 | 不复制桌面 portal、D-Bus、XDG runtime 或 GUI 权限模型。 | 把 host 文件导入/导出设计成显式 action；默认只让 guest 操作 `/workspace`。 |
+| gVisor | 把 guest 行为和 host syscall 面隔离，使用 Sentry/Gofer 分层处理执行与文件系统访问。 | 不实现用户态内核，不重写 Linux syscall 层。 | 借鉴“guest 内执行不等于宿主权限”的边界意识；实际 workspace 语义留在 guest 内 agent。 |
+| Flatpak | 静态权限最小化、portal 作为受控越界访问、避免 blanket filesystem access。 | 不复制桌面 portal、D-Bus、XDG runtime 或 GUI 权限模型。 | 默认只让 guest 操作 `/workspace`；host 文件导入后置，不作为第一阶段主能力。 |
 | ChromeOS Crostini / Termina | VM 承担安全边界，容器承载 Linux userland，宿主负责文件集成、终端、生命周期和恢复。 | 不复制 ChromeOS 系统服务、LXD、多容器管理或 crosvm 依赖。 | 借鉴“宿主集成层 + VM + user workspace”的分层；Android UI 只做控制和预览，不进 Linux GUI。 |
 
 参考资料：
@@ -88,21 +89,22 @@ rollback(snapshotId)
 
 ## 第一阶段适配原则
 
-### 1. 控制面和执行面分离
+### 1. 控制面和工作面分离
 
-宿主侧只管理生命周期、文件边界、日志、端口和状态。Linux guest 只执行命令和运行服务。
+Android 侧只管理 QEMU 生命周期、日志、端口和恢复入口。Linux guest 负责 agent、workspace、文件、命令和项目版本。
 
 错误做法：
 
 - UI 直接拼 QEMU 命令。
-- 业务层直接依赖 SSH/JSch。
-- guest 内脚本反过来修改宿主工作台结构。
+- Android 重新实现 workspace 文件/版本语义。
+- 把 SSH/JSch/dropbear 当成长期产品协议。
+- guest 内脚本反过来修改 Android 工作台结构。
 
 正确方向：
 
-- `VmManager` 负责启动、停止、状态和端口。
-- `Bridge` 负责 `exec/readFile/writeFile/getLogs`。
-- `Workspace` 负责文件、版本和回滚。
+- Android controller 负责启动、停止、状态和端口。
+- QEMU runtime 固定版本和启动参数。
+- guest agent 负责 `/workspace`、命令、文件、日志和 git。
 
 ### 2. 默认最小权限
 
@@ -111,9 +113,9 @@ rollback(snapshotId)
 默认策略：
 
 - guest 只默认写 `/workspace`。
-- host 文件必须显式导入。
+- host 文件导入后置，第一阶段不作为核心路径。
 - host 端口转发必须显式登记。
-- 运行日志必须可追踪到 action 或 service。
+- Android 只展示 VM 日志、agent 日志和预览端口，不重新定义项目日志系统。
 - 外部 runtime、kernel、initramfs、私钥全部作为 ignored 输入。
 
 ### 3. 工具链 workaround 不进入核心协议
@@ -127,29 +129,25 @@ rollback(snapshotId)
 - JSch API 细节。
 - `id_ed25519` 这种兼容文件名。
 
-### 4. 先冻结最小 bridge，再扩展 UI
+### 4. 先冻结 guest 工作机，再扩展 UI
 
-前端工作台和 WebView 可以存在，但必须挂在结构化控制协议之后。
+前端工作台和 WebView 可以存在，但必须挂在一台可重复启动、可观察、可恢复的 QEMU guest 工作机之后。
 
 第一阶段优先冻结：
 
-- `exec`
-- `readFile`
-- `writeFile`
-- `listFiles`
-- `getLogs`
-- `startService`
-- `stopService`
-- `forwardPort`
-- `snapshot`
-- `rollback`
+- 固定 QEMU 版本。
+- 固定 guest 镜像。
+- 固定启动参数。
+- 固定 `/workspace`。
+- 固定 readiness probe。
+- 固定预览端口策略。
 
-没有这些接口边界，不扩大 WebView、block tree 或自由画布实现面。
+没有这些运行时边界，不扩大 WebView、block tree 或自由画布实现面。
 
 ## 后续工程任务
 
-1. 在 `bridge/README.md` 中定义第一版 bridge capability，而不是继续让 Android spike 隐式定义控制协议。
-2. 把 Android spike 文档改成“参考实现 + 验收通道”，明确 SSH/JSch/dropbear 不是长期协议。
-3. 统一 SSH identity 命名，避免 `id_ed25519` 与 PEM ECDSA 实际格式不一致。
-4. 增加一份 sandbox threat model，但只描述第一阶段真实边界，不夸大安全承诺。
-5. 在正式 UI 工作台前，先定义 action schema 和事件 schema。
+1. 固化 QEMU runtime 版本、来源、许可证和依赖闭包。
+2. 固化一个可重复构建的 guest 镜像，并在镜像内预装 agent 和工具链。
+3. 把 Android spike 文档改成“薄控制层 + 验收通道”，明确 SSH/JSch/dropbear 只是 readiness probe。
+4. 统一 SSH identity 命名，避免 `id_ed25519` 与 PEM ECDSA 实际格式不一致。
+5. 在正式 UI 工作台前，先证明 guest 内 agent 能稳定管理 `/workspace`。

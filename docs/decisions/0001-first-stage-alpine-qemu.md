@@ -6,22 +6,23 @@ Accepted
 
 ## 背景
 
-项目目标是在 Android 12+ 普通设备方向上，为 AI Agent 提供一个最小 Linux 执行空间。第一阶段不做 APK，而是在当前开发环境中先制作和验证 Linux 系统本身。
+项目目标是在 Android 12+ 普通设备方向上，为 AI Agent 提供一台可被 Android 控制的最小 Linux 工作机。第一阶段不做通用 Android 虚拟化产品，而是在当前开发环境中先制作和验证 QEMU guest 工作环境。
 
 ## 决策
 
 第一阶段主线采用：
 
 ```text
-Alpine minimal rootfs + QEMU system VM
+Alpine minimal guest + QEMU system VM + guest agent workspace
 ```
 
 ## 原因
 
 - Alpine 足够小，同时保留 `apk` 包管理器。
 - QEMU 是真 VM，不依赖 AVF 系统权限。
-- 该路线更符合“AI 的最小 Linux 虚拟机”概念。
-- 先验证 rootfs、网络、服务、持久化，再处理 Android 包装层。
+- 该路线更符合“Android 可控制的一台 Linux 工作机”概念。
+- workspace、文件、命令、日志和 git 版本优先交给 guest 内 agent 和 Linux 工具链。
+- 先验证 guest 镜像、网络、服务、持久化和 agent，再处理 Android 包装层。
 
 ## 被排除的主线
 
@@ -34,7 +35,6 @@ Alpine minimal rootfs + QEMU system VM
 
 ## 后果
 
-- 第一阶段会优先设计 rootfs 和 QEMU 启动链路。
-- 构建脚本应保留未来替换 VM backend 的接口边界。
+- 第一阶段会优先设计 guest 镜像、QEMU 启动链路和 agent 工作目录。
+- 构建脚本应优先保证 QEMU runtime、guest 镜像和输入文件布局可复现。
 - 如果 Alpine 的 musl 兼容性成为阻塞，再引入 Debian slim 对照路线。
-
