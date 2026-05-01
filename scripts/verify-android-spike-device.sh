@@ -229,12 +229,12 @@ Device:
   $ADB_DEVICE
 
 Next step:
-  Open the app if it is not already visible, then press Start VM.
+  Open the app if it is not already visible, then press Start Linux.
 
 Expected app-side logs:
   - Bundled QEMU executable is expected at .../libqemu-system-aarch64.so
-  - Launching VM:
-  - VM process started.
+  - Starting Linux:
+  - Linux process started.
 
 Private inputs were staged to:
   /data/user/0/$PACKAGE/files/ai-linux-spike/inputs

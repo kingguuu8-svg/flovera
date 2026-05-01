@@ -36,3 +36,10 @@
 - 结果：新增镜像下载、NoCloud seed 生成和 host 侧 QEMU 验证脚本，并把 Ubuntu guest 路线接入 README、QEMU 文档和第一阶段体验文档。
 - 验收：`scripts/verify-ubuntu-cloud-vm.sh` 通过 SSH terminal、cloud-init、`aarch64`、HTTPS、Python、Git、`/workspace`、HTTP preview 和 QMP pause/resume 检查；验证记录见 `docs/verification/2026-05-01-ubuntu-cloud-guest.md`。
 - 后续影响：下一轮可以在 Android 侧接入 terminal 和 Linux 生命周期按钮；Node/agent 安装应作为 guest 内 provisioning，而不是首启 cloud-init 阻塞项。
+
+## 2026-05-01 - pending - android: expose linux lifecycle controls
+
+- 目标：把 Android spike 从技术验证按钮改造成第一阶段 Linux 电脑控制面。
+- 结果：UI 暴露 `Prepare Linux`、`Start Linux`、`Pause`、`Resume`、`Shutdown`、terminal 命令输入和日志区；`VmController` 增加 QMP TCP pause/resume 和通用 SSH exec。
+- 验收：`assembleDebug` 和 `testDebugUnitTest` 通过；`android describe` 仍受 Windows launcher `CreateProcess error=193` 阻塞；模拟器 layout 验收被本机 AVD QEMU 线程挂起阻塞。验证记录见 `docs/verification/2026-05-01-android-linux-controls.md`。
+- 后续影响：下一轮应优先做真机 UI 行为验收，或者先修复本机 emulator 环境；完整 PTY terminal 不应塞进本轮控制面。

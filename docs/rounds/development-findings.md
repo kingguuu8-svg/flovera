@@ -49,3 +49,17 @@
 - 结论：QEMU 验证运行时文件应放在 Linux 原生文件系统中，不能默认把 overlay、QMP socket 和 seed 运行时副本放在 Windows 挂载盘上。
 - 证据：验证脚本将运行时 image copy、seed copy、qcow2 overlay、PID file 和 QMP socket 放入 WSL `/tmp` 后，host 侧 Ubuntu arm64 guest 验收通过。
 - 对后续开发的影响：Android 侧也应使用 app 私有原生路径承载运行时文件，不要把 VM 热路径放在慢速或语义不完整的外部/桥接文件系统上。
+
+## Finding 7
+
+- 来源轮次：2026-05-01 `android: expose linux lifecycle controls`
+- 结论：第一阶段 Android 控制面可以先使用“一次输入一条命令”的 SSH exec 作为 terminal 占位，不应在生命周期控制面未稳定前实现完整 PTY。
+- 证据：本轮 `VmController` 复用已有 JSch SSH 通道，新增 terminal 命令输入和 `Run Command`；同时将 QMP pause/resume 接入生命周期按钮。
+- 对后续开发的影响：后续若要做完整 terminal，应作为独立轮次处理 PTY、会话重连、键盘、滚动缓冲和状态恢复，不与 QEMU 生命周期控制混在一起。
+
+## Finding 8
+
+- 来源轮次：2026-05-01 `android: expose linux lifecycle controls`
+- 结论：当前本机 emulator 不能作为稳定 UI 验收通道。
+- 证据：`docs/verification/2026-05-01-android-linux-controls.md` 记录了 `small_phone` 无 online ADB device、`Medium_Phone_API_36.1` emulator 进程死亡，并在日志中出现多个 QEMU2 CPU/main loop hanging thread。
+- 对后续开发的影响：下一轮 Android 行为验收应优先使用真机，或先单独修复 emulator 环境；不要把 app 功能问题和 emulator 启动问题混为一谈。

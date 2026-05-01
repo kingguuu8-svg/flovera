@@ -13,6 +13,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -32,24 +33,43 @@ fun SpikeScreen(controller: VmController, modifier: Modifier = Modifier) {
     modifier = modifier.fillMaxSize().padding(16.dp),
     verticalArrangement = Arrangement.spacedBy(12.dp),
   ) {
+    Text(
+      text = "Linux status: ${state.linuxStatus.name.lowercase()}",
+      style = MaterialTheme.typography.titleMedium,
+    )
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
       Button(onClick = { scope.launch { controller.prepareAssets() } }, modifier = Modifier.fillMaxWidth()) {
-        Text("Prepare Assets")
+        Text("Prepare Linux")
       }
     }
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
       Button(onClick = { scope.launch { controller.startVm() } }, modifier = Modifier.fillMaxWidth()) {
-        Text("Start VM")
+        Text("Start Linux")
+      }
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+      Button(onClick = { scope.launch { controller.pauseLinux() } }, modifier = Modifier.weight(1f)) {
+        Text("Pause")
+      }
+      Button(onClick = { scope.launch { controller.resumeLinux() } }, modifier = Modifier.weight(1f)) {
+        Text("Resume")
       }
     }
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
       Button(onClick = { scope.launch { controller.stopVm() } }, modifier = Modifier.fillMaxWidth()) {
-        Text("Stop VM")
+        Text("Shutdown")
       }
     }
+    OutlinedTextField(
+      value = state.terminalCommand,
+      onValueChange = controller::updateTerminalCommand,
+      label = { Text("Terminal command") },
+      singleLine = true,
+      modifier = Modifier.fillMaxWidth(),
+    )
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-      Button(onClick = { scope.launch { controller.runEchoReady() } }, modifier = Modifier.fillMaxWidth()) {
-        Text("Run echo ready")
+      Button(onClick = { scope.launch { controller.runTerminalCommand() } }, modifier = Modifier.fillMaxWidth()) {
+        Text("Run Command")
       }
     }
     Card(

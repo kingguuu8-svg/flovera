@@ -37,6 +37,11 @@ Use this file to record the actual build and verification results for the spike.
 
 ## Results
 
+- Android Linux controls round build: PASS, `gradlew.bat assembleDebug` exited 0 after adding `Prepare Linux`, `Start Linux`, `Pause`, `Resume`, `Shutdown`, terminal command input, and QMP TCP control wiring
+- Android Linux controls unit task: PASS, `gradlew.bat testDebugUnitTest` exited 0; current task result is `NO-SOURCE`
+- Android Linux controls CLI `android info`: PASS, SDK path and CLI version returned
+- Android Linux controls `android describe`: FAIL with existing Windows launcher issue, `CreateProcess error=193`
+- Android Linux controls emulator UI install/layout: BLOCKED, `small_phone` produced no online ADB device and `Medium_Phone_API_36.1` died with hanging QEMU threads before app install
 - Build: PASS, `android/spike/app/build/outputs/apk/debug/app-debug.apk` produced by `gradlew.bat assembleDebug`
 - UEFI/executable preview fix build: PASS, `gradlew.bat assembleDebug` with Android Studio JBR
 - Unit test task: PASS, `gradlew.bat testDebugUnitTest` with Android Studio JBR; current task result is `NO-SOURCE`
@@ -57,7 +62,7 @@ Use this file to record the actual build and verification results for the spike.
 - Host QEMU regression: PASS after rebuilding the aarch64 initramfs with `modloop-virt` and the ECDSA SSH key
 - Expected Android real-device inputs now include `QEMU_EFI.fd`, `vmlinuz-virt`, `ai-linux-aarch64.cpio.gz`, and `id_ed25519`
 - Android manifest includes `android.permission.INTERNET` because JSch connects to forwarded local SSH and QEMU usernet uses sockets on real devices
-- QEMU process monitoring now waits for `process.waitFor()` and updates `vmRunning=false`, `vmExitCode`, and the exit log when the current process exits
+- QEMU process monitoring now waits for `process.waitFor()` and updates stopped status, `vmExitCode`, and the exit log when the current process exits
 - Android real-device preflight: PASS on `e9512097`, model `RMX3841`, SDK `36`, ABI `arm64-v8a`, USB powered, battery above the required threshold
 - Android real-device UI layout: PASS; `Prepare Assets`, `Start VM`, `Stop VM`, `Run echo ready`, and the log area were visible through `android layout --device=e9512097 --pretty`
 - Android real-device VM start: PASS; the ordinary app process launched bundled `libqemu-system-aarch64.so`, booted the aarch64 Alpine initramfs, brought up QEMU usernet through static fallback, and started dropbear

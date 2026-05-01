@@ -53,6 +53,7 @@ Android 侧的最小控制面会以独立 spike 工程推进，入口在 `androi
 │   │   ├── development-findings.md
 │   │   └── idea-backlog.md
 │   ├── verification/
+│   │   ├── 2026-05-01-android-linux-controls.md
 │   │   └── 2026-05-01-ubuntu-cloud-guest.md
 │   └── decisions/
 │       └── 0001-first-stage-alpine-qemu.md

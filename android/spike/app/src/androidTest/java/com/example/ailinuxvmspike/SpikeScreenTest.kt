@@ -11,17 +11,21 @@ class SpikeScreenTest {
   @get:Rule val composeRule = createAndroidComposeRule<ComponentActivity>()
 
   @Test
-  fun screen_hasFiveRequiredElements() {
+  fun screen_hasLinuxComputerControls() {
     val controller = VmController(composeRule.activity.applicationContext)
     try {
       composeRule.setContent {
         SpikeScreen(controller)
       }
 
-      composeRule.onNodeWithText("Prepare Assets").assertIsDisplayed()
-      composeRule.onNodeWithText("Start VM").assertIsDisplayed()
-      composeRule.onNodeWithText("Stop VM").assertIsDisplayed()
-      composeRule.onNodeWithText("Run echo ready").assertIsDisplayed()
+      composeRule.onNodeWithText("Linux status: stopped").assertIsDisplayed()
+      composeRule.onNodeWithText("Prepare Linux").assertIsDisplayed()
+      composeRule.onNodeWithText("Start Linux").assertIsDisplayed()
+      composeRule.onNodeWithText("Pause").assertIsDisplayed()
+      composeRule.onNodeWithText("Resume").assertIsDisplayed()
+      composeRule.onNodeWithText("Shutdown").assertIsDisplayed()
+      composeRule.onNodeWithText("Terminal command").assertIsDisplayed()
+      composeRule.onNodeWithText("Run Command").assertIsDisplayed()
       composeRule.onNodeWithText("AI Linux VM Spike ready.").assertIsDisplayed()
     } finally {
       controller.close()

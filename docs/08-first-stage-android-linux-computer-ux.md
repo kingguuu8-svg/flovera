@@ -115,21 +115,19 @@ Ubuntu arm64 cloud image
 
 ## 对 Android spike 的影响
 
-后续 Android spike 的 UI 语义应从技术验证按钮转向用户语义：
+Android spike 的 UI 语义应使用用户侧 Linux 电脑语言，而不是 QEMU 管理语言：
 
-| 当前 spike 语义 | 第一阶段用户语义 |
+| Spike 控件 | 第一阶段用户语义 |
 |---|---|
-| `Prepare Assets` | 后台自动准备，必要时显示 `Prepare Linux` |
-| `Start VM` | `Start Linux` |
-| `Stop VM` | `Shutdown` |
-| `Run echo ready` | 后台 readiness check |
+| `Prepare Linux` | 准备 Linux 所需输入和运行目录 |
+| `Start Linux` | 开机 |
+| `Pause` | 暂停 Linux |
+| `Resume` | 恢复 Linux |
+| `Shutdown` | 关机 |
+| `Terminal command` + `Run Command` | 发送一条 Linux 命令 |
 | 日志输出区 | 普通用户默认隐藏，错误时展开 |
 
-新增用户侧能力：
-
-- `Pause`
-- `Resume`
-- `Terminal`
+当前 terminal 仍是一条命令一次执行的 SSH exec，不是完整 PTY 终端。完整 PTY、会话重连和滚动缓冲应作为后续独立轮次。
 
 ## QEMU 功能映射
 

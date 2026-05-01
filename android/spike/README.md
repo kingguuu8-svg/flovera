@@ -5,18 +5,20 @@ Subagent-first Android spike for the AI Linux QEMU path.
 ## Scope
 
 - Single Activity, single screen
-- Exactly four actions plus a log panel
-- Asset release, process start/stop, stdout/stderr capture, and SSH readiness probe
+- Linux lifecycle actions plus a log panel
+- Asset release, process start/stop, QMP pause/resume, stdout/stderr capture, and SSH command execution
 - No WebView
 - No AI agent loop
 - No full workspace shell
 
 ## Android behavior
 
-- `Prepare Assets` creates the on-device spike runtime directory and releases small template files.
-- `Start VM` launches `libqemu-system-aarch64.so` from the app native library directory and keeps the remaining inputs in the on-device inputs directory.
-- `Stop VM` terminates the running VM process.
-- `Run echo ready` uses SSH against the forwarded port and expects `ready` on stdout.
+- `Prepare Linux` creates the on-device spike runtime directory and releases small template files.
+- `Start Linux` launches `libqemu-system-aarch64.so` from the app native library directory and keeps the remaining inputs in the on-device inputs directory.
+- `Pause` sends QMP `stop` to the local QEMU control port.
+- `Resume` sends QMP `cont` to the local QEMU control port.
+- `Shutdown` terminates the running QEMU process.
+- `Run Command` uses SSH against the forwarded port and executes the current terminal command. The default command is `echo ready`.
 - The app declares `android.permission.INTERNET` because the real-device path uses local TCP sockets for QEMU usernet and JSch SSH to `127.0.0.1:<sshPort>`.
 
 ## Expected on-device inputs
@@ -74,4 +76,4 @@ To validate on a connected arm64 Android 12+ device:
 bash scripts/verify-android-spike-device.sh --apk android/spike/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-This spike intentionally keeps the surface area small so the emulator can prove the control path before a real device is available.
+This spike intentionally keeps the surface area small. The terminal is currently one SSH exec command per submit, not a full PTY session.
