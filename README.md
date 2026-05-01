@@ -42,6 +42,12 @@ Android 侧的最小控制面会以独立 spike 工程推进，入口在 `androi
 │   ├── 03-implementation-routes.md
 │   ├── 04-system-architecture.md
 │   ├── 05-open-questions.md
+│   ├── rounds/
+│   │   ├── README.md
+│   │   ├── current-round.md
+│   │   ├── round-timeline.md
+│   │   ├── development-findings.md
+│   │   └── idea-backlog.md
 │   └── decisions/
 │       └── 0001-first-stage-alpine-qemu.md
 ├── rootfs/
@@ -92,7 +98,20 @@ shell / file / network / service / log 基础能力
 4. [实现路线区别](docs/03-implementation-routes.md)
 5. [系统架构](docs/04-system-architecture.md)
 6. [待解决问题](docs/05-open-questions.md)
-7. [架构决策 0001](docs/decisions/0001-first-stage-alpine-qemu.md)
+7. [开发轮次流程](docs/rounds/README.md)
+8. [架构决策 0001](docs/decisions/0001-first-stage-alpine-qemu.md)
+
+## 开发轮次流程
+
+本仓库采用按提交计算的开发轮次流程：一个非平凡 commit 对应一个轮次。
+
+轮次入口：
+
+- [轮次规则](docs/rounds/README.md)
+- [当前轮次](docs/rounds/current-round.md)
+- [轮次时间线](docs/rounds/round-timeline.md)
+- [开发结论](docs/rounds/development-findings.md)
+- [想法 backlog](docs/rounds/idea-backlog.md)
 
 ## 第一阶段本地验证
 

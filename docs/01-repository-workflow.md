@@ -13,6 +13,16 @@
 
 ## 文件修改流程
 
+本仓库采用按提交计算的开发轮次流程：一个非平凡 commit 必须对应一个开发轮次。
+
+轮次文档入口：
+
+- `docs/rounds/README.md`
+- `docs/rounds/current-round.md`
+- `docs/rounds/round-timeline.md`
+- `docs/rounds/development-findings.md`
+- `docs/rounds/idea-backlog.md`
+
 修改已有文件前必须执行：
 
 ```text
@@ -40,6 +50,29 @@
 - diff 用于审查修改
 - tag 用于标记重要可运行版本
 
+## 开发轮次流程
+
+一轮等于一个非平凡 commit。轮次用于把目标、范围、验收和结论绑定到提交上，避免把新想法、临时补丁和主线开发混在一起。
+
+每轮开始前必须更新 `docs/rounds/current-round.md`，写清：
+
+- 本轮问题
+- 本轮只做什么
+- 本轮不做什么
+- 影响文件范围
+- 验收标准
+- 预期 commit message
+
+每轮结束前必须更新：
+
+- `docs/rounds/round-timeline.md`
+- 必要时更新 `docs/rounds/development-findings.md`
+- 必要时把新想法放入 `docs/rounds/idea-backlog.md`
+
+没有轮次记录的非平凡 commit，视为流程不完整。
+
+小型错别字、格式修正可以标记为 `trivial`，不要求完整轮次，但 commit message 必须明确说明这是 trivial 变更。
+
 ## 提交流程
 
 每次提交应满足：
@@ -47,6 +80,7 @@
 - 变更范围单一
 - commit message 说明目的
 - 文档和实现保持同步
+- 非平凡 commit 已对应一个开发轮次
 - 生成产物不提交，除非是小型、必要、可审查的样例
 
 推荐提交信息：
