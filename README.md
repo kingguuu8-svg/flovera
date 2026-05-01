@@ -42,6 +42,7 @@ Android 侧的最小控制面会以独立 spike 工程推进，入口在 `androi
 │   ├── 03-implementation-routes.md
 │   ├── 04-system-architecture.md
 │   ├── 05-open-questions.md
+│   ├── 06-sandbox-design-targets.md
 │   ├── rounds/
 │   │   ├── README.md
 │   │   ├── current-round.md
@@ -98,8 +99,9 @@ shell / file / network / service / log 基础能力
 4. [实现路线区别](docs/03-implementation-routes.md)
 5. [系统架构](docs/04-system-architecture.md)
 6. [待解决问题](docs/05-open-questions.md)
-7. [开发轮次流程](docs/rounds/README.md)
-8. [架构决策 0001](docs/decisions/0001-first-stage-alpine-qemu.md)
+7. [沙箱设计目标与参考案例](docs/06-sandbox-design-targets.md)
+8. [开发轮次流程](docs/rounds/README.md)
+9. [架构决策 0001](docs/decisions/0001-first-stage-alpine-qemu.md)
 
 ## 开发轮次流程
 

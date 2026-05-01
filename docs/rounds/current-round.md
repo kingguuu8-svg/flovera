@@ -2,38 +2,40 @@
 
 ## Round Goal
 
-建立按提交计算的开发轮次流程。
+规划沙箱设计目标，并列出可参考的成熟工程案例。
 
 ## Why Now
 
-仓库已经完成 rootfs、QEMU、Android spike 等多条验证链路，后续继续开发前需要一个强约束流程，避免功能、文档、验收和架构边界混在一起。
+`docs/05-open-questions.md` 已明确“借鉴成熟实现而不是照抄”是当前开放问题。继续扩展实现前，需要先把沙箱目标、边界和可借鉴案例写清，减少自创设计空间。
 
 ## Scope
 
-- 新增 `docs/rounds/` 下的轮次流程文档。
-- 修改仓库处理流程，明确“一轮 = 一个非平凡 commit”。
-- 在根 README 加入开发轮次入口。
+- 新增沙箱设计目标文档。
+- 列出 Android AVF、Firecracker、gVisor、Flatpak、Crostini/Termina 等参考案例。
+- 在根 README 加入沙箱设计目标入口。
+- 更新本轮时间线和必要的开发结论。
 
 ## Non-Goals
 
-- 不新增自动化脚本。
-- 不修改 Android/QEMU/rootfs 实现。
+- 不实现新的 sandbox 代码。
+- 不修改 Android/QEMU/rootfs 行为。
+- 不把任何参考案例照抄成当前方案。
 - 不提交 artifacts、APK、二进制、日志或截图。
 - 不改写 `docs/05-open-questions.md` 的内容。
 
 ## Acceptance Criteria
 
-- [x] `docs/rounds/` 包含当前轮次、时间线、结论、backlog 和归档说明。
-- [x] `docs/01-repository-workflow.md` 明确每个非平凡 commit 必须对应一轮。
-- [x] `README.md` 能导航到开发轮次流程。
+- [x] 文档明确第一阶段沙箱设计目标和非目标。
+- [x] 文档列出可参考工程案例，并区分“借鉴什么”和“不照抄什么”。
+- [x] 文档明确 SSH/JSch/dropbear 只是当前验收控制通道，不是长期协议。
+- [x] README 能导航到沙箱设计目标文档。
 - [x] 本轮只修改文档，不改变 Android/QEMU 行为。
-- [x] 不提交 artifacts 或已有无关改动。
 
 ## Planned Commit
 
-`docs: add development round workflow`
+`docs: define sandbox design targets`
 
 ## Notes
 
 - `docs/05-open-questions.md` 当前已有用户认可的未提交改动，本轮不触碰。
-- 第一版不做脚本自动化，避免过早固化流程实现。
+- 参考案例只吸收抽象和边界，不复制平台实现。
