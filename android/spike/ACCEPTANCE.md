@@ -73,6 +73,7 @@ Use this file to record the actual build and verification results for the spike.
 - Android real-device SSH readiness: PASS after fix; `Run Command` waits and retries until forwarded SSH is ready instead of assuming `Linux process started.` means dropbear is already accepting commands
 - Android real-device evidence files remain ignored under `artifacts/android-spike/`, including the latest after-shutdown layout JSON and screenshot
 - Android terminal presentation: PASS by build/static verification; user-facing command output now goes to `Terminal`, while QEMU/kernel/JSch/QMP details go to `Diagnostics`
+- Android terminal real-device preview: PASS; Terminal no longer receives lifecycle `[system]` messages and shows only prompt, `echo ready`, `ready`, `[exit 0]`, and `Ready probe succeeded.`
 
 ## Root causes and blockers
 

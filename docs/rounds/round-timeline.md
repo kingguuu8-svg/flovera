@@ -57,3 +57,10 @@
 - 结果：`VmUiState` 拆分为 `terminalText` 和 `diagnosticsText`；Terminal 只显示用户命令、stdout/stderr、exit code 和少量用户级状态，Diagnostics 承载 QEMU/kernel/JSch/QMP 调试信息。
 - 验收：`assembleDebug`、`testDebugUnitTest` 和 `git diff --check` 通过；当前无在线 Android 设备，未做真机 preview。验证记录见 `docs/verification/2026-05-02-android-terminal-diagnostics.md`。
 - 后续影响：下一轮如继续逼近 VPS 体验，应做真机 preview 后再决定是否进入完整 PTY terminal，而不是继续扩展一次性 SSH exec。
+
+## 2026-05-02 - pending - android: keep lifecycle messages out of terminal
+
+- 目标：真机 preview Terminal/Diagnostics 分离后的命令行体验，并清理主终端残余系统噪音。
+- 结果：生命周期按钮不再向 Terminal 写 `[system] Starting Linux`、`[system] Linux started`、pause/resume/shutdown 等状态消息；这些信息只保留在顶部状态和 Diagnostics。
+- 验收：RMX3841 真机通过 APK 安装、输入 staging、Start Linux、`echo ready`、Shutdown 和无 QEMU 残留检查；Terminal 只显示 prompt、命令、stdout、exit code 和探针结果。验证记录见 `docs/verification/2026-05-02-android-terminal-diagnostics.md`。
+- 后续影响：如果继续追求 VPS 体验，下一步应做真正 PTY/persistent shell，而不是再往一次性 SSH exec 上叠交互假象。

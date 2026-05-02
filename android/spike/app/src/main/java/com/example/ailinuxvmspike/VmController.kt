@@ -106,14 +106,12 @@ class VmController(
     val launchCommand = buildQemuCommand(inputs)
 
     if (processRef.get()?.isAlive == true) {
-      appendTerminal("[system] Linux is already running.")
       appendDiagnostics("Start Linux ignored because Linux is already running.")
       return@launch
     }
 
     val missing = validateInputs(inputs)
     if (missing.isNotEmpty()) {
-      appendTerminal("[system] Start Linux blocked. Check diagnostics.")
       appendDiagnostics("Start Linux blocked.")
       missing.forEach { appendDiagnostics("Missing: $it") }
       appendDiagnostics("This is expected on emulator until the external firmware/kernel/initramfs/key inputs are copied.")
@@ -123,7 +121,6 @@ class VmController(
 
     withContext(Dispatchers.IO) {
       if (!inputs.qemuBinary.canExecute()) {
-        appendTerminal("[system] Start Linux blocked. Check diagnostics.")
         appendDiagnostics("Start Linux blocked: QEMU binary is still not executable at ${inputs.qemuBinary.absolutePath}")
         updateState { it.copy(linuxStatus = LinuxStatus.Stopped, vmExitCode = null) }
         return@withContext
@@ -133,7 +130,6 @@ class VmController(
       val builder = ProcessBuilder(launchCommand)
       builder.directory(inputsDir)
       builder.redirectErrorStream(false)
-      appendTerminal("[system] Starting Linux.")
       appendDiagnostics("Starting Linux:")
       appendDiagnostics("Executable: ${inputs.qemuBinary.absolutePath}")
       appendDiagnostics("Working dir: ${inputsDir.absolutePath}")
@@ -149,10 +145,8 @@ class VmController(
         pumpStream("stdout", process.inputStream)
         pumpStream("stderr", process.errorStream)
         monitorProcess(process)
-        appendTerminal("[system] Linux started. Terminal will connect when SSH is ready.")
         appendDiagnostics("Linux process started.")
       } catch (exception: IOException) {
-        appendTerminal("[system] Failed to start Linux. Check diagnostics.")
         appendDiagnostics("Failed to start Linux: ${exception.message}")
         updateState { it.copy(linuxStatus = LinuxStatus.Error, vmExitCode = null) }
       }
@@ -162,7 +156,6 @@ class VmController(
   fun stopVm() = scope.launch {
     val process = processRef.get()
     if (process == null) {
-      appendTerminal("[system] Linux is not running.")
       appendDiagnostics("Shutdown requested, but Linux is not running.")
       updateState { it.copy(linuxStatus = LinuxStatus.Stopped) }
       return@launch
@@ -170,7 +163,6 @@ class VmController(
 
     withContext(Dispatchers.IO) {
       try {
-        appendTerminal("[system] Shutting down Linux.")
         appendDiagnostics("Shutting down Linux process.")
         updateState { it.copy(linuxStatus = LinuxStatus.Stopping) }
 
@@ -211,7 +203,6 @@ class VmController(
         processRef.compareAndSet(process, null)
         val exitCode = runCatching { process.exitValue() }.getOrNull()
         updateState { it.copy(linuxStatus = LinuxStatus.Stopped, vmExitCode = exitCode) }
-        appendTerminal("[system] Linux stopped.")
         appendDiagnostics("Linux stopped. exitCode=${exitCode ?: "unknown"}")
       }
     }
@@ -219,7 +210,6 @@ class VmController(
 
   fun pauseLinux() = scope.launch {
     if (processRef.get()?.isAlive != true) {
-      appendTerminal("[system] Pause blocked: Linux is not running.")
       appendDiagnostics("Pause blocked: Linux is not running.")
       return@launch
     }
@@ -227,12 +217,10 @@ class VmController(
       runCatching {
         qmpExecute(buildInputs().qmpPort, "stop")
       }.onSuccess { response ->
-        appendTerminal("[system] Linux paused.")
         appendDiagnostics("Pause requested through QMP.")
         appendDiagnostics("QMP response: $response")
         updateState { it.copy(linuxStatus = LinuxStatus.Paused) }
       }.onFailure { exception ->
-        appendTerminal("[system] Pause failed. Check diagnostics.")
         appendDiagnostics("Pause failed: ${exception.message}")
       }
     }
@@ -240,7 +228,6 @@ class VmController(
 
   fun resumeLinux() = scope.launch {
     if (processRef.get()?.isAlive != true) {
-      appendTerminal("[system] Resume blocked: Linux is not running.")
       appendDiagnostics("Resume blocked: Linux is not running.")
       return@launch
     }
@@ -248,12 +235,10 @@ class VmController(
       runCatching {
         qmpExecute(buildInputs().qmpPort, "cont")
       }.onSuccess { response ->
-        appendTerminal("[system] Linux resumed.")
         appendDiagnostics("Resume requested through QMP.")
         appendDiagnostics("QMP response: $response")
         updateState { it.copy(linuxStatus = LinuxStatus.Running) }
       }.onFailure { exception ->
-        appendTerminal("[system] Resume failed. Check diagnostics.")
         appendDiagnostics("Resume failed: ${exception.message}")
       }
     }
@@ -369,7 +354,6 @@ class VmController(
       val exitCode = process.waitFor()
       if (processRef.compareAndSet(process, null)) {
         updateState { it.copy(linuxStatus = LinuxStatus.Stopped, vmExitCode = exitCode) }
-        appendTerminal("[system] Linux stopped.")
         appendDiagnostics("Linux process exited. exitCode=$exitCode")
       }
     }

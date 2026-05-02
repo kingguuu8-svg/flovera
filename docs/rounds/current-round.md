@@ -2,43 +2,43 @@
 
 ## Round Goal
 
-把 Android 控制面从混合日志框改成更接近 VPS 的终端视图。
+真机 preview Terminal/Diagnostics 分离后的命令行体验。
 
 ## Why Now
 
-真机验收已经证明 QEMU 生命周期和 SSH exec 链路能跑通，但实际使用时所有 QEMU、kernel、SSH、状态和用户命令输出都挤在同一个信息栏里。这个体验不符合“像使用一台 Linux/VPS”的第一阶段目标。
+上一轮把 Terminal 和 Diagnostics 拆开，但当时没有在线设备，只做了构建和静态验证。现在真机已连接，应验证实际 VM 启动和命令输出是否真的接近 VPS 终端体验，并修正 preview 暴露的残余噪音。
 
 ## Scope
 
-- 将 `VmUiState` 的单一 `logText` 拆成用户 `terminalText` 和系统 `diagnosticsText`。
-- 让用户命令输入、stdout、stderr、exit code 进入 Terminal。
-- 让 QEMU 参数、kernel stdout/stderr、JSch 握手、readiness、生命周期细节进入 Diagnostics。
-- 调整 Compose UI，使 Terminal 成为主视图，Diagnostics 成为次级信息区。
-- 更新 Android spike 测试和验收文档。
+- 在真机上安装当前 Android spike APK。
+- 启动 QEMU/Linux，执行默认 `echo ready`，再关闭 Linux。
+- 检查 Terminal 是否只显示 prompt、用户命令、stdout/stderr 和 exit code。
+- 检查 QEMU/kernel/JSch/QMP 信息是否只进入 Diagnostics。
+- 必要时只修正 Terminal/Diagnostics 信息路由。
 
 ## Non-Goals
 
-- 不实现完整 PTY terminal、交互式 shell、键盘会话保持或光标控制。
+- 不实现完整 PTY terminal。
 - 不改 QEMU runtime、guest 镜像、SSH key 或端口策略。
-- 不改真机 staging 脚本。
+- 不改 staging 脚本。
 - 不提交 artifacts、APK、native libraries、截图或日志。
 
 ## Acceptance Criteria
 
-- [x] UI 中 Terminal 是主输出区，不再被 kernel/QEMU/JSch 日志淹没。
-- [x] Diagnostics 仍保留系统调试信息，方便排查问题。
-- [x] `Run Command` 后 Terminal 显示命令、stdout/stderr 和 exit code。
-- [x] 旧的 UI 测试更新到新的 Terminal/Diagnostics 文案。
+- [x] 真机 preflight、APK 安装和 app 私有输入 staging 通过。
 - [x] `assembleDebug` 通过。
 - [x] `testDebugUnitTest` 通过。
+- [x] `Run Command` 后 Terminal 显示 `root@ai-linux:~# echo ready`、`ready` 和 `[exit 0]`。
+- [x] Terminal 不显示 `[system] Starting Linux` 或 `[system] Linux started`。
+- [x] Diagnostics 仍显示 QEMU/kernel/JSch/QMP 诊断信息。
+- [x] `Shutdown` 后 App 保持前台，且无残留 QEMU 子进程。
 - [x] 本轮不提交 artifacts、APK 或 native runtime。
 
 ## Planned Commit
 
-`android: separate terminal from diagnostics`
+`android: keep lifecycle messages out of terminal`
 
 ## Notes
 
-- 本轮是“一次输入一条命令”的终端占位优化，不是完整 SSH PTY。
-- 关键产品判断：用户默认看到的是 Linux 命令行结果；系统诊断只是后台可观察性，不应抢占主体验。
-- 当前没有在线 Android 设备，因此本轮未做真机 VM 行为 preview。
+- 真机：RMX3841，Android SDK 36，arm64，电量约 54-55%，USB 供电。
+- 本轮仍是一次性 SSH exec，不是完整 VPS PTY；但主终端已经不再承担系统诊断职责。

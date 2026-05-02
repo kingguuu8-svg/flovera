@@ -84,3 +84,10 @@
 - 结论：第一阶段 Android UI 必须把用户终端和系统诊断分离，否则即使 VM 链路跑通，体验也会退化成调试日志面板。
 - 证据：用户试用后反馈“日志和信息同时挤在信息栏里，和 VPS 体验相距甚远”；本轮将 `terminalText` 与 `diagnosticsText` 分离，并让 QEMU/kernel/JSch/QMP 信息进入 Diagnostics。
 - 对后续开发的影响：后续新增日志、agent 状态、preview port 或错误信息时，必须先判断它属于用户终端、用户级状态，还是后台诊断，不能默认追加到主终端。
+
+## Finding 12
+
+- 来源轮次：2026-05-02 `android: keep lifecycle messages out of terminal`
+- 结论：生命周期状态不应伪装成终端输出；Terminal 应只承载用户命令会话。
+- 证据：真机 preview 的第一版截图中 Terminal 仍包含 `[system] Starting Linux` 和 `[system] Linux started`；移入 Diagnostics 后，Terminal 只剩 prompt、`echo ready`、`ready`、`[exit 0]` 和探针结果。
+- 对后续开发的影响：Start/Pause/Resume/Shutdown、readiness 和 VM 监控应显示在状态栏或 Diagnostics 中，不应写入主 Terminal。

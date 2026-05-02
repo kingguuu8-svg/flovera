@@ -28,7 +28,45 @@ git diff --check
 | Terminal/diagnostics split | PASS by static inspection | `VmUiState` now has `terminalText` and `diagnosticsText` instead of one `logText`. |
 | User command output path | PASS by static inspection | `Run Command` appends prompt, stdout/stderr, exit code, and `Ready probe succeeded.` to Terminal. |
 | Backend log path | PASS by static inspection | QEMU command details, kernel stdout/stderr, JSch logs, SSH readiness, and QMP responses append to Diagnostics. |
-| Device preview | NOT RUN | No Android device was online when this verification was performed. |
+| Device preview | PASS after follow-up | RMX3841 / Android SDK 36 / arm64 real-device preview passed after keeping lifecycle messages out of Terminal. |
+
+## Real Device Follow-up
+
+Target device:
+
+- Serial: `e9512097`
+- Model: `RMX3841`
+- Android SDK: `36`
+- ABI: `arm64-v8a,armeabi-v7a,armeabi`
+- Power: USB powered
+- Battery: 54-55%
+
+Commands:
+
+```powershell
+.\gradlew.bat assembleDebug
+.\gradlew.bat testDebugUnitTest
+
+bash scripts/verify-android-spike-device.sh `
+  --device e9512097 `
+  --apk android/spike/app/build/outputs/apk/debug/app-debug.apk
+
+android layout --device=e9512097 --pretty
+```
+
+Real-device results:
+
+| Check | Result | Evidence |
+|---|---|---|
+| APK install and private input staging | PASS | `verify-android-spike-device.sh` installed the debug APK and staged the existing QEMU/firmware/kernel/initramfs/key inputs. |
+| Static UI split | PASS | `android layout` showed `Terminal`, `Diagnostics`, `root@ai-linux:~#`, and `Diagnostics ready.` as separate visible regions. |
+| Start Linux | PASS | UI status reached `Linux status: running`; Diagnostics showed `Linux process started.` |
+| Terminal command output | PASS | Terminal showed `root@ai-linux:~# echo ready`, `ready`, `[exit 0]`, and `Ready probe succeeded.` |
+| Terminal lifecycle noise | PASS after fix | Terminal no longer showed `[system] Starting Linux` or `[system] Linux started`. |
+| Diagnostics retention | PASS | Diagnostics still contained kernel/QEMU diagnostic output. |
+| Shutdown cleanup | PASS | `Shutdown` returned to `Linux status: stopped`; `adb shell ps -A` showed only the App process and no QEMU child process. |
+
+Evidence screenshots were captured under `artifacts/android-spike/` and remain ignored by git.
 
 ## Scope Boundary
 
