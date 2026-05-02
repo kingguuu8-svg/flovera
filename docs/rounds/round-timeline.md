@@ -50,3 +50,10 @@
 - 结果：修复 shutdown 收尾和 SSH readiness 等待；真机链路通过 `Start Linux`、`Run Command`、`Pause`、`Resume`、`Shutdown`。
 - 验收：RMX3841 / Android SDK 36 / arm64 真机在用户允许低电量覆盖后通过 APK 安装、app 私有输入 staging、layout、QEMU 启动、SSH `echo ready`、QMP `STOP`/`RESUME`、QMP `quit` 和无残留 QEMU 子进程检查。验证记录见 `docs/verification/2026-05-01-android-linux-controls.md`。
 - 后续影响：后续 Android 行为验收以真机为主；terminal readiness 要作为显式状态等待，不能把 QEMU process started 当作 SSH ready。
+
+## 2026-05-02 - pending - android: separate terminal from diagnostics
+
+- 目标：把 Android 控制面从混合日志框改成更接近 VPS 的终端视图。
+- 结果：`VmUiState` 拆分为 `terminalText` 和 `diagnosticsText`；Terminal 只显示用户命令、stdout/stderr、exit code 和少量用户级状态，Diagnostics 承载 QEMU/kernel/JSch/QMP 调试信息。
+- 验收：`assembleDebug`、`testDebugUnitTest` 和 `git diff --check` 通过；当前无在线 Android 设备，未做真机 preview。验证记录见 `docs/verification/2026-05-02-android-terminal-diagnostics.md`。
+- 后续影响：下一轮如继续逼近 VPS 体验，应做真机 preview 后再决定是否进入完整 PTY terminal，而不是继续扩展一次性 SSH exec。

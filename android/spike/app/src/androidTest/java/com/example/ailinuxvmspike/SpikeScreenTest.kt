@@ -26,7 +26,10 @@ class SpikeScreenTest {
       composeRule.onNodeWithText("Shutdown").assertIsDisplayed()
       composeRule.onNodeWithText("Terminal command").assertIsDisplayed()
       composeRule.onNodeWithText("Run Command").assertIsDisplayed()
-      composeRule.onNodeWithText("AI Linux VM Spike ready.").assertIsDisplayed()
+      composeRule.onNodeWithText("Terminal").assertIsDisplayed()
+      composeRule.onNodeWithText("root@ai-linux", substring = true).assertIsDisplayed()
+      composeRule.onNodeWithText("Diagnostics").assertIsDisplayed()
+      composeRule.onNodeWithText("Diagnostics ready.").assertIsDisplayed()
     } finally {
       controller.close()
     }

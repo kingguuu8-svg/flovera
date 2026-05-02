@@ -77,3 +77,10 @@
 - 结论：Android 侧 `Shutdown` 应优先表达 Linux/QEMU 生命周期语义，而不是直接清空引用并硬杀进程。
 - 证据：真机验收中旧 shutdown 路径会让 App 回到 launcher 且缺少 `Linux stopped.`；改为保留进程引用、优先 QMP `quit`、等待退出并兜底回写 `Stopped` 后，App 保持前台且无残留 QEMU 子进程。
 - 对后续开发的影响：后续 pause/resume/shutdown/snapshot 这类生命周期操作应先走 QMP 或 guest 内协议，失败后才进入宿主进程兜底清理。
+
+## Finding 11
+
+- 来源轮次：2026-05-02 `android: separate terminal from diagnostics`
+- 结论：第一阶段 Android UI 必须把用户终端和系统诊断分离，否则即使 VM 链路跑通，体验也会退化成调试日志面板。
+- 证据：用户试用后反馈“日志和信息同时挤在信息栏里，和 VPS 体验相距甚远”；本轮将 `terminalText` 与 `diagnosticsText` 分离，并让 QEMU/kernel/JSch/QMP 信息进入 Diagnostics。
+- 对后续开发的影响：后续新增日志、agent 状态、preview port 或错误信息时，必须先判断它属于用户终端、用户级状态，还是后台诊断，不能默认追加到主终端。

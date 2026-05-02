@@ -16,7 +16,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 import java.io.ByteArrayOutputStream
 import java.io.Closeable
 import java.io.File
@@ -39,7 +38,8 @@ data class VmUiState(
   val linuxStatus: LinuxStatus = LinuxStatus.Stopped,
   val vmExitCode: Int? = null,
   val terminalCommand: String = "echo ready",
-  val logText: String = "AI Linux VM Spike ready.\n",
+  val terminalText: String = "root@ai-linux:~#\n",
+  val diagnosticsText: String = "Diagnostics ready.\n",
 )
 
 data class VmInputs(
@@ -59,6 +59,8 @@ private const val BUNDLED_QEMU_NAME = "libqemu-system-aarch64.so"
 private const val SSH_CONNECT_TIMEOUT_MS = 10_000
 private const val SSH_READY_TIMEOUT_MS = 90_000L
 private const val SSH_RETRY_DELAY_MS = 2_000L
+private const val TERMINAL_MAX_CHARS = 16_000
+private const val DIAGNOSTICS_MAX_CHARS = 24_000
 
 class VmController(
   private val context: Context,
@@ -90,7 +92,7 @@ class VmController(
       launchTemplate.setExecutable(true, true)
       writeReleaseNotes(File(assetsDir, "README.txt"))
     }
-    appendLog(
+    appendDiagnostics(
       "Prepared assets under ${assetsDir.absolutePath}",
       "Bundled QEMU executable is expected at ${File(nativeLibraryDir, BUNDLED_QEMU_NAME).absolutePath}",
       "Runtime inputs live in ${inputsDir.absolutePath}: QEMU_EFI.fd, vmlinuz-virt, ai-linux-aarch64.cpio.gz, id_ed25519",
@@ -104,22 +106,25 @@ class VmController(
     val launchCommand = buildQemuCommand(inputs)
 
     if (processRef.get()?.isAlive == true) {
-      appendLog("Linux is already running.")
+      appendTerminal("[system] Linux is already running.")
+      appendDiagnostics("Start Linux ignored because Linux is already running.")
       return@launch
     }
 
     val missing = validateInputs(inputs)
     if (missing.isNotEmpty()) {
-      appendLog("Start Linux blocked.")
-      missing.forEach { appendLog("Missing: $it") }
-      appendLog("This is expected on emulator until the external firmware/kernel/initramfs/key inputs are copied.")
+      appendTerminal("[system] Start Linux blocked. Check diagnostics.")
+      appendDiagnostics("Start Linux blocked.")
+      missing.forEach { appendDiagnostics("Missing: $it") }
+      appendDiagnostics("This is expected on emulator until the external firmware/kernel/initramfs/key inputs are copied.")
       updateState { it.copy(linuxStatus = LinuxStatus.Stopped, vmExitCode = null) }
       return@launch
     }
 
     withContext(Dispatchers.IO) {
       if (!inputs.qemuBinary.canExecute()) {
-        appendLog("Start Linux blocked: QEMU binary is still not executable at ${inputs.qemuBinary.absolutePath}")
+        appendTerminal("[system] Start Linux blocked. Check diagnostics.")
+        appendDiagnostics("Start Linux blocked: QEMU binary is still not executable at ${inputs.qemuBinary.absolutePath}")
         updateState { it.copy(linuxStatus = LinuxStatus.Stopped, vmExitCode = null) }
         return@withContext
       }
@@ -128,12 +133,13 @@ class VmController(
       val builder = ProcessBuilder(launchCommand)
       builder.directory(inputsDir)
       builder.redirectErrorStream(false)
-      appendLog("Starting Linux:")
-      appendLog("Executable: ${inputs.qemuBinary.absolutePath}")
-      appendLog("Working dir: ${inputsDir.absolutePath}")
-      appendLog("SSH terminal port: ${inputs.sshPort}")
-      appendLog("QMP control port: ${inputs.qmpPort}")
-      appendLog(launchCommand.joinToString(" "))
+      appendTerminal("[system] Starting Linux.")
+      appendDiagnostics("Starting Linux:")
+      appendDiagnostics("Executable: ${inputs.qemuBinary.absolutePath}")
+      appendDiagnostics("Working dir: ${inputsDir.absolutePath}")
+      appendDiagnostics("SSH terminal port: ${inputs.sshPort}")
+      appendDiagnostics("QMP control port: ${inputs.qmpPort}")
+      appendDiagnostics(launchCommand.joinToString(" "))
 
       try {
         updateState { it.copy(linuxStatus = LinuxStatus.Starting, vmExitCode = null) }
@@ -143,9 +149,11 @@ class VmController(
         pumpStream("stdout", process.inputStream)
         pumpStream("stderr", process.errorStream)
         monitorProcess(process)
-        appendLog("Linux process started.")
+        appendTerminal("[system] Linux started. Terminal will connect when SSH is ready.")
+        appendDiagnostics("Linux process started.")
       } catch (exception: IOException) {
-        appendLog("Failed to start Linux: ${exception.message}")
+        appendTerminal("[system] Failed to start Linux. Check diagnostics.")
+        appendDiagnostics("Failed to start Linux: ${exception.message}")
         updateState { it.copy(linuxStatus = LinuxStatus.Error, vmExitCode = null) }
       }
     }
@@ -154,24 +162,26 @@ class VmController(
   fun stopVm() = scope.launch {
     val process = processRef.get()
     if (process == null) {
-      appendLog("Shutdown requested, but Linux is not running.")
+      appendTerminal("[system] Linux is not running.")
+      appendDiagnostics("Shutdown requested, but Linux is not running.")
       updateState { it.copy(linuxStatus = LinuxStatus.Stopped) }
       return@launch
     }
 
     withContext(Dispatchers.IO) {
       try {
-        appendLog("Shutting down Linux process.")
+        appendTerminal("[system] Shutting down Linux.")
+        appendDiagnostics("Shutting down Linux process.")
         updateState { it.copy(linuxStatus = LinuxStatus.Stopping) }
 
         val qmpQuitRequested = runCatching {
           qmpExecute(buildInputs().qmpPort, "quit")
         }.onSuccess { response ->
-          appendLog("Shutdown requested through QMP quit.")
-          appendLog("QMP response: $response")
+          appendDiagnostics("Shutdown requested through QMP quit.")
+          appendDiagnostics("QMP response: $response")
         }.onFailure { exception ->
-          appendLog("QMP quit failed: ${exception.message}")
-          appendLog("Falling back to process termination.")
+          appendDiagnostics("QMP quit failed: ${exception.message}")
+          appendDiagnostics("Falling back to process termination.")
         }.isSuccess
 
         var exited = waitForProcessExit(process, 5_000)
@@ -181,18 +191,18 @@ class VmController(
           } else {
             "Linux did not stop cleanly; terminating process."
           }
-          appendLog(action)
+          appendDiagnostics(action)
           process.destroy()
           exited = waitForProcessExit(process, 3_000)
         }
 
         if (!exited && process.isAlive) {
-          appendLog("Linux did not stop after terminate; forcing termination.")
+          appendDiagnostics("Linux did not stop after terminate; forcing termination.")
           process.destroyForcibly()
           waitForProcessExit(process, 5_000)
         }
       } catch (exception: Exception) {
-        appendLog("Shutdown cleanup failed: ${exception.message}")
+        appendDiagnostics("Shutdown cleanup failed: ${exception.message}")
         if (process.isAlive) {
           process.destroyForcibly()
           waitForProcessExit(process, 5_000)
@@ -201,43 +211,50 @@ class VmController(
         processRef.compareAndSet(process, null)
         val exitCode = runCatching { process.exitValue() }.getOrNull()
         updateState { it.copy(linuxStatus = LinuxStatus.Stopped, vmExitCode = exitCode) }
-        appendLog("Linux stopped. exitCode=${exitCode ?: "unknown"}")
+        appendTerminal("[system] Linux stopped.")
+        appendDiagnostics("Linux stopped. exitCode=${exitCode ?: "unknown"}")
       }
     }
   }
 
   fun pauseLinux() = scope.launch {
     if (processRef.get()?.isAlive != true) {
-      appendLog("Pause blocked: Linux is not running.")
+      appendTerminal("[system] Pause blocked: Linux is not running.")
+      appendDiagnostics("Pause blocked: Linux is not running.")
       return@launch
     }
     withContext(Dispatchers.IO) {
       runCatching {
         qmpExecute(buildInputs().qmpPort, "stop")
       }.onSuccess { response ->
-        appendLog("Pause requested through QMP.")
-        appendLog("QMP response: $response")
+        appendTerminal("[system] Linux paused.")
+        appendDiagnostics("Pause requested through QMP.")
+        appendDiagnostics("QMP response: $response")
         updateState { it.copy(linuxStatus = LinuxStatus.Paused) }
       }.onFailure { exception ->
-        appendLog("Pause failed: ${exception.message}")
+        appendTerminal("[system] Pause failed. Check diagnostics.")
+        appendDiagnostics("Pause failed: ${exception.message}")
       }
     }
   }
 
   fun resumeLinux() = scope.launch {
     if (processRef.get()?.isAlive != true) {
-      appendLog("Resume blocked: Linux is not running.")
+      appendTerminal("[system] Resume blocked: Linux is not running.")
+      appendDiagnostics("Resume blocked: Linux is not running.")
       return@launch
     }
     withContext(Dispatchers.IO) {
       runCatching {
         qmpExecute(buildInputs().qmpPort, "cont")
       }.onSuccess { response ->
-        appendLog("Resume requested through QMP.")
-        appendLog("QMP response: $response")
+        appendTerminal("[system] Linux resumed.")
+        appendDiagnostics("Resume requested through QMP.")
+        appendDiagnostics("QMP response: $response")
         updateState { it.copy(linuxStatus = LinuxStatus.Running) }
       }.onFailure { exception ->
-        appendLog("Resume failed: ${exception.message}")
+        appendTerminal("[system] Resume failed. Check diagnostics.")
+        appendDiagnostics("Resume failed: ${exception.message}")
       }
     }
   }
@@ -253,24 +270,31 @@ class VmController(
   fun runTerminalCommand(command: String = stateFlow.value.terminalCommand) = scope.launch {
     val normalizedCommand = command.trim()
     if (normalizedCommand.isEmpty()) {
-      appendLog("Terminal command blocked: command is empty.")
+      appendTerminal("[system] Command blocked: command is empty.")
+      appendDiagnostics("Terminal command blocked: command is empty.")
       return@launch
     }
     val inputs = buildInputs()
     val processAlive = processRef.get()?.isAlive == true
     if (!processAlive) {
-      appendLog("Terminal command blocked: Linux is not running.")
+      appendTerminal("[system] Command blocked: Linux is not running.")
+      appendDiagnostics("Terminal command blocked: Linux is not running.")
       return@launch
     }
     if (!inputs.sshPrivateKey.isFile) {
-      appendLog("Terminal command blocked: missing SSH key at ${inputs.sshPrivateKey.absolutePath}")
+      appendTerminal("[system] Command blocked: SSH key is missing. Check diagnostics.")
+      appendDiagnostics("Terminal command blocked: missing SSH key at ${inputs.sshPrivateKey.absolutePath}")
       return@launch
     }
 
+    appendTerminal("root@ai-linux:~# $normalizedCommand")
     withContext(Dispatchers.IO) {
       val output = ByteArrayOutputStream()
       val errors = ByteArrayOutputStream()
-      val session = openSshSessionWhenReady(inputs) ?: return@withContext
+      val session = openSshSessionWhenReady(inputs) ?: run {
+        appendTerminal("[system] SSH terminal is not ready.")
+        return@withContext
+      }
 
       try {
         val channel = session.openChannel("exec") as ChannelExec
@@ -283,19 +307,22 @@ class VmController(
         }
         val stdout = output.toString(Charsets.UTF_8.name()).trim()
         val stderr = errors.toString(Charsets.UTF_8.name()).trim()
-        appendLog("$ $normalizedCommand")
-        appendLog("terminal exit=${channel.exitStatus}")
         if (stdout.isNotEmpty()) {
-          appendLog("stdout: $stdout")
+          appendTerminal(stdout)
         }
         if (stderr.isNotEmpty()) {
-          appendLog("stderr: $stderr")
+          appendTerminal(stderr)
         }
+        appendTerminal("[exit ${channel.exitStatus}]")
+        appendDiagnostics("Terminal command completed: $normalizedCommand")
+        appendDiagnostics("terminal exit=${channel.exitStatus}")
         if (stdout == "ready") {
-          appendLog("Ready probe succeeded.")
+          appendTerminal("Ready probe succeeded.")
+          appendDiagnostics("Ready probe succeeded.")
         }
       } catch (exception: Exception) {
-        appendLog("Terminal command failed: ${exception.message}")
+        appendTerminal("[system] Command failed. Check diagnostics.")
+        appendDiagnostics("Terminal command failed: ${exception.message}")
       } finally {
         session.disconnect()
       }
@@ -305,7 +332,7 @@ class VmController(
   private suspend fun openSshSessionWhenReady(inputs: VmInputs): Session? {
     val jsch = JSch().apply { installJschLogger() }
     loadSshIdentity(jsch, inputs.sshPrivateKey)
-    appendLog("Waiting for SSH terminal on 127.0.0.1:${inputs.sshPort}.")
+    appendDiagnostics("Waiting for SSH terminal on 127.0.0.1:${inputs.sshPort}.")
 
     val deadline = System.currentTimeMillis() + SSH_READY_TIMEOUT_MS
     var attempt = 1
@@ -319,21 +346,21 @@ class VmController(
       try {
         session.connect(SSH_CONNECT_TIMEOUT_MS)
         if (attempt > 1) {
-          appendLog("SSH terminal connected after $attempt attempts.")
+          appendDiagnostics("SSH terminal connected after $attempt attempts.")
         }
         return session
       } catch (exception: Exception) {
         session.disconnect()
         lastError = exception.message ?: exception::class.java.simpleName
         if (attempt == 1) {
-          appendLog("SSH terminal is not ready yet: $lastError")
+          appendDiagnostics("SSH terminal is not ready yet: $lastError")
         }
         attempt += 1
         delay(SSH_RETRY_DELAY_MS)
       }
     }
 
-    appendLog("SSH setup failed after waiting: $lastError")
+    appendDiagnostics("SSH setup failed after waiting: $lastError")
     return null
   }
 
@@ -342,7 +369,8 @@ class VmController(
       val exitCode = process.waitFor()
       if (processRef.compareAndSet(process, null)) {
         updateState { it.copy(linuxStatus = LinuxStatus.Stopped, vmExitCode = exitCode) }
-        appendLog("Linux process exited. exitCode=$exitCode")
+        appendTerminal("[system] Linux stopped.")
+        appendDiagnostics("Linux process exited. exitCode=$exitCode")
       }
     }
   }
@@ -351,7 +379,7 @@ class VmController(
     scope.launch(Dispatchers.IO) {
       inputStream.bufferedReader().useLines { lines ->
         lines.forEach { line ->
-          appendLog("[$label] $line")
+          appendDiagnostics("[$label] $line")
         }
       }
     }
@@ -433,17 +461,32 @@ class VmController(
   private fun waitForProcessExit(process: Process, timeoutMs: Long): Boolean =
     runCatching { process.waitFor(timeoutMs, TimeUnit.MILLISECONDS) }.getOrDefault(!process.isAlive)
 
-  private suspend fun appendLog(vararg lines: String) {
+  private suspend fun appendTerminal(vararg lines: String) {
     withContext(Dispatchers.Main.immediate) {
       stateFlow.update { current ->
-        val builder = StringBuilder(current.logText)
+        val builder = StringBuilder(current.terminalText)
         lines.forEach { line ->
           builder.append(line).append('\n')
         }
-        current.copy(logText = builder.toString())
+        current.copy(terminalText = trimLeading(builder.toString(), TERMINAL_MAX_CHARS))
       }
     }
   }
+
+  private suspend fun appendDiagnostics(vararg lines: String) {
+    withContext(Dispatchers.Main.immediate) {
+      stateFlow.update { current ->
+        val builder = StringBuilder(current.diagnosticsText)
+        lines.forEach { line ->
+          builder.append(line).append('\n')
+        }
+        current.copy(diagnosticsText = trimLeading(builder.toString(), DIAGNOSTICS_MAX_CHARS))
+      }
+    }
+  }
+
+  private fun trimLeading(text: String, maxChars: Int): String =
+    if (text.length <= maxChars) text else "...\n${text.takeLast(maxChars)}"
 
   private suspend fun updateState(update: (VmUiState) -> VmUiState) {
     withContext(Dispatchers.Main.immediate) {
@@ -457,7 +500,7 @@ class VmController(
 
       override fun log(level: Int, message: String) {
         scope.launch(Dispatchers.IO) {
-          appendLog("[jsch/${jschLogLevelName(level)}] $message")
+          appendDiagnostics("[jsch/${jschLogLevelName(level)}] $message")
         }
       }
     })
@@ -477,23 +520,23 @@ class VmController(
     val keyHeader = keyFile.bufferedReader().use { reader ->
       reader.lineSequence().firstOrNull()?.trim().orEmpty()
     }
-    appendLog("Loading SSH identity from ${keyFile.absolutePath}")
-    appendLog("SSH key size=${keyBytes.size} bytes")
+    appendDiagnostics("Loading SSH identity from ${keyFile.absolutePath}")
+    appendDiagnostics("SSH key size=${keyBytes.size} bytes")
     if (keyHeader.isNotEmpty()) {
-      appendLog("SSH key header: $keyHeader")
+      appendDiagnostics("SSH key header: $keyHeader")
     }
 
     runCatching {
       jsch.addIdentity(keyFile.name, keyBytes, null, null)
     }.onSuccess {
-      appendLog("SSH identity loaded from bytes.")
+      appendDiagnostics("SSH identity loaded from bytes.")
       return
     }.onFailure { exception ->
-      appendLog("SSH identity load from bytes failed: ${exception.message}")
+      appendDiagnostics("SSH identity load from bytes failed: ${exception.message}")
     }
 
     jsch.addIdentity(keyFile.absolutePath)
-    appendLog("SSH identity loaded from path fallback.")
+    appendDiagnostics("SSH identity loaded from path fallback.")
   }
 
   private suspend fun copyBundledAsset(assetName: String, destination: File) {
