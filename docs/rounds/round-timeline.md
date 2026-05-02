@@ -43,3 +43,10 @@
 - 结果：UI 暴露 `Prepare Linux`、`Start Linux`、`Pause`、`Resume`、`Shutdown`、terminal 命令输入和日志区；`VmController` 增加 QMP TCP pause/resume 和通用 SSH exec。
 - 验收：`assembleDebug` 和 `testDebugUnitTest` 通过；`android describe` 仍受 Windows launcher `CreateProcess error=193` 阻塞；模拟器 layout 验收被本机 AVD QEMU 线程挂起阻塞。验证记录见 `docs/verification/2026-05-01-android-linux-controls.md`。
 - 后续影响：下一轮应优先做真机 UI 行为验收，或者先修复本机 emulator 环境；完整 PTY terminal 不应塞进本轮控制面。
+
+## 2026-05-02 - pending - android: verify linux controls on device
+
+- 目标：在真机上验收第一阶段 Android Linux 控制面。
+- 结果：修复 shutdown 收尾和 SSH readiness 等待；真机链路通过 `Start Linux`、`Run Command`、`Pause`、`Resume`、`Shutdown`。
+- 验收：RMX3841 / Android SDK 36 / arm64 真机在用户允许低电量覆盖后通过 APK 安装、app 私有输入 staging、layout、QEMU 启动、SSH `echo ready`、QMP `STOP`/`RESUME`、QMP `quit` 和无残留 QEMU 子进程检查。验证记录见 `docs/verification/2026-05-01-android-linux-controls.md`。
+- 后续影响：后续 Android 行为验收以真机为主；terminal readiness 要作为显式状态等待，不能把 QEMU process started 当作 SSH ready。

@@ -4,6 +4,7 @@ import android.content.Context
 import com.jcraft.jsch.ChannelExec
 import com.jcraft.jsch.JSch
 import com.jcraft.jsch.Logger
+import com.jcraft.jsch.Session
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -21,6 +22,7 @@ import java.io.Closeable
 import java.io.File
 import java.io.IOException
 import java.net.Socket
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
 enum class LinuxStatus {
@@ -54,6 +56,9 @@ data class VmInputs(
 private const val ASSET_TEMPLATE_DIR = "spike"
 private const val RUNTIME_ROOT = "ai-linux-spike"
 private const val BUNDLED_QEMU_NAME = "libqemu-system-aarch64.so"
+private const val SSH_CONNECT_TIMEOUT_MS = 10_000
+private const val SSH_READY_TIMEOUT_MS = 90_000L
+private const val SSH_RETRY_DELAY_MS = 2_000L
 
 class VmController(
   private val context: Context,
@@ -147,7 +152,7 @@ class VmController(
   }
 
   fun stopVm() = scope.launch {
-    val process = processRef.getAndSet(null)
+    val process = processRef.get()
     if (process == null) {
       appendLog("Shutdown requested, but Linux is not running.")
       updateState { it.copy(linuxStatus = LinuxStatus.Stopped) }
@@ -155,22 +160,49 @@ class VmController(
     }
 
     withContext(Dispatchers.IO) {
-      appendLog("Shutting down Linux process.")
-      updateState { it.copy(linuxStatus = LinuxStatus.Stopping) }
-      process.destroy()
-      val exitedGracefully = withTimeoutOrNull(5_000) {
-        while (process.isAlive) {
-          delay(100)
+      try {
+        appendLog("Shutting down Linux process.")
+        updateState { it.copy(linuxStatus = LinuxStatus.Stopping) }
+
+        val qmpQuitRequested = runCatching {
+          qmpExecute(buildInputs().qmpPort, "quit")
+        }.onSuccess { response ->
+          appendLog("Shutdown requested through QMP quit.")
+          appendLog("QMP response: $response")
+        }.onFailure { exception ->
+          appendLog("QMP quit failed: ${exception.message}")
+          appendLog("Falling back to process termination.")
+        }.isSuccess
+
+        var exited = waitForProcessExit(process, 5_000)
+        if (!exited && process.isAlive) {
+          val action = if (qmpQuitRequested) {
+            "Linux did not exit after QMP quit; terminating process."
+          } else {
+            "Linux did not stop cleanly; terminating process."
+          }
+          appendLog(action)
+          process.destroy()
+          exited = waitForProcessExit(process, 3_000)
         }
-        true
-      } == true
-      if (!exitedGracefully && process.isAlive) {
-        appendLog("Linux did not stop cleanly; forcing termination.")
-        process.destroyForcibly()
+
+        if (!exited && process.isAlive) {
+          appendLog("Linux did not stop after terminate; forcing termination.")
+          process.destroyForcibly()
+          waitForProcessExit(process, 5_000)
+        }
+      } catch (exception: Exception) {
+        appendLog("Shutdown cleanup failed: ${exception.message}")
+        if (process.isAlive) {
+          process.destroyForcibly()
+          waitForProcessExit(process, 5_000)
+        }
+      } finally {
+        processRef.compareAndSet(process, null)
+        val exitCode = runCatching { process.exitValue() }.getOrNull()
+        updateState { it.copy(linuxStatus = LinuxStatus.Stopped, vmExitCode = exitCode) }
+        appendLog("Linux stopped. exitCode=${exitCode ?: "unknown"}")
       }
-      val exitCode = runCatching { process.exitValue() }.getOrNull()
-      updateState { it.copy(linuxStatus = LinuxStatus.Stopped, vmExitCode = exitCode) }
-      appendLog("Linux stopped. exitCode=${exitCode ?: "unknown"}")
     }
   }
 
@@ -238,26 +270,14 @@ class VmController(
     withContext(Dispatchers.IO) {
       val output = ByteArrayOutputStream()
       val errors = ByteArrayOutputStream()
-      val session = try {
-        val jsch = JSch().apply { installJschLogger() }
-        loadSshIdentity(jsch, inputs.sshPrivateKey)
-        jsch.getSession("root", "127.0.0.1", inputs.sshPort).apply {
-          setConfig("StrictHostKeyChecking", "no")
-          setConfig("PreferredAuthentications", "publickey")
-          timeout = 10_000
-          connect(10_000)
-        }
-      } catch (exception: Exception) {
-        appendLog("SSH setup failed: ${exception.message}")
-        return@withContext
-      }
+      val session = openSshSessionWhenReady(inputs) ?: return@withContext
 
       try {
         val channel = session.openChannel("exec") as ChannelExec
         channel.setCommand(normalizedCommand)
         channel.setOutputStream(output)
         channel.setErrStream(errors)
-        channel.connect(10_000)
+        channel.connect(SSH_CONNECT_TIMEOUT_MS)
         while (!channel.isClosed) {
           delay(100)
         }
@@ -280,6 +300,41 @@ class VmController(
         session.disconnect()
       }
     }
+  }
+
+  private suspend fun openSshSessionWhenReady(inputs: VmInputs): Session? {
+    val jsch = JSch().apply { installJschLogger() }
+    loadSshIdentity(jsch, inputs.sshPrivateKey)
+    appendLog("Waiting for SSH terminal on 127.0.0.1:${inputs.sshPort}.")
+
+    val deadline = System.currentTimeMillis() + SSH_READY_TIMEOUT_MS
+    var attempt = 1
+    var lastError = "unknown"
+    while (System.currentTimeMillis() < deadline && processRef.get()?.isAlive == true) {
+      val session = jsch.getSession("root", "127.0.0.1", inputs.sshPort).apply {
+        setConfig("StrictHostKeyChecking", "no")
+        setConfig("PreferredAuthentications", "publickey")
+        timeout = SSH_CONNECT_TIMEOUT_MS
+      }
+      try {
+        session.connect(SSH_CONNECT_TIMEOUT_MS)
+        if (attempt > 1) {
+          appendLog("SSH terminal connected after $attempt attempts.")
+        }
+        return session
+      } catch (exception: Exception) {
+        session.disconnect()
+        lastError = exception.message ?: exception::class.java.simpleName
+        if (attempt == 1) {
+          appendLog("SSH terminal is not ready yet: $lastError")
+        }
+        attempt += 1
+        delay(SSH_RETRY_DELAY_MS)
+      }
+    }
+
+    appendLog("SSH setup failed after waiting: $lastError")
+    return null
   }
 
   private suspend fun monitorProcess(process: Process) {
@@ -374,6 +429,9 @@ class VmController(
       return reader.readLine() ?: error("QMP $command response was empty")
     }
   }
+
+  private fun waitForProcessExit(process: Process, timeoutMs: Long): Boolean =
+    runCatching { process.waitFor(timeoutMs, TimeUnit.MILLISECONDS) }.getOrDefault(!process.isAlive)
 
   private suspend fun appendLog(vararg lines: String) {
     withContext(Dispatchers.Main.immediate) {

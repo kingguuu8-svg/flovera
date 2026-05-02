@@ -63,3 +63,17 @@
 - 结论：当前本机 emulator 不能作为稳定 UI 验收通道。
 - 证据：`docs/verification/2026-05-01-android-linux-controls.md` 记录了 `small_phone` 无 online ADB device、`Medium_Phone_API_36.1` emulator 进程死亡，并在日志中出现多个 QEMU2 CPU/main loop hanging thread。
 - 对后续开发的影响：下一轮 Android 行为验收应优先使用真机，或先单独修复 emulator 环境；不要把 app 功能问题和 emulator 启动问题混为一谈。
+
+## Finding 9
+
+- 来源轮次：2026-05-02 `android: verify linux controls on device`
+- 结论：Android 侧 `Linux process started` 只能说明 QEMU 子进程已启动，不能说明 guest terminal 已可用。
+- 证据：真机验收中第一次 `Run Command` 在 dropbear 启动前触发，JSch 连接超时；加入 SSH readiness 等待和重试后，`echo ready` 返回 `stdout: ready` 和 `Ready probe succeeded.`。
+- 对后续开发的影响：后续 terminal、agent bridge、preview port 和健康检查都必须有显式 readiness 判断，不能复用进程启动状态。
+
+## Finding 10
+
+- 来源轮次：2026-05-02 `android: verify linux controls on device`
+- 结论：Android 侧 `Shutdown` 应优先表达 Linux/QEMU 生命周期语义，而不是直接清空引用并硬杀进程。
+- 证据：真机验收中旧 shutdown 路径会让 App 回到 launcher 且缺少 `Linux stopped.`；改为保留进程引用、优先 QMP `quit`、等待退出并兜底回写 `Stopped` 后，App 保持前台且无残留 QEMU 子进程。
+- 对后续开发的影响：后续 pause/resume/shutdown/snapshot 这类生命周期操作应先走 QMP 或 guest 内协议，失败后才进入宿主进程兜底清理。

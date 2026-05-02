@@ -64,12 +64,14 @@ Use this file to record the actual build and verification results for the spike.
 - Android manifest includes `android.permission.INTERNET` because JSch connects to forwarded local SSH and QEMU usernet uses sockets on real devices
 - QEMU process monitoring now waits for `process.waitFor()` and updates stopped status, `vmExitCode`, and the exit log when the current process exits
 - Android real-device preflight: PASS on `e9512097`, model `RMX3841`, SDK `36`, ABI `arm64-v8a`, USB powered, battery above the required threshold
-- Android real-device UI layout: PASS; `Prepare Assets`, `Start VM`, `Stop VM`, `Run echo ready`, and the log area were visible through `android layout --device=e9512097 --pretty`
+- Android real-device UI layout: PASS; `Prepare Linux`, `Start Linux`, `Pause`, `Resume`, `Shutdown`, `Terminal command`, `Run Command`, and the log area were visible through `android layout --device=e9512097 --pretty`
 - Android real-device VM start: PASS; the ordinary app process launched bundled `libqemu-system-aarch64.so`, booted the aarch64 Alpine initramfs, brought up QEMU usernet through static fallback, and started dropbear
 - Android real-device SSH probe: PASS; App-side JSch loaded a PEM ECDSA key from bytes, authenticated with dropbear publickey auth, ran `echo ready`, and logged `Ready probe succeeded.`
 - Android real-device SSH mode: PASS with dropbear password login disabled through `-s`; the verified initramfs does not rely on a fixed root password
-- Android real-device cleanup: PASS; `Stop VM` terminated the QEMU child process, leaving no matching `qemu`, `ailinux`, or app VM child process in `adb shell ps -A`
-- Android real-device evidence files: `artifacts/android-spike/real-device-layout.xml` and `artifacts/android-spike/real-device-screen.png`
+- Android real-device lifecycle controls: PASS; `Pause` and `Resume` returned QMP `STOP` and `RESUME` events
+- Android real-device shutdown: PASS after fix; `Shutdown` used QMP `quit`, logged `Linux stopped. exitCode=0`, left the App in foreground, and left no matching `qemu`, `ailinux`, or app VM child process in `adb shell ps -A`
+- Android real-device SSH readiness: PASS after fix; `Run Command` waits and retries until forwarded SSH is ready instead of assuming `Linux process started.` means dropbear is already accepting commands
+- Android real-device evidence files remain ignored under `artifacts/android-spike/`, including the latest after-shutdown layout JSON and screenshot
 
 ## Root causes and blockers
 
