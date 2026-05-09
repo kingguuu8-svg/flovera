@@ -18,6 +18,7 @@ data class AgentScreenState(
   val settings: AppSettings = AppSettings(),
   val session: AgentSession? = null,
   val sessions: List<AgentSession> = emptyList(),
+  val archivedSessions: List<AgentSession> = emptyList(),
   val input: String = "",
   val providerDraft: String = AppSettings().provider,
   val modelDraft: String = AppSettings().model,
@@ -44,7 +45,12 @@ class AgentController(context: Context) {
   init {
     val loadedSettings = settingsStore.load()
     workspace = WorkspaceManager(appContext, loadedSettings.activeWorkspaceId).also { it.ensureSeedFiles() }
-    val session = loadedSettings.activeSessionId?.let { sessionStore.load(it) } ?: sessionStore.create("Default")
+    val loadedSession = loadedSettings.activeSessionId?.let { sessionStore.load(it) }
+    val session = if (loadedSession?.archivedAtMillis == null) {
+      loadedSession ?: sessionStore.list().firstOrNull() ?: sessionStore.create("Default")
+    } else {
+      sessionStore.list().firstOrNull() ?: sessionStore.create("Default")
+    }
     val htmlFiles = workspace.listHtmlFiles()
     val selectedHtmlPath = chooseHtmlPath(loadedSettings.selectedHtmlPath, htmlFiles)
     val provider = ModelProviderCatalog.findProvider(loadedSettings.provider) ?: ModelProviderCatalog.defaultProvider
@@ -60,6 +66,7 @@ class AgentController(context: Context) {
       settings = settings,
       session = session,
       sessions = sessionStore.list(),
+      archivedSessions = sessionStore.listArchived(),
       providerDraft = provider.id,
       modelDraft = model,
       apiKeyDraft = settings.apiKeyFor(provider.id),
@@ -145,6 +152,7 @@ class AgentController(context: Context) {
         settings = settings,
         session = session,
         sessions = sessionStore.list(),
+        archivedSessions = sessionStore.listArchived(),
         agentRulesDraft = workspace.readAgentRules(),
         input = "",
         status = "New session created",
@@ -154,6 +162,7 @@ class AgentController(context: Context) {
 
   fun openSession(sessionId: String) {
     val session = sessionStore.load(sessionId) ?: return
+    if (session.archivedAtMillis != null) return
     val settings = _state.value.settings.copy(activeSessionId = session.id)
     settingsStore.save(settings)
     _state.update {
@@ -161,10 +170,51 @@ class AgentController(context: Context) {
         settings = settings,
         session = session,
         sessions = sessionStore.list(),
+        archivedSessions = sessionStore.listArchived(),
         agentRulesDraft = workspace.readAgentRules(),
         status = "Session loaded",
       )
     }
+  }
+
+  fun renameSession(sessionId: String, title: String) {
+    val renamed = sessionStore.rename(sessionId, title) ?: return
+    val active = if (_state.value.session?.id == renamed.id) renamed else _state.value.session
+    _state.update {
+      it.copy(
+        session = active,
+        sessions = sessionStore.list(),
+        archivedSessions = sessionStore.listArchived(),
+        status = "Session renamed",
+      )
+    }
+  }
+
+  fun duplicateSession(sessionId: String) {
+    val copy = sessionStore.duplicate(sessionId) ?: return
+    activateSession(copy, "Session copied")
+  }
+
+  fun archiveSession(sessionId: String) {
+    sessionStore.archive(sessionId) ?: return
+    val current = _state.value
+    if (current.session?.id == sessionId) {
+      val next = sessionStore.list().firstOrNull() ?: sessionStore.create("Default")
+      activateSession(next, "Session archived")
+    } else {
+      _state.update {
+        it.copy(
+          sessions = sessionStore.list(),
+          archivedSessions = sessionStore.listArchived(),
+          status = "Session archived",
+        )
+      }
+    }
+  }
+
+  fun restoreSession(sessionId: String) {
+    val restored = sessionStore.restore(sessionId) ?: return
+    activateSession(restored, "Session restored")
   }
 
   suspend fun submit() {
@@ -216,6 +266,7 @@ class AgentController(context: Context) {
         settings = normalizedSettings,
         session = session,
         sessions = sessionStore.list(),
+        archivedSessions = sessionStore.listArchived(),
         workspaceFiles = workspace.listFiles("."),
         htmlFiles = htmlFiles,
         selectedHtmlPath = selectedHtmlPath,
@@ -224,6 +275,12 @@ class AgentController(context: Context) {
         status = status,
       )
     }
+  }
+
+  private fun activateSession(session: AgentSession, status: String) {
+    val settings = _state.value.settings.copy(activeSessionId = session.id)
+    settingsStore.save(settings)
+    refreshWorkspaceState(settings = settings, session = session, isRunning = false, status = status)
   }
 
   private fun chooseHtmlPath(current: String, htmlFiles: List<String>): String {

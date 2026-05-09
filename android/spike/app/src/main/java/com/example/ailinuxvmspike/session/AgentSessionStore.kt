@@ -13,6 +13,7 @@ data class AgentSession(
   val title: String,
   val createdAtMillis: Long,
   val updatedAtMillis: Long,
+  val archivedAtMillis: Long? = null,
   val messages: List<SessionMessage> = emptyList(),
 )
 
@@ -58,12 +59,65 @@ class AgentSessionStore(context: Context) {
     return runCatching { json.decodeFromString<AgentSession>(file.readText()) }.getOrNull()
   }
 
-  fun list(): List<AgentSession> {
+  fun list(includeArchived: Boolean = false): List<AgentSession> {
     if (!root.exists()) return emptyList()
     return root.listFiles { file -> file.extension == "json" }
       ?.mapNotNull { runCatching { json.decodeFromString<AgentSession>(it.readText()) }.getOrNull() }
+      ?.filter { includeArchived || it.archivedAtMillis == null }
       ?.sortedByDescending { it.updatedAtMillis }
       ?: emptyList()
+  }
+
+  fun listArchived(): List<AgentSession> = list(includeArchived = true)
+    .filter { it.archivedAtMillis != null }
+    .sortedByDescending { it.archivedAtMillis }
+
+  fun rename(id: String, title: String): AgentSession? {
+    val normalized = title.trim()
+    if (normalized.isBlank()) return load(id)
+    val session = load(id) ?: return null
+    val updated = session.copy(
+      title = normalized,
+      updatedAtMillis = System.currentTimeMillis(),
+    )
+    save(updated)
+    return updated
+  }
+
+  fun duplicate(id: String): AgentSession? {
+    val source = load(id) ?: return null
+    val now = System.currentTimeMillis()
+    val copy = source.copy(
+      id = UUID.randomUUID().toString(),
+      title = "${source.title} copy",
+      createdAtMillis = now,
+      updatedAtMillis = now,
+      archivedAtMillis = null,
+      messages = source.messages,
+    )
+    save(copy)
+    return copy
+  }
+
+  fun archive(id: String): AgentSession? {
+    val session = load(id) ?: return null
+    val now = System.currentTimeMillis()
+    val updated = session.copy(
+      archivedAtMillis = now,
+      updatedAtMillis = now,
+    )
+    save(updated)
+    return updated
+  }
+
+  fun restore(id: String): AgentSession? {
+    val session = load(id) ?: return null
+    val updated = session.copy(
+      archivedAtMillis = null,
+      updatedAtMillis = System.currentTimeMillis(),
+    )
+    save(updated)
+    return updated
   }
 
   fun appendMessage(session: AgentSession, message: SessionMessage): AgentSession {

@@ -21,6 +21,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -36,6 +37,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -378,6 +381,8 @@ private fun SessionsDialog(
   controller: AgentController,
   onDismiss: () -> Unit,
 ) {
+  var renameTarget by remember { mutableStateOf<SessionMessageTarget?>(null) }
+
   AlertDialog(
     onDismissRequest = onDismiss,
     title = { Text("Sessions") },
@@ -389,22 +394,177 @@ private fun SessionsDialog(
         OutlinedButton(onClick = controller::newSession, modifier = Modifier.fillMaxWidth()) {
           Text("New Session")
         }
+        if (state.sessions.isEmpty()) {
+          Text("No active sessions.", style = MaterialTheme.typography.bodyMedium)
+        }
         state.sessions.forEach { session ->
-          OutlinedButton(
-            onClick = {
-              controller.openSession(session.id)
-              onDismiss()
+          SessionListItem(
+            title = session.title,
+            subtitle = "${session.messages.size} messages",
+            active = session.id == state.session?.id,
+            menuContent = { closeMenu ->
+              DropdownMenuItem(
+                text = { Text("Open") },
+                onClick = {
+                  closeMenu()
+                  controller.openSession(session.id)
+                  onDismiss()
+                },
+              )
+              DropdownMenuItem(
+                text = { Text("Rename") },
+                onClick = {
+                  closeMenu()
+                  renameTarget = SessionMessageTarget(session.id, session.title)
+                },
+              )
+              DropdownMenuItem(
+                text = { Text("Copy") },
+                onClick = {
+                  closeMenu()
+                  controller.duplicateSession(session.id)
+                },
+              )
+              DropdownMenuItem(
+                text = { Text("Archive") },
+                onClick = {
+                  closeMenu()
+                  controller.archiveSession(session.id)
+                },
+              )
             },
-            modifier = Modifier.fillMaxWidth(),
-          ) {
-            Text("${session.title} (${session.messages.size} messages)")
-          }
+          )
+        }
+        if (state.archivedSessions.isNotEmpty()) {
+          Text("Archived", style = MaterialTheme.typography.titleSmall)
+        }
+        state.archivedSessions.forEach { session ->
+          SessionListItem(
+            title = session.title,
+            subtitle = "${session.messages.size} messages",
+            active = false,
+            menuContent = { closeMenu ->
+              DropdownMenuItem(
+                text = { Text("Restore") },
+                onClick = {
+                  closeMenu()
+                  controller.restoreSession(session.id)
+                  onDismiss()
+                },
+              )
+              DropdownMenuItem(
+                text = { Text("Rename") },
+                onClick = {
+                  closeMenu()
+                  renameTarget = SessionMessageTarget(session.id, session.title)
+                },
+              )
+              DropdownMenuItem(
+                text = { Text("Copy") },
+                onClick = {
+                  closeMenu()
+                  controller.duplicateSession(session.id)
+                },
+              )
+            },
+          )
         }
       }
     },
     confirmButton = {
       TextButton(onClick = onDismiss) {
         Text("Close")
+      }
+    },
+  )
+
+  renameTarget?.let { target ->
+    RenameSessionDialog(
+      initialTitle = target.title,
+      onDismiss = { renameTarget = null },
+      onSave = { title ->
+        controller.renameSession(target.id, title)
+        renameTarget = null
+      },
+    )
+  }
+}
+
+private data class SessionMessageTarget(val id: String, val title: String)
+
+@Composable
+private fun SessionListItem(
+  title: String,
+  subtitle: String,
+  active: Boolean,
+  menuContent: @Composable (closeMenu: () -> Unit) -> Unit,
+) {
+  var menuOpen by remember { mutableStateOf(false) }
+
+  Surface(
+    modifier = Modifier.fillMaxWidth(),
+    shape = RoundedCornerShape(8.dp),
+    color = if (active) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+  ) {
+    Column(
+      modifier = Modifier.fillMaxWidth().padding(10.dp),
+      verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+          Text(title, style = MaterialTheme.typography.bodyLarge)
+          Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+        }
+        Box {
+          IconButton(
+            onClick = { menuOpen = true },
+            modifier = Modifier.semantics {
+              contentDescription = "Session actions for $title"
+            },
+          ) {
+            Text("☰", style = MaterialTheme.typography.titleMedium)
+          }
+          DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+            menuContent { menuOpen = false }
+          }
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun RenameSessionDialog(
+  initialTitle: String,
+  onDismiss: () -> Unit,
+  onSave: (String) -> Unit,
+) {
+  var title by remember(initialTitle) { mutableStateOf(initialTitle) }
+
+  AlertDialog(
+    onDismissRequest = onDismiss,
+    title = { Text("Rename Session") },
+    text = {
+      OutlinedTextField(
+        value = title,
+        onValueChange = { title = it },
+        label = { Text("Title") },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+      )
+    },
+    confirmButton = {
+      Button(onClick = { onSave(title) }) {
+        Text("Save")
+      }
+    },
+    dismissButton = {
+      TextButton(onClick = onDismiss) {
+        Text("Cancel")
       }
     },
   )
