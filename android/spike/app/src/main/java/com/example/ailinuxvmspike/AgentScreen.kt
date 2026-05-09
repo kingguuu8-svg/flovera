@@ -167,10 +167,17 @@ fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
 @Composable
 private fun WorkspaceWebView(url: String?) {
   if (url.isNullOrBlank()) {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    Box(
+      modifier = Modifier.fillMaxSize(),
+      contentAlignment = Alignment.Center,
+    ) {
+      Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = Color(0xFF101214),
+      ) {}
       Text(
-        text = "No HTML file selected",
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        text = "可选择html进行打开",
+        color = Color(0xFFD7D9DD),
         style = MaterialTheme.typography.bodyLarge,
       )
     }

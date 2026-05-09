@@ -11,7 +11,7 @@ data class AppSettings(
   val providerApiKeys: Map<String, String> = emptyMap(),
   val activeWorkspaceId: String = "default",
   val activeSessionId: String? = null,
-  val selectedHtmlPath: String = "index.html",
+  val selectedHtmlPath: String = "",
   val maxAgentIterations: Int = 20,
 ) {
   fun apiKeyFor(providerId: String = provider): String {

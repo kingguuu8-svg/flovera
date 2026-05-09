@@ -26,7 +26,7 @@ data class AgentScreenState(
   val agentRulesDraft: String = "",
   val workspaceFiles: String = "",
   val htmlFiles: List<String> = emptyList(),
-  val selectedHtmlPath: String = "index.html",
+  val selectedHtmlPath: String = "",
   val selectedHtmlUrl: String? = null,
   val status: String = "Idle",
   val isRunning: Boolean = false,
@@ -299,8 +299,7 @@ class AgentController(context: Context) {
   private fun chooseHtmlPath(current: String, htmlFiles: List<String>): String {
     return when {
       current in htmlFiles -> current
-      "index.html" in htmlFiles -> "index.html"
-      else -> htmlFiles.firstOrNull().orEmpty()
+      else -> ""
     }
   }
 }
