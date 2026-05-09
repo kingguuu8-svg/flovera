@@ -1,5 +1,7 @@
 package com.example.ailinuxvmspike
 
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,8 +19,6 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
@@ -40,11 +40,16 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ailinuxvmspike.session.SessionMessage
 import kotlinx.coroutines.launch
 
 private enum class AgentPanel {
+  Conversation,
+  HtmlFiles,
   Sessions,
   Files,
   AgentFile,
@@ -54,109 +59,80 @@ private enum class AgentPanel {
 @Composable
 fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
   val state by controller.state.collectAsStateWithLifecycle()
-  val scope = rememberCoroutineScope()
   var menuOpen by remember { mutableStateOf(false) }
   var activePanel by remember { mutableStateOf<AgentPanel?>(null) }
 
   Box(modifier = modifier.fillMaxSize()) {
-    Column(
-      modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 12.dp),
-      verticalArrangement = Arrangement.spacedBy(10.dp),
+    WorkspaceWebView(url = state.selectedHtmlUrl)
+
+    Surface(
+      modifier = Modifier.align(Alignment.CenterStart).padding(start = 8.dp),
+      shape = RoundedCornerShape(999.dp),
+      color = MaterialTheme.colorScheme.primary.copy(alpha = 0.92f),
+      shadowElevation = 3.dp,
     ) {
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        Column(modifier = Modifier.weight(1f)) {
-          Text("Android Workspace Agent", style = MaterialTheme.typography.titleMedium)
-          Text(
-            "${state.settings.model} / ${state.status}",
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.bodySmall,
-          )
-        }
-        Box {
-          OutlinedButton(onClick = { menuOpen = true }) {
-            Text("Menu")
-          }
-          DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-            DropdownMenuItem(
-              text = { Text("Sessions") },
-              onClick = {
-                menuOpen = false
-                activePanel = AgentPanel.Sessions
-              },
-            )
-            DropdownMenuItem(
-              text = { Text("Files") },
-              onClick = {
-                menuOpen = false
-                activePanel = AgentPanel.Files
-              },
-            )
-            DropdownMenuItem(
-              text = { Text("AGENT.md") },
-              onClick = {
-                menuOpen = false
-                activePanel = AgentPanel.AgentFile
-              },
-            )
-            DropdownMenuItem(
-              text = { Text("Settings") },
-              onClick = {
-                menuOpen = false
-                activePanel = AgentPanel.Settings
-              },
-            )
-          }
-        }
+      TextButton(onClick = { activePanel = AgentPanel.Conversation }) {
+        Text(">", color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.titleLarge)
       }
+    }
 
-      LazyColumn(
-        modifier = Modifier.fillMaxWidth().weight(1f),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-      ) {
-        val messages = state.session?.messages.orEmpty()
-        if (messages.isEmpty()) {
-          item {
-            EmptyConversation()
-          }
-        } else {
-          items(messages) { message ->
-            MessageBubble(message)
-          }
-        }
+    Box(modifier = Modifier.align(Alignment.TopEnd).padding(12.dp)) {
+      OutlinedButton(onClick = { menuOpen = true }) {
+        Text("Menu")
       }
-
-      Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-      ) {
-        Column(
-          modifier = Modifier.fillMaxWidth().padding(10.dp),
-          verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-          OutlinedTextField(
-            value = state.input,
-            onValueChange = controller::updateInput,
-            label = { Text("Message") },
-            minLines = 2,
-            maxLines = 5,
-            modifier = Modifier.fillMaxWidth(),
-          )
-          Button(
-            onClick = { scope.launch { controller.submit() } },
-            enabled = !state.isRunning,
-            modifier = Modifier.fillMaxWidth(),
-          ) {
-            Text(if (state.isRunning) "Running..." else "Send")
-          }
-        }
+      DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+        DropdownMenuItem(
+          text = { Text("Select HTML") },
+          onClick = {
+            menuOpen = false
+            activePanel = AgentPanel.HtmlFiles
+          },
+        )
+        DropdownMenuItem(
+          text = { Text("Sessions") },
+          onClick = {
+            menuOpen = false
+            activePanel = AgentPanel.Sessions
+          },
+        )
+        DropdownMenuItem(
+          text = { Text("Files") },
+          onClick = {
+            menuOpen = false
+            activePanel = AgentPanel.Files
+          },
+        )
+        DropdownMenuItem(
+          text = { Text("AGENT.md") },
+          onClick = {
+            menuOpen = false
+            activePanel = AgentPanel.AgentFile
+          },
+        )
+        DropdownMenuItem(
+          text = { Text("Settings") },
+          onClick = {
+            menuOpen = false
+            activePanel = AgentPanel.Settings
+          },
+        )
       }
     }
   }
 
   when (activePanel) {
+    AgentPanel.Conversation -> ConversationDialog(
+      state = state,
+      controller = controller,
+      onDismiss = { activePanel = null },
+    )
+
+    AgentPanel.HtmlFiles -> HtmlFilesDialog(
+      state = state,
+      controller = controller,
+      onDismiss = { activePanel = null },
+    )
+
     AgentPanel.Sessions -> SessionsDialog(
       state = state,
       controller = controller,
@@ -185,16 +161,115 @@ fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun EmptyConversation() {
-  Surface(
-    modifier = Modifier.fillMaxWidth().padding(top = 48.dp),
-    color = Color.Transparent,
+private fun WorkspaceWebView(url: String?) {
+  if (url.isNullOrBlank()) {
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+      Text(
+        text = "No HTML file selected",
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.bodyLarge,
+      )
+    }
+    return
+  }
+
+  AndroidView(
+    modifier = Modifier.fillMaxSize(),
+    factory = { context ->
+      WebView(context).apply {
+        webViewClient = WebViewClient()
+        settings.javaScriptEnabled = true
+        settings.domStorageEnabled = true
+        settings.allowFileAccess = true
+        settings.allowContentAccess = true
+        loadUrl(url)
+      }
+    },
+    update = { webView ->
+      if (webView.url != url) {
+        webView.loadUrl(url)
+      }
+    },
+  )
+}
+
+@Composable
+private fun ConversationDialog(
+  state: AgentScreenState,
+  controller: AgentController,
+  onDismiss: () -> Unit,
+) {
+  val scope = rememberCoroutineScope()
+
+  Dialog(
+    onDismissRequest = onDismiss,
+    properties = DialogProperties(usePlatformDefaultWidth = false),
   ) {
-    Text(
-      text = "Start a session by asking the agent to create or edit files in the Android workspace.",
-      color = MaterialTheme.colorScheme.onSurfaceVariant,
-      style = MaterialTheme.typography.bodyMedium,
-    )
+    Surface(
+      modifier = Modifier.fillMaxSize().padding(12.dp),
+      shape = RoundedCornerShape(14.dp),
+      color = MaterialTheme.colorScheme.surface,
+      tonalElevation = 3.dp,
+    ) {
+      Column(
+        modifier = Modifier.fillMaxSize().padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+      ) {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Column(modifier = Modifier.weight(1f)) {
+            Text("Conversation", style = MaterialTheme.typography.titleMedium)
+            Text(
+              text = state.status,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+              style = MaterialTheme.typography.bodySmall,
+            )
+          }
+          TextButton(onClick = onDismiss) {
+            Text("Close")
+          }
+        }
+
+        LazyColumn(
+          modifier = Modifier.fillMaxWidth().weight(1f),
+          verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+          val messages = state.session?.messages.orEmpty()
+          if (messages.isEmpty()) {
+            item {
+              Text(
+                text = "Ask the agent to create or edit files in the current workspace.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium,
+              )
+            }
+          } else {
+            items(messages) { message ->
+              MessageBubble(message)
+            }
+          }
+        }
+
+        OutlinedTextField(
+          value = state.input,
+          onValueChange = controller::updateInput,
+          label = { Text("Message") },
+          minLines = 2,
+          maxLines = 5,
+          modifier = Modifier.fillMaxWidth(),
+        )
+        Button(
+          onClick = { scope.launch { controller.submit() } },
+          enabled = !state.isRunning,
+          modifier = Modifier.fillMaxWidth(),
+        ) {
+          Text(if (state.isRunning) "Running..." else "Send")
+        }
+      }
+    }
   }
 }
 
@@ -240,16 +315,9 @@ private fun MessageBubble(message: SessionMessage) {
             color = textColor.copy(alpha = 0.72f),
             style = MaterialTheme.typography.labelSmall,
           )
-          Text(
-            text = message.content,
-            color = textColor,
-            style = MaterialTheme.typography.bodyMedium,
-          )
+          Text(text = message.content, color = textColor, style = MaterialTheme.typography.bodyMedium)
           message.toolEvents.forEach { event ->
-            Surface(
-              shape = RoundedCornerShape(10.dp),
-              color = textColor.copy(alpha = 0.10f),
-            ) {
+            Surface(shape = RoundedCornerShape(10.dp), color = textColor.copy(alpha = 0.10f)) {
               Text(
                 text = "${event.name}: ${event.result}",
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
@@ -266,6 +334,44 @@ private fun MessageBubble(message: SessionMessage) {
 }
 
 @Composable
+private fun HtmlFilesDialog(
+  state: AgentScreenState,
+  controller: AgentController,
+  onDismiss: () -> Unit,
+) {
+  AlertDialog(
+    onDismissRequest = onDismiss,
+    title = { Text("Select HTML") },
+    text = {
+      Column(
+        modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
+        if (state.htmlFiles.isEmpty()) {
+          Text("No HTML files in this workspace.", style = MaterialTheme.typography.bodyMedium)
+        }
+        state.htmlFiles.forEach { path ->
+          OutlinedButton(
+            onClick = {
+              controller.selectHtmlFile(path)
+              onDismiss()
+            },
+            modifier = Modifier.fillMaxWidth(),
+          ) {
+            Text(if (path == state.selectedHtmlPath) "$path  selected" else path)
+          }
+        }
+      }
+    },
+    confirmButton = {
+      TextButton(onClick = onDismiss) {
+        Text("Close")
+      }
+    },
+  )
+}
+
+@Composable
 private fun SessionsDialog(
   state: AgentScreenState,
   controller: AgentController,
@@ -279,7 +385,6 @@ private fun SessionsDialog(
         modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(8.dp),
       ) {
-        Text("Active: ${state.session?.id ?: "none"}", style = MaterialTheme.typography.bodySmall)
         OutlinedButton(onClick = controller::newSession, modifier = Modifier.fillMaxWidth()) {
           Text("New Session")
         }
@@ -340,18 +445,13 @@ private fun AgentFileDialog(
     onDismissRequest = onDismiss,
     title = { Text("AGENT.md") },
     text = {
-      Column(
-        modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-      ) {
-        OutlinedTextField(
-          value = state.agentRulesDraft,
-          onValueChange = controller::updateAgentRules,
-          label = { Text("Workspace agent rules") },
-          minLines = 10,
-          modifier = Modifier.fillMaxWidth(),
-        )
-      }
+      OutlinedTextField(
+        value = state.agentRulesDraft,
+        onValueChange = controller::updateAgentRules,
+        label = { Text("Workspace agent rules") },
+        minLines = 10,
+        modifier = Modifier.fillMaxWidth(),
+      )
     },
     confirmButton = {
       Button(

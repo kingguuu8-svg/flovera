@@ -9,14 +9,6 @@ data class AppSettings(
   val apiKey: String = "",
   val activeWorkspaceId: String = "default",
   val activeSessionId: String? = null,
+  val selectedHtmlPath: String = "index.html",
   val maxAgentIterations: Int = 20,
-  val rules: List<UserRule> = emptyList(),
-)
-
-@Serializable
-data class UserRule(
-  val id: String,
-  val body: String,
-  val enabled: Boolean = true,
-  val createdAtMillis: Long = System.currentTimeMillis(),
 )

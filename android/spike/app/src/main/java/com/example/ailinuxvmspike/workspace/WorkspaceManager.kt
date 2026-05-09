@@ -29,9 +29,66 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
       """.trimIndent(),
       overwrite = false,
     )
+    writeFile(
+      path = "index.html",
+      content = """
+        <!doctype html>
+        <html>
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title>Android Workspace</title>
+            <style>
+              body {
+                margin: 0;
+                min-height: 100vh;
+                display: grid;
+                place-items: center;
+                font-family: system-ui, sans-serif;
+                color: #17202a;
+                background: #f6f8fb;
+              }
+              main {
+                width: min(720px, calc(100vw - 48px));
+              }
+              h1 {
+                margin: 0 0 12px;
+                font-size: 28px;
+              }
+              p {
+                margin: 0;
+                line-height: 1.6;
+              }
+            </style>
+          </head>
+          <body>
+            <main>
+              <h1>Android Workspace</h1>
+              <p>Select an HTML file from the app menu, or ask the agent to create one in this workspace.</p>
+            </main>
+          </body>
+        </html>
+      """.trimIndent(),
+      overwrite = false,
+    )
   }
 
   fun readAgentRules(): String = readFile("AGENT.md")
+
+  fun listHtmlFiles(): List<String> {
+    if (!root.exists()) return emptyList()
+    return root.walkTopDown()
+      .filter { it.isFile && it.extension.equals("html", ignoreCase = true) }
+      .map { relativeToRoot(it) }
+      .sorted()
+      .toList()
+  }
+
+  fun displayUrl(path: String): String? {
+    val file = safeFile(path)
+    if (!file.exists() || !file.isFile || !file.extension.equals("html", ignoreCase = true)) return null
+    return file.toURI().toASCIIString()
+  }
 
   fun listFiles(path: String = "."): String {
     val dir = safeFile(path)

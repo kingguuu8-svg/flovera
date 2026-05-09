@@ -21,6 +21,9 @@ data class AgentScreenState(
   val apiKeyDraft: String = "",
   val agentRulesDraft: String = "",
   val workspaceFiles: String = "",
+  val htmlFiles: List<String> = emptyList(),
+  val selectedHtmlPath: String = "index.html",
+  val selectedHtmlUrl: String? = null,
   val status: String = "Idle",
   val isRunning: Boolean = false,
 )
@@ -39,7 +42,9 @@ class AgentController(context: Context) {
     val loadedSettings = settingsStore.load()
     workspace = WorkspaceManager(appContext, loadedSettings.activeWorkspaceId).also { it.ensureSeedFiles() }
     val session = loadedSettings.activeSessionId?.let { sessionStore.load(it) } ?: sessionStore.create("Default")
-    val settings = loadedSettings.copy(activeSessionId = session.id)
+    val htmlFiles = workspace.listHtmlFiles()
+    val selectedHtmlPath = chooseHtmlPath(loadedSettings.selectedHtmlPath, htmlFiles)
+    val settings = loadedSettings.copy(activeSessionId = session.id, selectedHtmlPath = selectedHtmlPath)
     settingsStore.save(settings)
     _state.value = AgentScreenState(
       settings = settings,
@@ -48,6 +53,9 @@ class AgentController(context: Context) {
       apiKeyDraft = settings.apiKey,
       agentRulesDraft = workspace.readAgentRules(),
       workspaceFiles = workspace.listFiles("."),
+      htmlFiles = htmlFiles,
+      selectedHtmlPath = selectedHtmlPath,
+      selectedHtmlUrl = workspace.displayUrl(selectedHtmlPath),
       status = "Ready",
     )
   }
@@ -80,6 +88,13 @@ class AgentController(context: Context) {
         status = "AGENT.md saved",
       )
     }
+  }
+
+  fun selectHtmlFile(path: String) {
+    val current = _state.value
+    val settings = current.settings.copy(selectedHtmlPath = path)
+    settingsStore.save(settings)
+    refreshWorkspaceState(settings = settings, status = "Displaying $path")
   }
 
   fun newSession() {
@@ -143,14 +158,40 @@ class AgentController(context: Context) {
       },
     )
     val updated = sessionStore.appendMessage(withUser, assistantMessage)
+    val status = if (result.isSuccess) "Agent loop completed" else "Agent loop failed"
+    refreshWorkspaceState(session = updated, isRunning = false, status = status)
+  }
+
+  private fun refreshWorkspaceState(
+    settings: AppSettings = _state.value.settings,
+    session: AgentSession? = _state.value.session,
+    isRunning: Boolean = _state.value.isRunning,
+    status: String = _state.value.status,
+  ) {
+    val htmlFiles = workspace.listHtmlFiles()
+    val selectedHtmlPath = chooseHtmlPath(settings.selectedHtmlPath, htmlFiles)
+    val normalizedSettings = settings.copy(selectedHtmlPath = selectedHtmlPath)
+    if (normalizedSettings != settings) settingsStore.save(normalizedSettings)
     _state.update {
       it.copy(
-        session = updated,
+        settings = normalizedSettings,
+        session = session,
         sessions = sessionStore.list(),
         workspaceFiles = workspace.listFiles("."),
-        isRunning = false,
-        status = if (result.isSuccess) "Agent loop completed" else "Agent loop failed",
+        htmlFiles = htmlFiles,
+        selectedHtmlPath = selectedHtmlPath,
+        selectedHtmlUrl = workspace.displayUrl(selectedHtmlPath),
+        isRunning = isRunning,
+        status = status,
       )
+    }
+  }
+
+  private fun chooseHtmlPath(current: String, htmlFiles: List<String>): String {
+    return when {
+      current in htmlFiles -> current
+      "index.html" in htmlFiles -> "index.html"
+      else -> htmlFiles.firstOrNull().orEmpty()
     }
   }
 }
