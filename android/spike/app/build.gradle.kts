@@ -1,6 +1,7 @@
 plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.compose.compiler)
+  alias(libs.plugins.kotlin.serialization)
 }
 
 android {
@@ -37,6 +38,9 @@ android {
       }
       resources {
         excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        excludes += "META-INF/DEPENDENCIES"
+        excludes += "META-INF/INDEX.LIST"
+        excludes += "META-INF/io.netty.versions.properties"
       }
     }
 }
@@ -55,6 +59,8 @@ dependencies {
   implementation(libs.androidx.lifecycle.runtime.ktx)
   implementation(libs.androidx.activity.compose)
   implementation(libs.jsch)
+  implementation(libs.koog.agents)
+  implementation(libs.kotlinx.serialization.json)
 
   // Arch Components
   implementation(libs.androidx.lifecycle.runtime.compose)

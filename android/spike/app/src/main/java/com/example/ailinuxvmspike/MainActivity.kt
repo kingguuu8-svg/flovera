@@ -20,17 +20,15 @@ class MainActivity : ComponentActivity() {
     enableEdgeToEdge()
     setContent {
       val context = LocalContext.current
-      val controller = remember(context) { VmController(context.applicationContext) }
-      DisposableEffect(controller) {
-        onDispose { controller.close() }
-      }
+      val controller = remember(context) { AgentController(context.applicationContext) }
+      DisposableEffect(controller) { onDispose { } }
 
       MyApplicationTheme {
         Surface(
           modifier = Modifier.fillMaxSize(),
           color = MaterialTheme.colorScheme.background,
         ) {
-          SpikeScreen(controller)
+          AgentScreen(controller)
         }
       }
     }

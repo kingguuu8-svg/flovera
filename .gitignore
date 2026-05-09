@@ -12,6 +12,11 @@ artifacts/*
 # Local caches
 .cache/
 tmp/
+.env
+.env.*
+!.env.example
+setting.json
+settings.json
 .gradle/
 **/build/
 **/.cxx/
