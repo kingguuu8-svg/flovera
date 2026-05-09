@@ -1,7 +1,16 @@
 package com.example.ailinuxvmspike.workspace
 
 import android.content.Context
+import android.webkit.MimeTypeMap
 import java.io.File
+
+data class WorkspaceFileNode(
+  val name: String,
+  val path: String,
+  val isDirectory: Boolean,
+  val sizeBytes: Long,
+  val children: List<WorkspaceFileNode> = emptyList(),
+)
 
 class WorkspaceManager(context: Context, workspaceId: String = "default") {
   private val workspacesRoot = File(context.filesDir, "workspaces")
@@ -84,10 +93,32 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
       .toList()
   }
 
+  fun fileTree(): WorkspaceFileNode {
+    return toNode(root)
+  }
+
   fun displayUrl(path: String): String? {
     val file = safeFile(path)
     if (!file.exists() || !file.isFile || !file.extension.equals("html", ignoreCase = true)) return null
     return file.toURI().toASCIIString()
+  }
+
+  fun exportableFile(path: String): File? {
+    val file = safeFile(path)
+    if (!file.exists() || !file.isFile) return null
+    return file
+  }
+
+  fun mimeType(path: String): String {
+    val extension = safeFile(path).extension.lowercase()
+    return MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension) ?: when (extension) {
+      "html", "htm" -> "text/html"
+      "css" -> "text/css"
+      "js" -> "text/javascript"
+      "json" -> "application/json"
+      "md", "txt" -> "text/plain"
+      else -> "application/octet-stream"
+    }
   }
 
   fun listFiles(path: String = "."): String {
@@ -126,6 +157,45 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     val updated = current.replace(oldText, newText, ignoreCase = false)
     file.writeText(updated)
     return "Edited ${relativeToRoot(file)}"
+  }
+
+  fun rename(path: String, newName: String): String {
+    val file = safeFile(path)
+    if (!file.exists()) return "Path does not exist: $path"
+    val normalized = newName.trim()
+    if (normalized.isBlank() || normalized.contains("/") || normalized.contains("\\") || normalized == "." || normalized == "..") {
+      return "Invalid file name: $newName"
+    }
+    val target = File(file.parentFile, normalized).canonicalFile
+    val canonicalRoot = root.canonicalFile
+    if (target.path != canonicalRoot.path && !target.path.startsWith(canonicalRoot.path + File.separator)) {
+      return "Path escapes workspace: $newName"
+    }
+    if (target.exists()) return "Target already exists: ${relativeToRoot(target)}"
+    return if (file.renameTo(target)) {
+      "Renamed ${relativeToRoot(file)} to ${relativeToRoot(target)}"
+    } else {
+      "Failed to rename ${relativeToRoot(file)}"
+    }
+  }
+
+  private fun toNode(file: File): WorkspaceFileNode {
+    val isDirectory = file.isDirectory
+    val children = if (isDirectory) {
+      file.listFiles()
+        ?.sortedWith(compareBy<File> { !it.isDirectory }.thenBy { it.name.lowercase() })
+        ?.map { toNode(it) }
+        ?: emptyList()
+    } else {
+      emptyList()
+    }
+    return WorkspaceFileNode(
+      name = if (file == root) "workspace" else file.name,
+      path = relativeToRoot(file).let { if (it == ".") "" else it },
+      isDirectory = isDirectory,
+      sizeBytes = if (isDirectory) 0L else file.length(),
+      children = children,
+    )
   }
 
   private fun safeFile(path: String): File {

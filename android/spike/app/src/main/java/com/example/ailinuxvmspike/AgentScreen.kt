@@ -1,5 +1,10 @@
 package com.example.ailinuxvmspike
 
+import android.content.ActivityNotFoundException
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.layout.Arrangement
@@ -37,6 +42,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
@@ -49,6 +55,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ailinuxvmspike.koog.ModelProviderCatalog
 import com.example.ailinuxvmspike.session.SessionMessage
+import com.example.ailinuxvmspike.workspace.WorkspaceFileNode
 import kotlinx.coroutines.launch
 
 private enum class AgentPanel {
@@ -145,6 +152,7 @@ fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
 
     AgentPanel.Files -> FilesDialog(
       state = state,
+      controller = controller,
       onDismiss = { activePanel = null },
     )
 
@@ -580,19 +588,52 @@ private fun RenameSessionDialog(
 @Composable
 private fun FilesDialog(
   state: AgentScreenState,
+  controller: AgentController,
   onDismiss: () -> Unit,
 ) {
+  val root = state.workspaceTree
+  val expandedPaths = remember { mutableStateOf(setOf<String>()) }
+  var renameTarget by remember { mutableStateOf<WorkspaceFileNode?>(null) }
+  val context = LocalContext.current
+  val clipboard = context.getSystemService(ClipboardManager::class.java)
+
   AlertDialog(
     onDismissRequest = onDismiss,
     title = { Text("Workspace Files") },
     text = {
-      SelectionContainer {
-        Text(
-          text = state.workspaceFiles.ifBlank { "(empty)" },
-          modifier = Modifier.fillMaxWidth().heightIn(min = 160.dp, max = 420.dp).verticalScroll(rememberScrollState()),
-          fontFamily = FontFamily.Monospace,
-          style = MaterialTheme.typography.bodySmall,
-        )
+      Column(
+        modifier = Modifier.fillMaxWidth().heightIn(min = 160.dp, max = 460.dp).verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+      ) {
+        OutlinedButton(onClick = controller::refreshWorkspaceFiles, modifier = Modifier.fillMaxWidth()) {
+          Text("Refresh")
+        }
+        if (root == null || root.children.isEmpty()) {
+          Text("(empty)", style = MaterialTheme.typography.bodyMedium)
+        } else {
+          root.children.forEach { node ->
+            WorkspaceFileTreeNode(
+              node = node,
+              depth = 0,
+              expandedPaths = expandedPaths.value,
+              onToggle = { path ->
+                expandedPaths.value = if (path in expandedPaths.value) {
+                  expandedPaths.value - path
+                } else {
+                  expandedPaths.value + path
+                }
+              },
+              onOpenHtml = { path ->
+                controller.selectHtmlFile(path)
+                onDismiss()
+              },
+              onOpenWith = { path -> openWorkspaceFile(context, controller, path) },
+              onShare = { path -> shareWorkspaceFile(context, controller, path) },
+              onRename = { renameTarget = it },
+              onCopyPath = { path -> clipboard.setPrimaryClip(ClipData.newPlainText("Workspace path", path)) },
+            )
+          }
+        }
       }
     },
     confirmButton = {
@@ -601,6 +642,178 @@ private fun FilesDialog(
       }
     },
   )
+
+  renameTarget?.let { target ->
+    RenameWorkspacePathDialog(
+      initialName = target.name,
+      onDismiss = { renameTarget = null },
+      onSave = { newName ->
+        controller.renameWorkspacePath(target.path, newName)
+        renameTarget = null
+      },
+    )
+  }
+}
+
+@Composable
+private fun WorkspaceFileTreeNode(
+  node: WorkspaceFileNode,
+  depth: Int,
+  expandedPaths: Set<String>,
+  onToggle: (String) -> Unit,
+  onOpenHtml: (String) -> Unit,
+  onOpenWith: (String) -> Unit,
+  onShare: (String) -> Unit,
+  onRename: (WorkspaceFileNode) -> Unit,
+  onCopyPath: (String) -> Unit,
+) {
+  var menuOpen by remember { mutableStateOf(false) }
+  val expanded = node.path in expandedPaths
+  val leftPadding = (depth * 14).dp
+
+  Row(
+    modifier = Modifier.fillMaxWidth().padding(start = leftPadding),
+    horizontalArrangement = Arrangement.SpaceBetween,
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    TextButton(
+      onClick = {
+        if (node.isDirectory) onToggle(node.path)
+      },
+      modifier = Modifier.weight(1f),
+    ) {
+      val marker = when {
+        node.isDirectory && expanded -> "-"
+        node.isDirectory -> "+"
+        else -> " "
+      }
+      val label = if (node.isDirectory) node.name else "${node.name} (${node.sizeBytes} bytes)"
+      Text("$marker $label")
+    }
+    Box {
+      IconButton(
+        onClick = { menuOpen = true },
+        modifier = Modifier.semantics {
+          contentDescription = "File actions for ${node.path}"
+        },
+      ) {
+        Text("☰", style = MaterialTheme.typography.titleMedium)
+      }
+      DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+        if (!node.isDirectory && node.path.endsWith(".html", ignoreCase = true)) {
+          DropdownMenuItem(
+            text = { Text("Open in WebView") },
+            onClick = {
+              menuOpen = false
+              onOpenHtml(node.path)
+            },
+          )
+        }
+        if (!node.isDirectory) {
+          DropdownMenuItem(
+            text = { Text("Open with...") },
+            onClick = {
+              menuOpen = false
+              onOpenWith(node.path)
+            },
+          )
+          DropdownMenuItem(
+            text = { Text("Share") },
+            onClick = {
+              menuOpen = false
+              onShare(node.path)
+            },
+          )
+        }
+        DropdownMenuItem(
+          text = { Text("Rename") },
+          onClick = {
+            menuOpen = false
+            onRename(node)
+          },
+        )
+        DropdownMenuItem(
+          text = { Text("Copy path") },
+          onClick = {
+            menuOpen = false
+            onCopyPath(node.path)
+          },
+        )
+      }
+    }
+  }
+
+  if (node.isDirectory && expanded) {
+    node.children.forEach { child ->
+      WorkspaceFileTreeNode(
+        node = child,
+        depth = depth + 1,
+        expandedPaths = expandedPaths,
+        onToggle = onToggle,
+        onOpenHtml = onOpenHtml,
+        onOpenWith = onOpenWith,
+        onShare = onShare,
+        onRename = onRename,
+        onCopyPath = onCopyPath,
+      )
+    }
+  }
+}
+
+@Composable
+private fun RenameWorkspacePathDialog(
+  initialName: String,
+  onDismiss: () -> Unit,
+  onSave: (String) -> Unit,
+) {
+  var name by remember(initialName) { mutableStateOf(initialName) }
+
+  AlertDialog(
+    onDismissRequest = onDismiss,
+    title = { Text("Rename") },
+    text = {
+      OutlinedTextField(
+        value = name,
+        onValueChange = { name = it },
+        label = { Text("Name") },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+      )
+    },
+    confirmButton = {
+      Button(onClick = { onSave(name) }) {
+        Text("Save")
+      }
+    },
+    dismissButton = {
+      TextButton(onClick = onDismiss) {
+        Text("Cancel")
+      }
+    },
+  )
+}
+
+private fun openWorkspaceFile(context: Context, controller: AgentController, path: String) {
+  val uri = controller.workspaceFileUri(path) ?: return
+  val intent = Intent(Intent.ACTION_VIEW)
+    .setDataAndType(uri, controller.workspaceMimeType(path))
+    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+  try {
+    context.startActivity(Intent.createChooser(intent, "Open with"))
+  } catch (_: ActivityNotFoundException) {
+  }
+}
+
+private fun shareWorkspaceFile(context: Context, controller: AgentController, path: String) {
+  val uri = controller.workspaceFileUri(path) ?: return
+  val intent = Intent(Intent.ACTION_SEND)
+    .setType(controller.workspaceMimeType(path))
+    .putExtra(Intent.EXTRA_STREAM, uri)
+    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+  try {
+    context.startActivity(Intent.createChooser(intent, "Share"))
+  } catch (_: ActivityNotFoundException) {
+  }
 }
 
 @Composable

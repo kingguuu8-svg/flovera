@@ -1,6 +1,8 @@
 package com.example.ailinuxvmspike
 
 import android.content.Context
+import android.net.Uri
+import androidx.core.content.FileProvider
 import com.example.ailinuxvmspike.config.AppSettings
 import com.example.ailinuxvmspike.config.SettingsStore
 import com.example.ailinuxvmspike.koog.KoogAgentRuntime
@@ -9,6 +11,7 @@ import com.example.ailinuxvmspike.koog.ToolEventRecorder
 import com.example.ailinuxvmspike.session.AgentSession
 import com.example.ailinuxvmspike.session.AgentSessionStore
 import com.example.ailinuxvmspike.session.SessionMessage
+import com.example.ailinuxvmspike.workspace.WorkspaceFileNode
 import com.example.ailinuxvmspike.workspace.WorkspaceManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -25,6 +28,7 @@ data class AgentScreenState(
   val apiKeyDraft: String = "",
   val agentRulesDraft: String = "",
   val workspaceFiles: String = "",
+  val workspaceTree: WorkspaceFileNode? = null,
   val htmlFiles: List<String> = emptyList(),
   val selectedHtmlPath: String = "",
   val selectedHtmlUrl: String? = null,
@@ -72,6 +76,7 @@ class AgentController(context: Context) {
       apiKeyDraft = settings.apiKeyFor(provider.id),
       agentRulesDraft = workspace.readAgentRules(),
       workspaceFiles = workspace.listFiles("."),
+      workspaceTree = workspace.fileTree(),
       htmlFiles = htmlFiles,
       selectedHtmlPath = selectedHtmlPath,
       selectedHtmlUrl = workspace.displayUrl(selectedHtmlPath),
@@ -142,6 +147,22 @@ class AgentController(context: Context) {
     settingsStore.save(settings)
     refreshWorkspaceState(settings = settings, status = "Displaying $path")
   }
+
+  fun refreshWorkspaceFiles() {
+    refreshWorkspaceState(status = "Workspace refreshed")
+  }
+
+  fun renameWorkspacePath(path: String, newName: String) {
+    val status = workspace.rename(path, newName)
+    refreshWorkspaceState(status = status)
+  }
+
+  fun workspaceFileUri(path: String): Uri? {
+    val file = workspace.exportableFile(path) ?: return null
+    return FileProvider.getUriForFile(appContext, "${appContext.packageName}.workspacefiles", file)
+  }
+
+  fun workspaceMimeType(path: String): String = workspace.mimeType(path)
 
   fun newSession() {
     val session = sessionStore.create("Session ${sessionStore.list().size + 1}")
@@ -281,6 +302,7 @@ class AgentController(context: Context) {
         sessions = sessionStore.list(),
         archivedSessions = sessionStore.listArchived(),
         workspaceFiles = workspace.listFiles("."),
+        workspaceTree = workspace.fileTree(),
         htmlFiles = htmlFiles,
         selectedHtmlPath = selectedHtmlPath,
         selectedHtmlUrl = workspace.displayUrl(selectedHtmlPath),
