@@ -217,6 +217,19 @@ class AgentController(context: Context) {
     activateSession(restored, "Session restored")
   }
 
+  fun setSessionPinned(sessionId: String, pinned: Boolean) {
+    val updated = sessionStore.setPinned(sessionId, pinned) ?: return
+    val active = if (_state.value.session?.id == updated.id) updated else _state.value.session
+    _state.update {
+      it.copy(
+        session = active,
+        sessions = sessionStore.list(),
+        archivedSessions = sessionStore.listArchived(),
+        status = if (pinned) "Session pinned" else "Session unpinned",
+      )
+    }
+  }
+
   suspend fun submit() {
     val current = _state.value
     val session = current.session ?: return

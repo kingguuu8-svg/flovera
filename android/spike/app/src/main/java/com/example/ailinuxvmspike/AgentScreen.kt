@@ -382,6 +382,7 @@ private fun SessionsDialog(
   onDismiss: () -> Unit,
 ) {
   var renameTarget by remember { mutableStateOf<SessionMessageTarget?>(null) }
+  var archivedMenuOpen by remember { mutableStateOf(false) }
 
   AlertDialog(
     onDismissRequest = onDismiss,
@@ -391,8 +392,30 @@ private fun SessionsDialog(
         modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(8.dp),
       ) {
-        OutlinedButton(onClick = controller::newSession, modifier = Modifier.fillMaxWidth()) {
-          Text("New Session")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+          OutlinedButton(onClick = controller::newSession, modifier = Modifier.weight(1f)) {
+            Text("New Session")
+          }
+          Box {
+            OutlinedButton(
+              onClick = { archivedMenuOpen = true },
+              enabled = state.archivedSessions.isNotEmpty(),
+            ) {
+              Text("Archived")
+            }
+            DropdownMenu(expanded = archivedMenuOpen, onDismissRequest = { archivedMenuOpen = false }) {
+              state.archivedSessions.forEach { session ->
+                DropdownMenuItem(
+                  text = { Text("Restore ${session.title}") },
+                  onClick = {
+                    archivedMenuOpen = false
+                    controller.restoreSession(session.id)
+                    onDismiss()
+                  },
+                )
+              }
+            }
+          }
         }
         if (state.sessions.isEmpty()) {
           Text("No active sessions.", style = MaterialTheme.typography.bodyMedium)
@@ -400,7 +423,11 @@ private fun SessionsDialog(
         state.sessions.forEach { session ->
           SessionListItem(
             title = session.title,
-            subtitle = "${session.messages.size} messages",
+            subtitle = if (session.pinnedAtMillis == null) {
+              "${session.messages.size} messages"
+            } else {
+              "Pinned / ${session.messages.size} messages"
+            },
             active = session.id == state.session?.id,
             menuContent = { closeMenu ->
               DropdownMenuItem(
@@ -409,6 +436,13 @@ private fun SessionsDialog(
                   closeMenu()
                   controller.openSession(session.id)
                   onDismiss()
+                },
+              )
+              DropdownMenuItem(
+                text = { Text(if (session.pinnedAtMillis == null) "Pin" else "Unpin") },
+                onClick = {
+                  closeMenu()
+                  controller.setSessionPinned(session.id, session.pinnedAtMillis == null)
                 },
               )
               DropdownMenuItem(
@@ -430,40 +464,6 @@ private fun SessionsDialog(
                 onClick = {
                   closeMenu()
                   controller.archiveSession(session.id)
-                },
-              )
-            },
-          )
-        }
-        if (state.archivedSessions.isNotEmpty()) {
-          Text("Archived", style = MaterialTheme.typography.titleSmall)
-        }
-        state.archivedSessions.forEach { session ->
-          SessionListItem(
-            title = session.title,
-            subtitle = "${session.messages.size} messages",
-            active = false,
-            menuContent = { closeMenu ->
-              DropdownMenuItem(
-                text = { Text("Restore") },
-                onClick = {
-                  closeMenu()
-                  controller.restoreSession(session.id)
-                  onDismiss()
-                },
-              )
-              DropdownMenuItem(
-                text = { Text("Rename") },
-                onClick = {
-                  closeMenu()
-                  renameTarget = SessionMessageTarget(session.id, session.title)
-                },
-              )
-              DropdownMenuItem(
-                text = { Text("Copy") },
-                onClick = {
-                  closeMenu()
-                  controller.duplicateSession(session.id)
                 },
               )
             },

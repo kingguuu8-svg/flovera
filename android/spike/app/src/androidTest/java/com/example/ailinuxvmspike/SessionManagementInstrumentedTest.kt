@@ -26,9 +26,17 @@ class SessionManagementInstrumentedTest {
     val renamed = store.rename(withMessage.id, "Renamed $suffix")
     assertEquals("Renamed $suffix", renamed?.title)
 
+    val other = store.create("Other $suffix")
+    val pinned = store.setPinned(withMessage.id, true)
+    assertNotNull(pinned?.pinnedAtMillis)
+    val relevant = store.list().filter { it.id == withMessage.id || it.id == other.id }
+    assertEquals(withMessage.id, relevant.first().id)
+
     val archived = store.archive(withMessage.id)
     assertNotNull(archived?.archivedAtMillis)
+    assertEquals(null, archived?.pinnedAtMillis)
     assertTrue(store.list().none { it.id == withMessage.id })
+    assertTrue(store.list().any { it.id == other.id })
     assertTrue(store.listArchived().any { it.id == withMessage.id })
 
     val restored = store.restore(withMessage.id)
@@ -46,6 +54,8 @@ class SessionManagementInstrumentedTest {
 
     controller.renameSession(first!!.id, "Managed ${System.currentTimeMillis()}")
     assertTrue(controller.state.value.session?.title?.startsWith("Managed ") == true)
+    controller.setSessionPinned(first.id, true)
+    assertNotNull(controller.state.value.session?.pinnedAtMillis)
 
     controller.duplicateSession(first.id)
     val duplicate = controller.state.value.session

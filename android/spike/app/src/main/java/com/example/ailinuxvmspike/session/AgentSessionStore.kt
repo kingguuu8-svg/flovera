@@ -14,6 +14,7 @@ data class AgentSession(
   val createdAtMillis: Long,
   val updatedAtMillis: Long,
   val archivedAtMillis: Long? = null,
+  val pinnedAtMillis: Long? = null,
   val messages: List<SessionMessage> = emptyList(),
 )
 
@@ -64,7 +65,7 @@ class AgentSessionStore(context: Context) {
     return root.listFiles { file -> file.extension == "json" }
       ?.mapNotNull { runCatching { json.decodeFromString<AgentSession>(it.readText()) }.getOrNull() }
       ?.filter { includeArchived || it.archivedAtMillis == null }
-      ?.sortedByDescending { it.updatedAtMillis }
+      ?.sortedWith(sessionSort)
       ?: emptyList()
   }
 
@@ -93,6 +94,7 @@ class AgentSessionStore(context: Context) {
       createdAtMillis = now,
       updatedAtMillis = now,
       archivedAtMillis = null,
+      pinnedAtMillis = null,
       messages = source.messages,
     )
     save(copy)
@@ -104,6 +106,19 @@ class AgentSessionStore(context: Context) {
     val now = System.currentTimeMillis()
     val updated = session.copy(
       archivedAtMillis = now,
+      pinnedAtMillis = null,
+      updatedAtMillis = now,
+    )
+    save(updated)
+    return updated
+  }
+
+  fun setPinned(id: String, pinned: Boolean): AgentSession? {
+    val session = load(id) ?: return null
+    if (session.archivedAtMillis != null) return session
+    val now = System.currentTimeMillis()
+    val updated = session.copy(
+      pinnedAtMillis = if (pinned) now else null,
       updatedAtMillis = now,
     )
     save(updated)
@@ -135,4 +150,9 @@ class AgentSessionStore(context: Context) {
   }
 
   private fun fileFor(id: String): File = File(root, "$id.json")
+
+  private companion object {
+    val sessionSort = compareByDescending<AgentSession> { it.pinnedAtMillis ?: 0L }
+      .thenByDescending { it.updatedAtMillis }
+  }
 }
