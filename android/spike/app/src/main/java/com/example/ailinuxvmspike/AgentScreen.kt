@@ -44,6 +44,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.ailinuxvmspike.koog.ModelProviderCatalog
 import com.example.ailinuxvmspike.session.SessionMessage
 import kotlinx.coroutines.launch
 
@@ -477,16 +478,61 @@ private fun SettingsDialog(
   controller: AgentController,
   onDismiss: () -> Unit,
 ) {
+  val selectedProvider = ModelProviderCatalog.findProvider(state.providerDraft) ?: ModelProviderCatalog.defaultProvider
+  var providerMenuOpen by remember { mutableStateOf(false) }
+  var modelMenuOpen by remember { mutableStateOf(false) }
+
   AlertDialog(
     onDismissRequest = onDismiss,
     title = { Text("Settings") },
     text = {
       Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("${state.settings.provider} / ${state.settings.model}", style = MaterialTheme.typography.bodySmall)
+        Text("${selectedProvider.label} / ${state.modelDraft}", style = MaterialTheme.typography.bodySmall)
+        Box {
+          OutlinedButton(onClick = { providerMenuOpen = true }, modifier = Modifier.fillMaxWidth()) {
+            Text(selectedProvider.label)
+          }
+          DropdownMenu(expanded = providerMenuOpen, onDismissRequest = { providerMenuOpen = false }) {
+            ModelProviderCatalog.providers.forEach { provider ->
+              DropdownMenuItem(
+                text = { Text(provider.label) },
+                onClick = {
+                  providerMenuOpen = false
+                  controller.updateProvider(provider.id)
+                },
+              )
+            }
+          }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+          OutlinedTextField(
+            value = state.modelDraft,
+            onValueChange = controller::updateModel,
+            label = { Text("Model") },
+            singleLine = true,
+            modifier = Modifier.weight(1f),
+          )
+          Box {
+            OutlinedButton(onClick = { modelMenuOpen = true }) {
+              Text("Presets")
+            }
+            DropdownMenu(expanded = modelMenuOpen, onDismissRequest = { modelMenuOpen = false }) {
+              selectedProvider.suggestedModels.forEach { model ->
+                DropdownMenuItem(
+                  text = { Text(model) },
+                  onClick = {
+                    modelMenuOpen = false
+                    controller.updateModel(model)
+                  },
+                )
+              }
+            }
+          }
+        }
         OutlinedTextField(
           value = state.apiKeyDraft,
           onValueChange = controller::updateApiKey,
-          label = { Text("DeepSeek API key") },
+          label = { Text(selectedProvider.apiKeyLabel) },
           singleLine = true,
           visualTransformation = PasswordVisualTransformation(),
           keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
@@ -497,7 +543,7 @@ private fun SettingsDialog(
     confirmButton = {
       Button(
         onClick = {
-          controller.saveApiKey()
+          controller.saveModelSettings()
           onDismiss()
         },
       ) {

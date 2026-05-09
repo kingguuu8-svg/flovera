@@ -1,11 +1,7 @@
 package com.example.ailinuxvmspike.koog
 
 import ai.koog.agents.core.agent.AIAgent
-import ai.koog.prompt.executor.clients.deepseek.DeepSeekLLMClient
 import ai.koog.prompt.executor.llms.MultiLLMPromptExecutor
-import ai.koog.prompt.llm.LLMCapability
-import ai.koog.prompt.llm.LLMProvider
-import ai.koog.prompt.llm.LLModel
 import ai.koog.utils.io.use
 import com.example.ailinuxvmspike.config.AppSettings
 import com.example.ailinuxvmspike.session.AgentSession
@@ -19,13 +15,13 @@ class KoogAgentRuntime {
     workspace: WorkspaceManager,
     recorder: ToolEventRecorder,
   ): String {
-    require(settings.provider == "deepseek") { "Only DeepSeek is enabled in this phase." }
-    require(settings.model == "deepseek-v4-pro") { "Only deepseek-v4-pro is enabled in this phase." }
-    require(settings.apiKey.isNotBlank()) { "DeepSeek API key is not configured." }
+    val provider = ModelProviderCatalog.requireProvider(settings.provider)
+    val apiKey = settings.apiKeyFor(provider.id)
+    require(apiKey.isNotBlank()) { "${provider.label} API key is not configured." }
 
     val agent = AIAgent(
-      promptExecutor = MultiLLMPromptExecutor(DeepSeekLLMClient(settings.apiKey)),
-      llmModel = deepSeekV4Pro,
+      promptExecutor = MultiLLMPromptExecutor(provider.createClient(apiKey)),
+      llmModel = provider.createModel(settings.model),
       toolRegistry = workspaceToolRegistry(workspace, recorder),
       systemPrompt = buildSystemPrompt(workspace.readAgentRules()),
       maxIterations = settings.maxAgentIterations,
@@ -62,21 +58,4 @@ class KoogAgentRuntime {
       $input
     """.trimIndent()
   }
-
-  private val deepSeekV4Pro = LLModel(
-    provider = LLMProvider.DeepSeek,
-    id = "deepseek-v4-pro",
-    capabilities = listOf(
-      LLMCapability.Completion,
-      LLMCapability.Temperature,
-      LLMCapability.Tools,
-      LLMCapability.ToolChoice,
-      LLMCapability.Schema.JSON.Basic,
-      LLMCapability.Schema.JSON.Standard,
-      LLMCapability.MultipleChoices,
-      LLMCapability.Thinking,
-    ),
-    contextLength = 1_000_000,
-    maxOutputTokens = 384_000,
-  )
 }

@@ -4,6 +4,7 @@ import android.content.Context
 import com.example.ailinuxvmspike.config.AppSettings
 import com.example.ailinuxvmspike.config.SettingsStore
 import com.example.ailinuxvmspike.koog.KoogAgentRuntime
+import com.example.ailinuxvmspike.koog.ModelProviderCatalog
 import com.example.ailinuxvmspike.koog.ToolEventRecorder
 import com.example.ailinuxvmspike.session.AgentSession
 import com.example.ailinuxvmspike.session.AgentSessionStore
@@ -18,6 +19,8 @@ data class AgentScreenState(
   val session: AgentSession? = null,
   val sessions: List<AgentSession> = emptyList(),
   val input: String = "",
+  val providerDraft: String = AppSettings().provider,
+  val modelDraft: String = AppSettings().model,
   val apiKeyDraft: String = "",
   val agentRulesDraft: String = "",
   val workspaceFiles: String = "",
@@ -44,13 +47,22 @@ class AgentController(context: Context) {
     val session = loadedSettings.activeSessionId?.let { sessionStore.load(it) } ?: sessionStore.create("Default")
     val htmlFiles = workspace.listHtmlFiles()
     val selectedHtmlPath = chooseHtmlPath(loadedSettings.selectedHtmlPath, htmlFiles)
-    val settings = loadedSettings.copy(activeSessionId = session.id, selectedHtmlPath = selectedHtmlPath)
+    val provider = ModelProviderCatalog.findProvider(loadedSettings.provider) ?: ModelProviderCatalog.defaultProvider
+    val model = loadedSettings.model.ifBlank { provider.defaultModel }
+    val settings = loadedSettings.copy(
+      provider = provider.id,
+      model = model,
+      activeSessionId = session.id,
+      selectedHtmlPath = selectedHtmlPath,
+    )
     settingsStore.save(settings)
     _state.value = AgentScreenState(
       settings = settings,
       session = session,
       sessions = sessionStore.list(),
-      apiKeyDraft = settings.apiKey,
+      providerDraft = provider.id,
+      modelDraft = model,
+      apiKeyDraft = settings.apiKeyFor(provider.id),
       agentRulesDraft = workspace.readAgentRules(),
       workspaceFiles = workspace.listFiles("."),
       htmlFiles = htmlFiles,
@@ -68,15 +80,42 @@ class AgentController(context: Context) {
     _state.update { it.copy(apiKeyDraft = value) }
   }
 
+  fun updateProvider(value: String) {
+    val provider = ModelProviderCatalog.findProvider(value) ?: return
+    _state.update {
+      it.copy(
+        providerDraft = provider.id,
+        modelDraft = provider.defaultModel,
+        apiKeyDraft = it.settings.apiKeyFor(provider.id),
+      )
+    }
+  }
+
+  fun updateModel(value: String) {
+    _state.update { it.copy(modelDraft = value) }
+  }
+
   fun updateAgentRules(value: String) {
     _state.update { it.copy(agentRulesDraft = value) }
   }
 
-  fun saveApiKey() {
+  fun saveModelSettings() {
     val current = _state.value
-    val settings = current.settings.copy(apiKey = current.apiKeyDraft.trim())
+    val provider = ModelProviderCatalog.findProvider(current.providerDraft) ?: ModelProviderCatalog.defaultProvider
+    val model = current.modelDraft.trim().ifBlank { provider.defaultModel }
+    val settings = current.settings
+      .copy(provider = provider.id, model = model)
+      .withApiKey(provider.id, current.apiKeyDraft)
     settingsStore.save(settings)
-    _state.update { it.copy(settings = settings, status = "Settings saved") }
+    _state.update {
+      it.copy(
+        settings = settings,
+        providerDraft = provider.id,
+        modelDraft = model,
+        apiKeyDraft = settings.apiKeyFor(provider.id),
+        status = "Settings saved",
+      )
+    }
   }
 
   fun saveAgentRules() {
