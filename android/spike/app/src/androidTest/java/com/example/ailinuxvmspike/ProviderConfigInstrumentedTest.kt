@@ -3,6 +3,7 @@ package com.example.ailinuxvmspike
 import com.example.ailinuxvmspike.config.AppSettings
 import com.example.ailinuxvmspike.koog.ModelProviderCatalog
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -25,5 +26,11 @@ class ProviderConfigInstrumentedTest {
       assertTrue(provider.defaultModel.isNotBlank())
       assertTrue(provider.suggestedModels.contains(provider.defaultModel))
     }
+  }
+
+  @Test
+  fun networkToolsDefaultToDisabled() {
+    assertFalse(AppSettings().networkEnabled)
+    assertTrue(AppSettings(networkEnabled = true).networkEnabled)
   }
 }

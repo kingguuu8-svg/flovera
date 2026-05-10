@@ -6,17 +6,12 @@ import ai.koog.serialization.typeToken
 import com.example.ailinuxvmspike.workspace.WorkspaceManager
 import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
-import java.net.Inet4Address
-import java.net.Inet6Address
-import java.net.InetAddress
 import java.net.URI
 import java.net.URL
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 
-private const val FETCH_MAX_BYTES = 512 * 1024
-private const val DOWNLOAD_MAX_BYTES = 10 * 1024 * 1024
 private const val CONNECT_TIMEOUT_MS = 10_000
 private const val READ_TIMEOUT_MS = 20_000
 private const val MAX_REDIRECTS = 5
@@ -30,11 +25,11 @@ data class NetworkResponse(
 )
 
 interface NetworkHttpClient {
-  suspend fun get(url: URL, maxBytes: Int): NetworkResponse
+  suspend fun get(url: URL): NetworkResponse
 }
 
 class JavaNetNetworkHttpClient : NetworkHttpClient {
-  override suspend fun get(url: URL, maxBytes: Int): NetworkResponse = withContext(Dispatchers.IO) {
+  override suspend fun get(url: URL): NetworkResponse = withContext(Dispatchers.IO) {
     var current = url
     repeat(MAX_REDIRECTS + 1) { redirectCount ->
       val connection = (current.openConnection() as HttpURLConnection).apply {
@@ -63,13 +58,13 @@ class JavaNetNetworkHttpClient : NetworkHttpClient {
         }
 
         val stream = if (statusCode >= 400) connection.errorStream ?: connection.inputStream else connection.inputStream
-        val (body, truncated) = readLimited(stream, maxBytes)
+        val body = readFully(stream)
         return@withContext NetworkResponse(
           statusCode = statusCode,
           contentType = connection.contentType,
           finalUrl = current.toString(),
           body = body,
-          truncated = truncated,
+          truncated = false,
         )
       } finally {
         connection.disconnect()
@@ -78,23 +73,16 @@ class JavaNetNetworkHttpClient : NetworkHttpClient {
     error("Too many redirects")
   }
 
-  private fun readLimited(input: java.io.InputStream, maxBytes: Int): Pair<ByteArray, Boolean> {
+  private fun readFully(input: java.io.InputStream): ByteArray {
     input.use { stream ->
       val output = ByteArrayOutputStream()
       val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-      var remaining = maxBytes + 1
-      while (remaining > 0) {
-        val read = stream.read(buffer, 0, minOf(buffer.size, remaining))
+      while (true) {
+        val read = stream.read(buffer)
         if (read == -1) break
         output.write(buffer, 0, read)
-        remaining -= read
       }
-      val bytes = output.toByteArray()
-      return if (bytes.size > maxBytes) {
-        bytes.copyOf(maxBytes) to true
-      } else {
-        bytes to false
-      }
+      return output.toByteArray()
     }
   }
 }
@@ -107,10 +95,6 @@ object NetworkUrlPolicy {
     require(uri.userInfo == null) { "URLs with user info are not allowed." }
     val host = uri.host?.trim()?.lowercase()
     require(!host.isNullOrBlank()) { "URL host is required." }
-    require(host != "localhost") { "Localhost URLs are not allowed." }
-    InetAddress.getAllByName(host).forEach { address ->
-      require(!address.isRestrictedForAgent()) { "Private, local, or reserved network addresses are not allowed: $host" }
-    }
     return uri.toURL()
   }
 }
@@ -121,18 +105,18 @@ class FetchUrlTool(
 ) : SimpleTool<FetchUrlTool.Args>(
   argsType = typeToken<Args>(),
   name = "fetch_url",
-  description = "Fetch a public http or https URL and return a bounded text preview. Local, private, and reserved network targets are blocked.",
+  description = "Fetch an http or https URL and return the response content. This tool is available only when the user enables Network in the conversation.",
 ) {
   @Serializable
   data class Args(
-    @property:LLMDescription("Public http or https URL to fetch.")
+    @property:LLMDescription("HTTP or HTTPS URL to fetch.")
     val url: String,
   )
 
   override suspend fun execute(args: Args): String {
     val result = runCatching {
       val url = NetworkUrlPolicy.validate(args.url)
-      val response = client.get(url, FETCH_MAX_BYTES)
+      val response = client.get(url)
       response.formatForFetch()
     }.getOrElse { it.message ?: it.toString() }
     recorder.record(name, "url=${args.url}", result)
@@ -147,11 +131,11 @@ class DownloadFileTool(
 ) : SimpleTool<DownloadFileTool.Args>(
   argsType = typeToken<Args>(),
   name = "download_file",
-  description = "Download a public http or https URL into the Android workspace. The path is relative to the workspace root.",
+  description = "Download an http or https URL into the Android workspace. This tool is available only when the user enables Network in the conversation.",
 ) {
   @Serializable
   data class Args(
-    @property:LLMDescription("Public http or https URL to download.")
+    @property:LLMDescription("HTTP or HTTPS URL to download.")
     val url: String,
     @property:LLMDescription("Workspace-relative destination path.")
     val path: String,
@@ -160,8 +144,7 @@ class DownloadFileTool(
   override suspend fun execute(args: Args): String {
     val result = runCatching {
       val url = NetworkUrlPolicy.validate(args.url)
-      val response = client.get(url, DOWNLOAD_MAX_BYTES)
-      require(!response.truncated) { "Download exceeds ${DOWNLOAD_MAX_BYTES} bytes and was not saved." }
+      val response = client.get(url)
       val writeResult = workspace.writeBytes(args.path, response.body)
       "Downloaded ${response.body.size} bytes from ${response.finalUrl} to ${args.path} (status=${response.statusCode}, contentType=${response.contentType ?: "unknown"}). $writeResult"
     }.getOrElse { it.message ?: it.toString() }
@@ -181,40 +164,11 @@ private fun NetworkResponse.formatForFetch(): String {
   } else {
     "[binary response omitted: ${body.size} bytes]"
   }
-  val suffix = if (truncated) "\n[truncated at $FETCH_MAX_BYTES bytes]" else ""
   return """
     status: $statusCode
     final_url: $finalUrl
     content_type: ${contentType ?: "unknown"}
 
-    $bodyText$suffix
+    $bodyText
   """.trimIndent()
-}
-
-private fun InetAddress.isRestrictedForAgent(): Boolean {
-  if (isAnyLocalAddress || isLoopbackAddress || isLinkLocalAddress || isSiteLocalAddress || isMulticastAddress) return true
-  return when (this) {
-    is Inet4Address -> address.isRestrictedIpv4()
-    is Inet6Address -> address.isRestrictedIpv6()
-    else -> true
-  }
-}
-
-private fun ByteArray.isRestrictedIpv4(): Boolean {
-  val first = this[0].toInt() and 0xff
-  val second = this[1].toInt() and 0xff
-  return first == 0 ||
-    first == 10 ||
-    first == 127 ||
-    first >= 224 ||
-    first == 169 && second == 254 ||
-    first == 172 && second in 16..31 ||
-    first == 192 && second == 168 ||
-    first == 100 && second in 64..127 ||
-    first == 198 && second in 18..19
-}
-
-private fun ByteArray.isRestrictedIpv6(): Boolean {
-  val first = this[0].toInt() and 0xff
-  return first == 0 || first == 0xff || (first and 0xfe) == 0xfc
 }

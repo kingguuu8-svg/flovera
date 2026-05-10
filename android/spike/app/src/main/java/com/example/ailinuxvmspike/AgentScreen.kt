@@ -31,6 +31,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -280,6 +281,26 @@ private fun ConversationDialog(
           maxLines = 5,
           modifier = Modifier.fillMaxWidth(),
         )
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Column(modifier = Modifier.weight(1f)) {
+            Text("Network", style = MaterialTheme.typography.bodyMedium)
+            Text(
+              text = if (state.settings.networkEnabled) "fetch_url and download_file available" else "network tools disabled",
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+              style = MaterialTheme.typography.bodySmall,
+            )
+          }
+          Switch(
+            checked = state.settings.networkEnabled,
+            onCheckedChange = controller::setNetworkEnabled,
+            enabled = !state.isRunning,
+            modifier = Modifier.semantics { contentDescription = "Network tools switch" },
+          )
+        }
         Button(
           onClick = { scope.launch { controller.submit() } },
           enabled = !state.isRunning,

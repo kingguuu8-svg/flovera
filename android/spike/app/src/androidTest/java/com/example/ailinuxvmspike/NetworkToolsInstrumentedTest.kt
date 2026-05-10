@@ -67,7 +67,7 @@ class NetworkToolsInstrumentedTest {
   }
 
   @Test
-  fun networkToolsRejectLocalTargetsAndEscapingPaths() = runBlocking {
+  fun networkToolsAllowLocalTargetsButRejectEscapingPaths() = runBlocking {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val workspace = WorkspaceManager(context, "network-reject-${System.currentTimeMillis()}")
     val recorder = ToolEventRecorder()
@@ -84,7 +84,7 @@ class NetworkToolsInstrumentedTest {
     val localResult = FetchUrlTool(recorder, client).execute(
       FetchUrlTool.Args("http://127.0.0.1:8080/private"),
     )
-    assertTrue(localResult.contains("Private, local, or reserved network addresses are not allowed"))
+    assertTrue(localResult.contains("status: 200"))
 
     val escapeName = "escape-${System.currentTimeMillis()}.txt"
     val pathResult = DownloadFileTool(workspace, recorder, client).execute(
@@ -102,13 +102,9 @@ class NetworkToolsInstrumentedTest {
   ) : NetworkHttpClient {
     var requestedUrl: String? = null
 
-    override suspend fun get(url: URL, maxBytes: Int): NetworkResponse {
+    override suspend fun get(url: URL): NetworkResponse {
       requestedUrl = url.toString()
-      return if (response.body.size > maxBytes) {
-        response.copy(body = response.body.copyOf(maxBytes), truncated = true)
-      } else {
-        response
-      }
+      return response
     }
   }
 }

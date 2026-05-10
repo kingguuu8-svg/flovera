@@ -111,6 +111,17 @@ class AgentController(context: Context) {
     _state.update { it.copy(agentRulesDraft = value) }
   }
 
+  fun setNetworkEnabled(enabled: Boolean) {
+    val settings = _state.value.settings.copy(networkEnabled = enabled)
+    settingsStore.save(settings)
+    _state.update {
+      it.copy(
+        settings = settings,
+        status = if (enabled) "Network tools enabled" else "Network tools disabled",
+      )
+    }
+  }
+
   fun saveModelSettings() {
     val current = _state.value
     val provider = ModelProviderCatalog.findProvider(current.providerDraft) ?: ModelProviderCatalog.defaultProvider

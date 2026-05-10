@@ -13,6 +13,7 @@ data class AppSettings(
   val activeSessionId: String? = null,
   val selectedHtmlPath: String = "",
   val maxAgentIterations: Int = 20,
+  val networkEnabled: Boolean = false,
 ) {
   fun apiKeyFor(providerId: String = provider): String {
     val keyed = providerApiKeys[providerId].orEmpty()

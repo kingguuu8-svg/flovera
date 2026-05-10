@@ -10,13 +10,16 @@ import kotlinx.serialization.Serializable
 fun workspaceToolRegistry(
   workspace: WorkspaceManager,
   recorder: ToolEventRecorder,
+  networkEnabled: Boolean = false,
 ): ToolRegistry = ToolRegistry {
   tool(ListFilesTool(workspace, recorder))
   tool(ReadFileTool(workspace, recorder))
   tool(WriteFileTool(workspace, recorder))
   tool(EditFileTool(workspace, recorder))
-  tool(FetchUrlTool(recorder))
-  tool(DownloadFileTool(workspace, recorder))
+  if (networkEnabled) {
+    tool(FetchUrlTool(recorder))
+    tool(DownloadFileTool(workspace, recorder))
+  }
 }
 
 class ListFilesTool(
