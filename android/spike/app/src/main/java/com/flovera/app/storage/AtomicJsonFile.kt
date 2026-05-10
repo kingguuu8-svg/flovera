@@ -2,6 +2,7 @@ package com.flovera.app.storage
 
 import android.util.AtomicFile
 import java.io.File
+import java.io.InputStream
 import java.nio.charset.StandardCharsets
 
 internal fun readUtf8Text(file: File): String {
@@ -13,11 +14,15 @@ internal fun writeUtf8TextAtomically(file: File, text: String) {
 }
 
 internal fun writeBytesAtomically(file: File, bytes: ByteArray) {
+  writeStreamAtomically(file, bytes.inputStream())
+}
+
+internal fun writeStreamAtomically(file: File, input: InputStream) {
   file.parentFile?.mkdirs()
   val atomicFile = AtomicFile(file)
   val stream = atomicFile.startWrite()
   try {
-    stream.write(bytes)
+    input.use { it.copyTo(stream) }
     atomicFile.finishWrite(stream)
   } catch (throwable: Throwable) {
     atomicFile.failWrite(stream)

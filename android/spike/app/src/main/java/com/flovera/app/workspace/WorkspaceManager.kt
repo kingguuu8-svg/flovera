@@ -1,9 +1,12 @@
 package com.flovera.app.workspace
 
 import android.content.Context
+import android.net.Uri
+import android.provider.OpenableColumns
 import android.webkit.MimeTypeMap
 import com.flovera.app.storage.readUtf8Text
 import com.flovera.app.storage.writeBytesAtomically
+import com.flovera.app.storage.writeStreamAtomically
 import com.flovera.app.storage.writeUtf8TextAtomically
 import java.io.File
 
@@ -16,6 +19,7 @@ data class WorkspaceFileNode(
 )
 
 class WorkspaceManager(context: Context, workspaceId: String = "default") {
+  private val appContext = context.applicationContext
   private val workspacesRoot = File(context.filesDir, "workspaces")
   val root: File = File(workspacesRoot, workspaceId).apply { mkdirs() }
 
@@ -158,6 +162,14 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     return "Wrote ${content.size} bytes to ${relativeToRoot(file)}"
   }
 
+  fun importUriToRoot(uri: Uri): String {
+    val name = uniqueRootFileName(sanitizeRootFileName(displayName(uri) ?: uri.lastPathSegment.orEmpty()))
+    val target = safeFile(name)
+    val input = appContext.contentResolver.openInputStream(uri) ?: return "Could not open shared file: $uri"
+    writeStreamAtomically(target, input)
+    return "Imported ${relativeToRoot(target)}"
+  }
+
   fun editFile(path: String, oldText: String, newText: String): String {
     val file = safeFile(path)
     if (!file.exists() || !file.isFile) return "File does not exist: $path"
@@ -214,6 +226,42 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
       "Path escapes workspace: $path"
     }
     return requested
+  }
+
+  private fun displayName(uri: Uri): String? {
+    return runCatching {
+      appContext.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+        if (cursor.moveToFirst()) {
+          cursor.getString(cursor.getColumnIndexOrThrow(OpenableColumns.DISPLAY_NAME))
+        } else {
+          null
+        }
+      }
+    }.getOrNull()
+  }
+
+  private fun sanitizeRootFileName(name: String): String {
+    val leaf = name.substringAfterLast('/').substringAfterLast('\\')
+    val cleaned = leaf.map { char ->
+      when {
+        char.isISOControl() -> '_'
+        char == '/' || char == '\\' || char == ':' || char == '*' || char == '?' || char == '"' || char == '<' || char == '>' || char == '|' -> '_'
+        else -> char
+      }
+    }.joinToString("").trim().trim('.')
+    return cleaned.ifBlank { "shared-file" }
+  }
+
+  private fun uniqueRootFileName(name: String): String {
+    val base = name.substringBeforeLast('.', name)
+    val extension = name.substringAfterLast('.', missingDelimiterValue = "")
+    fun candidate(index: Int): String {
+      val suffix = if (index == 0) "" else " ($index)"
+      return if (extension.isBlank() || base == name) "$base$suffix" else "$base$suffix.$extension"
+    }
+    var index = 0
+    while (safeFile(candidate(index)).exists()) index += 1
+    return candidate(index)
   }
 
   private fun relativeToRoot(file: File): String {

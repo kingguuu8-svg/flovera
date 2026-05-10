@@ -1,6 +1,7 @@
 package com.flovera.app
 
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import androidx.core.content.FileProvider
 import com.flovera.app.agent.AgentRunController
@@ -162,6 +163,14 @@ class AgentController(context: Context) {
   }
 
   fun workspaceMimeType(path: String): String = workspaceController.mimeType(path)
+
+  fun importSharedIntent(intent: Intent?): Boolean {
+    val uris = sharedUris(intent)
+    if (uris.isEmpty()) return false
+    val results = uris.map { uri -> workspaceController.importSharedFile(uri) }
+    refreshWorkspaceState(status = results.joinToString("; "))
+    return true
+  }
 
   fun newSession() {
     val session = sessionController.createSession()
@@ -347,6 +356,16 @@ class AgentController(context: Context) {
   private fun activateSession(session: AgentSession, status: String) {
     val settings = settingsController.setActiveSession(_state.value.settings, session.id)
     refreshWorkspaceState(settings = settings, session = session, isRunning = false, status = status)
+  }
+
+  @Suppress("DEPRECATION")
+  private fun sharedUris(intent: Intent?): List<Uri> {
+    if (intent == null) return emptyList()
+    return when (intent.action) {
+      Intent.ACTION_SEND -> listOfNotNull(intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM))
+      Intent.ACTION_SEND_MULTIPLE -> intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM) ?: emptyList()
+      else -> emptyList()
+    }
   }
 
 }

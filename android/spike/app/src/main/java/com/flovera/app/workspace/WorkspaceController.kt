@@ -1,6 +1,7 @@
 package com.flovera.app.workspace
 
 import android.content.Context
+import android.net.Uri
 import java.io.File
 
 data class WorkspaceSnapshot(
@@ -23,6 +24,8 @@ class WorkspaceController(context: Context, workspaceId: String) {
   fun readAgentRules(): String = workspace.readAgentRules()
 
   fun writeAgentRules(content: String): String = workspace.writeFile("AGENT.md", content)
+
+  fun importSharedFile(uri: Uri): String = workspace.importUriToRoot(uri)
 
   fun rename(path: String, newName: String): String = workspace.rename(path, newName)
 

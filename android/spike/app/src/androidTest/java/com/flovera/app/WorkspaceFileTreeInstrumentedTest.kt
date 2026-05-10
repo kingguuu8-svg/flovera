@@ -1,5 +1,6 @@
 package com.flovera.app
 
+import android.net.Uri
 import androidx.core.content.FileProvider
 import androidx.test.platform.app.InstrumentationRegistry
 import com.flovera.app.workspace.WorkspaceController
@@ -71,5 +72,20 @@ class WorkspaceFileTreeInstrumentedTest {
       assertFalse(File(file.absolutePath + ".new").exists())
       assertFalse(File(file.absolutePath + ".bak").exists())
     }
+  }
+
+  @Test
+  fun workspaceImportsSharedFilesToRootWithUniqueNames() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "shared-import-${System.currentTimeMillis()}")
+    val shared = File(context.cacheDir, "shared-note.txt").apply { writeText("from another app") }
+
+    val first = workspace.importUriToRoot(Uri.fromFile(shared))
+    val second = workspace.importUriToRoot(Uri.fromFile(shared))
+
+    assertEquals("Imported shared-note.txt", first)
+    assertEquals("Imported shared-note (1).txt", second)
+    assertEquals("from another app", workspace.readFile("shared-note.txt"))
+    assertEquals("from another app", workspace.readFile("shared-note (1).txt"))
   }
 }

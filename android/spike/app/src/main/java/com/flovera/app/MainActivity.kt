@@ -1,5 +1,6 @@
 package com.flovera.app
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -10,27 +11,41 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import com.flovera.app.theme.FloveraTheme
 
 class MainActivity : ComponentActivity() {
+  private lateinit var controller: AgentController
+
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
 
     enableEdgeToEdge()
+    controller = AgentController(applicationContext)
+    consumeShareIntent(intent)
     setContent {
-      val context = LocalContext.current
-      val controller = remember(context) { AgentController(context.applicationContext) }
-      DisposableEffect(controller) { onDispose { } }
+      val appController = remember { controller }
+      DisposableEffect(appController) { onDispose { } }
 
       FloveraTheme {
         Surface(
           modifier = Modifier.fillMaxSize(),
           color = MaterialTheme.colorScheme.background,
         ) {
-          AgentScreen(controller)
+          AgentScreen(appController)
         }
       }
+    }
+  }
+
+  override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    setIntent(intent)
+    consumeShareIntent(intent)
+  }
+
+  private fun consumeShareIntent(intent: Intent?) {
+    if (::controller.isInitialized && controller.importSharedIntent(intent)) {
+      setIntent(Intent())
     }
   }
 }
