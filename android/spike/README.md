@@ -30,5 +30,5 @@ Install and run the current instrumentation suite on a connected device:
 ```powershell
 adb install -r -t -d -g app\build\outputs\apk\debug\app-debug.apk
 adb install -r -t -d -g app\build\outputs\apk\androidTest\debug\app-debug-androidTest.apk
-adb shell am instrument -w -r com.example.ailinuxvmspike.test/androidx.test.runner.AndroidJUnitRunner
+adb shell am instrument -w -r com.flovera.app.test/androidx.test.runner.AndroidJUnitRunner
 ```

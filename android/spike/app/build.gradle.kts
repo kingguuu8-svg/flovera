@@ -5,10 +5,10 @@ plugins {
 }
 
 android {
-    namespace = "com.example.ailinuxvmspike"
+    namespace = "com.flovera.app"
     compileSdk = 36
     defaultConfig {
-        applicationId = "com.example.ailinuxvmspike"
+        applicationId = "com.flovera.app"
         minSdk = 31
         targetSdk = 36
         versionCode = 1
