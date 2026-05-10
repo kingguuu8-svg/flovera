@@ -11,7 +11,6 @@ androidxTestEspresso = "3.7.0"
 coroutines = "1.10.2"
 junit = "4.13.2"
 kotlin = "2.3.20"
-jsch = "0.2.23"
 koog = "0.8.0"
 kotlinxSerializationJson = "1.9.0"
 
@@ -33,7 +32,6 @@ androidx-test-espresso-core = { module = "androidx.test.espresso:espresso-core",
 androidx-test-runner = { module = "androidx.test:runner", version.ref = "androidxTestRunner" }
 junit = { module = "junit:junit", version.ref = "junit" }
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
-jsch = { module = "com.github.mwiede:jsch", version.ref = "jsch" }
 koog-agents = { module = "ai.koog:koog-agents", version.ref = "koog" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinxSerializationJson" }
 

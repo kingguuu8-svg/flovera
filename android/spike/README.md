@@ -1,79 +1,34 @@
-# AI Linux VM Spike
+# flovera Android App
 
-Subagent-first Android spike for the AI Linux QEMU path.
+Android app prototype for the local flovera agent product path.
 
 ## Scope
 
-- Single Activity, single screen
-- Linux lifecycle actions plus a log panel
-- Asset release, process start/stop, QMP pause/resume, stdout/stderr capture, and SSH command execution
-- No WebView
-- No AI agent loop
-- No full workspace shell
+- Native Android shell built with Kotlin and Jetpack Compose.
+- Koog-backed agent loop with workspace file tools and optional network tools.
+- Persistent sessions, conversation history, provider settings, and selected workspace HTML display.
+- WebView as the first-class workspace preview surface.
 
-## Android behavior
+Legacy QEMU/VPS work is archived under `docs/archive/legacy-qemu-vps/` and is no longer part of this Android app source set.
 
-- `Prepare Linux` creates the on-device spike runtime directory and releases small template files.
-- `Start Linux` launches `libqemu-system-aarch64.so` from the app native library directory and keeps the remaining inputs in the on-device inputs directory.
-- `Pause` sends QMP `stop` to the local QEMU control port.
-- `Resume` sends QMP `cont` to the local QEMU control port.
-- `Shutdown` terminates the running QEMU process.
-- `Run Command` uses SSH against the forwarded port and executes the current terminal command. The default command is `echo ready`.
-- The app declares `android.permission.INTERNET` because the real-device path uses local TCP sockets for QEMU usernet and JSch SSH to `127.0.0.1:<sshPort>`.
+## Build
 
-## Expected on-device inputs
-
-- `libqemu-system-aarch64.so`
-
-Place these files into the runtime inputs directory created by the app:
-
-- `QEMU_EFI.fd`
-- `vmlinuz-virt`
-- `ai-linux-aarch64.cpio.gz`
-- `id_ed25519`
-
-Runtime libraries must live alongside QEMU in the native library directory,
-with `RUNPATH=$ORIGIN`.
-
-The emulator stage is allowed to fail with a clear missing-input error.
-
-## Windows build
-
-The default Java on this preview host is Java 8. Use Android Studio JBR before running Gradle:
+Use Android Studio JBR on Windows:
 
 ```powershell
 $env:JAVA_HOME='C:\Program Files\Android\Android Studio\jbr'
-$env:PATH="$env:JAVA_HOME\bin;$env:PATH"
-.\android\spike\gradlew.bat -p android\spike assembleDebug
+$env:ANDROID_HOME='C:\Users\中二哲人\AppData\Local\Android\Sdk'
+$env:ANDROID_SDK_ROOT=$env:ANDROID_HOME
+$env:PATH="$env:JAVA_HOME\bin;$env:ANDROID_HOME\platform-tools;$env:PATH"
+.\gradlew.bat :app:assembleDebug :app:assembleDebugAndroidTest
 ```
 
-More local toolchain notes are recorded in [TOOLCHAIN.md](TOOLCHAIN.md), including the current `android describe` workaround.
+## True-Device Verification
 
-## Verification
-
-Run from this directory:
+Install and run the current instrumentation suite on a connected device:
 
 ```powershell
-android info
-android describe --project_dir=android/spike
+adb install -r -t -d -g app\build\outputs\apk\debug\app-debug.apk
+adb install -r -t -d -g app\build\outputs\apk\androidTest\debug\app-debug-androidTest.apk
+adb shell am instrument -w -r com.example.ailinuxvmspike.test/androidx.test.runner.AndroidJUnitRunner
 ```
-
-If the SDK is incomplete, install the missing packages with:
-
-```powershell
-android sdk install platform-tools emulator platforms/android-36 system-images;android-36;google_apis;x86_64
-```
-
-To rebuild the APK with the injected QEMU runtime:
-
-```bash
-bash scripts/build-android-spike-apk.sh --runtime-root artifacts/qemu-runtime/app-local --force
-```
-
-To validate on a connected arm64 Android 12+ device:
-
-```bash
-bash scripts/verify-android-spike-device.sh --apk android/spike/app/build/outputs/apk/debug/app-debug.apk
-```
-
-This spike intentionally keeps the surface area small. The terminal is currently one SSH exec command per submit, not a full PTY session.
