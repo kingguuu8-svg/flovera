@@ -29,11 +29,11 @@ $env:PATH = (Join-Path $env:ANDROID_HOME "platform-tools") + ";" + $env:PATH
 $Gradle = Join-Path $ProjectRoot "gradlew.bat"
 Push-Location $ProjectRoot
 try {
-  & $Gradle ":app:assembleDebug" ":app:assembleDebugAndroidTest"
+  & $Gradle ":app:assembleFloveraDebug" ":app:assembleFloveraDebugAndroidTest" ":app:assembleLegacyDebug"
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   if (-not $SkipRelease) {
-    & $Gradle ":app:assembleRelease"
+    & $Gradle ":app:assembleFloveraRelease" ":app:assembleLegacyRelease"
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
   }
 
@@ -57,9 +57,12 @@ try {
     throw "No online Android device found. Pass -DeviceSerial or use -SkipDevice."
   }
 
-  $DebugApk = Join-Path $ProjectRoot "app\build\outputs\apk\debug\app-debug.apk"
-  $AndroidTestApk = Join-Path $ProjectRoot "app\build\outputs\apk\androidTest\debug\app-debug-androidTest.apk"
-  & $Adb "-s" $DeviceSerial "install" "-r" "-t" "-d" "-g" $DebugApk
+  $FloveraDebugApk = Join-Path $ProjectRoot "app\build\outputs\apk\flovera\debug\app-flovera-debug.apk"
+  $LegacyDebugApk = Join-Path $ProjectRoot "app\build\outputs\apk\legacy\debug\app-legacy-debug.apk"
+  $AndroidTestApk = Join-Path $ProjectRoot "app\build\outputs\apk\androidTest\flovera\debug\app-flovera-debug-androidTest.apk"
+  & $Adb "-s" $DeviceSerial "install" "-r" "-t" "-d" "-g" $FloveraDebugApk
+  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  & $Adb "-s" $DeviceSerial "install" "-r" "-t" "-d" "-g" $LegacyDebugApk
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
   & $Adb "-s" $DeviceSerial "install" "-r" "-t" "-d" "-g" $AndroidTestApk
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

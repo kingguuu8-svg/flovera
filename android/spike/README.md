@@ -20,7 +20,7 @@ $env:JAVA_HOME='C:\Program Files\Android\Android Studio\jbr'
 $env:ANDROID_HOME='C:\Users\中二哲人\AppData\Local\Android\Sdk'
 $env:ANDROID_SDK_ROOT=$env:ANDROID_HOME
 $env:PATH="$env:JAVA_HOME\bin;$env:ANDROID_HOME\platform-tools;$env:PATH"
-.\gradlew.bat :app:assembleDebug :app:assembleDebugAndroidTest
+.\gradlew.bat :app:assembleFloveraDebug :app:assembleFloveraDebugAndroidTest :app:assembleLegacyDebug
 ```
 
 ## True-Device Verification
@@ -32,3 +32,8 @@ Run the standard verification gate from this directory:
 ```
 
 Use `-SkipDevice` for build-only verification, or `-SkipRelease` when iterating on debug-only UI/test changes.
+
+The verifier installs both Android package slots:
+
+- `com.flovera.app`
+- `com.example.ailinuxvmspike` for devices that still have the pre-rename flovera install.

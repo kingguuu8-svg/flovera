@@ -15,6 +15,18 @@ android {
         versionName = "1.0"
     }
 
+    flavorDimensions += "installSlot"
+    productFlavors {
+        create("flovera") {
+            dimension = "installSlot"
+            applicationId = "com.flovera.app"
+        }
+        create("legacy") {
+            dimension = "installSlot"
+            applicationId = "com.example.ailinuxvmspike"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
