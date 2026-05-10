@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.layout.Arrangement
@@ -799,15 +800,11 @@ private fun SessionsDialog(
               "Pinned / ${session.messages.size} messages"
             },
             active = session.id == state.session?.id,
+            onOpen = {
+              controller.openSession(session.id)
+              onDismiss()
+            },
             menuContent = { closeMenu ->
-              DropdownMenuItem(
-                text = { Text("Open") },
-                onClick = {
-                  closeMenu()
-                  controller.openSession(session.id)
-                  onDismiss()
-                },
-              )
               DropdownMenuItem(
                 text = { Text(if (session.pinnedAtMillis == null) "Pin" else "Unpin") },
                 onClick = {
@@ -867,12 +864,18 @@ private fun SessionListItem(
   title: String,
   subtitle: String,
   active: Boolean,
+  onOpen: () -> Unit,
   menuContent: @Composable (closeMenu: () -> Unit) -> Unit,
 ) {
   var menuOpen by remember { mutableStateOf(false) }
 
   Surface(
-    modifier = Modifier.fillMaxWidth(),
+    modifier = Modifier
+      .fillMaxWidth()
+      .clickable(onClick = onOpen)
+      .semantics {
+        contentDescription = "Open session $title"
+      },
     shape = RoundedCornerShape(8.dp),
     color = if (active) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
   ) {
@@ -978,9 +981,13 @@ private fun FilesDialog(
                   expandedPaths.value + path
                 }
               },
-              onOpenHtml = { path ->
-                controller.selectHtmlFile(path)
-                onDismiss()
+              onDefaultOpen = { path ->
+                if (path.endsWith(".html", ignoreCase = true)) {
+                  controller.selectHtmlFile(path)
+                  onDismiss()
+                } else {
+                  openWorkspaceFile(context, controller, path)
+                }
               },
               onOpenWith = { path -> openWorkspaceFile(context, controller, path) },
               onShare = { path -> shareWorkspaceFile(context, controller, path) },
@@ -1016,7 +1023,7 @@ private fun WorkspaceFileTreeNode(
   depth: Int,
   expandedPaths: Set<String>,
   onToggle: (String) -> Unit,
-  onOpenHtml: (String) -> Unit,
+  onDefaultOpen: (String) -> Unit,
   onOpenWith: (String) -> Unit,
   onShare: (String) -> Unit,
   onRename: (WorkspaceFileNode) -> Unit,
@@ -1033,7 +1040,11 @@ private fun WorkspaceFileTreeNode(
   ) {
     TextButton(
       onClick = {
-        if (node.isDirectory) onToggle(node.path)
+        if (node.isDirectory) {
+          onToggle(node.path)
+        } else {
+          onDefaultOpen(node.path)
+        }
       },
       modifier = Modifier.weight(1f),
     ) {
@@ -1055,15 +1066,6 @@ private fun WorkspaceFileTreeNode(
         Text("☰", style = MaterialTheme.typography.titleMedium)
       }
       DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-        if (!node.isDirectory && node.path.endsWith(".html", ignoreCase = true)) {
-          DropdownMenuItem(
-            text = { Text("Open in WebView") },
-            onClick = {
-              menuOpen = false
-              onOpenHtml(node.path)
-            },
-          )
-        }
         if (!node.isDirectory) {
           DropdownMenuItem(
             text = { Text("Open with...") },
@@ -1105,7 +1107,7 @@ private fun WorkspaceFileTreeNode(
         depth = depth + 1,
         expandedPaths = expandedPaths,
         onToggle = onToggle,
-        onOpenHtml = onOpenHtml,
+        onDefaultOpen = onDefaultOpen,
         onOpenWith = onOpenWith,
         onShare = onShare,
         onRename = onRename,
