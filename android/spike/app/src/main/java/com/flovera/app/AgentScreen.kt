@@ -81,6 +81,8 @@ private enum class AgentPanel {
   Settings,
 }
 
+private const val EmptyWebPrompt = "\u53ef\u9009\u62e9 HTML \u8fdb\u884c\u6253\u5f00"
+
 @Composable
 fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
   val state by controller.state.collectAsStateWithLifecycle()
@@ -188,7 +190,7 @@ private fun WorkspaceWebView(url: String?) {
         color = Color(0xFF101214),
       ) {}
       Text(
-        text = "鍙€夋嫨html杩涜鎵撳紑",
+        text = EmptyWebPrompt,
         color = Color(0xFFD7D9DD),
         style = MaterialTheme.typography.bodyLarge,
       )

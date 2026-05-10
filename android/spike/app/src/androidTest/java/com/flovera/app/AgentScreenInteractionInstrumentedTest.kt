@@ -7,6 +7,8 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import com.flovera.app.config.AppSettings
+import com.flovera.app.config.SettingsStore
 import com.flovera.app.session.AgentSessionStore
 import com.flovera.app.session.SessionMessage
 import org.junit.Assert.assertEquals
@@ -17,6 +19,19 @@ import org.junit.Test
 
 class AgentScreenInteractionInstrumentedTest {
   @get:Rule val composeRule = createAndroidComposeRule<ComponentActivity>()
+
+  @Test
+  fun defaultWebSurfaceShowsEmptyHtmlPrompt() {
+    val context = composeRule.activity.applicationContext
+    SettingsStore(context).save(AppSettings(selectedHtmlPath = ""))
+    val controller = AgentController(context)
+
+    composeRule.setContent {
+      AgentScreen(controller)
+    }
+
+    composeRule.onNodeWithText("\u53ef\u9009\u62e9 HTML \u8fdb\u884c\u6253\u5f00").assertIsDisplayed()
+  }
 
   @Test
   fun tappingSessionRowOpensSession() {
