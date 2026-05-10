@@ -2,6 +2,7 @@ package com.example.ailinuxvmspike
 
 import androidx.core.content.FileProvider
 import androidx.test.platform.app.InstrumentationRegistry
+import com.example.ailinuxvmspike.workspace.WorkspaceController
 import com.example.ailinuxvmspike.workspace.WorkspaceManager
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -32,5 +33,21 @@ class WorkspaceFileTreeInstrumentedTest {
     val result = workspace.rename("nested/page.html", "home.html")
     assertTrue(result.startsWith("Renamed"))
     assertTrue(workspace.listHtmlFiles().contains("nested/home.html"))
+  }
+
+  @Test
+  fun workspaceControllerSnapshotNormalizesHtmlSelection() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val controller = WorkspaceController(context, "workspace-controller-${System.currentTimeMillis()}")
+      .also { it.ensureSeedFiles() }
+
+    val initial = controller.snapshot("index.html")
+    assertEquals("index.html", initial.selectedHtmlPath)
+    assertNotNull(initial.selectedHtmlUrl)
+    assertTrue(initial.htmlFiles.contains("index.html"))
+
+    val missing = controller.snapshot("missing.html")
+    assertEquals("", missing.selectedHtmlPath)
+    assertEquals(null, missing.selectedHtmlUrl)
   }
 }

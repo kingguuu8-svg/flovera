@@ -12,8 +12,8 @@ import com.example.ailinuxvmspike.session.AgentSession
 import com.example.ailinuxvmspike.session.AgentSessionStore
 import com.example.ailinuxvmspike.session.SessionController
 import com.example.ailinuxvmspike.session.SessionMessage
+import com.example.ailinuxvmspike.workspace.WorkspaceController
 import com.example.ailinuxvmspike.workspace.WorkspaceFileNode
-import com.example.ailinuxvmspike.workspace.WorkspaceManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -48,24 +48,23 @@ class AgentController(context: Context) {
   private val sessionController = SessionController(AgentSessionStore(appContext))
   private val runtime = KoogAgentRuntime()
   private val agentScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-  private var workspace: WorkspaceManager
+  private var workspaceController: WorkspaceController
 
   private val _state = MutableStateFlow(AgentScreenState())
   val state: StateFlow<AgentScreenState> = _state
 
   init {
     val loadedSettings = settingsStore.load()
-    workspace = WorkspaceManager(appContext, loadedSettings.activeWorkspaceId).also { it.ensureSeedFiles() }
+    workspaceController = WorkspaceController(appContext, loadedSettings.activeWorkspaceId).also { it.ensureSeedFiles() }
     val session = sessionController.initialSession(loadedSettings.activeSessionId)
-    val htmlFiles = workspace.listHtmlFiles()
-    val selectedHtmlPath = chooseHtmlPath(loadedSettings.selectedHtmlPath, htmlFiles)
+    val workspaceSnapshot = workspaceController.snapshot(loadedSettings.selectedHtmlPath)
     val provider = ModelProviderCatalog.findProvider(loadedSettings.provider) ?: ModelProviderCatalog.defaultProvider
     val model = loadedSettings.model.ifBlank { provider.defaultModel }
     val settings = loadedSettings.copy(
       provider = provider.id,
       model = model,
       activeSessionId = session.id,
-      selectedHtmlPath = selectedHtmlPath,
+      selectedHtmlPath = workspaceSnapshot.selectedHtmlPath,
     )
     settingsStore.save(settings)
     _state.value = AgentScreenState(
@@ -76,12 +75,12 @@ class AgentController(context: Context) {
       providerDraft = provider.id,
       modelDraft = model,
       apiKeyDraft = settings.apiKeyFor(provider.id),
-      agentRulesDraft = workspace.readAgentRules(),
-      workspaceFiles = workspace.listFiles("."),
-      workspaceTree = workspace.fileTree(),
-      htmlFiles = htmlFiles,
-      selectedHtmlPath = selectedHtmlPath,
-      selectedHtmlUrl = workspace.displayUrl(selectedHtmlPath),
+      agentRulesDraft = workspaceController.readAgentRules(),
+      workspaceFiles = workspaceSnapshot.files,
+      workspaceTree = workspaceSnapshot.tree,
+      htmlFiles = workspaceSnapshot.htmlFiles,
+      selectedHtmlPath = workspaceSnapshot.selectedHtmlPath,
+      selectedHtmlUrl = workspaceSnapshot.selectedHtmlUrl,
       status = "Ready",
     )
   }
@@ -145,13 +144,8 @@ class AgentController(context: Context) {
 
   fun saveAgentRules() {
     val current = _state.value
-    workspace.writeFile("AGENT.md", current.agentRulesDraft)
-    _state.update {
-      it.copy(
-        workspaceFiles = workspace.listFiles("."),
-        status = "AGENT.md saved",
-      )
-    }
+    workspaceController.writeAgentRules(current.agentRulesDraft)
+    refreshWorkspaceState(status = "AGENT.md saved")
   }
 
   fun selectHtmlFile(path: String) {
@@ -166,16 +160,16 @@ class AgentController(context: Context) {
   }
 
   fun renameWorkspacePath(path: String, newName: String) {
-    val status = workspace.rename(path, newName)
+    val status = workspaceController.rename(path, newName)
     refreshWorkspaceState(status = status)
   }
 
   fun workspaceFileUri(path: String): Uri? {
-    val file = workspace.exportableFile(path) ?: return null
+    val file = workspaceController.exportableFile(path) ?: return null
     return FileProvider.getUriForFile(appContext, "${appContext.packageName}.workspacefiles", file)
   }
 
-  fun workspaceMimeType(path: String): String = workspace.mimeType(path)
+  fun workspaceMimeType(path: String): String = workspaceController.mimeType(path)
 
   fun newSession() {
     val session = sessionController.createSession()
@@ -187,7 +181,7 @@ class AgentController(context: Context) {
         session = session,
         sessions = sessionController.listActive(),
         archivedSessions = sessionController.listArchived(),
-        agentRulesDraft = workspace.readAgentRules(),
+        agentRulesDraft = workspaceController.readAgentRules(),
         input = "",
         status = "New session created",
       )
@@ -204,7 +198,7 @@ class AgentController(context: Context) {
         session = session,
         sessions = sessionController.listActive(),
         archivedSessions = sessionController.listArchived(),
-        agentRulesDraft = workspace.readAgentRules(),
+        agentRulesDraft = workspaceController.readAgentRules(),
         status = "Session loaded",
       )
     }
@@ -314,7 +308,7 @@ class AgentController(context: Context) {
         input = input,
         settings = current.settings,
         session = withUser,
-        workspace = workspace,
+        workspace = workspaceController.runtimeWorkspace(),
         recorder = recorder,
       )
     }
@@ -338,9 +332,8 @@ class AgentController(context: Context) {
     isRunning: Boolean = _state.value.isRunning,
     status: String = _state.value.status,
   ) {
-    val htmlFiles = workspace.listHtmlFiles()
-    val selectedHtmlPath = chooseHtmlPath(settings.selectedHtmlPath, htmlFiles)
-    val normalizedSettings = settings.copy(selectedHtmlPath = selectedHtmlPath)
+    val workspaceSnapshot = workspaceController.snapshot(settings.selectedHtmlPath)
+    val normalizedSettings = settings.copy(selectedHtmlPath = workspaceSnapshot.selectedHtmlPath)
     if (normalizedSettings != settings) settingsStore.save(normalizedSettings)
     _state.update {
       it.copy(
@@ -348,11 +341,11 @@ class AgentController(context: Context) {
         session = session,
         sessions = sessionController.listActive(),
         archivedSessions = sessionController.listArchived(),
-        workspaceFiles = workspace.listFiles("."),
-        workspaceTree = workspace.fileTree(),
-        htmlFiles = htmlFiles,
-        selectedHtmlPath = selectedHtmlPath,
-        selectedHtmlUrl = workspace.displayUrl(selectedHtmlPath),
+        workspaceFiles = workspaceSnapshot.files,
+        workspaceTree = workspaceSnapshot.tree,
+        htmlFiles = workspaceSnapshot.htmlFiles,
+        selectedHtmlPath = workspaceSnapshot.selectedHtmlPath,
+        selectedHtmlUrl = workspaceSnapshot.selectedHtmlUrl,
         isRunning = isRunning,
         assistantDraft = if (isRunning) it.assistantDraft else null,
         status = status,
@@ -366,10 +359,4 @@ class AgentController(context: Context) {
     refreshWorkspaceState(settings = settings, session = session, isRunning = false, status = status)
   }
 
-  private fun chooseHtmlPath(current: String, htmlFiles: List<String>): String {
-    return when {
-      current in htmlFiles -> current
-      else -> ""
-    }
-  }
 }
