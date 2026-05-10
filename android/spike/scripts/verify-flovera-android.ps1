@@ -63,8 +63,20 @@ try {
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
   & $Adb "-s" $DeviceSerial "install" "-r" "-t" "-d" "-g" $AndroidTestApk
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-  & $Adb "-s" $DeviceSerial "shell" "am" "instrument" "-w" "-r" "com.flovera.app.test/androidx.test.runner.AndroidJUnitRunner"
+  $InstrumentationOutput = & $Adb "-s" $DeviceSerial "shell" "am" "instrument" "-w" "-r" "com.flovera.app.test/androidx.test.runner.AndroidJUnitRunner" 2>&1
+  $InstrumentationOutput | ForEach-Object { Write-Host $_ }
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  $InstrumentationText = $InstrumentationOutput -join "`n"
+  if ($InstrumentationText -match "FAILURES!!!" -or
+      $InstrumentationText -match "There were \d+ failures" -or
+      $InstrumentationText -match "INSTRUMENTATION_STATUS_CODE: -2" -or
+      $InstrumentationText -match "INSTRUMENTATION_RESULT: shortMsg=") {
+    exit 1
+  }
+  if ($InstrumentationText -notmatch "OK \(\d+ tests\)") {
+    Write-Error "Instrumentation finished without an OK test summary."
+    exit 1
+  }
 } finally {
   Pop-Location
 }
