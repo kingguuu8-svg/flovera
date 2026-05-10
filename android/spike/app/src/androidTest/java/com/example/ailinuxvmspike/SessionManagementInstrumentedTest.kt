@@ -46,6 +46,27 @@ class SessionManagementInstrumentedTest {
   }
 
   @Test
+  fun storeSortsPinnedSessionsFirstThenByLatestUpdate() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val store = AgentSessionStore(context)
+    val suffix = System.currentTimeMillis()
+    val olderPinned = store.create("Older pinned $suffix")
+    val newerPinned = store.create("Newer pinned $suffix")
+    val newestUnpinned = store.create("Newest unpinned $suffix")
+    val ids = setOf(olderPinned.id, newerPinned.id, newestUnpinned.id)
+
+    store.save(olderPinned.copy(updatedAtMillis = 1_000L, pinnedAtMillis = 3_000L))
+    store.save(newerPinned.copy(updatedAtMillis = 2_000L, pinnedAtMillis = 1_000L))
+    store.save(newestUnpinned.copy(updatedAtMillis = 3_000L, pinnedAtMillis = null))
+
+    val orderedIds = store.list()
+      .filter { it.id in ids }
+      .map { it.id }
+
+    assertEquals(listOf(newerPinned.id, olderPinned.id, newestUnpinned.id), orderedIds)
+  }
+
+  @Test
   fun controllerArchivesActiveSessionAndSwitchesToUsableSession() {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val controller = AgentController(context)

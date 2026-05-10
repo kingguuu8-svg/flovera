@@ -163,7 +163,7 @@ class AgentSessionStore(context: Context) {
   private fun fileFor(id: String): File = File(root, "$id.json")
 
   private companion object {
-    val sessionSort = compareByDescending<AgentSession> { it.pinnedAtMillis ?: 0L }
+    val sessionSort = compareByDescending<AgentSession> { it.pinnedAtMillis != null }
       .thenByDescending { it.updatedAtMillis }
   }
 }
