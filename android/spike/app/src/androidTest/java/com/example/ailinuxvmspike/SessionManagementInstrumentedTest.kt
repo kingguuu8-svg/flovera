@@ -2,6 +2,7 @@ package com.example.ailinuxvmspike
 
 import androidx.test.platform.app.InstrumentationRegistry
 import com.example.ailinuxvmspike.session.AgentSessionStore
+import com.example.ailinuxvmspike.session.SessionController
 import com.example.ailinuxvmspike.session.SessionMessage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
@@ -101,6 +102,37 @@ class SessionManagementInstrumentedTest {
     controller.revertSessionToMessage(1)
 
     val reverted = controller.state.value.session
+    assertEquals(1, reverted?.messages?.size)
+    assertEquals("one", reverted?.messages?.single()?.content)
+  }
+
+  @Test
+  fun sessionControllerFallsBackWhenSavedSessionIsArchived() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val store = AgentSessionStore(context)
+    val controller = SessionController(store)
+    val suffix = System.currentTimeMillis()
+    val archived = store.create("Archived active $suffix")
+    store.archive(archived.id)
+
+    val selected = controller.initialSession(archived.id)
+
+    assertNotEquals(archived.id, selected.id)
+    assertEquals(null, selected.archivedAtMillis)
+  }
+
+  @Test
+  fun sessionControllerRevertsBeforeSelectedMessage() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val store = AgentSessionStore(context)
+    val controller = SessionController(store)
+    val session = store.create("Controller revert ${System.currentTimeMillis()}")
+    val one = controller.appendMessage(session, SessionMessage(role = "user", content = "one"))
+    val two = controller.appendMessage(one, SessionMessage(role = "assistant", content = "two"))
+    controller.appendMessage(two, SessionMessage(role = "user", content = "three"))
+
+    val reverted = controller.revertToBeforeMessage(session.id, 1)
+
     assertEquals(1, reverted?.messages?.size)
     assertEquals("one", reverted?.messages?.single()?.content)
   }

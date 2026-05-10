@@ -10,6 +10,7 @@ import com.example.ailinuxvmspike.koog.ModelProviderCatalog
 import com.example.ailinuxvmspike.koog.ToolEventRecorder
 import com.example.ailinuxvmspike.session.AgentSession
 import com.example.ailinuxvmspike.session.AgentSessionStore
+import com.example.ailinuxvmspike.session.SessionController
 import com.example.ailinuxvmspike.session.SessionMessage
 import com.example.ailinuxvmspike.workspace.WorkspaceFileNode
 import com.example.ailinuxvmspike.workspace.WorkspaceManager
@@ -44,7 +45,7 @@ data class AgentScreenState(
 class AgentController(context: Context) {
   private val appContext = context.applicationContext
   private val settingsStore = SettingsStore(appContext)
-  private val sessionStore = AgentSessionStore(appContext)
+  private val sessionController = SessionController(AgentSessionStore(appContext))
   private val runtime = KoogAgentRuntime()
   private val agentScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
   private var workspace: WorkspaceManager
@@ -55,12 +56,7 @@ class AgentController(context: Context) {
   init {
     val loadedSettings = settingsStore.load()
     workspace = WorkspaceManager(appContext, loadedSettings.activeWorkspaceId).also { it.ensureSeedFiles() }
-    val loadedSession = loadedSettings.activeSessionId?.let { sessionStore.load(it) }
-    val session = if (loadedSession?.archivedAtMillis == null) {
-      loadedSession ?: sessionStore.list().firstOrNull() ?: sessionStore.create("Default")
-    } else {
-      sessionStore.list().firstOrNull() ?: sessionStore.create("Default")
-    }
+    val session = sessionController.initialSession(loadedSettings.activeSessionId)
     val htmlFiles = workspace.listHtmlFiles()
     val selectedHtmlPath = chooseHtmlPath(loadedSettings.selectedHtmlPath, htmlFiles)
     val provider = ModelProviderCatalog.findProvider(loadedSettings.provider) ?: ModelProviderCatalog.defaultProvider
@@ -75,8 +71,8 @@ class AgentController(context: Context) {
     _state.value = AgentScreenState(
       settings = settings,
       session = session,
-      sessions = sessionStore.list(),
-      archivedSessions = sessionStore.listArchived(),
+      sessions = sessionController.listActive(),
+      archivedSessions = sessionController.listArchived(),
       providerDraft = provider.id,
       modelDraft = model,
       apiKeyDraft = settings.apiKeyFor(provider.id),
@@ -182,15 +178,15 @@ class AgentController(context: Context) {
   fun workspaceMimeType(path: String): String = workspace.mimeType(path)
 
   fun newSession() {
-    val session = sessionStore.create("Session ${sessionStore.list().size + 1}")
+    val session = sessionController.createSession()
     val settings = _state.value.settings.copy(activeSessionId = session.id)
     settingsStore.save(settings)
     _state.update {
       it.copy(
         settings = settings,
         session = session,
-        sessions = sessionStore.list(),
-        archivedSessions = sessionStore.listArchived(),
+        sessions = sessionController.listActive(),
+        archivedSessions = sessionController.listArchived(),
         agentRulesDraft = workspace.readAgentRules(),
         input = "",
         status = "New session created",
@@ -199,16 +195,15 @@ class AgentController(context: Context) {
   }
 
   fun openSession(sessionId: String) {
-    val session = sessionStore.load(sessionId) ?: return
-    if (session.archivedAtMillis != null) return
+    val session = sessionController.openSession(sessionId) ?: return
     val settings = _state.value.settings.copy(activeSessionId = session.id)
     settingsStore.save(settings)
     _state.update {
       it.copy(
         settings = settings,
         session = session,
-        sessions = sessionStore.list(),
-        archivedSessions = sessionStore.listArchived(),
+        sessions = sessionController.listActive(),
+        archivedSessions = sessionController.listArchived(),
         agentRulesDraft = workspace.readAgentRules(),
         status = "Session loaded",
       )
@@ -216,34 +211,34 @@ class AgentController(context: Context) {
   }
 
   fun renameSession(sessionId: String, title: String) {
-    val renamed = sessionStore.rename(sessionId, title) ?: return
+    val renamed = sessionController.renameSession(sessionId, title) ?: return
     val active = if (_state.value.session?.id == renamed.id) renamed else _state.value.session
     _state.update {
       it.copy(
         session = active,
-        sessions = sessionStore.list(),
-        archivedSessions = sessionStore.listArchived(),
+        sessions = sessionController.listActive(),
+        archivedSessions = sessionController.listArchived(),
         status = "Session renamed",
       )
     }
   }
 
   fun duplicateSession(sessionId: String) {
-    val copy = sessionStore.duplicate(sessionId) ?: return
+    val copy = sessionController.duplicateSession(sessionId) ?: return
     activateSession(copy, "Session copied")
   }
 
   fun archiveSession(sessionId: String) {
-    sessionStore.archive(sessionId) ?: return
+    sessionController.archiveSession(sessionId) ?: return
     val current = _state.value
     if (current.session?.id == sessionId) {
-      val next = sessionStore.list().firstOrNull() ?: sessionStore.create("Default")
+      val next = sessionController.nextUsableSession()
       activateSession(next, "Session archived")
     } else {
       _state.update {
         it.copy(
-          sessions = sessionStore.list(),
-          archivedSessions = sessionStore.listArchived(),
+          sessions = sessionController.listActive(),
+          archivedSessions = sessionController.listArchived(),
           status = "Session archived",
         )
       }
@@ -251,18 +246,18 @@ class AgentController(context: Context) {
   }
 
   fun restoreSession(sessionId: String) {
-    val restored = sessionStore.restore(sessionId) ?: return
+    val restored = sessionController.restoreSession(sessionId) ?: return
     activateSession(restored, "Session restored")
   }
 
   fun setSessionPinned(sessionId: String, pinned: Boolean) {
-    val updated = sessionStore.setPinned(sessionId, pinned) ?: return
+    val updated = sessionController.setSessionPinned(sessionId, pinned) ?: return
     val active = if (_state.value.session?.id == updated.id) updated else _state.value.session
     _state.update {
       it.copy(
         session = active,
-        sessions = sessionStore.list(),
-        archivedSessions = sessionStore.listArchived(),
+        sessions = sessionController.listActive(),
+        archivedSessions = sessionController.listArchived(),
         status = if (pinned) "Session pinned" else "Session unpinned",
       )
     }
@@ -272,7 +267,7 @@ class AgentController(context: Context) {
     val current = _state.value
     if (current.isRunning) return
     val session = current.session ?: return
-    val restored = sessionStore.truncateMessages(session.id, messageIndex) ?: return
+    val restored = sessionController.revertToBeforeMessage(session.id, messageIndex) ?: return
     refreshWorkspaceState(
       session = restored,
       isRunning = false,
@@ -294,8 +289,8 @@ class AgentController(context: Context) {
         assistantDraft = SessionMessage(role = "assistant", content = "Working..."),
       )
     }
-    val withUser = sessionStore.appendMessage(session, SessionMessage(role = "user", content = input))
-    _state.update { it.copy(session = withUser, sessions = sessionStore.list()) }
+    val withUser = sessionController.appendMessage(session, SessionMessage(role = "user", content = input))
+    _state.update { it.copy(session = withUser, sessions = sessionController.listActive()) }
 
     agentScope.launch {
       runAgentLoop(current, withUser, input)
@@ -332,7 +327,7 @@ class AgentController(context: Context) {
         SessionMessage(role = "error", content = error.message ?: error.toString(), toolEvents = recorder.snapshot())
       },
     )
-    val updated = sessionStore.appendMessage(withUser, assistantMessage)
+    val updated = sessionController.appendMessage(withUser, assistantMessage)
     val status = if (result.isSuccess) "Agent loop completed" else "Agent loop failed"
     refreshWorkspaceState(session = updated, isRunning = false, status = status)
   }
@@ -351,8 +346,8 @@ class AgentController(context: Context) {
       it.copy(
         settings = normalizedSettings,
         session = session,
-        sessions = sessionStore.list(),
-        archivedSessions = sessionStore.listArchived(),
+        sessions = sessionController.listActive(),
+        archivedSessions = sessionController.listArchived(),
         workspaceFiles = workspace.listFiles("."),
         workspaceTree = workspace.fileTree(),
         htmlFiles = htmlFiles,
