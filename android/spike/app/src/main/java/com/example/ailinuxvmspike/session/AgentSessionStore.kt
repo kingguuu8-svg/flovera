@@ -144,6 +144,17 @@ class AgentSessionStore(context: Context) {
     return updated
   }
 
+  fun truncateMessages(id: String, messageCount: Int): AgentSession? {
+    val session = load(id) ?: return null
+    val normalizedCount = messageCount.coerceIn(0, session.messages.size)
+    val updated = session.copy(
+      updatedAtMillis = System.currentTimeMillis(),
+      messages = session.messages.take(normalizedCount),
+    )
+    save(updated)
+    return updated
+  }
+
   fun save(session: AgentSession) {
     root.mkdirs()
     fileFor(session.id).writeText(json.encodeToString(session))

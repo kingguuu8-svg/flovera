@@ -263,6 +263,18 @@ class AgentController(context: Context) {
     }
   }
 
+  fun revertSessionToMessage(messageIndex: Int) {
+    val current = _state.value
+    if (current.isRunning) return
+    val session = current.session ?: return
+    val restored = sessionStore.truncateMessages(session.id, messageIndex + 1) ?: return
+    refreshWorkspaceState(
+      session = restored,
+      isRunning = false,
+      status = "Conversation reverted",
+    )
+  }
+
   suspend fun submit() {
     val current = _state.value
     val session = current.session ?: return

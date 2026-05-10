@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,7 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -35,6 +36,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -60,7 +62,11 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ailinuxvmspike.koog.ModelProviderCatalog
 import com.example.ailinuxvmspike.session.SessionMessage
+import com.example.ailinuxvmspike.session.ToolEvent
 import com.example.ailinuxvmspike.workspace.WorkspaceFileNode
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlinx.coroutines.launch
 
 private enum class AgentPanel {
@@ -224,6 +230,15 @@ private fun ConversationDialog(
   onDismiss: () -> Unit,
 ) {
   val scope = rememberCoroutineScope()
+  val listState = rememberLazyListState()
+  val messages = state.session?.messages.orEmpty()
+  val visibleMessageCount = messages.size + if (state.assistantDraft == null) 0 else 1
+
+  LaunchedEffect(state.session?.id, visibleMessageCount) {
+    if (visibleMessageCount > 0) {
+      listState.scrollToItem(visibleMessageCount - 1)
+    }
+  }
 
   Dialog(
     onDismissRequest = onDismiss,
@@ -259,9 +274,9 @@ private fun ConversationDialog(
 
         LazyColumn(
           modifier = Modifier.fillMaxWidth().weight(1f),
+          state = listState,
           verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-          val messages = state.session?.messages.orEmpty()
           if (messages.isEmpty()) {
             item {
               Text(
@@ -271,12 +286,18 @@ private fun ConversationDialog(
               )
             }
           } else {
-            items(messages) { message ->
-              MessageBubble(message)
+            itemsIndexed(
+              items = messages,
+              key = { index, message -> "${message.timestampMillis}-${message.role}-$index" },
+            ) { index, message ->
+              MessageBubble(
+                message = message,
+                onRevert = if (state.isRunning) null else ({ controller.revertSessionToMessage(index) }),
+              )
             }
             state.assistantDraft?.let { draft ->
-              item {
-                MessageBubble(draft)
+              item(key = "assistant-draft") {
+                MessageBubble(message = draft, onRevert = null)
               }
             }
           }
@@ -323,7 +344,10 @@ private fun ConversationDialog(
 }
 
 @Composable
-private fun MessageBubble(message: SessionMessage) {
+private fun MessageBubble(
+  message: SessionMessage,
+  onRevert: (() -> Unit)?,
+) {
   val isUser = message.role == "user"
   val isError = message.role == "error"
   val horizontal = if (isUser) Arrangement.End else Arrangement.Start
@@ -355,27 +379,67 @@ private fun MessageBubble(message: SessionMessage) {
           modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
           verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-          Text(
-            text = when {
-              isUser -> "You"
-              isError -> "Error"
-              else -> "Assistant"
-            },
-            color = textColor.copy(alpha = 0.72f),
-            style = MaterialTheme.typography.labelSmall,
-          )
-          MarkdownMessageText(content = message.content, color = textColor)
-          message.toolEvents.forEach { event ->
-            Surface(shape = RoundedCornerShape(10.dp), color = textColor.copy(alpha = 0.10f)) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            Column {
               Text(
-                text = "${event.name}: ${event.result}",
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
-                color = textColor,
-                fontFamily = FontFamily.Monospace,
-                style = MaterialTheme.typography.bodySmall,
+                text = when {
+                  isUser -> "You"
+                  isError -> "Error"
+                  else -> "Assistant"
+                },
+                color = textColor.copy(alpha = 0.72f),
+                style = MaterialTheme.typography.labelSmall,
+              )
+              Text(
+                text = formatMessageTime(message.timestampMillis),
+                color = textColor.copy(alpha = 0.58f),
+                style = MaterialTheme.typography.labelSmall,
               )
             }
+            onRevert?.let {
+              TextButton(onClick = it) {
+                Text("Revert", color = textColor.copy(alpha = 0.82f), style = MaterialTheme.typography.labelSmall)
+              }
+            }
           }
+          MarkdownMessageText(content = message.content, color = textColor)
+          ToolEventsSummary(events = message.toolEvents, color = textColor)
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun ToolEventsSummary(events: List<ToolEvent>, color: Color) {
+  if (events.isEmpty()) return
+  var expanded by remember(events.size) { mutableStateOf(false) }
+  val summary = events.joinToString(", ") { it.name }
+
+  Surface(shape = RoundedCornerShape(10.dp), color = color.copy(alpha = 0.10f)) {
+    Column(
+      modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 5.dp),
+      verticalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+      TextButton(onClick = { expanded = !expanded }) {
+        Text(
+          text = if (expanded) "Hide tool calls (${events.size})" else "Tool calls (${events.size}): $summary",
+          color = color,
+          style = MaterialTheme.typography.bodySmall,
+        )
+      }
+      if (expanded) {
+        events.forEach { event ->
+          Text(
+            text = "${event.name} @ ${formatMessageTime(event.timestampMillis)}\nargs: ${event.args}\nresult: ${event.result}",
+            color = color,
+            fontFamily = FontFamily.Monospace,
+            style = MaterialTheme.typography.bodySmall,
+          )
         }
       }
     }
@@ -384,8 +448,9 @@ private fun MessageBubble(message: SessionMessage) {
 
 @Composable
 private fun MarkdownMessageText(content: String, color: Color) {
+  val blocks = remember(content) { parseMarkdownBlocks(content) }
   Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-    parseMarkdownBlocks(content).forEach { block ->
+    blocks.forEach { block ->
       when (block) {
         is MarkdownBlock.Heading -> Text(
           text = block.text,
@@ -432,6 +497,10 @@ private fun MarkdownMessageText(content: String, color: Color) {
       }
     }
   }
+}
+
+private fun formatMessageTime(timestampMillis: Long): String {
+  return SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(timestampMillis))
 }
 
 private sealed interface MarkdownBlock {

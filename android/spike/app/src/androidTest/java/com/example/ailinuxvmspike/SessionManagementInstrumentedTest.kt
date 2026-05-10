@@ -67,4 +67,20 @@ class SessionManagementInstrumentedTest {
     assertNotEquals(duplicate.id, afterArchive.session?.id)
     assertTrue(afterArchive.archivedSessions.any { it.id == duplicate.id })
   }
+
+  @Test
+  fun storeCanTruncateConversationHistory() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val store = AgentSessionStore(context)
+    val session = store.create("Truncate ${System.currentTimeMillis()}")
+    val one = store.appendMessage(session, SessionMessage(role = "user", content = "one"))
+    val two = store.appendMessage(one, SessionMessage(role = "assistant", content = "two"))
+    val three = store.appendMessage(two, SessionMessage(role = "user", content = "three"))
+
+    val truncated = store.truncateMessages(three.id, 2)
+
+    assertEquals(2, truncated?.messages?.size)
+    assertEquals("two", truncated?.messages?.last()?.content)
+    assertEquals(2, store.load(three.id)?.messages?.size)
+  }
 }
