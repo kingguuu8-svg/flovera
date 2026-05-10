@@ -15,6 +15,8 @@ fun workspaceToolRegistry(
   tool(ReadFileTool(workspace, recorder))
   tool(WriteFileTool(workspace, recorder))
   tool(EditFileTool(workspace, recorder))
+  tool(FetchUrlTool(recorder))
+  tool(DownloadFileTool(workspace, recorder))
 }
 
 class ListFilesTool(

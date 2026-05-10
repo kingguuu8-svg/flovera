@@ -149,6 +149,14 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     return "Wrote ${content.length} chars to ${relativeToRoot(file)}"
   }
 
+  fun writeBytes(path: String, content: ByteArray, overwrite: Boolean = true): String {
+    val file = safeFile(path)
+    if (file.exists() && !overwrite) return "File already exists: ${relativeToRoot(file)}"
+    file.parentFile?.mkdirs()
+    file.writeBytes(content)
+    return "Wrote ${content.size} bytes to ${relativeToRoot(file)}"
+  }
+
   fun editFile(path: String, oldText: String, newText: String): String {
     val file = safeFile(path)
     if (!file.exists() || !file.isFile) return "File does not exist: $path"
