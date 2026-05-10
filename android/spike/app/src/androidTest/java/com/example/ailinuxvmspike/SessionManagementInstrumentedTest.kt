@@ -83,4 +83,25 @@ class SessionManagementInstrumentedTest {
     assertEquals("two", truncated?.messages?.last()?.content)
     assertEquals(2, store.load(three.id)?.messages?.size)
   }
+
+  @Test
+  fun controllerRevertExcludesSelectedMessage() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val controller = AgentController(context)
+    controller.newSession()
+    val session = controller.state.value.session
+    assertNotNull(session)
+
+    val store = AgentSessionStore(context)
+    val one = store.appendMessage(session!!, SessionMessage(role = "user", content = "one"))
+    val two = store.appendMessage(one, SessionMessage(role = "assistant", content = "two"))
+    store.appendMessage(two, SessionMessage(role = "user", content = "three"))
+
+    controller.openSession(session.id)
+    controller.revertSessionToMessage(1)
+
+    val reverted = controller.state.value.session
+    assertEquals(1, reverted?.messages?.size)
+    assertEquals("one", reverted?.messages?.single()?.content)
+  }
 }

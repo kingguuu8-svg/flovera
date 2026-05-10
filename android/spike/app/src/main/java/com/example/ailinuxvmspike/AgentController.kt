@@ -267,7 +267,7 @@ class AgentController(context: Context) {
     val current = _state.value
     if (current.isRunning) return
     val session = current.session ?: return
-    val restored = sessionStore.truncateMessages(session.id, messageIndex + 1) ?: return
+    val restored = sessionStore.truncateMessages(session.id, messageIndex) ?: return
     refreshWorkspaceState(
       session = restored,
       isRunning = false,

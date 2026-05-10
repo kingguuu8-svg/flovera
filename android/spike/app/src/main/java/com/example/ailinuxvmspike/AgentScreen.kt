@@ -233,6 +233,7 @@ private fun ConversationDialog(
   val listState = rememberLazyListState()
   val messages = state.session?.messages.orEmpty()
   val visibleMessageCount = messages.size + if (state.assistantDraft == null) 0 else 1
+  var pendingRevertIndex by remember { mutableStateOf<Int?>(null) }
 
   LaunchedEffect(state.session?.id, visibleMessageCount) {
     if (visibleMessageCount > 0) {
@@ -292,7 +293,7 @@ private fun ConversationDialog(
             ) { index, message ->
               MessageBubble(
                 message = message,
-                onRevert = if (state.isRunning) null else ({ controller.revertSessionToMessage(index) }),
+                onRevert = if (state.isRunning) null else ({ pendingRevertIndex = index }),
               )
             }
             state.assistantDraft?.let { draft ->
@@ -340,6 +341,29 @@ private fun ConversationDialog(
         }
       }
     }
+  }
+
+  pendingRevertIndex?.let { index ->
+    AlertDialog(
+      onDismissRequest = { pendingRevertIndex = null },
+      title = { Text("Revert conversation?") },
+      text = { Text("This will remove the selected message and all messages after it.") },
+      confirmButton = {
+        TextButton(
+          onClick = {
+            controller.revertSessionToMessage(index)
+            pendingRevertIndex = null
+          },
+        ) {
+          Text("Revert")
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { pendingRevertIndex = null }) {
+          Text("Cancel")
+        }
+      },
+    )
   }
 }
 
@@ -401,8 +425,13 @@ private fun MessageBubble(
               )
             }
             onRevert?.let {
-              TextButton(onClick = it) {
-                Text("Revert", color = textColor.copy(alpha = 0.82f), style = MaterialTheme.typography.labelSmall)
+              IconButton(
+                onClick = it,
+                modifier = Modifier.semantics {
+                  contentDescription = "Revert to before this message"
+                },
+              ) {
+                Text("↩", color = textColor.copy(alpha = 0.82f), style = MaterialTheme.typography.titleMedium)
               }
             }
           }
