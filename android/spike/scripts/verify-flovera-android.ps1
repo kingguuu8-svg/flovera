@@ -107,10 +107,16 @@ try {
 
   $FloveraDebugApk = Join-Path $ProjectRoot "app\build\outputs\apk\flovera\debug\app-flovera-debug.apk"
   $LegacyDebugApk = Join-Path $ProjectRoot "app\build\outputs\apk\legacy\debug\app-legacy-debug.apk"
+  $FloveraReleaseApk = Join-Path $ProjectRoot "app\build\outputs\apk\flovera\release\app-flovera-release-unsigned.apk"
+  $LegacyReleaseApk = Join-Path $ProjectRoot "app\build\outputs\apk\legacy\release\app-legacy-release-unsigned.apk"
   $AndroidTestApk = Join-Path $ProjectRoot "app\build\outputs\apk\androidTest\flovera\debug\app-flovera-debug-androidTest.apk"
   $Aapt = Find-Aapt
   Assert-ApkLabel -AaptPath $Aapt -ApkPath $FloveraDebugApk -ExpectedLabel "Flovera"
   Assert-ApkLabel -AaptPath $Aapt -ApkPath $LegacyDebugApk -ExpectedLabel "Flovera legacy"
+  if (-not $SkipRelease) {
+    Assert-ApkLabel -AaptPath $Aapt -ApkPath $FloveraReleaseApk -ExpectedLabel "Flovera"
+    Assert-ApkLabel -AaptPath $Aapt -ApkPath $LegacyReleaseApk -ExpectedLabel "Flovera legacy"
+  }
 
   if ($SkipDevice) {
     Write-Host "Device verification skipped."
