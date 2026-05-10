@@ -48,6 +48,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
@@ -794,6 +795,7 @@ private fun SessionsDialog(
         }
         state.sessions.forEach { session ->
           SessionListItem(
+            sessionId = session.id,
             title = session.title,
             subtitle = if (session.pinnedAtMillis == null) {
               "${session.messages.size} messages"
@@ -862,6 +864,7 @@ private data class SessionMessageTarget(val id: String, val title: String)
 
 @Composable
 private fun SessionListItem(
+  sessionId: String,
   title: String,
   subtitle: String,
   active: Boolean,
@@ -873,6 +876,7 @@ private fun SessionListItem(
   Surface(
     modifier = Modifier
       .fillMaxWidth()
+      .testTag("open-session-$sessionId")
       .clickable(onClick = onOpen)
       .semantics {
         contentDescription = "Open session $title"

@@ -4,7 +4,9 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.flovera.app.session.AgentSessionStore
 import com.flovera.app.session.SessionController
 import com.flovera.app.session.SessionMessage
+import java.io.File
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -64,6 +66,20 @@ class SessionManagementInstrumentedTest {
       .map { it.id }
 
     assertEquals(listOf(newerPinned.id, olderPinned.id, newestUnpinned.id), orderedIds)
+  }
+
+  @Test
+  fun sessionStoreWritesJsonWithoutLeavingAtomicTempFiles() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val store = AgentSessionStore(context)
+    val session = store.create("Atomic ${System.currentTimeMillis()}")
+    val updated = store.appendMessage(session, SessionMessage(role = "user", content = "persist me"))
+    val sessionFile = File(File(context.filesDir, "sessions"), "${session.id}.json")
+
+    assertEquals(updated.messages, store.load(session.id)?.messages)
+    assertTrue(sessionFile.isFile)
+    assertFalse(File(sessionFile.absolutePath + ".new").exists())
+    assertFalse(File(sessionFile.absolutePath + ".bak").exists())
   }
 
   @Test

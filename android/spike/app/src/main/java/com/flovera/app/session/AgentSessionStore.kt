@@ -1,6 +1,8 @@
 package com.flovera.app.session
 
 import android.content.Context
+import com.flovera.app.storage.readUtf8Text
+import com.flovera.app.storage.writeUtf8TextAtomically
 import java.io.File
 import java.util.UUID
 import kotlinx.serialization.Serializable
@@ -57,13 +59,13 @@ class AgentSessionStore(context: Context) {
   fun load(id: String): AgentSession? {
     val file = fileFor(id)
     if (!file.exists()) return null
-    return runCatching { json.decodeFromString<AgentSession>(file.readText()) }.getOrNull()
+    return runCatching { json.decodeFromString<AgentSession>(readUtf8Text(file)) }.getOrNull()
   }
 
   fun list(includeArchived: Boolean = false): List<AgentSession> {
     if (!root.exists()) return emptyList()
     return root.listFiles { file -> file.extension == "json" }
-      ?.mapNotNull { runCatching { json.decodeFromString<AgentSession>(it.readText()) }.getOrNull() }
+      ?.mapNotNull { runCatching { json.decodeFromString<AgentSession>(readUtf8Text(it)) }.getOrNull() }
       ?.filter { includeArchived || it.archivedAtMillis == null }
       ?.sortedWith(sessionSort)
       ?: emptyList()
@@ -156,8 +158,7 @@ class AgentSessionStore(context: Context) {
   }
 
   fun save(session: AgentSession) {
-    root.mkdirs()
-    fileFor(session.id).writeText(json.encodeToString(session))
+    writeUtf8TextAtomically(fileFor(session.id), json.encodeToString(session))
   }
 
   private fun fileFor(id: String): File = File(root, "$id.json")

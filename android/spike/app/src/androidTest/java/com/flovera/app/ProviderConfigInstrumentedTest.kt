@@ -6,6 +6,7 @@ import com.flovera.app.config.ModelSettingsDraft
 import com.flovera.app.config.SettingsController
 import com.flovera.app.config.SettingsStore
 import com.flovera.app.koog.ModelProviderCatalog
+import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -61,6 +62,24 @@ class ProviderConfigInstrumentedTest {
       assertEquals("openai", saved.provider)
       assertEquals(ModelProviderCatalog.findProvider("openai")?.defaultModel, saved.model)
       assertEquals("openai-key", saved.apiKeyFor("openai"))
+    } finally {
+      store.save(original)
+    }
+  }
+
+  @Test
+  fun settingsStoreWritesJsonWithoutLeavingAtomicTempFiles() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val store = SettingsStore(context)
+    val settingsFile = File(context.filesDir, "settings.json")
+    val original = store.load()
+    try {
+      store.save(AppSettings(apiKey = "atomic-key", provider = "deepseek", model = "deepseek-chat"))
+
+      assertEquals("atomic-key", store.load().apiKeyFor("deepseek"))
+      assertTrue(settingsFile.isFile)
+      assertFalse(File(settingsFile.absolutePath + ".new").exists())
+      assertFalse(File(settingsFile.absolutePath + ".bak").exists())
     } finally {
       store.save(original)
     }

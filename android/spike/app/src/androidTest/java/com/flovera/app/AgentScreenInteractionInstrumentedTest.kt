@@ -2,9 +2,10 @@ package com.flovera.app
 
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
-import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -28,7 +29,7 @@ class AgentScreenInteractionInstrumentedTest {
 
     composeRule.onNodeWithText(">").performClick()
     composeRule.onNodeWithText("Sessions").performClick()
-    composeRule.onNodeWithContentDescription("Open session Tap target $suffix").performClick()
+    composeRule.onNodeWithTag("open-session-${target.id}").performScrollTo().performClick()
 
     composeRule.runOnIdle {
       assertEquals(target.id, controller.state.value.session?.id)
