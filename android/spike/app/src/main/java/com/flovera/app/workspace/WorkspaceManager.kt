@@ -2,6 +2,9 @@ package com.flovera.app.workspace
 
 import android.content.Context
 import android.webkit.MimeTypeMap
+import com.flovera.app.storage.readUtf8Text
+import com.flovera.app.storage.writeBytesAtomically
+import com.flovera.app.storage.writeUtf8TextAtomically
 import java.io.File
 
 data class WorkspaceFileNode(
@@ -138,32 +141,30 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     val file = safeFile(path)
     if (!file.exists()) return "File does not exist: $path"
     if (!file.isFile) return "Path is not a file: $path"
-    return file.readText()
+    return readUtf8Text(file)
   }
 
   fun writeFile(path: String, content: String, overwrite: Boolean = true): String {
     val file = safeFile(path)
     if (file.exists() && !overwrite) return "File already exists: ${relativeToRoot(file)}"
-    file.parentFile?.mkdirs()
-    file.writeText(content)
+    writeUtf8TextAtomically(file, content)
     return "Wrote ${content.length} chars to ${relativeToRoot(file)}"
   }
 
   fun writeBytes(path: String, content: ByteArray, overwrite: Boolean = true): String {
     val file = safeFile(path)
     if (file.exists() && !overwrite) return "File already exists: ${relativeToRoot(file)}"
-    file.parentFile?.mkdirs()
-    file.writeBytes(content)
+    writeBytesAtomically(file, content)
     return "Wrote ${content.size} bytes to ${relativeToRoot(file)}"
   }
 
   fun editFile(path: String, oldText: String, newText: String): String {
     val file = safeFile(path)
     if (!file.exists() || !file.isFile) return "File does not exist: $path"
-    val current = file.readText()
+    val current = readUtf8Text(file)
     if (!current.contains(oldText)) return "Old text was not found in $path"
     val updated = current.replace(oldText, newText, ignoreCase = false)
-    file.writeText(updated)
+    writeUtf8TextAtomically(file, updated)
     return "Edited ${relativeToRoot(file)}"
   }
 

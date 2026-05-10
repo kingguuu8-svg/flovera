@@ -4,7 +4,9 @@ import androidx.core.content.FileProvider
 import androidx.test.platform.app.InstrumentationRegistry
 import com.flovera.app.workspace.WorkspaceController
 import com.flovera.app.workspace.WorkspaceManager
+import java.io.File
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -49,5 +51,25 @@ class WorkspaceFileTreeInstrumentedTest {
     val missing = controller.snapshot("missing.html")
     assertEquals("", missing.selectedHtmlPath)
     assertEquals(null, missing.selectedHtmlUrl)
+  }
+
+  @Test
+  fun workspaceWritesTextEditsAndBytesAtomically() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "atomic-workspace-${System.currentTimeMillis()}")
+    val textFile = File(workspace.root, "notes/today.md")
+    val bytesFile = File(workspace.root, "assets/icon.bin")
+
+    workspace.writeFile("notes/today.md", "alpha")
+    workspace.editFile("notes/today.md", "alpha", "beta")
+    workspace.writeBytes("assets/icon.bin", byteArrayOf(1, 2, 3))
+
+    assertEquals("beta", workspace.readFile("notes/today.md"))
+    assertEquals(listOf(1.toByte(), 2.toByte(), 3.toByte()), bytesFile.readBytes().toList())
+    listOf(textFile, bytesFile).forEach { file ->
+      assertTrue(file.isFile)
+      assertFalse(File(file.absolutePath + ".new").exists())
+      assertFalse(File(file.absolutePath + ".bak").exists())
+    }
   }
 }

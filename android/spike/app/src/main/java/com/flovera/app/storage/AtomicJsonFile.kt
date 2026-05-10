@@ -9,11 +9,15 @@ internal fun readUtf8Text(file: File): String {
 }
 
 internal fun writeUtf8TextAtomically(file: File, text: String) {
+  writeBytesAtomically(file, text.toByteArray(StandardCharsets.UTF_8))
+}
+
+internal fun writeBytesAtomically(file: File, bytes: ByteArray) {
   file.parentFile?.mkdirs()
   val atomicFile = AtomicFile(file)
   val stream = atomicFile.startWrite()
   try {
-    stream.write(text.toByteArray(StandardCharsets.UTF_8))
+    stream.write(bytes)
     atomicFile.finishWrite(stream)
   } catch (throwable: Throwable) {
     atomicFile.failWrite(stream)
