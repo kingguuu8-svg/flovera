@@ -13,9 +13,13 @@ import com.example.ailinuxvmspike.session.AgentSessionStore
 import com.example.ailinuxvmspike.session.SessionMessage
 import com.example.ailinuxvmspike.workspace.WorkspaceFileNode
 import com.example.ailinuxvmspike.workspace.WorkspaceManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 
 data class AgentScreenState(
   val settings: AppSettings = AppSettings(),
@@ -42,6 +46,7 @@ class AgentController(context: Context) {
   private val settingsStore = SettingsStore(appContext)
   private val sessionStore = AgentSessionStore(appContext)
   private val runtime = KoogAgentRuntime()
+  private val agentScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
   private var workspace: WorkspaceManager
 
   private val _state = MutableStateFlow(AgentScreenState())
@@ -275,7 +280,7 @@ class AgentController(context: Context) {
     )
   }
 
-  suspend fun submit() {
+  fun submit() {
     val current = _state.value
     val session = current.session ?: return
     val input = current.input.trim()
@@ -292,6 +297,12 @@ class AgentController(context: Context) {
     val withUser = sessionStore.appendMessage(session, SessionMessage(role = "user", content = input))
     _state.update { it.copy(session = withUser, sessions = sessionStore.list()) }
 
+    agentScope.launch {
+      runAgentLoop(current, withUser, input)
+    }
+  }
+
+  private suspend fun runAgentLoop(current: AgentScreenState, withUser: AgentSession, input: String) {
     val recorder = ToolEventRecorder { events ->
       _state.update {
         it.copy(

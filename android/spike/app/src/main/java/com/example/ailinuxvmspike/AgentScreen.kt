@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -40,11 +41,11 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -67,12 +68,10 @@ import com.example.ailinuxvmspike.workspace.WorkspaceFileNode
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import kotlinx.coroutines.launch
 
 private enum class AgentPanel {
   Conversation,
   HtmlFiles,
-  Sessions,
   Files,
   AgentFile,
   Settings,
@@ -111,13 +110,6 @@ fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
           },
         )
         DropdownMenuItem(
-          text = { Text("Sessions") },
-          onClick = {
-            menuOpen = false
-            activePanel = AgentPanel.Sessions
-          },
-        )
-        DropdownMenuItem(
           text = { Text("Files") },
           onClick = {
             menuOpen = false
@@ -150,12 +142,6 @@ fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
     )
 
     AgentPanel.HtmlFiles -> HtmlFilesDialog(
-      state = state,
-      controller = controller,
-      onDismiss = { activePanel = null },
-    )
-
-    AgentPanel.Sessions -> SessionsDialog(
       state = state,
       controller = controller,
       onDismiss = { activePanel = null },
@@ -229,11 +215,11 @@ private fun ConversationDialog(
   controller: AgentController,
   onDismiss: () -> Unit,
 ) {
-  val scope = rememberCoroutineScope()
   val listState = rememberLazyListState()
   val messages = state.session?.messages.orEmpty()
   val visibleMessageCount = messages.size + if (state.assistantDraft == null) 0 else 1
   var pendingRevertIndex by remember { mutableStateOf<Int?>(null) }
+  var sessionPickerOpen by remember { mutableStateOf(false) }
 
   LaunchedEffect(state.session?.id, visibleMessageCount) {
     if (visibleMessageCount > 0) {
@@ -268,8 +254,13 @@ private fun ConversationDialog(
               style = MaterialTheme.typography.bodySmall,
             )
           }
-          TextButton(onClick = onDismiss) {
-            Text("Close")
+          Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedButton(onClick = { sessionPickerOpen = true }) {
+              Text("Sessions")
+            }
+            TextButton(onClick = onDismiss) {
+              Text("Close")
+            }
           }
         }
 
@@ -333,7 +324,7 @@ private fun ConversationDialog(
           )
         }
         Button(
-          onClick = { scope.launch { controller.submit() } },
+          onClick = controller::submit,
           enabled = !state.isRunning,
           modifier = Modifier.fillMaxWidth(),
         ) {
@@ -365,6 +356,14 @@ private fun ConversationDialog(
       },
     )
   }
+
+  if (sessionPickerOpen) {
+    SessionsDialog(
+      state = state,
+      controller = controller,
+      onDismiss = { sessionPickerOpen = false },
+    )
+  }
 }
 
 @Composable
@@ -385,10 +384,24 @@ private fun MessageBubble(
     isError -> MaterialTheme.colorScheme.onErrorContainer
     else -> MaterialTheme.colorScheme.onSurfaceVariant
   }
+  val previewContent = remember(message.content) { collapsedMessageContent(message.content) }
+  val canExpand = previewContent != message.content
+  var expanded by remember(message.timestampMillis, message.role, message.content) { mutableStateOf(!canExpand) }
+  var selectionEnabled by remember(message.timestampMillis, message.role, message.content) { mutableStateOf(false) }
+  val displayContent = if (expanded) message.content else previewContent
+  val surfaceModifier = if (selectionEnabled) {
+    Modifier.fillMaxWidth(0.84f)
+  } else {
+    Modifier
+      .fillMaxWidth(0.84f)
+      .pointerInput(message.timestampMillis, message.role, message.content) {
+        detectTapGestures(onLongPress = { selectionEnabled = true })
+      }
+  }
 
   Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = horizontal) {
     Surface(
-      modifier = Modifier.fillMaxWidth(0.84f),
+      modifier = surfaceModifier,
       shape = RoundedCornerShape(
         topStart = 18.dp,
         topEnd = 18.dp,
@@ -398,7 +411,9 @@ private fun MessageBubble(
       color = bubbleColor,
       tonalElevation = 1.dp,
     ) {
-      SelectionContainer {
+      MessageBubbleContent(
+        selectionEnabled = selectionEnabled,
+      ) {
         Column(
           modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
           verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -435,11 +450,43 @@ private fun MessageBubble(
               }
             }
           }
-          MarkdownMessageText(content = message.content, color = textColor)
+          MarkdownMessageText(content = displayContent, color = textColor)
+          if (canExpand) {
+            TextButton(onClick = { expanded = !expanded }) {
+              Text(
+                text = if (expanded) "Show less" else "Show more",
+                color = textColor.copy(alpha = 0.82f),
+                style = MaterialTheme.typography.labelSmall,
+              )
+            }
+          }
+          if (selectionEnabled) {
+            TextButton(onClick = { selectionEnabled = false }) {
+              Text(
+                text = "Done selecting",
+                color = textColor.copy(alpha = 0.82f),
+                style = MaterialTheme.typography.labelSmall,
+              )
+            }
+          }
           ToolEventsSummary(events = message.toolEvents, color = textColor)
         }
       }
     }
+  }
+}
+
+@Composable
+private fun MessageBubbleContent(
+  selectionEnabled: Boolean,
+  content: @Composable () -> Unit,
+) {
+  if (selectionEnabled) {
+    SelectionContainer {
+      content()
+    }
+  } else {
+    content()
   }
 }
 
@@ -492,20 +539,20 @@ private fun MarkdownMessageText(content: String, color: Color) {
           },
         )
 
-        is MarkdownBlock.Paragraph -> Text(
-          text = inlineMarkdown(block.text, color),
+        is MarkdownBlock.Paragraph -> InlineMarkdownText(
+          text = block.text,
           color = color,
           style = MaterialTheme.typography.bodyMedium,
         )
 
-        is MarkdownBlock.Bullet -> Text(
-          text = inlineMarkdown("- ${block.text}", color),
+        is MarkdownBlock.Bullet -> InlineMarkdownText(
+          text = "- ${block.text}",
           color = color,
           style = MaterialTheme.typography.bodyMedium,
         )
 
-        is MarkdownBlock.Quote -> Text(
-          text = inlineMarkdown("> ${block.text}", color.copy(alpha = 0.82f)),
+        is MarkdownBlock.Quote -> InlineMarkdownText(
+          text = "> ${block.text}",
           color = color.copy(alpha = 0.82f),
           style = MaterialTheme.typography.bodyMedium,
         )
@@ -528,8 +575,35 @@ private fun MarkdownMessageText(content: String, color: Color) {
   }
 }
 
+@Composable
+private fun InlineMarkdownText(
+  text: String,
+  color: Color,
+  style: androidx.compose.ui.text.TextStyle,
+) {
+  val annotated = remember(text, color) { inlineMarkdown(text, color) }
+  Text(
+    text = annotated,
+    color = color,
+    style = style,
+  )
+}
+
 private fun formatMessageTime(timestampMillis: Long): String {
   return SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(timestampMillis))
+}
+
+private fun collapsedMessageContent(content: String): String {
+  val maxLines = 24
+  val maxChars = 1600
+  val lines = content.lines()
+  val lineCollapsed = lines.size > maxLines
+  val charCollapsed = content.length > maxChars
+  if (!lineCollapsed && !charCollapsed) return content
+
+  val byLines = if (lineCollapsed) lines.take(maxLines).joinToString("\n") else content
+  val preview = if (byLines.length > maxChars) byLines.take(maxChars).trimEnd() else byLines
+  return "$preview\n\n..."
 }
 
 private sealed interface MarkdownBlock {
