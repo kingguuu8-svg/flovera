@@ -17,7 +17,7 @@ Use Android Studio JBR on Windows:
 
 ```powershell
 $env:JAVA_HOME='C:\Program Files\Android\Android Studio\jbr'
-$env:ANDROID_HOME='C:\Users\中二哲人\AppData\Local\Android\Sdk'
+$env:ANDROID_HOME=Join-Path $env:LOCALAPPDATA 'Android\Sdk'
 $env:ANDROID_SDK_ROOT=$env:ANDROID_HOME
 $env:PATH="$env:JAVA_HOME\bin;$env:ANDROID_HOME\platform-tools;$env:PATH"
 .\gradlew.bat :app:assembleFloveraDebug :app:assembleFloveraDebugAndroidTest :app:assembleLegacyDebug
@@ -35,5 +35,5 @@ Use `-SkipDevice` for build-only verification, or `-SkipRelease` when iterating 
 
 The verifier installs both Android package slots:
 
-- `com.flovera.app`, launcher label `flovera`
-- `com.example.ailinuxvmspike`, launcher label `flovera legacy`, for devices that still have the pre-rename flovera install.
+- `com.flovera.app`, launcher label `Flovera`
+- `com.example.ailinuxvmspike`, launcher label `Flovera legacy`, for devices that still have the pre-rename flovera install.
