@@ -46,6 +46,34 @@ function Assert-InstalledPackage {
   Write-Host "$PackageName $Version $LastUpdate"
 }
 
+function Find-Aapt {
+  $BuildToolsRoot = Join-Path $env:ANDROID_HOME "build-tools"
+  $Aapt = Get-ChildItem -Path $BuildToolsRoot -Recurse -Filter "aapt.exe" |
+    Sort-Object FullName -Descending |
+    Select-Object -First 1
+  if (-not $Aapt) {
+    throw "aapt.exe was not found under ANDROID_HOME build-tools."
+  }
+  return $Aapt.FullName
+}
+
+function Assert-ApkLabel {
+  param(
+    [string]$AaptPath,
+    [string]$ApkPath,
+    [string]$ExpectedLabel
+  )
+
+  $Badging = & $AaptPath "dump" "badging" $ApkPath 2>&1
+  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  $BadgingText = $Badging -join "`n"
+  if ($BadgingText -notmatch "application-label:'$([regex]::Escape($ExpectedLabel))'") {
+    Write-Error "Unexpected APK label for $ApkPath. Expected '$ExpectedLabel'."
+    exit 1
+  }
+  Write-Host "$ApkPath label=$ExpectedLabel"
+}
+
 function Assert-LaunchesMainActivity {
   param(
     [string]$AdbPath,
@@ -77,6 +105,13 @@ try {
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
   }
 
+  $FloveraDebugApk = Join-Path $ProjectRoot "app\build\outputs\apk\flovera\debug\app-flovera-debug.apk"
+  $LegacyDebugApk = Join-Path $ProjectRoot "app\build\outputs\apk\legacy\debug\app-legacy-debug.apk"
+  $AndroidTestApk = Join-Path $ProjectRoot "app\build\outputs\apk\androidTest\flovera\debug\app-flovera-debug-androidTest.apk"
+  $Aapt = Find-Aapt
+  Assert-ApkLabel -AaptPath $Aapt -ApkPath $FloveraDebugApk -ExpectedLabel "flovera"
+  Assert-ApkLabel -AaptPath $Aapt -ApkPath $LegacyDebugApk -ExpectedLabel "flovera legacy"
+
   if ($SkipDevice) {
     Write-Host "Device verification skipped."
     exit 0
@@ -97,9 +132,6 @@ try {
     throw "No online Android device found. Pass -DeviceSerial or use -SkipDevice."
   }
 
-  $FloveraDebugApk = Join-Path $ProjectRoot "app\build\outputs\apk\flovera\debug\app-flovera-debug.apk"
-  $LegacyDebugApk = Join-Path $ProjectRoot "app\build\outputs\apk\legacy\debug\app-legacy-debug.apk"
-  $AndroidTestApk = Join-Path $ProjectRoot "app\build\outputs\apk\androidTest\flovera\debug\app-flovera-debug-androidTest.apk"
   & $Adb "-s" $DeviceSerial "install" "-r" "-t" "-d" "-g" $FloveraDebugApk
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
   & $Adb "-s" $DeviceSerial "install" "-r" "-t" "-d" "-g" $LegacyDebugApk

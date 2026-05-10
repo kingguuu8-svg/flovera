@@ -35,5 +35,5 @@ Use `-SkipDevice` for build-only verification, or `-SkipRelease` when iterating 
 
 The verifier installs both Android package slots:
 
-- `com.flovera.app`
-- `com.example.ailinuxvmspike` for devices that still have the pre-rename flovera install.
+- `com.flovera.app`, launcher label `flovera`
+- `com.example.ailinuxvmspike`, launcher label `flovera legacy`, for devices that still have the pre-rename flovera install.
