@@ -25,10 +25,10 @@ $env:PATH="$env:JAVA_HOME\bin;$env:ANDROID_HOME\platform-tools;$env:PATH"
 
 ## True-Device Verification
 
-Install and run the current instrumentation suite on a connected device:
+Run the standard verification gate from this directory:
 
 ```powershell
-adb install -r -t -d -g app\build\outputs\apk\debug\app-debug.apk
-adb install -r -t -d -g app\build\outputs\apk\androidTest\debug\app-debug-androidTest.apk
-adb shell am instrument -w -r com.flovera.app.test/androidx.test.runner.AndroidJUnitRunner
+.\scripts\verify-flovera-android.ps1 -DeviceSerial <adb-serial>
 ```
+
+Use `-SkipDevice` for build-only verification, or `-SkipRelease` when iterating on debug-only UI/test changes.
