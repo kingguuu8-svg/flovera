@@ -141,7 +141,10 @@ fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
     AgentPanel.Conversation -> ConversationDialog(
       state = state,
       controller = controller,
-      onDismiss = { activePanel = null },
+      onDismiss = {
+        controller.discardEmptyDraftSession()
+        activePanel = null
+      },
     )
 
     AgentPanel.HtmlFiles -> HtmlFilesDialog(
@@ -766,7 +769,13 @@ private fun SessionsDialog(
         verticalArrangement = Arrangement.spacedBy(8.dp),
       ) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-          OutlinedButton(onClick = controller::newSession, modifier = Modifier.weight(1f)) {
+          OutlinedButton(
+            onClick = {
+              controller.newSession()
+              onDismiss()
+            },
+            modifier = Modifier.weight(1f),
+          ) {
             Text("New Session")
           }
           Box {

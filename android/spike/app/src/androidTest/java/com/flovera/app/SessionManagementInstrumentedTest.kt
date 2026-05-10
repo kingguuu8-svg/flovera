@@ -9,6 +9,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -29,7 +30,7 @@ class SessionManagementInstrumentedTest {
     val renamed = store.rename(withMessage.id, "Renamed $suffix")
     assertEquals("Renamed $suffix", renamed?.title)
 
-    val other = store.create("Other $suffix")
+    val other = store.appendMessage(store.create("Other $suffix"), SessionMessage(role = "user", content = "other"))
     val pinned = store.setPinned(withMessage.id, true)
     assertNotNull(pinned?.pinnedAtMillis)
     val relevant = store.list().filter { it.id == withMessage.id || it.id == other.id }
@@ -52,9 +53,9 @@ class SessionManagementInstrumentedTest {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val store = AgentSessionStore(context)
     val suffix = System.currentTimeMillis()
-    val olderPinned = store.create("Older pinned $suffix")
-    val newerPinned = store.create("Newer pinned $suffix")
-    val newestUnpinned = store.create("Newest unpinned $suffix")
+    val olderPinned = store.appendMessage(store.create("Older pinned $suffix"), SessionMessage(role = "user", content = "old"))
+    val newerPinned = store.appendMessage(store.create("Newer pinned $suffix"), SessionMessage(role = "user", content = "new"))
+    val newestUnpinned = store.appendMessage(store.create("Newest unpinned $suffix"), SessionMessage(role = "user", content = "newest"))
     val ids = setOf(olderPinned.id, newerPinned.id, newestUnpinned.id)
 
     store.save(olderPinned.copy(updatedAtMillis = 1_000L, pinnedAtMillis = 3_000L))
@@ -86,11 +87,14 @@ class SessionManagementInstrumentedTest {
   fun controllerArchivesActiveSessionAndSwitchesToUsableSession() {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val controller = AgentController(context)
-    controller.newSession()
-    val first = controller.state.value.session
-    assertNotNull(first)
+    val store = AgentSessionStore(context)
+    val first = store.appendMessage(
+      store.create("Managed source ${System.currentTimeMillis()}"),
+      SessionMessage(role = "user", content = "persisted"),
+    )
+    controller.openSession(first.id)
 
-    controller.renameSession(first!!.id, "Managed ${System.currentTimeMillis()}")
+    controller.renameSession(first.id, "Managed ${System.currentTimeMillis()}")
     assertTrue(controller.state.value.session?.title?.startsWith("Managed ") == true)
     controller.setSessionPinned(first.id, true)
     assertNotNull(controller.state.value.session?.pinnedAtMillis)
@@ -123,6 +127,19 @@ class SessionManagementInstrumentedTest {
   }
 
   @Test
+  fun emptySessionsAreDeletedAndDraftSessionsAreNotListed() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val store = AgentSessionStore(context)
+    val controller = SessionController(store)
+    val empty = store.create("Empty ${System.currentTimeMillis()}")
+    val draft = controller.createSession()
+
+    assertTrue(store.list().none { it.id == empty.id })
+    assertNull(store.load(empty.id))
+    assertTrue(store.list().none { it.id == draft.id })
+  }
+
+  @Test
   fun controllerRevertExcludesSelectedMessage() {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val controller = AgentController(context)
@@ -149,13 +166,15 @@ class SessionManagementInstrumentedTest {
     val store = AgentSessionStore(context)
     val controller = SessionController(store)
     val suffix = System.currentTimeMillis()
-    val archived = store.create("Archived active $suffix")
+    val archived = store.appendMessage(store.create("Archived active $suffix"), SessionMessage(role = "user", content = "archived"))
+    val fallback = store.appendMessage(store.create("Fallback active $suffix"), SessionMessage(role = "user", content = "fallback"))
     store.archive(archived.id)
 
     val selected = controller.initialSession(archived.id)
 
-    assertNotEquals(archived.id, selected.id)
-    assertEquals(null, selected.archivedAtMillis)
+    assertNotEquals(archived.id, selected?.id)
+    assertEquals(fallback.id, selected?.id)
+    assertEquals(null, selected?.archivedAtMillis)
   }
 
   @Test
@@ -163,7 +182,7 @@ class SessionManagementInstrumentedTest {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val store = AgentSessionStore(context)
     val controller = SessionController(store)
-    val session = store.create("Session ${System.currentTimeMillis()}")
+    val session = store.draft("Session ${System.currentTimeMillis()}")
 
     val withFirstPrompt = controller.appendUserPrompt(
       session,

@@ -54,7 +54,7 @@ class AgentController(context: Context) {
     val session = sessionController.initialSession(loadedSettings.activeSessionId)
     val workspaceSnapshot = workspaceController.snapshot(loadedSettings.selectedHtmlPath)
     val settings = settingsController.normalizeSelectedHtml(
-      settingsController.setActiveSession(loadedSettings, session.id),
+      settingsController.setActiveSession(loadedSettings, session?.id),
       workspaceSnapshot.selectedHtmlPath,
     )
     val modelDraft = settingsController.draftFor(settings)
@@ -165,18 +165,30 @@ class AgentController(context: Context) {
 
   fun newSession() {
     val session = sessionController.createSession()
-    val settings = settingsController.setActiveSession(_state.value.settings, session.id)
     _state.update {
       it.copy(
-        settings = settings,
         session = session,
         sessions = sessionController.listActive(),
         archivedSessions = sessionController.listArchived(),
         agentRulesDraft = workspaceController.readAgentRules(),
         input = "",
-        status = "New session created",
+        status = "New draft session",
       )
     }
+  }
+
+  fun discardEmptyDraftSession() {
+    val current = _state.value
+    val session = current.session ?: return
+    if (session.messages.isNotEmpty()) return
+    val fallback = sessionController.nextUsableSession()
+    val settings = settingsController.setActiveSession(current.settings, fallback?.id)
+    refreshWorkspaceState(
+      settings = settings,
+      session = fallback,
+      isRunning = false,
+      status = if (fallback == null) "No active session" else "Session loaded",
+    )
   }
 
   fun openSession(sessionId: String) {
@@ -217,7 +229,12 @@ class AgentController(context: Context) {
     val current = _state.value
     if (current.session?.id == sessionId) {
       val next = sessionController.nextUsableSession()
-      activateSession(next, "Session archived")
+      if (next == null) {
+        val settings = settingsController.setActiveSession(current.settings, null)
+        refreshWorkspaceState(settings = settings, session = null, isRunning = false, status = "Session archived")
+      } else {
+        activateSession(next, "Session archived")
+      }
     } else {
       _state.update {
         it.copy(
@@ -261,7 +278,7 @@ class AgentController(context: Context) {
 
   fun submit() {
     val current = _state.value
-    val session = current.session ?: return
+    val session = current.session ?: sessionController.createSession()
     if (current.isRunning) return
 
     agentRunController.submit(
@@ -272,8 +289,10 @@ class AgentController(context: Context) {
       appendUserPrompt = sessionController::appendUserPrompt,
       appendMessage = sessionController::appendMessage,
       onStarted = { withUser, draft ->
+        val settings = settingsController.setActiveSession(current.settings, withUser.id)
         _state.update {
           it.copy(
+            settings = settings,
             input = "",
             isRunning = true,
             status = "Running agent loop...",

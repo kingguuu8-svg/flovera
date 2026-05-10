@@ -45,15 +45,19 @@ class AgentSessionStore(context: Context) {
   }
 
   fun create(title: String = "New session"): AgentSession {
+    val session = draft(title)
+    save(session)
+    return session
+  }
+
+  fun draft(title: String = "New session"): AgentSession {
     val now = System.currentTimeMillis()
-    val session = AgentSession(
+    return AgentSession(
       id = UUID.randomUUID().toString(),
       title = title,
       createdAtMillis = now,
       updatedAtMillis = now,
     )
-    save(session)
-    return session
   }
 
   fun load(id: String): AgentSession? {
@@ -63,6 +67,7 @@ class AgentSessionStore(context: Context) {
   }
 
   fun list(includeArchived: Boolean = false): List<AgentSession> {
+    pruneEmptySessions()
     if (!root.exists()) return emptyList()
     return root.listFiles { file -> file.extension == "json" }
       ?.mapNotNull { runCatching { json.decodeFromString<AgentSession>(readUtf8Text(it)) }.getOrNull() }
@@ -149,6 +154,10 @@ class AgentSessionStore(context: Context) {
   fun truncateMessages(id: String, messageCount: Int): AgentSession? {
     val session = load(id) ?: return null
     val normalizedCount = messageCount.coerceIn(0, session.messages.size)
+    if (normalizedCount == 0) {
+      delete(id)
+      return null
+    }
     val updated = session.copy(
       updatedAtMillis = System.currentTimeMillis(),
       messages = session.messages.take(normalizedCount),
@@ -159,6 +168,17 @@ class AgentSessionStore(context: Context) {
 
   fun save(session: AgentSession) {
     writeUtf8TextAtomically(fileFor(session.id), json.encodeToString(session))
+  }
+
+  fun delete(id: String): Boolean = fileFor(id).delete()
+
+  fun pruneEmptySessions() {
+    if (!root.exists()) return
+    root.listFiles { file -> file.extension == "json" }
+      ?.forEach { file ->
+        val session = runCatching { json.decodeFromString<AgentSession>(readUtf8Text(file)) }.getOrNull()
+        if (session?.messages?.isEmpty() == true) file.delete()
+      }
   }
 
   private fun fileFor(id: String): File = File(root, "$id.json")

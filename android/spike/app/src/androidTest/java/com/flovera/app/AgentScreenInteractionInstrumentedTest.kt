@@ -6,6 +6,8 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import com.flovera.app.session.AgentSessionStore
+import com.flovera.app.session.SessionMessage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -17,11 +19,16 @@ class AgentScreenInteractionInstrumentedTest {
   @Test
   fun tappingSessionRowOpensSession() {
     val controller = AgentController(composeRule.activity.applicationContext)
+    val store = AgentSessionStore(composeRule.activity.applicationContext)
     val suffix = System.currentTimeMillis()
-    controller.newSession()
-    val target = controller.state.value.session!!
-    controller.renameSession(target.id, "Tap target $suffix")
-    controller.newSession()
+    val target = store.appendMessage(
+      store.create("Tap target $suffix"),
+      SessionMessage(role = "user", content = "persisted"),
+    )
+    store.appendMessage(
+      store.create("Other target $suffix"),
+      SessionMessage(role = "user", content = "other"),
+    )
 
     composeRule.setContent {
       AgentScreen(controller)

@@ -51,7 +51,7 @@ class SettingsController(private val store: SettingsStore) {
     return updated
   }
 
-  fun setActiveSession(settings: AppSettings, sessionId: String): AppSettings {
+  fun setActiveSession(settings: AppSettings, sessionId: String?): AppSettings {
     val updated = settings.copy(activeSessionId = sessionId)
     store.save(updated)
     return updated

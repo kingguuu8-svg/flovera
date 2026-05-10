@@ -1,12 +1,13 @@
 package com.flovera.app.session
 
 class SessionController(private val store: AgentSessionStore) {
-  fun initialSession(activeSessionId: String?): AgentSession {
+  fun initialSession(activeSessionId: String?): AgentSession? {
+    store.pruneEmptySessions()
     val active = activeSessionId?.let { store.load(it) }
-    return if (active?.archivedAtMillis == null) {
-      active ?: nextUsableSession(defaultTitle = "Default")
+    return if (active != null && active.archivedAtMillis == null && active.messages.isNotEmpty()) {
+      active
     } else {
-      nextUsableSession(defaultTitle = "Default")
+      nextUsableSession()
     }
   }
 
@@ -15,7 +16,7 @@ class SessionController(private val store: AgentSessionStore) {
   fun listArchived(): List<AgentSession> = store.listArchived()
 
   fun createSession(): AgentSession {
-    return store.create("Session ${store.list().size + 1}")
+    return store.draft("New session")
   }
 
   fun openSession(sessionId: String): AgentSession? {
@@ -57,8 +58,8 @@ class SessionController(private val store: AgentSessionStore) {
     return store.truncateMessages(sessionId, messageIndex)
   }
 
-  fun nextUsableSession(defaultTitle: String = "Default"): AgentSession {
-    return store.list().firstOrNull() ?: store.create(defaultTitle)
+  fun nextUsableSession(): AgentSession? {
+    return store.list().firstOrNull()
   }
 
   private fun firstPromptTitle(prompt: String): String {
