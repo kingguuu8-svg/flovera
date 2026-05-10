@@ -42,6 +42,11 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
         - Prefer plain HTML, CSS, JavaScript, Markdown, and JSON files.
         - Do not assume Python, npm, git, bash, or Linux tools exist on Android.
         - Do not use emoji unless the user explicitly asks for them.
+        - Workspace HTML can call controlled Android app events through window.Flovera:
+          - window.Flovera.toast("message")
+          - window.Flovera.notify(JSON.stringify({ title: "Title", body: "Body" }))
+          - window.Flovera.postEvent(JSON.stringify({ type: "notification", title: "Title", body: "Body" }))
+        - Always check window.Flovera exists before calling it, and keep these calls user-visible and intentional.
       """.trimIndent(),
       overwrite = false,
     )

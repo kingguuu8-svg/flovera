@@ -49,6 +49,11 @@ class KoogAgentRuntime : AgentRuntime {
       Only create or edit files through the provided workspace tools.
       Keep all file paths relative to the workspace root.
       For web projects, prefer plain HTML, CSS, JS, and JSON files. Do not assume Python, npm, git, bash, or Linux tools exist.
+      Workspace HTML is displayed inside flovera WebView and can call controlled app events through window.Flovera when available:
+      - window.Flovera.toast("message")
+      - window.Flovera.notify(JSON.stringify({ title: "Title", body: "Body" }))
+      - window.Flovera.postEvent(JSON.stringify({ type: "notification", title: "Title", body: "Body" }))
+      Always guard these calls with if (window.Flovera) and make the behavior clear in the UI.
       Network tools are ${if (networkEnabled) "enabled. Use fetch_url and download_file only when they directly help the user's request." else "disabled for this run."}
       When the user asks you to create files, call the tools and then summarize the files changed.
 

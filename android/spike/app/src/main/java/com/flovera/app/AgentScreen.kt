@@ -67,6 +67,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.flovera.app.koog.ModelProviderCatalog
 import com.flovera.app.session.SessionMessage
 import com.flovera.app.session.ToolEvent
+import com.flovera.app.web.FloveraWebBridge
 import com.flovera.app.workspace.WorkspaceFileNode
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -204,6 +205,7 @@ private fun WorkspaceWebView(url: String?) {
         settings.domStorageEnabled = true
         settings.allowFileAccess = true
         settings.allowContentAccess = true
+        addJavascriptInterface(FloveraWebBridge(context.applicationContext), "Flovera")
         loadUrl(url)
       }
     },
