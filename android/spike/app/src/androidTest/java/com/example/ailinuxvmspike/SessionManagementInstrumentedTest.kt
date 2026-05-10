@@ -122,6 +122,27 @@ class SessionManagementInstrumentedTest {
   }
 
   @Test
+  fun sessionControllerNamesSessionFromFirstPrompt() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val store = AgentSessionStore(context)
+    val controller = SessionController(store)
+    val session = store.create("Session ${System.currentTimeMillis()}")
+
+    val withFirstPrompt = controller.appendUserPrompt(
+      session,
+      "  请做一个非常长的个性化日历工具并展示今天的安排  ",
+    )
+    val afterSecondPrompt = controller.appendUserPrompt(
+      withFirstPrompt,
+      "second prompt should not rename",
+    )
+
+    assertTrue(withFirstPrompt.title.length <= 30)
+    assertEquals("请做一个非常长的个性化日历工具并展示今天的安排", withFirstPrompt.title)
+    assertEquals(withFirstPrompt.title, afterSecondPrompt.title)
+  }
+
+  @Test
   fun sessionControllerRevertsBeforeSelectedMessage() {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val store = AgentSessionStore(context)

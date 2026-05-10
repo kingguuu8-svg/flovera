@@ -273,6 +273,7 @@ class AgentController(context: Context) {
       settings = current.settings,
       session = session,
       workspace = workspaceController.runtimeWorkspace(),
+      appendUserPrompt = sessionController::appendUserPrompt,
       appendMessage = sessionController::appendMessage,
       onStarted = { withUser, draft ->
         _state.update {

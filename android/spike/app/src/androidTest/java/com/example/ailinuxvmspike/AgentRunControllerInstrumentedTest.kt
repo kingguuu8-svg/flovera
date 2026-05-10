@@ -39,6 +39,7 @@ class AgentRunControllerInstrumentedTest {
       settings = AppSettings(),
       session = session,
       workspace = workspace,
+      appendUserPrompt = sessions::appendUserPrompt,
       appendMessage = sessions::appendMessage,
       onStarted = { withUser, draft ->
         startedSession = withUser
@@ -80,6 +81,10 @@ class AgentRunControllerInstrumentedTest {
       settings = AppSettings(),
       session = session,
       workspace = workspace,
+      appendUserPrompt = { current, _ ->
+        callbackCalled = true
+        current
+      },
       appendMessage = { current, _ ->
         callbackCalled = true
         current

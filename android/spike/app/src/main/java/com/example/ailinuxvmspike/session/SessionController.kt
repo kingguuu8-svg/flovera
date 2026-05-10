@@ -47,11 +47,26 @@ class SessionController(private val store: AgentSessionStore) {
     return store.appendMessage(session, message)
   }
 
+  fun appendUserPrompt(session: AgentSession, prompt: String): AgentSession {
+    val withPrompt = store.appendMessage(session, SessionMessage(role = "user", content = prompt))
+    if (session.messages.isNotEmpty()) return withPrompt
+    return store.rename(withPrompt.id, firstPromptTitle(prompt)) ?: withPrompt
+  }
+
   fun revertToBeforeMessage(sessionId: String, messageIndex: Int): AgentSession? {
     return store.truncateMessages(sessionId, messageIndex)
   }
 
   fun nextUsableSession(defaultTitle: String = "Default"): AgentSession {
     return store.list().firstOrNull() ?: store.create(defaultTitle)
+  }
+
+  private fun firstPromptTitle(prompt: String): String {
+    val normalized = prompt
+      .lineSequence()
+      .joinToString(" ") { it.trim() }
+      .replace(Regex("\\s+"), " ")
+      .trim()
+    return normalized.take(30).ifBlank { "Untitled session" }
   }
 }

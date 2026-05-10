@@ -22,6 +22,7 @@ class AgentRunController(
     settings: AppSettings,
     session: AgentSession,
     workspace: WorkspaceManager,
+    appendUserPrompt: (AgentSession, String) -> AgentSession,
     appendMessage: (AgentSession, SessionMessage) -> AgentSession,
     onStarted: (AgentSession, SessionMessage) -> Unit,
     onDraft: (SessionMessage) -> Unit,
@@ -30,7 +31,7 @@ class AgentRunController(
     val trimmed = input.trim()
     if (trimmed.isBlank()) return null
 
-    val withUser = appendMessage(session, SessionMessage(role = "user", content = trimmed))
+    val withUser = appendUserPrompt(session, trimmed)
     onStarted(withUser, SessionMessage(role = "assistant", content = "Working..."))
 
     return scope.launch {
