@@ -46,6 +46,26 @@ function Assert-InstalledPackage {
   Write-Host "$PackageName $Version $LastUpdate"
 }
 
+function Assert-LaunchesMainActivity {
+  param(
+    [string]$AdbPath,
+    [string]$Serial,
+    [string]$PackageName
+  )
+
+  $Component = "$PackageName/com.flovera.app.MainActivity"
+  $LaunchOutput = & $AdbPath "-s" $Serial "shell" "am" "start" "-W" "-n" $Component 2>&1
+  $LaunchOutput | ForEach-Object { Write-Host $_ }
+  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  $LaunchText = $LaunchOutput -join "`n"
+  if ($LaunchText -notmatch "Status: ok") {
+    Write-Error "Failed to launch $Component"
+    exit 1
+  }
+  & $AdbPath "-s" $Serial "shell" "am" "force-stop" $PackageName
+  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
+
 $Gradle = Join-Path $ProjectRoot "gradlew.bat"
 Push-Location $ProjectRoot
 try {
@@ -88,6 +108,8 @@ try {
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
   Assert-InstalledPackage -AdbPath $Adb -Serial $DeviceSerial -PackageName "com.flovera.app"
   Assert-InstalledPackage -AdbPath $Adb -Serial $DeviceSerial -PackageName "com.example.ailinuxvmspike"
+  Assert-LaunchesMainActivity -AdbPath $Adb -Serial $DeviceSerial -PackageName "com.flovera.app"
+  Assert-LaunchesMainActivity -AdbPath $Adb -Serial $DeviceSerial -PackageName "com.example.ailinuxvmspike"
 
   $InstrumentationOutput = & $Adb "-s" $DeviceSerial "shell" "am" "instrument" "-w" "-r" "com.flovera.app.test/androidx.test.runner.AndroidJUnitRunner" 2>&1
   $InstrumentationOutput | ForEach-Object { Write-Host $_ }
