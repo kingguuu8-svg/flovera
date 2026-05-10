@@ -18,7 +18,6 @@ class AgentScreenInteractionInstrumentedTest {
 
   @Test
   fun tappingSessionRowOpensSession() {
-    val controller = AgentController(composeRule.activity.applicationContext)
     val store = AgentSessionStore(composeRule.activity.applicationContext)
     val suffix = System.currentTimeMillis()
     val target = store.appendMessage(
@@ -29,6 +28,7 @@ class AgentScreenInteractionInstrumentedTest {
       store.create("Other target $suffix"),
       SessionMessage(role = "user", content = "other"),
     )
+    val controller = AgentController(composeRule.activity.applicationContext)
 
     composeRule.setContent {
       AgentScreen(controller)
