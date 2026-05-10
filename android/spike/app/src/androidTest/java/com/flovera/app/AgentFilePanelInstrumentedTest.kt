@@ -6,7 +6,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import com.flovera.app.theme.MyApplicationTheme
+import com.flovera.app.theme.FloveraTheme
 import org.junit.Rule
 import org.junit.Test
 
@@ -17,7 +17,7 @@ class AgentFilePanelInstrumentedTest {
   fun filesPanelShowsWorkspaceTreeWithActionMenuSemantics() {
     val controller = AgentController(composeRule.activity.applicationContext)
     composeRule.setContent {
-      MyApplicationTheme {
+      FloveraTheme {
         AgentScreen(controller)
       }
     }

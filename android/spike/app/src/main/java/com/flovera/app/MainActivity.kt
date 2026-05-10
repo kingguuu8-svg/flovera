@@ -11,7 +11,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import com.flovera.app.theme.MyApplicationTheme
+import com.flovera.app.theme.FloveraTheme
 
 class MainActivity : ComponentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
@@ -23,7 +23,7 @@ class MainActivity : ComponentActivity() {
       val controller = remember(context) { AgentController(context.applicationContext) }
       DisposableEffect(controller) { onDispose { } }
 
-      MyApplicationTheme {
+      FloveraTheme {
         Surface(
           modifier = Modifier.fillMaxSize(),
           color = MaterialTheme.colorScheme.background,
