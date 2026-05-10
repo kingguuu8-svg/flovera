@@ -1,6 +1,10 @@
 package com.example.ailinuxvmspike
 
+import androidx.test.platform.app.InstrumentationRegistry
 import com.example.ailinuxvmspike.config.AppSettings
+import com.example.ailinuxvmspike.config.ModelSettingsDraft
+import com.example.ailinuxvmspike.config.SettingsController
+import com.example.ailinuxvmspike.config.SettingsStore
 import com.example.ailinuxvmspike.koog.ModelProviderCatalog
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -32,5 +36,33 @@ class ProviderConfigInstrumentedTest {
   fun networkToolsDefaultToDisabled() {
     assertFalse(AppSettings().networkEnabled)
     assertTrue(AppSettings(networkEnabled = true).networkEnabled)
+  }
+
+  @Test
+  fun settingsControllerNormalizesAndPersistsModelSettings() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val store = SettingsStore(context)
+    val original = store.load()
+    try {
+      store.save(AppSettings(provider = "missing", model = ""))
+      val controller = SettingsController(store)
+
+      val normalized = controller.load()
+      assertEquals(ModelProviderCatalog.defaultProvider.id, normalized.provider)
+      assertEquals(ModelProviderCatalog.defaultProvider.defaultModel, normalized.model)
+
+      val openAiDraft = controller.draftForProvider(normalized, "openai")
+      assertEquals("openai", openAiDraft?.providerId)
+
+      val saved = controller.saveModelSettings(
+        normalized,
+        ModelSettingsDraft(providerId = "openai", model = "  ", apiKey = " openai-key "),
+      )
+      assertEquals("openai", saved.provider)
+      assertEquals(ModelProviderCatalog.findProvider("openai")?.defaultModel, saved.model)
+      assertEquals("openai-key", saved.apiKeyFor("openai"))
+    } finally {
+      store.save(original)
+    }
   }
 }

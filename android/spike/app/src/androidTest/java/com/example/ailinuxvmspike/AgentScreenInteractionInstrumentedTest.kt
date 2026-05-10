@@ -2,6 +2,7 @@ package com.example.ailinuxvmspike
 
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import org.junit.Assert.assertEquals
@@ -27,7 +28,7 @@ class AgentScreenInteractionInstrumentedTest {
 
     composeRule.onNodeWithText(">").performClick()
     composeRule.onNodeWithText("Sessions").performClick()
-    composeRule.onNodeWithText("Tap target $suffix").performClick()
+    composeRule.onNodeWithContentDescription("Open session Tap target $suffix").performClick()
 
     composeRule.runOnIdle {
       assertEquals(target.id, controller.state.value.session?.id)

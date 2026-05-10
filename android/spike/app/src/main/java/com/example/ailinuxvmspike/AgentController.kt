@@ -5,8 +5,9 @@ import android.net.Uri
 import androidx.core.content.FileProvider
 import com.example.ailinuxvmspike.agent.AgentRunController
 import com.example.ailinuxvmspike.config.AppSettings
+import com.example.ailinuxvmspike.config.ModelSettingsDraft
+import com.example.ailinuxvmspike.config.SettingsController
 import com.example.ailinuxvmspike.config.SettingsStore
-import com.example.ailinuxvmspike.koog.ModelProviderCatalog
 import com.example.ailinuxvmspike.session.AgentSession
 import com.example.ailinuxvmspike.session.AgentSessionStore
 import com.example.ailinuxvmspike.session.SessionController
@@ -39,7 +40,7 @@ data class AgentScreenState(
 
 class AgentController(context: Context) {
   private val appContext = context.applicationContext
-  private val settingsStore = SettingsStore(appContext)
+  private val settingsController = SettingsController(SettingsStore(appContext))
   private val sessionController = SessionController(AgentSessionStore(appContext))
   private val agentRunController = AgentRunController()
   private var workspaceController: WorkspaceController
@@ -48,27 +49,23 @@ class AgentController(context: Context) {
   val state: StateFlow<AgentScreenState> = _state
 
   init {
-    val loadedSettings = settingsStore.load()
+    val loadedSettings = settingsController.load()
     workspaceController = WorkspaceController(appContext, loadedSettings.activeWorkspaceId).also { it.ensureSeedFiles() }
     val session = sessionController.initialSession(loadedSettings.activeSessionId)
     val workspaceSnapshot = workspaceController.snapshot(loadedSettings.selectedHtmlPath)
-    val provider = ModelProviderCatalog.findProvider(loadedSettings.provider) ?: ModelProviderCatalog.defaultProvider
-    val model = loadedSettings.model.ifBlank { provider.defaultModel }
-    val settings = loadedSettings.copy(
-      provider = provider.id,
-      model = model,
-      activeSessionId = session.id,
-      selectedHtmlPath = workspaceSnapshot.selectedHtmlPath,
+    val settings = settingsController.normalizeSelectedHtml(
+      settingsController.setActiveSession(loadedSettings, session.id),
+      workspaceSnapshot.selectedHtmlPath,
     )
-    settingsStore.save(settings)
+    val modelDraft = settingsController.draftFor(settings)
     _state.value = AgentScreenState(
       settings = settings,
       session = session,
       sessions = sessionController.listActive(),
       archivedSessions = sessionController.listArchived(),
-      providerDraft = provider.id,
-      modelDraft = model,
-      apiKeyDraft = settings.apiKeyFor(provider.id),
+      providerDraft = modelDraft.providerId,
+      modelDraft = modelDraft.model,
+      apiKeyDraft = modelDraft.apiKey,
       agentRulesDraft = workspaceController.readAgentRules(),
       workspaceFiles = workspaceSnapshot.files,
       workspaceTree = workspaceSnapshot.tree,
@@ -88,12 +85,12 @@ class AgentController(context: Context) {
   }
 
   fun updateProvider(value: String) {
-    val provider = ModelProviderCatalog.findProvider(value) ?: return
+    val draft = settingsController.draftForProvider(_state.value.settings, value) ?: return
     _state.update {
       it.copy(
-        providerDraft = provider.id,
-        modelDraft = provider.defaultModel,
-        apiKeyDraft = it.settings.apiKeyFor(provider.id),
+        providerDraft = draft.providerId,
+        modelDraft = draft.model,
+        apiKeyDraft = draft.apiKey,
       )
     }
   }
@@ -107,8 +104,7 @@ class AgentController(context: Context) {
   }
 
   fun setNetworkEnabled(enabled: Boolean) {
-    val settings = _state.value.settings.copy(networkEnabled = enabled)
-    settingsStore.save(settings)
+    val settings = settingsController.setNetworkEnabled(_state.value.settings, enabled)
     _state.update {
       it.copy(
         settings = settings,
@@ -119,18 +115,21 @@ class AgentController(context: Context) {
 
   fun saveModelSettings() {
     val current = _state.value
-    val provider = ModelProviderCatalog.findProvider(current.providerDraft) ?: ModelProviderCatalog.defaultProvider
-    val model = current.modelDraft.trim().ifBlank { provider.defaultModel }
-    val settings = current.settings
-      .copy(provider = provider.id, model = model)
-      .withApiKey(provider.id, current.apiKeyDraft)
-    settingsStore.save(settings)
+    val settings = settingsController.saveModelSettings(
+      current.settings,
+      ModelSettingsDraft(
+        providerId = current.providerDraft,
+        model = current.modelDraft,
+        apiKey = current.apiKeyDraft,
+      ),
+    )
+    val draft = settingsController.draftFor(settings)
     _state.update {
       it.copy(
         settings = settings,
-        providerDraft = provider.id,
-        modelDraft = model,
-        apiKeyDraft = settings.apiKeyFor(provider.id),
+        providerDraft = draft.providerId,
+        modelDraft = draft.model,
+        apiKeyDraft = draft.apiKey,
         status = "Settings saved",
       )
     }
@@ -144,8 +143,7 @@ class AgentController(context: Context) {
 
   fun selectHtmlFile(path: String) {
     val current = _state.value
-    val settings = current.settings.copy(selectedHtmlPath = path)
-    settingsStore.save(settings)
+    val settings = settingsController.setSelectedHtml(current.settings, path)
     refreshWorkspaceState(settings = settings, status = "Displaying $path")
   }
 
@@ -167,8 +165,7 @@ class AgentController(context: Context) {
 
   fun newSession() {
     val session = sessionController.createSession()
-    val settings = _state.value.settings.copy(activeSessionId = session.id)
-    settingsStore.save(settings)
+    val settings = settingsController.setActiveSession(_state.value.settings, session.id)
     _state.update {
       it.copy(
         settings = settings,
@@ -184,8 +181,7 @@ class AgentController(context: Context) {
 
   fun openSession(sessionId: String) {
     val session = sessionController.openSession(sessionId) ?: return
-    val settings = _state.value.settings.copy(activeSessionId = session.id)
-    settingsStore.save(settings)
+    val settings = settingsController.setActiveSession(_state.value.settings, session.id)
     _state.update {
       it.copy(
         settings = settings,
@@ -310,8 +306,7 @@ class AgentController(context: Context) {
     status: String = _state.value.status,
   ) {
     val workspaceSnapshot = workspaceController.snapshot(settings.selectedHtmlPath)
-    val normalizedSettings = settings.copy(selectedHtmlPath = workspaceSnapshot.selectedHtmlPath)
-    if (normalizedSettings != settings) settingsStore.save(normalizedSettings)
+    val normalizedSettings = settingsController.normalizeSelectedHtml(settings, workspaceSnapshot.selectedHtmlPath)
     _state.update {
       it.copy(
         settings = normalizedSettings,
@@ -331,8 +326,7 @@ class AgentController(context: Context) {
   }
 
   private fun activateSession(session: AgentSession, status: String) {
-    val settings = _state.value.settings.copy(activeSessionId = session.id)
-    settingsStore.save(settings)
+    val settings = settingsController.setActiveSession(_state.value.settings, session.id)
     refreshWorkspaceState(settings = settings, session = session, isRunning = false, status = status)
   }
 
