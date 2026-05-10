@@ -68,7 +68,7 @@ class ProviderConfigInstrumentedTest {
   }
 
   @Test
-  fun settingsStoreWritesJsonWithoutLeavingAtomicTempFiles() {
+  fun settingsStoreEncryptsSettingsWithoutLeavingAtomicTempFiles() {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val store = SettingsStore(context)
     val settingsFile = File(context.filesDir, "settings.json")
@@ -78,8 +78,46 @@ class ProviderConfigInstrumentedTest {
 
       assertEquals("atomic-key", store.load().apiKeyFor("deepseek"))
       assertTrue(settingsFile.isFile)
+      val stored = settingsFile.readText()
+      assertTrue(stored.contains("cipherText"))
+      assertFalse(stored.contains("atomic-key"))
+      assertFalse(stored.contains("deepseek-chat"))
       assertFalse(File(settingsFile.absolutePath + ".new").exists())
       assertFalse(File(settingsFile.absolutePath + ".bak").exists())
+    } finally {
+      store.save(original)
+    }
+  }
+
+  @Test
+  fun settingsStoreMigratesLegacyPlaintextSettings() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val store = SettingsStore(context)
+    val settingsFile = File(context.filesDir, "settings.json")
+    val original = store.load()
+    try {
+      settingsFile.writeText(
+        """
+        {
+          "provider": "deepseek",
+          "model": "deepseek-chat",
+          "apiKey": "legacy-plain-key",
+          "providerApiKeys": {},
+          "activeWorkspaceId": "default",
+          "activeSessionId": null,
+          "selectedHtmlPath": "",
+          "maxAgentIterations": 20,
+          "networkEnabled": false
+        }
+        """.trimIndent(),
+      )
+
+      val migrated = store.load()
+
+      assertEquals("legacy-plain-key", migrated.apiKeyFor("deepseek"))
+      val stored = settingsFile.readText()
+      assertTrue(stored.contains("cipherText"))
+      assertFalse(stored.contains("legacy-plain-key"))
     } finally {
       store.save(original)
     }
