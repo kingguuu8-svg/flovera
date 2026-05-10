@@ -3,24 +3,19 @@ package com.example.ailinuxvmspike
 import android.content.Context
 import android.net.Uri
 import androidx.core.content.FileProvider
+import com.example.ailinuxvmspike.agent.AgentRunController
 import com.example.ailinuxvmspike.config.AppSettings
 import com.example.ailinuxvmspike.config.SettingsStore
-import com.example.ailinuxvmspike.koog.KoogAgentRuntime
 import com.example.ailinuxvmspike.koog.ModelProviderCatalog
-import com.example.ailinuxvmspike.koog.ToolEventRecorder
 import com.example.ailinuxvmspike.session.AgentSession
 import com.example.ailinuxvmspike.session.AgentSessionStore
 import com.example.ailinuxvmspike.session.SessionController
 import com.example.ailinuxvmspike.session.SessionMessage
 import com.example.ailinuxvmspike.workspace.WorkspaceController
 import com.example.ailinuxvmspike.workspace.WorkspaceFileNode
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.launch
 
 data class AgentScreenState(
   val settings: AppSettings = AppSettings(),
@@ -46,8 +41,7 @@ class AgentController(context: Context) {
   private val appContext = context.applicationContext
   private val settingsStore = SettingsStore(appContext)
   private val sessionController = SessionController(AgentSessionStore(appContext))
-  private val runtime = KoogAgentRuntime()
-  private val agentScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+  private val agentRunController = AgentRunController()
   private var workspaceController: WorkspaceController
 
   private val _state = MutableStateFlow(AgentScreenState())
@@ -272,58 +266,40 @@ class AgentController(context: Context) {
   fun submit() {
     val current = _state.value
     val session = current.session ?: return
-    val input = current.input.trim()
-    if (input.isBlank() || current.isRunning) return
+    if (current.isRunning) return
 
-    _state.update {
-      it.copy(
-        input = "",
-        isRunning = true,
-        status = "Running agent loop...",
-        assistantDraft = SessionMessage(role = "assistant", content = "Working..."),
-      )
-    }
-    val withUser = sessionController.appendMessage(session, SessionMessage(role = "user", content = input))
-    _state.update { it.copy(session = withUser, sessions = sessionController.listActive()) }
-
-    agentScope.launch {
-      runAgentLoop(current, withUser, input)
-    }
-  }
-
-  private suspend fun runAgentLoop(current: AgentScreenState, withUser: AgentSession, input: String) {
-    val recorder = ToolEventRecorder { events ->
-      _state.update {
-        it.copy(
-          assistantDraft = SessionMessage(
-            role = "assistant",
-            content = "Running tools...",
-            toolEvents = events,
-          ),
-        )
-      }
-    }
-    val result = runCatching {
-      runtime.run(
-        input = input,
-        settings = current.settings,
-        session = withUser,
-        workspace = workspaceController.runtimeWorkspace(),
-        recorder = recorder,
-      )
-    }
-
-    val assistantMessage = result.fold(
-      onSuccess = { output ->
-        SessionMessage(role = "assistant", content = output, toolEvents = recorder.snapshot())
+    agentRunController.submit(
+      input = current.input,
+      settings = current.settings,
+      session = session,
+      workspace = workspaceController.runtimeWorkspace(),
+      appendMessage = sessionController::appendMessage,
+      onStarted = { withUser, draft ->
+        _state.update {
+          it.copy(
+            input = "",
+            isRunning = true,
+            status = "Running agent loop...",
+            assistantDraft = draft,
+            session = withUser,
+            sessions = sessionController.listActive(),
+          )
+        }
       },
-      onFailure = { error ->
-        SessionMessage(role = "error", content = error.message ?: error.toString(), toolEvents = recorder.snapshot())
+      onDraft = { draft ->
+        _state.update {
+          it.copy(assistantDraft = draft)
+        }
+      },
+      onFinished = { updated, succeeded ->
+        val status = if (succeeded) "Agent loop completed" else "Agent loop failed"
+        refreshWorkspaceState(
+          session = updated,
+          isRunning = false,
+          status = status,
+        )
       },
     )
-    val updated = sessionController.appendMessage(withUser, assistantMessage)
-    val status = if (result.isSuccess) "Agent loop completed" else "Agent loop failed"
-    refreshWorkspaceState(session = updated, isRunning = false, status = status)
   }
 
   private fun refreshWorkspaceState(

@@ -7,8 +7,18 @@ import com.example.ailinuxvmspike.config.AppSettings
 import com.example.ailinuxvmspike.session.AgentSession
 import com.example.ailinuxvmspike.workspace.WorkspaceManager
 
-class KoogAgentRuntime {
+interface AgentRuntime {
   suspend fun run(
+    input: String,
+    settings: AppSettings,
+    session: AgentSession,
+    workspace: WorkspaceManager,
+    recorder: ToolEventRecorder,
+  ): String
+}
+
+class KoogAgentRuntime : AgentRuntime {
+  override suspend fun run(
     input: String,
     settings: AppSettings,
     session: AgentSession,
