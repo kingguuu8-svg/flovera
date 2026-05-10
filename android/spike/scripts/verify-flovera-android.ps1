@@ -26,6 +26,26 @@ if ($env:JAVA_HOME) {
 }
 $env:PATH = (Join-Path $env:ANDROID_HOME "platform-tools") + ";" + $env:PATH
 
+function Assert-InstalledPackage {
+  param(
+    [string]$AdbPath,
+    [string]$Serial,
+    [string]$PackageName
+  )
+
+  $PackageDump = & $AdbPath "-s" $Serial "shell" "dumpsys" "package" $PackageName 2>&1
+  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  $PackageText = $PackageDump -join "`n"
+  if ($PackageText -notmatch "Package \[$([regex]::Escape($PackageName))\]") {
+    Write-Error "Package was not installed: $PackageName"
+    exit 1
+  }
+
+  $Version = ($PackageDump | Select-String -Pattern "versionCode=" | Select-Object -First 1).Line.Trim()
+  $LastUpdate = ($PackageDump | Select-String -Pattern "lastUpdateTime=" | Select-Object -First 1).Line.Trim()
+  Write-Host "$PackageName $Version $LastUpdate"
+}
+
 $Gradle = Join-Path $ProjectRoot "gradlew.bat"
 Push-Location $ProjectRoot
 try {
@@ -66,6 +86,9 @@ try {
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
   & $Adb "-s" $DeviceSerial "install" "-r" "-t" "-d" "-g" $AndroidTestApk
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  Assert-InstalledPackage -AdbPath $Adb -Serial $DeviceSerial -PackageName "com.flovera.app"
+  Assert-InstalledPackage -AdbPath $Adb -Serial $DeviceSerial -PackageName "com.example.ailinuxvmspike"
+
   $InstrumentationOutput = & $Adb "-s" $DeviceSerial "shell" "am" "instrument" "-w" "-r" "com.flovera.app.test/androidx.test.runner.AndroidJUnitRunner" 2>&1
   $InstrumentationOutput | ForEach-Object { Write-Host $_ }
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
