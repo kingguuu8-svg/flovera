@@ -228,6 +228,7 @@ private fun ConversationDialog(
   val visibleMessageCount = messages.size + if (state.assistantDraft == null) 0 else 1
   var pendingRevertIndex by remember { mutableStateOf<Int?>(null) }
   var sessionPickerOpen by remember { mutableStateOf(false) }
+  val isDraftSession = state.session != null && state.session.messages.isEmpty()
 
   LaunchedEffect(state.session?.id, visibleMessageCount) {
     if (visibleMessageCount > 0) {
@@ -255,14 +256,20 @@ private fun ConversationDialog(
           verticalAlignment = Alignment.CenterVertically,
         ) {
           Column(modifier = Modifier.weight(1f)) {
-            Text("Conversation", style = MaterialTheme.typography.titleMedium)
             Text(
-              text = state.status,
+              text = if (isDraftSession) "New conversation" else state.session?.title ?: "Conversation",
+              style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+              text = if (isDraftSession) "Draft: send a message to create this session." else state.status,
               color = MaterialTheme.colorScheme.onSurfaceVariant,
               style = MaterialTheme.typography.bodySmall,
             )
           }
           Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedButton(onClick = controller::newSession, enabled = !state.isRunning) {
+              Text("New")
+            }
             OutlinedButton(onClick = { sessionPickerOpen = true }) {
               Text("Sessions")
             }
