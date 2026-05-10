@@ -46,9 +46,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
@@ -270,6 +274,11 @@ private fun ConversationDialog(
             items(messages) { message ->
               MessageBubble(message)
             }
+            state.assistantDraft?.let { draft ->
+              item {
+                MessageBubble(draft)
+              }
+            }
           }
         }
 
@@ -355,7 +364,7 @@ private fun MessageBubble(message: SessionMessage) {
             color = textColor.copy(alpha = 0.72f),
             style = MaterialTheme.typography.labelSmall,
           )
-          Text(text = message.content, color = textColor, style = MaterialTheme.typography.bodyMedium)
+          MarkdownMessageText(content = message.content, color = textColor)
           message.toolEvents.forEach { event ->
             Surface(shape = RoundedCornerShape(10.dp), color = textColor.copy(alpha = 0.10f)) {
               Text(
@@ -368,6 +377,159 @@ private fun MessageBubble(message: SessionMessage) {
             }
           }
         }
+      }
+    }
+  }
+}
+
+@Composable
+private fun MarkdownMessageText(content: String, color: Color) {
+  Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+    parseMarkdownBlocks(content).forEach { block ->
+      when (block) {
+        is MarkdownBlock.Heading -> Text(
+          text = block.text,
+          color = color,
+          fontWeight = FontWeight.SemiBold,
+          style = when (block.level) {
+            1 -> MaterialTheme.typography.titleMedium
+            2 -> MaterialTheme.typography.titleSmall
+            else -> MaterialTheme.typography.bodyLarge
+          },
+        )
+
+        is MarkdownBlock.Paragraph -> Text(
+          text = inlineMarkdown(block.text, color),
+          color = color,
+          style = MaterialTheme.typography.bodyMedium,
+        )
+
+        is MarkdownBlock.Bullet -> Text(
+          text = inlineMarkdown("- ${block.text}", color),
+          color = color,
+          style = MaterialTheme.typography.bodyMedium,
+        )
+
+        is MarkdownBlock.Quote -> Text(
+          text = inlineMarkdown("> ${block.text}", color.copy(alpha = 0.82f)),
+          color = color.copy(alpha = 0.82f),
+          style = MaterialTheme.typography.bodyMedium,
+        )
+
+        is MarkdownBlock.Code -> Surface(
+          modifier = Modifier.fillMaxWidth(),
+          shape = RoundedCornerShape(8.dp),
+          color = color.copy(alpha = 0.12f),
+        ) {
+          Text(
+            text = block.text,
+            modifier = Modifier.padding(10.dp),
+            color = color,
+            fontFamily = FontFamily.Monospace,
+            style = MaterialTheme.typography.bodySmall,
+          )
+        }
+      }
+    }
+  }
+}
+
+private sealed interface MarkdownBlock {
+  data class Heading(val level: Int, val text: String) : MarkdownBlock
+  data class Paragraph(val text: String) : MarkdownBlock
+  data class Bullet(val text: String) : MarkdownBlock
+  data class Quote(val text: String) : MarkdownBlock
+  data class Code(val text: String) : MarkdownBlock
+}
+
+private fun parseMarkdownBlocks(content: String): List<MarkdownBlock> {
+  val blocks = mutableListOf<MarkdownBlock>()
+  val paragraph = StringBuilder()
+  val code = StringBuilder()
+  var inCode = false
+
+  fun flushParagraph() {
+    val text = paragraph.toString().trim()
+    if (text.isNotBlank()) blocks += MarkdownBlock.Paragraph(text)
+    paragraph.clear()
+  }
+
+  content.lines().forEach { rawLine ->
+    val line = rawLine.trimEnd()
+    if (line.trimStart().startsWith("```")) {
+      if (inCode) {
+        blocks += MarkdownBlock.Code(code.toString().trimEnd())
+        code.clear()
+      } else {
+        flushParagraph()
+      }
+      inCode = !inCode
+      return@forEach
+    }
+
+    if (inCode) {
+      code.appendLine(rawLine)
+      return@forEach
+    }
+
+    val trimmed = line.trim()
+    when {
+      trimmed.isBlank() -> flushParagraph()
+      trimmed.startsWith("#") -> {
+        flushParagraph()
+        val level = trimmed.takeWhile { it == '#' }.length.coerceIn(1, 3)
+        blocks += MarkdownBlock.Heading(level, trimmed.drop(level).trim())
+      }
+      trimmed.startsWith("- ") || trimmed.startsWith("* ") -> {
+        flushParagraph()
+        blocks += MarkdownBlock.Bullet(trimmed.drop(2).trim())
+      }
+      trimmed.startsWith("> ") -> {
+        flushParagraph()
+        blocks += MarkdownBlock.Quote(trimmed.drop(2).trim())
+      }
+      else -> {
+        if (paragraph.isNotEmpty()) paragraph.append('\n')
+        paragraph.append(line)
+      }
+    }
+  }
+  if (inCode && code.isNotEmpty()) blocks += MarkdownBlock.Code(code.toString().trimEnd())
+  flushParagraph()
+  return blocks.ifEmpty { listOf(MarkdownBlock.Paragraph("")) }
+}
+
+private fun inlineMarkdown(text: String, color: Color) = buildAnnotatedString {
+  var index = 0
+  while (index < text.length) {
+    when {
+      text.startsWith("`", index) -> {
+        val end = text.indexOf('`', startIndex = index + 1)
+        if (end > index) {
+          withStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = color.copy(alpha = 0.12f))) {
+            append(text.substring(index + 1, end))
+          }
+          index = end + 1
+        } else {
+          append(text[index])
+          index += 1
+        }
+      }
+      text.startsWith("**", index) -> {
+        val end = text.indexOf("**", startIndex = index + 2)
+        if (end > index) {
+          withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) {
+            append(text.substring(index + 2, end))
+          }
+          index = end + 2
+        } else {
+          append(text[index])
+          index += 1
+        }
+      }
+      else -> {
+        append(text[index])
+        index += 1
       }
     }
   }

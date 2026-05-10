@@ -34,6 +34,7 @@ data class AgentScreenState(
   val selectedHtmlUrl: String? = null,
   val status: String = "Idle",
   val isRunning: Boolean = false,
+  val assistantDraft: SessionMessage? = null,
 )
 
 class AgentController(context: Context) {
@@ -268,11 +269,28 @@ class AgentController(context: Context) {
     val input = current.input.trim()
     if (input.isBlank() || current.isRunning) return
 
-    _state.update { it.copy(input = "", isRunning = true, status = "Running agent loop...") }
+    _state.update {
+      it.copy(
+        input = "",
+        isRunning = true,
+        status = "Running agent loop...",
+        assistantDraft = SessionMessage(role = "assistant", content = "Working..."),
+      )
+    }
     val withUser = sessionStore.appendMessage(session, SessionMessage(role = "user", content = input))
     _state.update { it.copy(session = withUser, sessions = sessionStore.list()) }
 
-    val recorder = ToolEventRecorder()
+    val recorder = ToolEventRecorder { events ->
+      _state.update {
+        it.copy(
+          assistantDraft = SessionMessage(
+            role = "assistant",
+            content = "Running tools...",
+            toolEvents = events,
+          ),
+        )
+      }
+    }
     val result = runCatching {
       runtime.run(
         input = input,
@@ -318,6 +336,7 @@ class AgentController(context: Context) {
         selectedHtmlPath = selectedHtmlPath,
         selectedHtmlUrl = workspace.displayUrl(selectedHtmlPath),
         isRunning = isRunning,
+        assistantDraft = if (isRunning) it.assistantDraft else null,
         status = status,
       )
     }
