@@ -1,15 +1,18 @@
 package com.flovera.app.web
 
 import android.Manifest
+import android.app.Activity
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.webkit.JavascriptInterface
 import android.widget.Toast
+import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import org.json.JSONObject
@@ -42,10 +45,16 @@ class FloveraWebBridge(private val context: Context) {
     val payload = runCatching { JSONObject(json) }.getOrNull() ?: return "invalid json"
     val title = payload.optString("title").take(MAX_TITLE_CHARS).ifBlank { "flovera" }
     val body = payload.optString("body").take(MAX_BODY_CHARS).ifBlank { return "missing body" }
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-      appContext.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-    ) {
-      return "notification permission not granted"
+    if (needsNotificationPermission()) {
+      val activity = context.findActivity() ?: return "notification permission not granted"
+      mainHandler.post {
+        ActivityCompat.requestPermissions(
+          activity,
+          arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+          NOTIFICATION_PERMISSION_REQUEST_CODE,
+        )
+      }
+      return "notification permission requested"
     }
 
     ensureNotificationChannel()
@@ -71,8 +80,23 @@ class FloveraWebBridge(private val context: Context) {
 
   private fun nextNotificationId(): Int = (System.currentTimeMillis() % Int.MAX_VALUE).toInt()
 
+  private fun needsNotificationPermission(): Boolean {
+    return Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+      appContext.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+  }
+
+  private fun Context.findActivity(): Activity? {
+    var current: Context? = this
+    while (current is ContextWrapper) {
+      if (current is Activity) return current
+      current = current.baseContext
+    }
+    return null
+  }
+
   private companion object {
     const val CHANNEL_ID = "flovera_workspace_events"
+    const val NOTIFICATION_PERMISSION_REQUEST_CODE = 1001
     const val MAX_TITLE_CHARS = 80
     const val MAX_BODY_CHARS = 500
     const val MAX_TOAST_CHARS = 160

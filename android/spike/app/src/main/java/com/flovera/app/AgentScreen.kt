@@ -207,7 +207,7 @@ private fun WorkspaceWebView(url: String?) {
         settings.domStorageEnabled = true
         settings.allowFileAccess = true
         settings.allowContentAccess = true
-        addJavascriptInterface(FloveraWebBridge(context.applicationContext), "Flovera")
+        addJavascriptInterface(FloveraWebBridge(context), "Flovera")
         loadUrl(url)
       }
     },
