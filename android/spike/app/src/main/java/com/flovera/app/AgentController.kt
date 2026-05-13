@@ -51,7 +51,8 @@ class AgentController(context: Context) {
   val state: StateFlow<AgentScreenState> = _state
 
   init {
-    val loadedSettings = settingsController.load()
+    val settingsLoad = settingsController.loadResult()
+    val loadedSettings = settingsLoad.settings
     workspaceController = WorkspaceController(appContext, loadedSettings.activeWorkspaceId).also { it.ensureSeedFiles() }
     val session = sessionController.initialSession(loadedSettings.activeSessionId)
     val workspaceSnapshot = workspaceController.snapshot(loadedSettings.selectedHtmlPath)
@@ -75,7 +76,7 @@ class AgentController(context: Context) {
       selectedHtmlPath = workspaceSnapshot.selectedHtmlPath,
       selectedHtmlUrl = workspaceSnapshot.selectedHtmlUrl,
       workspaceRootUrl = workspaceSnapshot.workspaceRootUrl,
-      status = "Ready",
+      status = settingsLoad.warning ?: "Ready",
     )
   }
 

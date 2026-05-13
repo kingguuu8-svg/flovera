@@ -16,6 +16,11 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
+data class SettingsLoadResult(
+  val settings: AppSettings,
+  val warning: String? = null,
+)
+
 class SettingsStore(context: Context) {
   private val settingsFile = File(context.filesDir, "settings.json")
   private val settingsCipher = SettingsCipher()
@@ -26,15 +31,32 @@ class SettingsStore(context: Context) {
   }
 
   fun load(): AppSettings {
-    if (!settingsFile.exists()) return AppSettings()
-    val stored = readUtf8Text(settingsFile)
-    decodeEncryptedSettings(stored)?.let { return it }
-    val plaintext = runCatching { json.decodeFromString<AppSettings>(stored) }.getOrNull()
-    if (plaintext != null) {
-      save(plaintext)
-      return plaintext
+    return loadResult().settings
+  }
+
+  fun loadResult(): SettingsLoadResult {
+    if (!settingsFile.exists()) return SettingsLoadResult(AppSettings())
+    val stored = runCatching { readUtf8Text(settingsFile) }.getOrElse {
+      return SettingsLoadResult(AppSettings(), "Settings could not be read; defaults were loaded.")
     }
-    return AppSettings()
+
+    val encrypted = decodeEncryptedSettings(stored)
+    if (encrypted != null) {
+      return encrypted.fold(
+        onSuccess = { SettingsLoadResult(it) },
+        onFailure = {
+          SettingsLoadResult(AppSettings(), "Settings could not be decrypted; defaults were loaded.")
+        },
+      )
+    }
+
+    val plaintext = runCatching { json.decodeFromString<AppSettings>(stored) }
+    plaintext.getOrNull()?.let {
+      save(it)
+      return SettingsLoadResult(it)
+    }
+
+    return SettingsLoadResult(AppSettings(), "Settings file is invalid; defaults were loaded.")
   }
 
   fun save(settings: AppSettings) {
@@ -42,11 +64,13 @@ class SettingsStore(context: Context) {
     writeUtf8TextAtomically(settingsFile, json.encodeToString(encrypted))
   }
 
-  private fun decodeEncryptedSettings(stored: String): AppSettings? {
+  private fun decodeEncryptedSettings(stored: String): Result<AppSettings>? {
+    val encrypted = runCatching {
+      json.decodeFromString<EncryptedSettingsFile>(stored)
+    }.getOrNull() ?: return null
     return runCatching {
-      val encrypted = json.decodeFromString<EncryptedSettingsFile>(stored)
       json.decodeFromString<AppSettings>(settingsCipher.decrypt(encrypted))
-    }.getOrNull()
+    }
   }
 }
 

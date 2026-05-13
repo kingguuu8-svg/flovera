@@ -10,10 +10,15 @@ data class ModelSettingsDraft(
 
 class SettingsController(private val store: SettingsStore) {
   fun load(): AppSettings {
-    val loaded = store.load()
+    return loadResult().settings
+  }
+
+  fun loadResult(): SettingsLoadResult {
+    val result = store.loadResult()
+    val loaded = result.settings
     val normalized = normalizeLanguage(normalizeProviderAndModel(loaded))
     if (normalized != loaded) store.save(normalized)
-    return normalized
+    return result.copy(settings = normalized)
   }
 
   fun draftFor(settings: AppSettings): ModelSettingsDraft {

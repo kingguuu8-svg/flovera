@@ -141,4 +141,24 @@ class ProviderConfigInstrumentedTest {
       store.save(original)
     }
   }
+
+  @Test
+  fun invalidSettingsFileIsReportedToUiState() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val store = SettingsStore(context)
+    val settingsFile = File(context.filesDir, "settings.json")
+    val original = store.load()
+    try {
+      settingsFile.writeText("not-json")
+
+      val result = store.loadResult()
+      assertEquals(AppSettings(), result.settings)
+      assertTrue(result.warning.orEmpty().contains("invalid"))
+
+      val controller = AgentController(context)
+      assertTrue(controller.state.value.status.contains("invalid"))
+    } finally {
+      store.save(original)
+    }
+  }
 }
