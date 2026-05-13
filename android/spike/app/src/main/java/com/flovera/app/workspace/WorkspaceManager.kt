@@ -155,6 +155,19 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     return readUtf8Text(file)
   }
 
+  fun readFilePreview(path: String, maxChars: Int): String {
+    val file = safeFile(path)
+    if (!file.exists()) return "File does not exist: $path"
+    if (!file.isFile) return "Path is not a file: $path"
+    file.reader(Charsets.UTF_8).use { reader ->
+      val buffer = CharArray(maxChars + 1)
+      val count = reader.read(buffer)
+      if (count <= maxChars) return String(buffer, 0, count.coerceAtLeast(0))
+      return String(buffer, 0, maxChars) +
+        "\n\n[truncated: showing first $maxChars chars of ${relativeToRoot(file)}; file is ${file.length()} bytes]"
+    }
+  }
+
   fun writeFile(path: String, content: String, overwrite: Boolean = true): String {
     val file = safeFile(path)
     if (file.exists() && !overwrite) return "File already exists: ${relativeToRoot(file)}"

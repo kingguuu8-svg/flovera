@@ -15,6 +15,7 @@ import kotlinx.serialization.Serializable
 private const val CONNECT_TIMEOUT_MS = 10_000
 private const val READ_TIMEOUT_MS = 20_000
 private const val MAX_REDIRECTS = 5
+private const val MAX_FETCH_RESPONSE_BYTES = 64 * 1024
 
 data class NetworkResponse(
   val statusCode: Int,
@@ -25,11 +26,11 @@ data class NetworkResponse(
 )
 
 interface NetworkHttpClient {
-  suspend fun get(url: URL): NetworkResponse
+  suspend fun get(url: URL, maxBytes: Int? = null): NetworkResponse
 }
 
 class JavaNetNetworkHttpClient : NetworkHttpClient {
-  override suspend fun get(url: URL): NetworkResponse = withContext(Dispatchers.IO) {
+  override suspend fun get(url: URL, maxBytes: Int?): NetworkResponse = withContext(Dispatchers.IO) {
     var current = url
     repeat(MAX_REDIRECTS + 1) { redirectCount ->
       val connection = (current.openConnection() as HttpURLConnection).apply {
@@ -58,13 +59,13 @@ class JavaNetNetworkHttpClient : NetworkHttpClient {
         }
 
         val stream = if (statusCode >= 400) connection.errorStream ?: connection.inputStream else connection.inputStream
-        val body = readFully(stream)
+        val body = readFully(stream, maxBytes)
         return@withContext NetworkResponse(
           statusCode = statusCode,
           contentType = connection.contentType,
           finalUrl = current.toString(),
-          body = body,
-          truncated = false,
+          body = body.bytes,
+          truncated = body.truncated,
         )
       } finally {
         connection.disconnect()
@@ -73,18 +74,28 @@ class JavaNetNetworkHttpClient : NetworkHttpClient {
     error("Too many redirects")
   }
 
-  private fun readFully(input: java.io.InputStream): ByteArray {
+  private fun readFully(input: java.io.InputStream, maxBytes: Int?): ReadBody {
     input.use { stream ->
       val output = ByteArrayOutputStream()
       val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
       while (true) {
         val read = stream.read(buffer)
         if (read == -1) break
+        if (maxBytes != null && output.size() + read > maxBytes) {
+          val remaining = maxBytes - output.size()
+          if (remaining > 0) output.write(buffer, 0, remaining)
+          return ReadBody(output.toByteArray(), truncated = true)
+        }
         output.write(buffer, 0, read)
       }
-      return output.toByteArray()
+      return ReadBody(output.toByteArray(), truncated = false)
     }
   }
+
+  private data class ReadBody(
+    val bytes: ByteArray,
+    val truncated: Boolean,
+  )
 }
 
 object NetworkUrlPolicy {
@@ -116,7 +127,7 @@ class FetchUrlTool(
   override suspend fun execute(args: Args): String {
     val result = runCatching {
       val url = NetworkUrlPolicy.validate(args.url)
-      val response = client.get(url)
+      val response = client.get(url, maxBytes = MAX_FETCH_RESPONSE_BYTES)
       response.formatForFetch()
     }.getOrElse { it.message ?: it.toString() }
     recorder.record(name, "url=${args.url}", result)
@@ -168,6 +179,7 @@ private fun NetworkResponse.formatForFetch(): String {
     status: $statusCode
     final_url: $finalUrl
     content_type: ${contentType ?: "unknown"}
+    truncated: $truncated
 
     $bodyText
   """.trimIndent()

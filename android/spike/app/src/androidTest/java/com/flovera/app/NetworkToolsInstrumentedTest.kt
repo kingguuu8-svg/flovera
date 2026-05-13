@@ -35,7 +35,9 @@ class NetworkToolsInstrumentedTest {
 
     assertTrue(result.contains("status: 200"))
     assertTrue(result.contains("hello from web"))
+    assertTrue(result.contains("truncated: false"))
     assertEquals("https://93.184.216.34/example.txt", client.requestedUrl)
+    assertEquals(64 * 1024, client.maxBytesSeen)
     assertTrue(recorder.snapshot().any { it.name == "fetch_url" })
   }
 
@@ -63,6 +65,7 @@ class NetworkToolsInstrumentedTest {
 
     assertTrue(result.contains("Downloaded"))
     assertEquals("<!doctype html><title>Downloaded</title>", File(workspace.root, "downloads/page.html").readText())
+    assertEquals(null, client.maxBytesSeen)
     assertTrue(recorder.snapshot().any { it.name == "download_file" })
   }
 
@@ -101,9 +104,11 @@ class NetworkToolsInstrumentedTest {
     private val response: NetworkResponse,
   ) : NetworkHttpClient {
     var requestedUrl: String? = null
+    var maxBytesSeen: Int? = null
 
-    override suspend fun get(url: URL): NetworkResponse {
+    override suspend fun get(url: URL, maxBytes: Int?): NetworkResponse {
       requestedUrl = url.toString()
+      maxBytesSeen = maxBytes
       return response
     }
   }

@@ -75,6 +75,18 @@ class WorkspaceFileTreeInstrumentedTest {
   }
 
   @Test
+  fun workspaceReadPreviewTruncatesLargeText() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "preview-workspace-${System.currentTimeMillis()}")
+    workspace.writeFile("large.txt", "a".repeat(128))
+
+    val preview = workspace.readFilePreview("large.txt", maxChars = 16)
+
+    assertTrue(preview.startsWith("a".repeat(16)))
+    assertTrue(preview.contains("[truncated: showing first 16 chars"))
+  }
+
+  @Test
   fun workspaceImportsSharedFilesToRootWithUniqueNames() {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val workspace = WorkspaceManager(context, "shared-import-${System.currentTimeMillis()}")

@@ -7,6 +7,8 @@ import ai.koog.serialization.typeToken
 import com.flovera.app.workspace.WorkspaceManager
 import kotlinx.serialization.Serializable
 
+private const val MAX_READ_FILE_CHARS = 64 * 1024
+
 fun workspaceToolRegistry(
   workspace: WorkspaceManager,
   recorder: ToolEventRecorder,
@@ -58,7 +60,9 @@ class ReadFileTool(
   )
 
   override suspend fun execute(args: Args): String {
-    val result = runCatching { workspace.readFile(args.path) }.getOrElse { it.message ?: it.toString() }
+    val result = runCatching {
+      workspace.readFilePreview(args.path, maxChars = MAX_READ_FILE_CHARS)
+    }.getOrElse { it.message ?: it.toString() }
     recorder.record(name, "path=${args.path}", result)
     return result
   }
