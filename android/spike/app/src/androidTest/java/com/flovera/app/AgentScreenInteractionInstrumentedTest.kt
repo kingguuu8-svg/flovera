@@ -1,11 +1,14 @@
 package com.flovera.app
 
 import androidx.activity.ComponentActivity
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextClearance
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performScrollTo
 import com.flovera.app.config.AppSettings
 import com.flovera.app.config.SettingsStore
@@ -35,7 +38,9 @@ class AgentScreenInteractionInstrumentedTest {
 
   @Test
   fun tappingSessionRowOpensSession() {
-    val store = AgentSessionStore(composeRule.activity.applicationContext)
+    val context = composeRule.activity.applicationContext
+    SettingsStore(context).save(AppSettings(language = "en"))
+    val store = AgentSessionStore(context)
     val suffix = System.currentTimeMillis()
     val target = store.appendMessage(
       store.create("Tap target $suffix"),
@@ -45,7 +50,7 @@ class AgentScreenInteractionInstrumentedTest {
       store.create("Other target $suffix"),
       SessionMessage(role = "user", content = "other"),
     )
-    val controller = AgentController(composeRule.activity.applicationContext)
+    val controller = AgentController(context)
 
     composeRule.setContent {
       AgentScreen(controller)
@@ -63,6 +68,7 @@ class AgentScreenInteractionInstrumentedTest {
   @Test
   fun newConversationShowsDraftAndDoesNotPersistUntilMessage() {
     val context = composeRule.activity.applicationContext
+    SettingsStore(context).save(AppSettings(language = "en"))
     val controller = AgentController(context)
 
     composeRule.setContent {
@@ -90,7 +96,9 @@ class AgentScreenInteractionInstrumentedTest {
 
   @Test
   fun tappingHtmlFileOpensItInWebView() {
-    val controller = AgentController(composeRule.activity.applicationContext)
+    val context = composeRule.activity.applicationContext
+    SettingsStore(context).save(AppSettings(language = "en"))
+    val controller = AgentController(context)
 
     composeRule.setContent {
       AgentScreen(controller)
@@ -103,6 +111,62 @@ class AgentScreenInteractionInstrumentedTest {
     composeRule.runOnIdle {
       assertEquals("index.html", controller.state.value.selectedHtmlPath)
       assertTrue(controller.state.value.selectedHtmlUrl?.endsWith("index.html") == true)
+    }
+  }
+
+  @Test
+  fun agentRulesCancelKeepsPersistedRules() {
+    val context = composeRule.activity.applicationContext
+    SettingsStore(context).save(AppSettings(language = "en"))
+    val controller = AgentController(context)
+    val original = controller.state.value.agentRulesDraft
+
+    composeRule.setContent {
+      AgentScreen(controller)
+    }
+
+    composeRule.onNodeWithText("Menu").performClick()
+    composeRule.onNodeWithText("AGENT.md").performClick()
+    composeRule.onAllNodes(hasSetTextAction())[0].performTextClearance()
+    composeRule.onAllNodes(hasSetTextAction())[0].performTextInput("discard me")
+    composeRule.onNodeWithText("Cancel").performClick()
+
+    composeRule.runOnIdle {
+      assertEquals(original, controller.state.value.agentRulesDraft)
+    }
+  }
+
+  @Test
+  fun settingsCancelKeepsModelDraftAndLanguageSaveSwitchesUi() {
+    val context = composeRule.activity.applicationContext
+    SettingsStore(context).save(AppSettings(language = "en"))
+    val controller = AgentController(context)
+    val originalModel = controller.state.value.modelDraft
+
+    composeRule.setContent {
+      AgentScreen(controller)
+    }
+
+    composeRule.onNodeWithText("Menu").performClick()
+    composeRule.onNodeWithText("Settings").performClick()
+    composeRule.onAllNodes(hasSetTextAction())[0].performTextClearance()
+    composeRule.onAllNodes(hasSetTextAction())[0].performTextInput("discard-model")
+    composeRule.onNodeWithText("Cancel").performClick()
+
+    composeRule.runOnIdle {
+      assertEquals(originalModel, controller.state.value.modelDraft)
+      assertEquals("en", controller.state.value.settings.language)
+    }
+
+    composeRule.onNodeWithText("Menu").performClick()
+    composeRule.onNodeWithText("Settings").performClick()
+    composeRule.onNodeWithText("Language: English").performClick()
+    composeRule.onNodeWithText("\u4e2d\u6587").performClick()
+    composeRule.onNodeWithText("Save").performClick()
+
+    composeRule.onNodeWithText("\u83dc\u5355").assertIsDisplayed()
+    composeRule.runOnIdle {
+      assertEquals("zh", controller.state.value.settings.language)
     }
   }
 }

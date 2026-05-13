@@ -14,6 +14,7 @@ data class AppSettings(
   val selectedHtmlPath: String = "",
   val maxAgentIterations: Int = 20,
   val networkEnabled: Boolean = false,
+  val language: String = "en",
 ) {
   fun apiKeyFor(providerId: String = provider): String {
     val keyed = providerApiKeys[providerId].orEmpty()

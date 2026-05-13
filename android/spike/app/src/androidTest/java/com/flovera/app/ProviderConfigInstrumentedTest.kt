@@ -40,6 +40,25 @@ class ProviderConfigInstrumentedTest {
   }
 
   @Test
+  fun settingsControllerPersistsSupportedLanguage() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val store = SettingsStore(context)
+    val original = store.load()
+    try {
+      val controller = SettingsController(store)
+
+      val zh = controller.setLanguage(AppSettings(), "zh")
+      assertEquals("zh", zh.language)
+      assertEquals("zh", store.load().language)
+
+      val normalized = controller.setLanguage(zh, "missing")
+      assertEquals("en", normalized.language)
+    } finally {
+      store.save(original)
+    }
+  }
+
+  @Test
   fun settingsControllerNormalizesAndPersistsModelSettings() {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val store = SettingsStore(context)

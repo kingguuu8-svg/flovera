@@ -116,16 +116,22 @@ class AgentController(context: Context) {
     }
   }
 
-  fun saveModelSettings() {
+  fun saveModelSettings(
+    providerId: String = _state.value.providerDraft,
+    model: String = _state.value.modelDraft,
+    apiKey: String = _state.value.apiKeyDraft,
+    language: String = _state.value.settings.language,
+  ) {
     val current = _state.value
-    val settings = settingsController.saveModelSettings(
+    val modelSettings = settingsController.saveModelSettings(
       current.settings,
       ModelSettingsDraft(
-        providerId = current.providerDraft,
-        model = current.modelDraft,
-        apiKey = current.apiKeyDraft,
+        providerId = providerId,
+        model = model,
+        apiKey = apiKey,
       ),
     )
+    val settings = settingsController.setLanguage(modelSettings, language)
     val draft = settingsController.draftFor(settings)
     _state.update {
       it.copy(
@@ -138,10 +144,10 @@ class AgentController(context: Context) {
     }
   }
 
-  fun saveAgentRules() {
-    val current = _state.value
-    workspaceController.writeAgentRules(current.agentRulesDraft)
+  fun saveAgentRules(content: String = _state.value.agentRulesDraft) {
+    workspaceController.writeAgentRules(content)
     refreshWorkspaceState(status = "AGENT.md saved")
+    _state.update { it.copy(agentRulesDraft = content) }
   }
 
   fun selectHtmlFile(path: String) {

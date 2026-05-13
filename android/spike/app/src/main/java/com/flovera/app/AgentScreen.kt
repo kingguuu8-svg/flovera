@@ -89,6 +89,7 @@ private const val EmptyWebPrompt = "\u53ef\u9009\u62e9 HTML \u8fdb\u884c\u6253\u
 @Composable
 fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
   val state by controller.state.collectAsStateWithLifecycle()
+  val language = state.settings.language
   var menuOpen by remember { mutableStateOf(false) }
   var activePanel by remember { mutableStateOf<AgentPanel?>(null) }
 
@@ -108,18 +109,18 @@ fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
 
     Box(modifier = Modifier.align(Alignment.TopEnd).padding(12.dp)) {
       OutlinedButton(onClick = { menuOpen = true }) {
-        Text("Menu")
+        Text(t(language, "Menu", "\u83dc\u5355"))
       }
       DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
         DropdownMenuItem(
-          text = { Text("Select HTML") },
+          text = { Text(t(language, "Select HTML", "\u9009\u62e9 HTML")) },
           onClick = {
             menuOpen = false
             activePanel = AgentPanel.HtmlFiles
           },
         )
         DropdownMenuItem(
-          text = { Text("Files") },
+          text = { Text(t(language, "Files", "\u6587\u4ef6")) },
           onClick = {
             menuOpen = false
             activePanel = AgentPanel.Files
@@ -133,7 +134,7 @@ fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
           },
         )
         DropdownMenuItem(
-          text = { Text("Settings") },
+          text = { Text(t(language, "Settings", "\u8bbe\u7f6e")) },
           onClick = {
             menuOpen = false
             activePanel = AgentPanel.Settings
@@ -147,6 +148,7 @@ fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
     AgentPanel.Conversation -> ConversationDialog(
       state = state,
       controller = controller,
+      language = language,
       onDismiss = {
         controller.discardEmptyDraftSession()
         activePanel = null
@@ -156,24 +158,28 @@ fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
     AgentPanel.HtmlFiles -> HtmlFilesDialog(
       state = state,
       controller = controller,
+      language = language,
       onDismiss = { activePanel = null },
     )
 
     AgentPanel.Files -> FilesDialog(
       state = state,
       controller = controller,
+      language = language,
       onDismiss = { activePanel = null },
     )
 
     AgentPanel.AgentFile -> AgentFileDialog(
       state = state,
       controller = controller,
+      language = language,
       onDismiss = { activePanel = null },
     )
 
     AgentPanel.Settings -> SettingsDialog(
       state = state,
       controller = controller,
+      language = language,
       onDismiss = { activePanel = null },
     )
 
@@ -249,6 +255,8 @@ private fun WorkspaceWebView(url: String?, workspaceRootUrl: String) {
   }
 }
 
+private fun t(language: String, en: String, zh: String): String = if (language == "zh") zh else en
+
 private class FloveraWorkspaceWebViewClient(
   private val workspaceRootUrl: String,
   private val onError: (String) -> Unit,
@@ -296,6 +304,7 @@ private class FloveraWorkspaceWebViewClient(
 private fun ConversationDialog(
   state: AgentScreenState,
   controller: AgentController,
+  language: String,
   onDismiss: () -> Unit,
 ) {
   val listState = rememberLazyListState()
@@ -332,24 +341,32 @@ private fun ConversationDialog(
         ) {
           Column(modifier = Modifier.weight(1f)) {
             Text(
-              text = if (isDraftSession) "New conversation" else state.session?.title ?: "Conversation",
+              text = if (isDraftSession) {
+                t(language, "New conversation", "\u65b0\u5bf9\u8bdd")
+              } else {
+                state.session?.title ?: t(language, "Conversation", "\u5bf9\u8bdd")
+              },
               style = MaterialTheme.typography.titleMedium,
             )
             Text(
-              text = if (isDraftSession) "Draft: send a message to create this session." else state.status,
+              text = if (isDraftSession) {
+                t(language, "Draft: send a message to create this session.", "\u8349\u7a3f\uff1a\u53d1\u9001\u7b2c\u4e00\u6761\u6d88\u606f\u540e\u624d\u4f1a\u521b\u5efa session\u3002")
+              } else {
+                state.status
+              },
               color = MaterialTheme.colorScheme.onSurfaceVariant,
               style = MaterialTheme.typography.bodySmall,
             )
           }
           Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             OutlinedButton(onClick = controller::newSession, enabled = !state.isRunning) {
-              Text("New")
+              Text(t(language, "New", "\u65b0\u5efa"))
             }
             OutlinedButton(onClick = { sessionPickerOpen = true }) {
-              Text("Sessions")
+              Text(t(language, "Sessions", "Sessions"))
             }
             TextButton(onClick = onDismiss) {
-              Text("Close")
+              Text(t(language, "Close", "\u5173\u95ed"))
             }
           }
         }
@@ -362,7 +379,7 @@ private fun ConversationDialog(
           if (messages.isEmpty()) {
             item {
               Text(
-                text = "Ask the agent to create or edit files in the current workspace.",
+                text = t(language, "Ask the agent to create or edit files in the current workspace.", "\u8ba9 agent \u5728\u5f53\u524d workspace \u4e2d\u521b\u5efa\u6216\u7f16\u8f91\u6587\u4ef6\u3002"),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodyMedium,
               )
@@ -388,7 +405,7 @@ private fun ConversationDialog(
         OutlinedTextField(
           value = state.input,
           onValueChange = controller::updateInput,
-          label = { Text("Message") },
+          label = { Text(t(language, "Message", "\u6d88\u606f")) },
           minLines = 2,
           maxLines = 5,
           modifier = Modifier.fillMaxWidth(),
@@ -399,9 +416,13 @@ private fun ConversationDialog(
           verticalAlignment = Alignment.CenterVertically,
         ) {
           Column(modifier = Modifier.weight(1f)) {
-            Text("Network", style = MaterialTheme.typography.bodyMedium)
+            Text(t(language, "Network", "\u8054\u7f51"), style = MaterialTheme.typography.bodyMedium)
             Text(
-              text = if (state.settings.networkEnabled) "fetch_url and download_file available" else "network tools disabled",
+              text = if (state.settings.networkEnabled) {
+                t(language, "fetch_url and download_file available", "fetch_url \u548c download_file \u53ef\u7528")
+              } else {
+                t(language, "network tools disabled", "\u8054\u7f51\u5de5\u5177\u5df2\u5173\u95ed")
+              },
               color = MaterialTheme.colorScheme.onSurfaceVariant,
               style = MaterialTheme.typography.bodySmall,
             )
@@ -418,7 +439,7 @@ private fun ConversationDialog(
           enabled = !state.isRunning,
           modifier = Modifier.fillMaxWidth(),
         ) {
-          Text(if (state.isRunning) "Running..." else "Send")
+          Text(if (state.isRunning) t(language, "Running...", "\u8fd0\u884c\u4e2d...") else t(language, "Send", "\u53d1\u9001"))
         }
       }
     }
@@ -451,6 +472,7 @@ private fun ConversationDialog(
     SessionsDialog(
       state = state,
       controller = controller,
+      language = language,
       onDismiss = { sessionPickerOpen = false },
     )
   }
@@ -801,18 +823,19 @@ private fun inlineMarkdown(text: String, color: Color) = buildAnnotatedString {
 private fun HtmlFilesDialog(
   state: AgentScreenState,
   controller: AgentController,
+  language: String,
   onDismiss: () -> Unit,
 ) {
   AlertDialog(
     onDismissRequest = onDismiss,
-    title = { Text("Select HTML") },
+    title = { Text(t(language, "Select HTML", "\u9009\u62e9 HTML")) },
     text = {
       Column(
         modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(8.dp),
       ) {
         if (state.htmlFiles.isEmpty()) {
-          Text("No HTML files in this workspace.", style = MaterialTheme.typography.bodyMedium)
+          Text(t(language, "No HTML files in this workspace.", "\u5f53\u524d workspace \u6ca1\u6709 HTML \u6587\u4ef6\u3002"), style = MaterialTheme.typography.bodyMedium)
         }
         state.htmlFiles.forEach { path ->
           OutlinedButton(
@@ -822,14 +845,14 @@ private fun HtmlFilesDialog(
             },
             modifier = Modifier.fillMaxWidth(),
           ) {
-            Text(if (path == state.selectedHtmlPath) "$path  selected" else path)
+            Text(if (path == state.selectedHtmlPath) t(language, "$path  selected", "$path  \u5df2\u9009\u4e2d") else path)
           }
         }
       }
     },
     confirmButton = {
       TextButton(onClick = onDismiss) {
-        Text("Close")
+        Text(t(language, "Close", "\u5173\u95ed"))
       }
     },
   )
@@ -839,6 +862,7 @@ private fun HtmlFilesDialog(
 private fun SessionsDialog(
   state: AgentScreenState,
   controller: AgentController,
+  language: String,
   onDismiss: () -> Unit,
 ) {
   var renameTarget by remember { mutableStateOf<SessionMessageTarget?>(null) }
@@ -846,7 +870,7 @@ private fun SessionsDialog(
 
   AlertDialog(
     onDismissRequest = onDismiss,
-    title = { Text("Sessions") },
+    title = { Text(t(language, "Sessions", "Sessions")) },
     text = {
       Column(
         modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
@@ -860,19 +884,19 @@ private fun SessionsDialog(
             },
             modifier = Modifier.weight(1f),
           ) {
-            Text("New Session")
+            Text(t(language, "New Session", "\u65b0\u5efa Session"))
           }
           Box {
             OutlinedButton(
               onClick = { archivedMenuOpen = true },
               enabled = state.archivedSessions.isNotEmpty(),
             ) {
-              Text("Archived")
+              Text(t(language, "Archived", "\u5df2\u5f52\u6863"))
             }
             DropdownMenu(expanded = archivedMenuOpen, onDismissRequest = { archivedMenuOpen = false }) {
               state.archivedSessions.forEach { session ->
                 DropdownMenuItem(
-                  text = { Text("Restore ${session.title}") },
+                  text = { Text(t(language, "Restore ${session.title}", "\u6062\u590d ${session.title}")) },
                   onClick = {
                     archivedMenuOpen = false
                     controller.restoreSession(session.id)
@@ -884,16 +908,16 @@ private fun SessionsDialog(
           }
         }
         if (state.sessions.isEmpty()) {
-          Text("No active sessions.", style = MaterialTheme.typography.bodyMedium)
+          Text(t(language, "No active sessions.", "\u6ca1\u6709\u6d3b\u8dc3 session\u3002"), style = MaterialTheme.typography.bodyMedium)
         }
         state.sessions.forEach { session ->
           SessionListItem(
             sessionId = session.id,
             title = session.title,
             subtitle = if (session.pinnedAtMillis == null) {
-              "${session.messages.size} messages"
+              t(language, "${session.messages.size} messages", "${session.messages.size} \u6761\u6d88\u606f")
             } else {
-              "Pinned / ${session.messages.size} messages"
+              t(language, "Pinned / ${session.messages.size} messages", "\u5df2\u7f6e\u9876 / ${session.messages.size} \u6761\u6d88\u606f")
             },
             active = session.id == state.session?.id,
             onOpen = {
@@ -902,28 +926,28 @@ private fun SessionsDialog(
             },
             menuContent = { closeMenu ->
               DropdownMenuItem(
-                text = { Text(if (session.pinnedAtMillis == null) "Pin" else "Unpin") },
+                text = { Text(if (session.pinnedAtMillis == null) t(language, "Pin", "\u7f6e\u9876") else t(language, "Unpin", "\u53d6\u6d88\u7f6e\u9876")) },
                 onClick = {
                   closeMenu()
                   controller.setSessionPinned(session.id, session.pinnedAtMillis == null)
                 },
               )
               DropdownMenuItem(
-                text = { Text("Rename") },
+                text = { Text(t(language, "Rename", "\u91cd\u547d\u540d")) },
                 onClick = {
                   closeMenu()
                   renameTarget = SessionMessageTarget(session.id, session.title)
                 },
               )
               DropdownMenuItem(
-                text = { Text("Copy") },
+                text = { Text(t(language, "Copy", "\u590d\u5236")) },
                 onClick = {
                   closeMenu()
                   controller.duplicateSession(session.id)
                 },
               )
               DropdownMenuItem(
-                text = { Text("Archive") },
+                text = { Text(t(language, "Archive", "\u5f52\u6863")) },
                 onClick = {
                   closeMenu()
                   controller.archiveSession(session.id)
@@ -936,7 +960,7 @@ private fun SessionsDialog(
     },
     confirmButton = {
       TextButton(onClick = onDismiss) {
-        Text("Close")
+        Text(t(language, "Close", "\u5173\u95ed"))
       }
     },
   )
@@ -944,6 +968,7 @@ private fun SessionsDialog(
   renameTarget?.let { target ->
     RenameSessionDialog(
       initialTitle = target.title,
+      language = language,
       onDismiss = { renameTarget = null },
       onSave = { title ->
         controller.renameSession(target.id, title)
@@ -1015,6 +1040,7 @@ private fun SessionListItem(
 @Composable
 private fun RenameSessionDialog(
   initialTitle: String,
+  language: String,
   onDismiss: () -> Unit,
   onSave: (String) -> Unit,
 ) {
@@ -1022,24 +1048,24 @@ private fun RenameSessionDialog(
 
   AlertDialog(
     onDismissRequest = onDismiss,
-    title = { Text("Rename Session") },
+    title = { Text(t(language, "Rename Session", "\u91cd\u547d\u540d Session")) },
     text = {
       OutlinedTextField(
         value = title,
         onValueChange = { title = it },
-        label = { Text("Title") },
+        label = { Text(t(language, "Title", "\u6807\u9898")) },
         singleLine = true,
         modifier = Modifier.fillMaxWidth(),
       )
     },
     confirmButton = {
       Button(onClick = { onSave(title) }) {
-        Text("Save")
+        Text(t(language, "Save", "\u4fdd\u5b58"))
       }
     },
     dismissButton = {
       TextButton(onClick = onDismiss) {
-        Text("Cancel")
+        Text(t(language, "Cancel", "\u53d6\u6d88"))
       }
     },
   )
@@ -1049,6 +1075,7 @@ private fun RenameSessionDialog(
 private fun FilesDialog(
   state: AgentScreenState,
   controller: AgentController,
+  language: String,
   onDismiss: () -> Unit,
 ) {
   val root = state.workspaceTree
@@ -1059,17 +1086,17 @@ private fun FilesDialog(
 
   AlertDialog(
     onDismissRequest = onDismiss,
-    title = { Text("Workspace Files") },
+    title = { Text(t(language, "Workspace Files", "Workspace \u6587\u4ef6")) },
     text = {
       Column(
         modifier = Modifier.fillMaxWidth().heightIn(min = 160.dp, max = 460.dp).verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(6.dp),
       ) {
         OutlinedButton(onClick = controller::refreshWorkspaceFiles, modifier = Modifier.fillMaxWidth()) {
-          Text("Refresh")
+          Text(t(language, "Refresh", "\u5237\u65b0"))
         }
         if (root == null || root.children.isEmpty()) {
-          Text("(empty)", style = MaterialTheme.typography.bodyMedium)
+          Text(t(language, "(empty)", "\uff08\u7a7a\uff09"), style = MaterialTheme.typography.bodyMedium)
         } else {
           root.children.forEach { node ->
             WorkspaceFileTreeNode(
@@ -1095,6 +1122,7 @@ private fun FilesDialog(
               onShare = { path -> shareWorkspaceFile(context, controller, path) },
               onRename = { renameTarget = it },
               onCopyPath = { path -> clipboard.setPrimaryClip(ClipData.newPlainText("Workspace path", path)) },
+              language = language,
             )
           }
         }
@@ -1102,7 +1130,7 @@ private fun FilesDialog(
     },
     confirmButton = {
       TextButton(onClick = onDismiss) {
-        Text("Close")
+        Text(t(language, "Close", "\u5173\u95ed"))
       }
     },
   )
@@ -1110,6 +1138,7 @@ private fun FilesDialog(
   renameTarget?.let { target ->
     RenameWorkspacePathDialog(
       initialName = target.name,
+      language = language,
       onDismiss = { renameTarget = null },
       onSave = { newName ->
         controller.renameWorkspacePath(target.path, newName)
@@ -1124,6 +1153,7 @@ private fun WorkspaceFileTreeNode(
   node: WorkspaceFileNode,
   depth: Int,
   expandedPaths: Set<String>,
+  language: String,
   onToggle: (String) -> Unit,
   onDefaultOpen: (String) -> Unit,
   onOpenWith: (String) -> Unit,
@@ -1170,14 +1200,14 @@ private fun WorkspaceFileTreeNode(
       DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
         if (!node.isDirectory) {
           DropdownMenuItem(
-            text = { Text("Open with...") },
+            text = { Text(t(language, "Open with...", "\u6253\u5f00\u65b9\u5f0f...")) },
             onClick = {
               menuOpen = false
               onOpenWith(node.path)
             },
           )
           DropdownMenuItem(
-            text = { Text("Share") },
+            text = { Text(t(language, "Share", "\u5206\u4eab")) },
             onClick = {
               menuOpen = false
               onShare(node.path)
@@ -1185,14 +1215,14 @@ private fun WorkspaceFileTreeNode(
           )
         }
         DropdownMenuItem(
-          text = { Text("Rename") },
+          text = { Text(t(language, "Rename", "\u91cd\u547d\u540d")) },
           onClick = {
             menuOpen = false
             onRename(node)
           },
         )
         DropdownMenuItem(
-          text = { Text("Copy path") },
+          text = { Text(t(language, "Copy path", "\u590d\u5236\u8def\u5f84")) },
           onClick = {
             menuOpen = false
             onCopyPath(node.path)
@@ -1208,6 +1238,7 @@ private fun WorkspaceFileTreeNode(
         node = child,
         depth = depth + 1,
         expandedPaths = expandedPaths,
+        language = language,
         onToggle = onToggle,
         onDefaultOpen = onDefaultOpen,
         onOpenWith = onOpenWith,
@@ -1222,6 +1253,7 @@ private fun WorkspaceFileTreeNode(
 @Composable
 private fun RenameWorkspacePathDialog(
   initialName: String,
+  language: String,
   onDismiss: () -> Unit,
   onSave: (String) -> Unit,
 ) {
@@ -1229,24 +1261,24 @@ private fun RenameWorkspacePathDialog(
 
   AlertDialog(
     onDismissRequest = onDismiss,
-    title = { Text("Rename") },
+    title = { Text(t(language, "Rename", "\u91cd\u547d\u540d")) },
     text = {
       OutlinedTextField(
         value = name,
         onValueChange = { name = it },
-        label = { Text("Name") },
+        label = { Text(t(language, "Name", "\u540d\u79f0")) },
         singleLine = true,
         modifier = Modifier.fillMaxWidth(),
       )
     },
     confirmButton = {
       Button(onClick = { onSave(name) }) {
-        Text("Save")
+        Text(t(language, "Save", "\u4fdd\u5b58"))
       }
     },
     dismissButton = {
       TextButton(onClick = onDismiss) {
-        Text("Cancel")
+        Text(t(language, "Cancel", "\u53d6\u6d88"))
       }
     },
   )
@@ -1279,16 +1311,19 @@ private fun shareWorkspaceFile(context: Context, controller: AgentController, pa
 private fun AgentFileDialog(
   state: AgentScreenState,
   controller: AgentController,
+  language: String,
   onDismiss: () -> Unit,
 ) {
+  var agentRulesDraft by remember(state.agentRulesDraft) { mutableStateOf(state.agentRulesDraft) }
+
   AlertDialog(
     onDismissRequest = onDismiss,
     title = { Text("AGENT.md") },
     text = {
       OutlinedTextField(
-        value = state.agentRulesDraft,
-        onValueChange = controller::updateAgentRules,
-        label = { Text("Workspace agent rules") },
+        value = agentRulesDraft,
+        onValueChange = { agentRulesDraft = it },
+        label = { Text(t(language, "Workspace agent rules", "Workspace agent \u89c4\u5219")) },
         minLines = 10,
         modifier = Modifier.fillMaxWidth(),
       )
@@ -1296,16 +1331,16 @@ private fun AgentFileDialog(
     confirmButton = {
       Button(
         onClick = {
-          controller.saveAgentRules()
+          controller.saveAgentRules(agentRulesDraft)
           onDismiss()
         },
       ) {
-        Text("Save")
+        Text(t(language, "Save", "\u4fdd\u5b58"))
       }
     },
     dismissButton = {
       TextButton(onClick = onDismiss) {
-        Text("Cancel")
+        Text(t(language, "Cancel", "\u53d6\u6d88"))
       }
     },
   )
@@ -1315,18 +1350,24 @@ private fun AgentFileDialog(
 private fun SettingsDialog(
   state: AgentScreenState,
   controller: AgentController,
+  language: String,
   onDismiss: () -> Unit,
 ) {
-  val selectedProvider = ModelProviderCatalog.findProvider(state.providerDraft) ?: ModelProviderCatalog.defaultProvider
+  var providerDraft by remember(state.providerDraft) { mutableStateOf(state.providerDraft) }
+  var modelDraft by remember(state.modelDraft) { mutableStateOf(state.modelDraft) }
+  var apiKeyDraft by remember(state.apiKeyDraft) { mutableStateOf(state.apiKeyDraft) }
+  var languageDraft by remember(state.settings.language) { mutableStateOf(state.settings.language) }
+  val selectedProvider = ModelProviderCatalog.findProvider(providerDraft) ?: ModelProviderCatalog.defaultProvider
   var providerMenuOpen by remember { mutableStateOf(false) }
   var modelMenuOpen by remember { mutableStateOf(false) }
+  var languageMenuOpen by remember { mutableStateOf(false) }
 
   AlertDialog(
     onDismissRequest = onDismiss,
-    title = { Text("Settings") },
+    title = { Text(t(language, "Settings", "\u8bbe\u7f6e")) },
     text = {
       Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("${selectedProvider.label} / ${state.modelDraft}", style = MaterialTheme.typography.bodySmall)
+        Text("${selectedProvider.label} / $modelDraft", style = MaterialTheme.typography.bodySmall)
         Box {
           OutlinedButton(onClick = { providerMenuOpen = true }, modifier = Modifier.fillMaxWidth()) {
             Text(selectedProvider.label)
@@ -1337,7 +1378,9 @@ private fun SettingsDialog(
                 text = { Text(provider.label) },
                 onClick = {
                   providerMenuOpen = false
-                  controller.updateProvider(provider.id)
+                  providerDraft = provider.id
+                  modelDraft = provider.defaultModel
+                  apiKeyDraft = state.settings.apiKeyFor(provider.id)
                 },
               )
             }
@@ -1345,15 +1388,15 @@ private fun SettingsDialog(
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
           OutlinedTextField(
-            value = state.modelDraft,
-            onValueChange = controller::updateModel,
-            label = { Text("Model") },
+            value = modelDraft,
+            onValueChange = { modelDraft = it },
+            label = { Text(t(language, "Model", "\u6a21\u578b")) },
             singleLine = true,
             modifier = Modifier.weight(1f),
           )
           Box {
             OutlinedButton(onClick = { modelMenuOpen = true }) {
-              Text("Presets")
+              Text(t(language, "Presets", "\u9884\u8bbe"))
             }
             DropdownMenu(expanded = modelMenuOpen, onDismissRequest = { modelMenuOpen = false }) {
               selectedProvider.suggestedModels.forEach { model ->
@@ -1361,7 +1404,7 @@ private fun SettingsDialog(
                   text = { Text(model) },
                   onClick = {
                     modelMenuOpen = false
-                    controller.updateModel(model)
+                    modelDraft = model
                   },
                 )
               }
@@ -1369,30 +1412,58 @@ private fun SettingsDialog(
           }
         }
         OutlinedTextField(
-          value = state.apiKeyDraft,
-          onValueChange = controller::updateApiKey,
+          value = apiKeyDraft,
+          onValueChange = { apiKeyDraft = it },
           label = { Text(selectedProvider.apiKeyLabel) },
           singleLine = true,
           visualTransformation = PasswordVisualTransformation(),
           keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
           modifier = Modifier.fillMaxWidth(),
         )
+        Box {
+          OutlinedButton(onClick = { languageMenuOpen = true }, modifier = Modifier.fillMaxWidth()) {
+            Text(t(language, "Language: ${languageLabel(languageDraft)}", "\u8bed\u8a00\uff1a${languageLabel(languageDraft)}"))
+          }
+          DropdownMenu(expanded = languageMenuOpen, onDismissRequest = { languageMenuOpen = false }) {
+            DropdownMenuItem(
+              text = { Text("English") },
+              onClick = {
+                languageMenuOpen = false
+                languageDraft = "en"
+              },
+            )
+            DropdownMenuItem(
+              text = { Text("\u4e2d\u6587") },
+              onClick = {
+                languageMenuOpen = false
+                languageDraft = "zh"
+              },
+            )
+          }
+        }
       }
     },
     confirmButton = {
       Button(
         onClick = {
-          controller.saveModelSettings()
+          controller.saveModelSettings(
+            providerId = providerDraft,
+            model = modelDraft,
+            apiKey = apiKeyDraft,
+            language = languageDraft,
+          )
           onDismiss()
         },
       ) {
-        Text("Save")
+        Text(t(language, "Save", "\u4fdd\u5b58"))
       }
     },
     dismissButton = {
       TextButton(onClick = onDismiss) {
-        Text("Cancel")
+        Text(t(language, "Cancel", "\u53d6\u6d88"))
       }
     },
   )
 }
+
+private fun languageLabel(language: String): String = if (language == "zh") "\u4e2d\u6587" else "English"

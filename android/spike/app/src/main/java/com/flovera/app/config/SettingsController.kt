@@ -11,7 +11,7 @@ data class ModelSettingsDraft(
 class SettingsController(private val store: SettingsStore) {
   fun load(): AppSettings {
     val loaded = store.load()
-    val normalized = normalizeProviderAndModel(loaded)
+    val normalized = normalizeLanguage(normalizeProviderAndModel(loaded))
     if (normalized != loaded) store.save(normalized)
     return normalized
   }
@@ -51,6 +51,12 @@ class SettingsController(private val store: SettingsStore) {
     return updated
   }
 
+  fun setLanguage(settings: AppSettings, language: String): AppSettings {
+    val updated = settings.copy(language = normalizeLanguageId(language))
+    store.save(updated)
+    return updated
+  }
+
   fun setActiveSession(settings: AppSettings, sessionId: String?): AppSettings {
     val updated = settings.copy(activeSessionId = sessionId)
     store.save(updated)
@@ -73,5 +79,16 @@ class SettingsController(private val store: SettingsStore) {
     val provider = ModelProviderCatalog.findProvider(settings.provider) ?: ModelProviderCatalog.defaultProvider
     val model = settings.model.ifBlank { provider.defaultModel }
     return settings.copy(provider = provider.id, model = model)
+  }
+
+  private fun normalizeLanguage(settings: AppSettings): AppSettings {
+    return settings.copy(language = normalizeLanguageId(settings.language))
+  }
+
+  private fun normalizeLanguageId(language: String): String {
+    return when (language) {
+      "zh" -> "zh"
+      else -> "en"
+    }
   }
 }
