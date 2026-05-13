@@ -10,6 +10,7 @@ import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -90,8 +92,15 @@ private const val EmptyWebPrompt = "\u53ef\u9009\u62e9 HTML \u8fdb\u884c\u6253\u
 fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
   val state by controller.state.collectAsStateWithLifecycle()
   val language = state.settings.language
+  val context = LocalContext.current
   var menuOpen by remember { mutableStateOf(false) }
   var activePanel by remember { mutableStateOf<AgentPanel?>(null) }
+
+  LaunchedEffect(state.status) {
+    if (state.status !in setOf("Idle", "Ready")) {
+      Toast.makeText(context, state.status, Toast.LENGTH_SHORT).show()
+    }
+  }
 
   Box(modifier = modifier.fillMaxSize()) {
     WorkspaceWebView(url = state.selectedHtmlUrl, workspaceRootUrl = state.workspaceRootUrl)
@@ -830,14 +839,16 @@ private fun HtmlFilesDialog(
     onDismissRequest = onDismiss,
     title = { Text(t(language, "Select HTML", "\u9009\u62e9 HTML")) },
     text = {
-      Column(
-        modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+      LazyColumn(
+        modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 420.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
       ) {
         if (state.htmlFiles.isEmpty()) {
-          Text(t(language, "No HTML files in this workspace.", "\u5f53\u524d workspace \u6ca1\u6709 HTML \u6587\u4ef6\u3002"), style = MaterialTheme.typography.bodyMedium)
+          item {
+            Text(t(language, "No HTML files in this workspace.", "\u5f53\u524d workspace \u6ca1\u6709 HTML \u6587\u4ef6\u3002"), style = MaterialTheme.typography.bodyMedium)
+          }
         }
-        state.htmlFiles.forEach { path ->
+        items(state.htmlFiles) { path ->
           OutlinedButton(
             onClick = {
               controller.selectHtmlFile(path)
@@ -1083,25 +1094,32 @@ private fun FilesDialog(
   var renameTarget by remember { mutableStateOf<WorkspaceFileNode?>(null) }
   val context = LocalContext.current
   val clipboard = context.getSystemService(ClipboardManager::class.java)
+  val visibleNodes = remember(root, expandedPaths.value) {
+    root?.children.orEmpty().flattenVisibleWorkspaceNodes(expandedPaths.value)
+  }
 
   AlertDialog(
     onDismissRequest = onDismiss,
     title = { Text(t(language, "Workspace Files", "Workspace \u6587\u4ef6")) },
     text = {
-      Column(
-        modifier = Modifier.fillMaxWidth().heightIn(min = 160.dp, max = 460.dp).verticalScroll(rememberScrollState()),
+      LazyColumn(
+        modifier = Modifier.fillMaxWidth().heightIn(min = 160.dp, max = 460.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
       ) {
-        OutlinedButton(onClick = controller::refreshWorkspaceFiles, modifier = Modifier.fillMaxWidth()) {
-          Text(t(language, "Refresh", "\u5237\u65b0"))
+        item {
+          OutlinedButton(onClick = controller::refreshWorkspaceFiles, modifier = Modifier.fillMaxWidth()) {
+            Text(t(language, "Refresh", "\u5237\u65b0"))
+          }
         }
-        if (root == null || root.children.isEmpty()) {
-          Text(t(language, "(empty)", "\uff08\u7a7a\uff09"), style = MaterialTheme.typography.bodyMedium)
+        if (visibleNodes.isEmpty()) {
+          item {
+            Text(t(language, "(empty)", "\uff08\u7a7a\uff09"), style = MaterialTheme.typography.bodyMedium)
+          }
         } else {
-          root.children.forEach { node ->
+          items(visibleNodes, key = { it.node.path }) { visibleNode ->
             WorkspaceFileTreeNode(
-              node = node,
-              depth = 0,
+              node = visibleNode.node,
+              depth = visibleNode.depth,
               expandedPaths = expandedPaths.value,
               onToggle = { path ->
                 expandedPaths.value = if (path in expandedPaths.value) {
@@ -1232,20 +1250,23 @@ private fun WorkspaceFileTreeNode(
     }
   }
 
-  if (node.isDirectory && expanded) {
-    node.children.forEach { child ->
-      WorkspaceFileTreeNode(
-        node = child,
-        depth = depth + 1,
-        expandedPaths = expandedPaths,
-        language = language,
-        onToggle = onToggle,
-        onDefaultOpen = onDefaultOpen,
-        onOpenWith = onOpenWith,
-        onShare = onShare,
-        onRename = onRename,
-        onCopyPath = onCopyPath,
-      )
+}
+
+private data class VisibleWorkspaceFileNode(
+  val node: WorkspaceFileNode,
+  val depth: Int,
+)
+
+private fun List<WorkspaceFileNode>.flattenVisibleWorkspaceNodes(
+  expandedPaths: Set<String>,
+  depth: Int = 0,
+): List<VisibleWorkspaceFileNode> {
+  return flatMap { node ->
+    val current = VisibleWorkspaceFileNode(node = node, depth = depth)
+    if (node.isDirectory && node.path in expandedPaths) {
+      listOf(current) + node.children.flattenVisibleWorkspaceNodes(expandedPaths, depth + 1)
+    } else {
+      listOf(current)
     }
   }
 }
@@ -1285,25 +1306,37 @@ private fun RenameWorkspacePathDialog(
 }
 
 private fun openWorkspaceFile(context: Context, controller: AgentController, path: String) {
-  val uri = controller.workspaceFileUri(path) ?: return
+  val uri = controller.workspaceFileUri(path)
+  if (uri == null) {
+    controller.reportStatus("File is not available: $path")
+    return
+  }
   val intent = Intent(Intent.ACTION_VIEW)
     .setDataAndType(uri, controller.workspaceMimeType(path))
     .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
   try {
     context.startActivity(Intent.createChooser(intent, "Open with"))
+    controller.reportStatus("Opening $path")
   } catch (_: ActivityNotFoundException) {
+    controller.reportStatus("No app can open $path")
   }
 }
 
 private fun shareWorkspaceFile(context: Context, controller: AgentController, path: String) {
-  val uri = controller.workspaceFileUri(path) ?: return
+  val uri = controller.workspaceFileUri(path)
+  if (uri == null) {
+    controller.reportStatus("File is not available: $path")
+    return
+  }
   val intent = Intent(Intent.ACTION_SEND)
     .setType(controller.workspaceMimeType(path))
     .putExtra(Intent.EXTRA_STREAM, uri)
     .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
   try {
     context.startActivity(Intent.createChooser(intent, "Share"))
+    controller.reportStatus("Sharing $path")
   } catch (_: ActivityNotFoundException) {
+    controller.reportStatus("No app can share $path")
   }
 }
 

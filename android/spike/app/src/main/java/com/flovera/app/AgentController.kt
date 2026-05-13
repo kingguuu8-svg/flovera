@@ -160,6 +160,10 @@ class AgentController(context: Context) {
     refreshWorkspaceState(status = "Workspace refreshed")
   }
 
+  fun reportStatus(status: String) {
+    _state.update { it.copy(status = status) }
+  }
+
   fun renameWorkspacePath(path: String, newName: String) {
     val status = workspaceController.rename(path, newName)
     refreshWorkspaceState(status = status)
