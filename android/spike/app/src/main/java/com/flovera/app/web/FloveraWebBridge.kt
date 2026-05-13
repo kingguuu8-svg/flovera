@@ -47,6 +47,7 @@ class FloveraWebBridge(private val context: Context) {
     val body = payload.optString("body").take(MAX_BODY_CHARS).ifBlank { return "missing body" }
     if (needsNotificationPermission()) {
       val activity = context.findActivity() ?: return "notification permission not granted"
+      pendingNotification = PendingNotification(title = title, body = body)
       mainHandler.post {
         ActivityCompat.requestPermissions(
           activity,
@@ -80,6 +81,20 @@ class FloveraWebBridge(private val context: Context) {
 
   private fun nextNotificationId(): Int = (System.currentTimeMillis() % Int.MAX_VALUE).toInt()
 
+  private fun postNotification(title: String, body: String) {
+    ensureNotificationChannel()
+    val notification = NotificationCompat.Builder(appContext, CHANNEL_ID)
+      .setSmallIcon(android.R.drawable.ic_dialog_info)
+      .setContentTitle(title)
+      .setContentText(body)
+      .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+      .setAutoCancel(true)
+      .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+      .build()
+
+    NotificationManagerCompat.from(appContext).notify(nextNotificationId(), notification)
+  }
+
   private fun needsNotificationPermission(): Boolean {
     return Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
       appContext.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
@@ -94,11 +109,29 @@ class FloveraWebBridge(private val context: Context) {
     return null
   }
 
-  private companion object {
+  companion object {
     const val CHANNEL_ID = "flovera_workspace_events"
     const val NOTIFICATION_PERMISSION_REQUEST_CODE = 1001
     const val MAX_TITLE_CHARS = 80
     const val MAX_BODY_CHARS = 500
     const val MAX_TOAST_CHARS = 160
+
+    private var pendingNotification: PendingNotification? = null
+
+    fun flushPendingNotification(context: Context) {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+        context.applicationContext.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+      ) {
+        return
+      }
+      val pending = pendingNotification ?: return
+      pendingNotification = null
+      FloveraWebBridge(context).postNotification(pending.title, pending.body)
+    }
   }
+
+  private data class PendingNotification(
+    val title: String,
+    val body: String,
+  )
 }

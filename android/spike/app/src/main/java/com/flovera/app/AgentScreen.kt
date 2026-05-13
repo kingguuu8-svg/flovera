@@ -5,6 +5,9 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.clickable
@@ -90,7 +93,7 @@ fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
   var activePanel by remember { mutableStateOf<AgentPanel?>(null) }
 
   Box(modifier = modifier.fillMaxSize()) {
-    WorkspaceWebView(url = state.selectedHtmlUrl)
+    WorkspaceWebView(url = state.selectedHtmlUrl, workspaceRootUrl = state.workspaceRootUrl)
 
     Surface(
       modifier = Modifier.align(Alignment.CenterStart).padding(start = 8.dp),
@@ -179,7 +182,9 @@ fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun WorkspaceWebView(url: String?) {
+private fun WorkspaceWebView(url: String?, workspaceRootUrl: String) {
+  var webError by remember(url) { mutableStateOf<String?>(null) }
+
   if (url.isNullOrBlank()) {
     Box(
       modifier = Modifier.fillMaxSize(),
@@ -202,7 +207,10 @@ private fun WorkspaceWebView(url: String?) {
     modifier = Modifier.fillMaxSize(),
     factory = { context ->
       WebView(context).apply {
-        webViewClient = WebViewClient()
+        webViewClient = FloveraWorkspaceWebViewClient(
+          workspaceRootUrl = workspaceRootUrl,
+          onError = { webError = it },
+        )
         settings.javaScriptEnabled = true
         settings.domStorageEnabled = true
         settings.allowFileAccess = true
@@ -213,10 +221,75 @@ private fun WorkspaceWebView(url: String?) {
     },
     update = { webView ->
       if (webView.url != url) {
+        webError = null
         webView.loadUrl(url)
       }
     },
   )
+
+  webError?.let { message ->
+    Box(
+      modifier = Modifier.fillMaxSize(),
+      contentAlignment = Alignment.BottomCenter,
+    ) {
+      Surface(
+        modifier = Modifier.fillMaxWidth().padding(16.dp),
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.errorContainer,
+        tonalElevation = 4.dp,
+      ) {
+        Text(
+          text = message,
+          modifier = Modifier.padding(12.dp),
+          color = MaterialTheme.colorScheme.onErrorContainer,
+          style = MaterialTheme.typography.bodySmall,
+        )
+      }
+    }
+  }
+}
+
+private class FloveraWorkspaceWebViewClient(
+  private val workspaceRootUrl: String,
+  private val onError: (String) -> Unit,
+) : WebViewClient() {
+  override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+    return handleUrl(view, request.url)
+  }
+
+  @Suppress("DEPRECATION")
+  override fun shouldOverrideUrlLoading(view: WebView, url: String): Boolean {
+    return handleUrl(view, Uri.parse(url))
+  }
+
+  override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
+    if (request.isForMainFrame) {
+      onError("WebView load failed: ${error.description}")
+    }
+  }
+
+  private fun handleUrl(view: WebView, uri: Uri): Boolean {
+    val target = uri.toString()
+    if (target.startsWith(workspaceRootUrl)) {
+      return false
+    }
+
+    val scheme = uri.scheme?.lowercase()
+    if (scheme == "http" || scheme == "https") {
+      val intent = Intent(Intent.ACTION_VIEW, uri)
+      return runCatching {
+        view.context.startActivity(intent)
+        onError("Opened external link outside Flovera.")
+        true
+      }.getOrElse {
+        onError("No app can open external link: $target")
+        true
+      }
+    }
+
+    onError("Blocked non-workspace navigation: $target")
+    return true
+  }
 }
 
 @Composable

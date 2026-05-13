@@ -115,6 +115,8 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     return file.toURI().toASCIIString()
   }
 
+  fun rootUrl(): String = root.toURI().toASCIIString()
+
   fun exportableFile(path: String): File? {
     val file = safeFile(path)
     if (!file.exists() || !file.isFile) return null

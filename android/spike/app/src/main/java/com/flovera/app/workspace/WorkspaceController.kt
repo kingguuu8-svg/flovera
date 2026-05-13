@@ -10,6 +10,7 @@ data class WorkspaceSnapshot(
   val htmlFiles: List<String>,
   val selectedHtmlPath: String,
   val selectedHtmlUrl: String?,
+  val workspaceRootUrl: String,
 )
 
 class WorkspaceController(context: Context, workspaceId: String) {
@@ -44,6 +45,7 @@ class WorkspaceController(context: Context, workspaceId: String) {
       htmlFiles = htmlFiles,
       selectedHtmlPath = selectedHtmlPath,
       selectedHtmlUrl = workspace.displayUrl(selectedHtmlPath),
+      workspaceRootUrl = workspace.rootUrl(),
     )
   }
 

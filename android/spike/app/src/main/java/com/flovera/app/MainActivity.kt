@@ -1,6 +1,7 @@
 package com.flovera.app
 
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -11,6 +12,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import com.flovera.app.web.FloveraWebBridge
 import com.flovera.app.theme.FloveraTheme
 
 class MainActivity : ComponentActivity() {
@@ -41,6 +43,19 @@ class MainActivity : ComponentActivity() {
     super.onNewIntent(intent)
     setIntent(intent)
     consumeShareIntent(intent)
+  }
+
+  override fun onRequestPermissionsResult(
+    requestCode: Int,
+    permissions: Array<String>,
+    grantResults: IntArray,
+  ) {
+    super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+    if (requestCode == FloveraWebBridge.NOTIFICATION_PERMISSION_REQUEST_CODE &&
+      grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED
+    ) {
+      FloveraWebBridge.flushPendingNotification(this)
+    }
   }
 
   private fun consumeShareIntent(intent: Intent?) {

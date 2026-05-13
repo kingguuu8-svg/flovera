@@ -34,6 +34,7 @@ data class AgentScreenState(
   val htmlFiles: List<String> = emptyList(),
   val selectedHtmlPath: String = "",
   val selectedHtmlUrl: String? = null,
+  val workspaceRootUrl: String = "",
   val status: String = "Idle",
   val isRunning: Boolean = false,
   val assistantDraft: SessionMessage? = null,
@@ -73,6 +74,7 @@ class AgentController(context: Context) {
       htmlFiles = workspaceSnapshot.htmlFiles,
       selectedHtmlPath = workspaceSnapshot.selectedHtmlPath,
       selectedHtmlUrl = workspaceSnapshot.selectedHtmlUrl,
+      workspaceRootUrl = workspaceSnapshot.workspaceRootUrl,
       status = "Ready",
     )
   }
@@ -346,6 +348,7 @@ class AgentController(context: Context) {
         htmlFiles = workspaceSnapshot.htmlFiles,
         selectedHtmlPath = workspaceSnapshot.selectedHtmlPath,
         selectedHtmlUrl = workspaceSnapshot.selectedHtmlUrl,
+        workspaceRootUrl = workspaceSnapshot.workspaceRootUrl,
         isRunning = isRunning,
         assistantDraft = if (isRunning) it.assistantDraft else null,
         status = status,
