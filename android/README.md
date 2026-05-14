@@ -1,11 +1,16 @@
-# android
+# Android
 
-这里放 Android 侧控制层。
+The active Android project is `spike/`.
 
-当前已落地的子工程在 [spike/](spike/)：
+Despite the historical directory name, this is the Flovera Android app:
 
-- 单屏 `AI Linux VM Spike`
-- `Prepare Linux` / `Start Linux` / `Pause` / `Resume` / `Shutdown`
-- terminal 命令输入、资产释放、子进程控制、QMP pause/resume、日志收集、SSH exec
+- package slot `com.flovera.app`
+- launcher label `Flovera`
+- Kotlin and Jetpack Compose UI
+- persistent agent sessions
+- scoped workspace file tools
+- WebView workspace preview
+- configurable model provider settings
 
-这不是完整工作台，也不承诺 WebView 或复杂 Agent 层。
+Legacy Android/QEMU control experiments are preserved under
+`docs/archive/legacy-qemu-vps/`.
