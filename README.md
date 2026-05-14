@@ -4,6 +4,10 @@ Flovera is an Android-local workspace agent app. It runs an agent inside the
 Android app, gives it a scoped local workspace, persists sessions, and uses
 WebView as the primary surface for generated HTML/web artifacts.
 
+The agent runtime is built on top of
+[JetBrains Koog](https://github.com/JetBrains/koog), an Apache-2.0 licensed
+Kotlin agent framework.
+
 ## Current Status
 
 This repository is still pre-release. The Android app already supports:
@@ -89,3 +93,6 @@ Pre-release changes are tracked in `CHANGELOG.md`.
 ## License
 
 Flovera is licensed under the MIT License. See `LICENSE`.
+
+Flovera depends on third-party open source projects, including JetBrains Koog.
+See `THIRD_PARTY_NOTICES.md` for dependency notices.

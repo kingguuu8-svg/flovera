@@ -23,7 +23,15 @@ The Android dependency versions are defined in
 | AndroidX Test | Instrumented test runner and test APIs | AndroidX Test license metadata |
 | Espresso | Android UI test support | AndroidX Test/Espresso license metadata |
 | JUnit 4 | Unit test framework | JUnit license metadata |
-| Koog Agents | Agent runtime integration | Koog project license metadata |
+| Koog Agents | Agent runtime integration | JetBrains Koog, Apache License 2.0 |
+
+## Upstream Agent Framework
+
+Flovera uses [JetBrains Koog](https://github.com/JetBrains/koog) through the
+`ai.koog:koog-agents` dependency. Koog is licensed under the Apache License 2.0.
+
+Flovera is not affiliated with JetBrains. Koog and related names belong to their
+respective owners.
 
 ## Release Requirement
 
