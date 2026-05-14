@@ -1,156 +1,95 @@
-# AI in Linux
+# Flovera
 
-本仓库用于实现一个面向 AI Agent 的 QEMU guest workspace runtime。
+Flovera is an Android-local workspace agent app.
 
-第一阶段不做通用 Android 虚拟化产品，也不重新制作沙箱操作系统。当前目标是把 QEMU 固定为成熟执行底座，启动一台预装 agent 和工具链的 Linux guest，让它像一台可被 Android 控制的轻量 Linux 工作机。
+The current product direction is not a phone-hosted Linux VM. Flovera runs an
+agent inside an Android app, gives it a scoped local workspace, persists
+sessions, and uses WebView as the primary surface for generated HTML/web
+artifacts.
 
-## 当前阶段目标
+## Current Status
 
-构建一个可重复启动的 QEMU Linux 工作机，使 AI 具备基础操作空间：
+This repository is still pre-release. The Android app already supports:
 
-- QEMU 启动固定 aarch64 Linux guest
-- guest 提供 shell、SSH、Git、curl、Python、证书和 `/workspace`；Node/agent 作为后续 guest 内 provisioning 目标
-- agent 默认操作 `/workspace`
-- guest 可联网访问 HTTPS
-- guest 可启动本地服务并通过 QEMU 端口转发预览
-- Android 侧可开启、暂停、恢复、关闭 Linux，并直接操作 terminal
+- Persistent agent sessions and conversation history.
+- Workspace file read/write tools.
+- Workspace file browser with HTML preview in the app WebView.
+- Configurable model provider settings stored outside source code.
+- Optional network tools behind a user setting.
+- Markdown conversation rendering and collapsed tool output.
+- Product quality and backlog rules in `PRODUCT_QUALITY.md`.
 
-第一阶段用户体验定义为：Android 上的一台本地 Linux 电脑。用户可以像连接 VPS 一样使用终端；QEMU、SSH、QMP、端口转发、日志和网络配置都属于后台实现细节。
+Planned work includes workspace snapshots, broader agent-controlled settings,
+controlled Python runtime support, Brave Search integration, and more workspace
+renderers.
 
-## 非目标
-
-- 不做 Linux 桌面
-- 不做 GUI/X11/Wayland
-- 不做多用户系统
-- 不做 systemd 依赖
-- 不做 Docker 编排
-- 不做完整前端可视化工作台
-- 不把 AVF 作为 Android 12+ 普适主线
-- 不承诺多机型 Android 兼容
-
-Android 侧的最小控制面会以独立 spike 工程推进，入口在 `android/spike`。它只负责资产释放、QEMU 进程控制和最小验收，不代表完整工作台。
-
-## 仓库结构
+## Repository Layout
 
 ```text
 .
-├── AGENTS.md
-├── README.md
-├── docs/
-│   ├── 00-project-scope.md
-│   ├── 01-repository-workflow.md
-│   ├── 02-minimal-linux-spec.md
-│   ├── 03-implementation-routes.md
-│   ├── 04-system-architecture.md
-│   ├── 05-open-questions.md
-│   ├── 06-sandbox-design-targets.md
-│   ├── 07-qemu-guest-workspace-runtime.md
-│   ├── 08-first-stage-android-linux-computer-ux.md
-│   ├── rounds/
-│   │   ├── README.md
-│   │   ├── current-round.md
-│   │   ├── round-timeline.md
-│   │   ├── development-findings.md
-│   │   └── idea-backlog.md
-│   ├── verification/
-│   │   ├── 2026-05-01-android-linux-controls.md
-│   │   └── 2026-05-01-ubuntu-cloud-guest.md
-│   └── decisions/
-│       └── 0001-first-stage-alpine-qemu.md
-├── rootfs/
-│   ├── README.md
-│   └── alpine/
-│       └── README.md
-├── vm/
-│   ├── README.md
-│   └── qemu/
-│       └── README.md
-├── bridge/
-│   └── README.md
-├── android/
-│   └── README.md
-├── scripts/
-│   └── README.md
-├── examples/
-│   └── README.md
-└── artifacts/
-    └── README.md
+|-- android/spike/                 Android app source
+|-- docs/                          Current docs and archived research
+|-- docs/archive/legacy-qemu-vps/  Historical QEMU/VPS route
+|-- PRODUCT_QUALITY.md             Product quality model and backlog
+|-- docs/OPEN_SOURCE_READINESS.md  Open-source readiness checklist
+|-- LICENSE                        MIT license
+`-- .env.example                   Local environment template
 ```
 
-## 路线摘要
+The old QEMU/VPS work is kept as archived research. It is not the active product
+path.
 
-第一阶段主线：
+## Android Build
 
-```text
-Fixed Linux guest image
-  ↓
-QEMU system VM
-  ↓
-guest agent + /workspace + git
-  ↓
-Android thin controller
-```
+Requirements:
 
-备用路线：
+- Android Studio or Android SDK.
+- JDK 17. Android Studio JBR is recommended on Windows.
 
-- `proot`：用于快速验证 Linux userland 工作流，但不是真 VM。
-- AVF/pKVM：作为长期高性能方向预留，不作为 Android 12+ 普通 App 的第一阶段依赖。
-- Buildroot：作为后期极限瘦身和固化 runtime 的方向，不作为探索期主线。
-
-## 推荐阅读顺序
-
-1. [项目边界](docs/00-project-scope.md)
-2. [仓库处理流程](docs/01-repository-workflow.md)
-3. [最小 Linux 规格](docs/02-minimal-linux-spec.md)
-4. [实现路线区别](docs/03-implementation-routes.md)
-5. [系统架构](docs/04-system-architecture.md)
-6. [待解决问题](docs/05-open-questions.md)
-7. [沙箱设计目标与参考案例](docs/06-sandbox-design-targets.md)
-8. [QEMU Guest Workspace Runtime](docs/07-qemu-guest-workspace-runtime.md)
-9. [第一阶段 Android Linux 电脑体验](docs/08-first-stage-android-linux-computer-ux.md)
-10. [开发轮次流程](docs/rounds/README.md)
-11. [架构决策 0001](docs/decisions/0001-first-stage-alpine-qemu.md)
-
-## 开发轮次流程
-
-本仓库采用按提交计算的开发轮次流程：一个非平凡 commit 对应一个轮次。
-
-轮次入口：
-
-- [轮次规则](docs/rounds/README.md)
-- [当前轮次](docs/rounds/current-round.md)
-- [轮次时间线](docs/rounds/round-timeline.md)
-- [开发结论](docs/rounds/development-findings.md)
-- [想法 backlog](docs/rounds/idea-backlog.md)
-
-## 第一阶段本地验证
-
-当前仓库已经提供 Alpine rootfs 构建和验证脚本。Windows 宿主建议通过 WSL 执行：
+From `android/spike`:
 
 ```powershell
-wsl bash -lc "cd /mnt/e/main/ai-in-linux && bash scripts/build-alpine-rootfs.sh --arch x86_64 --force"
-wsl bash -lc "cd /mnt/e/main/ai-in-linux && bash scripts/verify-alpine-rootfs.sh --rootfs artifacts/rootfs/alpine-x86_64"
+$env:JAVA_HOME='C:\Program Files\Android\Android Studio\jbr'
+$env:ANDROID_HOME=Join-Path $env:LOCALAPPDATA 'Android\Sdk'
+$env:ANDROID_SDK_ROOT=$env:ANDROID_HOME
+$env:PATH="$env:JAVA_HOME\bin;$env:ANDROID_HOME\platform-tools;$env:PATH"
+
+.\gradlew.bat :app:assembleFloveraDebug :app:assembleFloveraDebugAndroidTest :app:assembleLegacyDebug
 ```
 
-这一步验证的是最小 Linux userspace 能力，不等于完整 QEMU guest 工作机已完成。
+## Device Verification
 
-## QEMU 边界验证
+Use the protected verifier instead of running raw Gradle connected tests. The
+script updates existing app installs and refuses unexpected fresh installs by
+default.
+
+From `android/spike`:
 
 ```powershell
-wsl bash -lc "cd /mnt/e/main/ai-in-linux && bash scripts/build-qemu-image.sh --rootfs artifacts/rootfs/alpine-x86_64 --force"
-wsl bash -lc "cd /mnt/e/main/ai-in-linux && bash scripts/verify-qemu-vm.sh --image artifacts/qemu/ai-linux-x86_64.ext4 --timeout 150"
+.\scripts\verify-flovera-android.ps1 -DeviceSerial <adb-serial> -SkipRelease
 ```
 
-这一步通过 QEMU 启动 ext4 镜像，并通过 SSH 跨 VM 边界重复验证 shell、网络、包管理、Python、Git、Node、`/workspace` 和 HTTP 服务。它是 guest 工作机运行时基线，不等于最终 agent 工作层。
+Use `-SkipDevice` for build-only verification.
 
-## Ubuntu Guest 工作机验证
+The app currently has two Android package slots:
 
-第一阶段优先复用官方 Ubuntu 24.04 arm64 cloud image，避免从零设计 VPS 风格镜像：
+- `com.flovera.app` with launcher label `Flovera`
+- `com.example.ailinuxvmspike` with launcher label `Flovera legacy`
 
-```powershell
-wsl bash -lc "cd /mnt/e/main/ai-in-linux && bash scripts/download-ubuntu-cloud-image.sh"
-wsl bash -lc "cd /mnt/e/main/ai-in-linux && bash scripts/build-ubuntu-nocloud-seed.sh --force"
-wsl bash -lc "cd /mnt/e/main/ai-in-linux && bash scripts/verify-ubuntu-cloud-vm.sh --image artifacts/cloud-images/ubuntu/noble-server-cloudimg-arm64.img --seed artifacts/qemu/ubuntu/seed/seed.iso --timeout 900"
-```
+The legacy slot exists so existing test devices can update an old install
+without losing app data.
 
-这条链路验证 SSH terminal、HTTPS、Python、Git、`/workspace`、HTTP 预览和 QMP 暂停/恢复。Node 如已存在会记录版本；否则作为后续 guest 内 provisioning 项，不阻塞首启验收。
+## Configuration And Secrets
+
+Do not commit API keys, signing files, local paths, generated settings, APKs, or
+workspace data.
+
+Runtime provider settings are stored by the Android app, not hardcoded in
+source. `.env.example` is only a template for local development.
+
+Before publishing or cutting a release, run the checks in
+`docs/OPEN_SOURCE_READINESS.md`.
+
+## License
+
+Flovera is licensed under the MIT License. See `LICENSE`.
