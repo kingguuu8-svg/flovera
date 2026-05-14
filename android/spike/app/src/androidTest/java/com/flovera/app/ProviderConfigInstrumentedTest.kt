@@ -40,6 +40,27 @@ class ProviderConfigInstrumentedTest {
   }
 
   @Test
+  fun settingsControllerNormalizesAndPersistsAppearance() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val store = SettingsStore(context)
+    val original = store.load()
+    try {
+      val controller = SettingsController(store)
+
+      val light = controller.setAppearance(AppSettings(), "light", "c989b8")
+      assertEquals("light", light.themeMode)
+      assertEquals("#C989B8", light.themeColor)
+      assertEquals("#C989B8", store.load().themeColor)
+
+      val fallback = controller.setAppearance(light, "missing", "not-a-color")
+      assertEquals("dark", fallback.themeMode)
+      assertEquals(AppSettings().themeColor, fallback.themeColor)
+    } finally {
+      store.save(original)
+    }
+  }
+
+  @Test
   fun settingsControllerPersistsSupportedLanguage() {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val store = SettingsStore(context)

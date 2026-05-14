@@ -122,6 +122,8 @@ class AgentController(context: Context) {
     model: String = _state.value.modelDraft,
     apiKey: String = _state.value.apiKeyDraft,
     language: String = _state.value.settings.language,
+    themeMode: String = _state.value.settings.themeMode,
+    themeColor: String = _state.value.settings.themeColor,
   ) {
     val current = _state.value
     val modelSettings = settingsController.saveModelSettings(
@@ -132,7 +134,11 @@ class AgentController(context: Context) {
         apiKey = apiKey,
       ),
     )
-    val settings = settingsController.setLanguage(modelSettings, language)
+    val settings = settingsController.setAppearance(
+      settingsController.setLanguage(modelSettings, language),
+      themeMode,
+      themeColor,
+    )
     val draft = settingsController.draftFor(settings)
     _state.update {
       it.copy(

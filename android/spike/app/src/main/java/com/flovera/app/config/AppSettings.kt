@@ -15,6 +15,8 @@ data class AppSettings(
   val maxAgentIterations: Int = 20,
   val networkEnabled: Boolean = false,
   val language: String = "en",
+  val themeMode: String = "dark",
+  val themeColor: String = "#76C4D8",
 ) {
   fun apiKeyFor(providerId: String = provider): String {
     val keyed = providerApiKeys[providerId].orEmpty()

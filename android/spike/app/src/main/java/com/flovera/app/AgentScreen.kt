@@ -1483,16 +1483,22 @@ private fun SettingsDialog(
   var modelDraft by remember(state.modelDraft) { mutableStateOf(state.modelDraft) }
   var apiKeyDraft by remember(state.apiKeyDraft) { mutableStateOf(state.apiKeyDraft) }
   var languageDraft by remember(state.settings.language) { mutableStateOf(state.settings.language) }
+  var themeModeDraft by remember(state.settings.themeMode) { mutableStateOf(state.settings.themeMode) }
+  var themeColorDraft by remember(state.settings.themeColor) { mutableStateOf(state.settings.themeColor) }
   val selectedProvider = ModelProviderCatalog.findProvider(providerDraft) ?: ModelProviderCatalog.defaultProvider
   var providerMenuOpen by remember { mutableStateOf(false) }
   var modelMenuOpen by remember { mutableStateOf(false) }
   var languageMenuOpen by remember { mutableStateOf(false) }
+  val themeColorPreview = remember(themeColorDraft) { parseUiColor(themeColorDraft) ?: Color(0xFF76C4D8) }
 
   AlertDialog(
     onDismissRequest = onDismiss,
     title = { Text(t(language, "Settings", "\u8bbe\u7f6e")) },
     text = {
-      Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+      Column(
+        modifier = Modifier.fillMaxWidth().heightIn(max = 560.dp).verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
         Text("${selectedProvider.label} / $modelDraft", style = MaterialTheme.typography.bodySmall)
         Box {
           OutlinedButton(onClick = { providerMenuOpen = true }, modifier = Modifier.fillMaxWidth()) {
@@ -1565,6 +1571,50 @@ private fun SettingsDialog(
             )
           }
         }
+        Text(t(language, "Appearance", "\u5916\u89c2"), style = MaterialTheme.typography.titleSmall)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+          OutlinedButton(
+            onClick = { themeModeDraft = "dark" },
+            modifier = Modifier.weight(1f).semantics { contentDescription = "Theme dark" },
+            border = BorderStroke(
+              1.dp,
+              if (themeModeDraft == "dark") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+            ),
+          ) {
+            Text(t(language, "Dark", "\u6697\u8272"))
+          }
+          OutlinedButton(
+            onClick = { themeModeDraft = "light" },
+            modifier = Modifier.weight(1f).semantics { contentDescription = "Theme light" },
+            border = BorderStroke(
+              1.dp,
+              if (themeModeDraft == "light") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+            ),
+          ) {
+            Text(t(language, "Light", "\u4eae\u8272"))
+          }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+          OutlinedTextField(
+            value = themeColorDraft,
+            onValueChange = { themeColorDraft = it },
+            label = { Text(t(language, "Theme color", "\u4e3b\u9898\u8272")) },
+            singleLine = true,
+            modifier = Modifier.weight(1f),
+          )
+          Surface(
+            modifier = Modifier.size(42.dp).semantics { contentDescription = "Theme color preview" },
+            shape = RoundedCornerShape(999.dp),
+            color = themeColorPreview,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+          ) {}
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+          ThemeColorPreset("#76C4D8", themeColorDraft) { themeColorDraft = it }
+          ThemeColorPreset("#9AA7FF", themeColorDraft) { themeColorDraft = it }
+          ThemeColorPreset("#D1B56F", themeColorDraft) { themeColorDraft = it }
+          ThemeColorPreset("#C989B8", themeColorDraft) { themeColorDraft = it }
+        }
       }
     },
     confirmButton = {
@@ -1575,6 +1625,8 @@ private fun SettingsDialog(
             model = modelDraft,
             apiKey = apiKeyDraft,
             language = languageDraft,
+            themeMode = themeModeDraft,
+            themeColor = themeColorDraft,
           )
           onDismiss()
         },
@@ -1591,3 +1643,27 @@ private fun SettingsDialog(
 }
 
 private fun languageLabel(language: String): String = if (language == "zh") "\u4e2d\u6587" else "English"
+
+@Composable
+private fun ThemeColorPreset(colorHex: String, selectedColorHex: String, onSelect: (String) -> Unit) {
+  val color = remember(colorHex) { parseUiColor(colorHex) ?: Color(0xFF76C4D8) }
+  val selected = colorHex.equals(selectedColorHex.trim(), ignoreCase = true)
+  Surface(
+    modifier = Modifier
+      .size(34.dp)
+      .clickable { onSelect(colorHex) }
+      .semantics { contentDescription = "Theme color $colorHex" },
+    shape = RoundedCornerShape(999.dp),
+    color = color,
+    border = BorderStroke(
+      if (selected) 2.dp else 1.dp,
+      if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outline,
+    ),
+  ) {}
+}
+
+private fun parseUiColor(value: String): Color? {
+  val normalized = value.trim().removePrefix("#")
+  if (!Regex("^[0-9A-Fa-f]{6}$").matches(normalized)) return null
+  return Color(("FF$normalized").toLong(16))
+}

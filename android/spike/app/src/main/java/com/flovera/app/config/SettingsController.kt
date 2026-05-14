@@ -16,7 +16,7 @@ class SettingsController(private val store: SettingsStore) {
   fun loadResult(): SettingsLoadResult {
     val result = store.loadResult()
     val loaded = result.settings
-    val normalized = normalizeLanguage(normalizeProviderAndModel(loaded))
+    val normalized = normalizeAppearance(normalizeLanguage(normalizeProviderAndModel(loaded)))
     if (normalized != loaded) store.save(normalized)
     return result.copy(settings = normalized)
   }
@@ -62,6 +62,15 @@ class SettingsController(private val store: SettingsStore) {
     return updated
   }
 
+  fun setAppearance(settings: AppSettings, themeMode: String, themeColor: String): AppSettings {
+    val updated = settings.copy(
+      themeMode = normalizeThemeMode(themeMode),
+      themeColor = normalizeThemeColor(themeColor),
+    )
+    store.save(updated)
+    return updated
+  }
+
   fun setActiveSession(settings: AppSettings, sessionId: String?): AppSettings {
     val updated = settings.copy(activeSessionId = sessionId)
     store.save(updated)
@@ -90,10 +99,31 @@ class SettingsController(private val store: SettingsStore) {
     return settings.copy(language = normalizeLanguageId(settings.language))
   }
 
+  private fun normalizeAppearance(settings: AppSettings): AppSettings {
+    return settings.copy(
+      themeMode = normalizeThemeMode(settings.themeMode),
+      themeColor = normalizeThemeColor(settings.themeColor),
+    )
+  }
+
   private fun normalizeLanguageId(language: String): String {
     return when (language) {
       "zh" -> "zh"
       else -> "en"
     }
+  }
+
+  private fun normalizeThemeMode(themeMode: String): String {
+    return when (themeMode) {
+      "light" -> "light"
+      else -> "dark"
+    }
+  }
+
+  private fun normalizeThemeColor(themeColor: String): String {
+    val candidate = themeColor.trim().uppercase()
+    val normalized = if (candidate.startsWith("#")) candidate else "#$candidate"
+    val valid = Regex("^#[0-9A-F]{6}$").matches(normalized)
+    return if (valid) normalized else AppSettings().themeColor
   }
 }

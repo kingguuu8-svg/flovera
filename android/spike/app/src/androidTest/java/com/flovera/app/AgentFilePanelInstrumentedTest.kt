@@ -8,6 +8,8 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import com.flovera.app.config.AppSettings
+import com.flovera.app.config.SettingsStore
 import org.junit.Rule
 import org.junit.Test
 
@@ -16,7 +18,9 @@ class AgentFilePanelInstrumentedTest {
 
   @Test
   fun filesPanelShowsWorkspaceTreeWithActionMenuSemantics() {
-    val controller = AgentController(composeRule.activity.applicationContext)
+    val context = composeRule.activity.applicationContext
+    SettingsStore(context).save(AppSettings(language = "en"))
+    val controller = AgentController(context)
     composeRule.setContent {
       AgentScreen(controller)
     }
@@ -29,6 +33,9 @@ class AgentFilePanelInstrumentedTest {
       composeRule.onAllNodesWithContentDescription("More").fetchSemanticsNodes().isNotEmpty()
     }
     composeRule.onNodeWithContentDescription("More").performClick()
+    composeRule.waitUntil(timeoutMillis = 10_000) {
+      composeRule.onAllNodesWithText("Files").fetchSemanticsNodes().isNotEmpty()
+    }
     composeRule.onNodeWithText("Files").performClick()
     composeRule.onNodeWithText("Workspace Files").assertIsDisplayed()
     composeRule.onNodeWithText("Refresh").assertIsDisplayed()

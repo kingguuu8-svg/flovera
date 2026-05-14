@@ -10,8 +10,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.flovera.app.web.FloveraWebBridge
 import com.flovera.app.theme.FloveraTheme
 
@@ -26,9 +28,13 @@ class MainActivity : ComponentActivity() {
     consumeShareIntent(intent)
     setContent {
       val appController = remember { controller }
+      val state by appController.state.collectAsStateWithLifecycle()
       DisposableEffect(appController) { onDispose { } }
 
-      FloveraTheme {
+      FloveraTheme(
+        themeMode = state.settings.themeMode,
+        themeColor = state.settings.themeColor,
+      ) {
         Surface(
           modifier = Modifier.fillMaxSize(),
           color = MaterialTheme.colorScheme.background,
