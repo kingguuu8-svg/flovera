@@ -5,6 +5,7 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -68,7 +69,7 @@ class AgentScreenInteractionInstrumentedTest {
     }
 
     composeRule.onNodeWithText("Agent").performClick()
-    composeRule.onNodeWithText("More").performClick()
+    composeRule.onNodeWithContentDescription("More").performClick()
     composeRule.onNodeWithText("Sessions").performClick()
     composeRule.onNodeWithTag("open-session-${target.id}").performScrollTo().performClick()
 
@@ -98,7 +99,7 @@ class AgentScreenInteractionInstrumentedTest {
       assertFalse(controller.state.value.sessions.any { it.id == draftId })
     }
 
-    composeRule.onNodeWithText("Close").performClick()
+    composeRule.onNodeWithContentDescription("Close").performClick()
 
     composeRule.runOnIdle {
       assertFalse(controller.state.value.sessions.any { it.id == draftId })
@@ -142,7 +143,7 @@ class AgentScreenInteractionInstrumentedTest {
     assertEquals(0, composeRule.onAllNodesWithText("Menu").fetchSemanticsNodes().size)
 
     composeRule.onNodeWithText("Agent").performClick()
-    composeRule.onNodeWithText("More").performClick()
+    composeRule.onNodeWithContentDescription("More").performClick()
     composeRule.onNodeWithText("Sessions").assertIsDisplayed()
     composeRule.onNodeWithText("Select HTML").assertIsDisplayed()
     composeRule.onNodeWithText("Files").assertIsDisplayed()
@@ -161,7 +162,7 @@ class AgentScreenInteractionInstrumentedTest {
     }
 
     composeRule.onNodeWithText("Agent").performClick()
-    composeRule.onNodeWithText("More").performClick()
+    composeRule.onNodeWithContentDescription("More").performClick()
     composeRule.onNodeWithText("Files").performClick()
     composeRule.onNodeWithText("index.html", substring = true).performClick()
 
@@ -183,7 +184,7 @@ class AgentScreenInteractionInstrumentedTest {
     }
 
     composeRule.onNodeWithText("Agent").performClick()
-    composeRule.onNodeWithText("More").performClick()
+    composeRule.onNodeWithContentDescription("More").performClick()
     composeRule.onNodeWithText("AGENT.md").performClick()
     composeRule.onAllNodes(hasSetTextAction())[0].performTextClearance()
     composeRule.onAllNodes(hasSetTextAction())[0].performTextInput("discard me")
@@ -206,7 +207,7 @@ class AgentScreenInteractionInstrumentedTest {
     }
 
     composeRule.onNodeWithText("Agent").performClick()
-    composeRule.onNodeWithText("More").performClick()
+    composeRule.onNodeWithContentDescription("More").performClick()
     composeRule.onNodeWithText("Settings").performClick()
     composeRule.onAllNodes(hasSetTextAction())[0].performTextClearance()
     composeRule.onAllNodes(hasSetTextAction())[0].performTextInput("discard-model")
@@ -218,7 +219,7 @@ class AgentScreenInteractionInstrumentedTest {
     }
 
     composeRule.onNodeWithText("Agent").performClick()
-    composeRule.onNodeWithText("More").performClick()
+    composeRule.onNodeWithContentDescription("More").performClick()
     composeRule.onNodeWithText("Settings").performClick()
     composeRule.onNodeWithText("Language: English").performClick()
     composeRule.onNodeWithText("\u4e2d\u6587").performClick()

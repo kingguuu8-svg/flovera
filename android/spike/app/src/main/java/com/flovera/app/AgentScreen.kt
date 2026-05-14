@@ -11,6 +11,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -29,15 +31,24 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -76,6 +87,15 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+private val FloveraFabShape = RoundedCornerShape(999.dp)
+private val FloveraPanelShape = RoundedCornerShape(18.dp)
+private val FloveraSmallShape = RoundedCornerShape(8.dp)
+private val FloveraUserBubbleColor = Color(0xFF233640)
+private val FloveraUserBubbleBorder = Color(0xFF365A67)
+private val FloveraAssistantBubbleBorder = Color(0xFF2C3137)
+private val FloveraFabContainer = Color(0xFF172229)
+private val FloveraFabText = Color(0xFFDEF3F8)
+
 private enum class AgentPanel {
   Conversation,
   HtmlFiles,
@@ -108,10 +128,18 @@ fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
         .align(Alignment.BottomEnd)
         .padding(18.dp)
         .semantics { contentDescription = "Open agent conversation" },
-      containerColor = MaterialTheme.colorScheme.primary,
-      contentColor = MaterialTheme.colorScheme.onPrimary,
+      shape = FloveraFabShape,
+      containerColor = FloveraFabContainer,
+      contentColor = FloveraFabText,
     ) {
-      Text(t(language, "Agent", "Agent"), style = MaterialTheme.typography.labelLarge)
+      Row(
+        modifier = Modifier.padding(horizontal = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Icon(Icons.Filled.Menu, contentDescription = null, modifier = Modifier.size(18.dp))
+        Text(t(language, "Agent", "Agent"), style = MaterialTheme.typography.labelLarge)
+      }
     }
   }
 
@@ -170,11 +198,11 @@ private fun WorkspaceWebView(url: String?, workspaceRootUrl: String) {
     ) {
       Surface(
         modifier = Modifier.fillMaxSize(),
-        color = Color(0xFF101214),
+        color = MaterialTheme.colorScheme.background,
       ) {}
       Text(
         text = EmptyWebPrompt,
-        color = Color(0xFFD7D9DD),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
         style = MaterialTheme.typography.bodyLarge,
       )
     }
@@ -299,10 +327,11 @@ private fun ConversationDialog(
     properties = DialogProperties(usePlatformDefaultWidth = false),
   ) {
     Surface(
-      modifier = Modifier.fillMaxSize().padding(12.dp),
-      shape = RoundedCornerShape(14.dp),
+      modifier = Modifier.fillMaxSize().padding(10.dp),
+      shape = FloveraPanelShape,
       color = MaterialTheme.colorScheme.surface,
-      tonalElevation = 3.dp,
+      border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+      tonalElevation = 0.dp,
     ) {
       Column(
         modifier = Modifier.fillMaxSize().padding(12.dp),
@@ -313,10 +342,7 @@ private fun ConversationDialog(
           horizontalArrangement = Arrangement.SpaceBetween,
           verticalAlignment = Alignment.CenterVertically,
         ) {
-          TextButton(onClick = onDismiss) {
-            Text(t(language, "Close", "\u5173\u95ed"))
-          }
-          Column(modifier = Modifier.weight(1f)) {
+          Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
               text = if (isDraftSession) {
                 t(language, "New conversation", "\u65b0\u5bf9\u8bdd")
@@ -336,15 +362,22 @@ private fun ConversationDialog(
             )
           }
           Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            OutlinedButton(onClick = controller::newSession, enabled = !state.isRunning) {
+            OutlinedButton(
+              onClick = controller::newSession,
+              enabled = !state.isRunning,
+              shape = FloveraSmallShape,
+              colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface),
+              border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+            ) {
+              Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(17.dp))
               Text(t(language, "New", "\u65b0\u5efa"))
             }
             Box {
-              OutlinedButton(
+              IconButton(
                 onClick = { moreMenuOpen = true },
-                modifier = Modifier.semantics { contentDescription = "Conversation more" },
+                modifier = Modifier.semantics { contentDescription = "More" },
               ) {
-                Text(t(language, "More", "\u66f4\u591a"))
+                Icon(Icons.Filled.Menu, contentDescription = null)
               }
               DropdownMenu(expanded = moreMenuOpen, onDismissRequest = { moreMenuOpen = false }) {
                 DropdownMenuItem(
@@ -384,6 +417,12 @@ private fun ConversationDialog(
                 )
               }
             }
+            IconButton(
+              onClick = onDismiss,
+              modifier = Modifier.semantics { contentDescription = "Close" },
+            ) {
+              Icon(Icons.Filled.Close, contentDescription = null)
+            }
           }
         }
 
@@ -418,14 +457,40 @@ private fun ConversationDialog(
           }
         }
 
-        OutlinedTextField(
-          value = state.input,
-          onValueChange = controller::updateInput,
-          label = { Text(t(language, "Message", "\u6d88\u606f")) },
-          minLines = 2,
-          maxLines = 5,
+        Row(
           modifier = Modifier.fillMaxWidth(),
-        )
+          horizontalArrangement = Arrangement.spacedBy(10.dp),
+          verticalAlignment = Alignment.Bottom,
+        ) {
+          OutlinedTextField(
+            value = state.input,
+            onValueChange = controller::updateInput,
+            label = { Text(t(language, "Message", "\u6d88\u606f")) },
+            minLines = 2,
+            maxLines = 5,
+            shape = RoundedCornerShape(12.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+              focusedBorderColor = MaterialTheme.colorScheme.primary,
+              unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+              focusedContainerColor = MaterialTheme.colorScheme.background,
+              unfocusedContainerColor = MaterialTheme.colorScheme.background,
+            ),
+            modifier = Modifier.weight(1f),
+          )
+          Surface(
+            modifier = Modifier
+              .size(52.dp)
+              .semantics { contentDescription = "Send message" }
+              .clickable(enabled = !state.isRunning, onClick = controller::submit),
+            shape = RoundedCornerShape(12.dp),
+            color = if (state.isRunning) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.primaryContainer,
+            contentColor = if (state.isRunning) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onPrimaryContainer,
+          ) {
+            Box(contentAlignment = Alignment.Center) {
+              Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(20.dp))
+            }
+          }
+        }
         Row(
           modifier = Modifier.fillMaxWidth(),
           horizontalArrangement = Arrangement.SpaceBetween,
@@ -449,13 +514,6 @@ private fun ConversationDialog(
             enabled = !state.isRunning,
             modifier = Modifier.semantics { contentDescription = "Network tools switch" },
           )
-        }
-        Button(
-          onClick = controller::submit,
-          enabled = !state.isRunning,
-          modifier = Modifier.fillMaxWidth(),
-        ) {
-          Text(if (state.isRunning) t(language, "Running...", "\u8fd0\u884c\u4e2d...") else t(language, "Send", "\u53d1\u9001"))
         }
       }
     }
@@ -503,14 +561,19 @@ private fun MessageBubble(
   val isError = message.role == "error"
   val horizontal = if (isUser) Arrangement.End else Arrangement.Start
   val bubbleColor = when {
-    isUser -> MaterialTheme.colorScheme.primary
+    isUser -> FloveraUserBubbleColor
     isError -> MaterialTheme.colorScheme.errorContainer
     else -> MaterialTheme.colorScheme.surfaceVariant
   }
   val textColor = when {
-    isUser -> MaterialTheme.colorScheme.onPrimary
+    isUser -> MaterialTheme.colorScheme.onSurface
     isError -> MaterialTheme.colorScheme.onErrorContainer
     else -> MaterialTheme.colorScheme.onSurfaceVariant
+  }
+  val bubbleBorderColor = when {
+    isUser -> FloveraUserBubbleBorder
+    isError -> MaterialTheme.colorScheme.error
+    else -> FloveraAssistantBubbleBorder
   }
   val previewContent = remember(message.content) { collapsedMessageContent(message.content) }
   val canExpand = previewContent != message.content
@@ -531,13 +594,14 @@ private fun MessageBubble(
     Surface(
       modifier = surfaceModifier,
       shape = RoundedCornerShape(
-        topStart = 18.dp,
-        topEnd = 18.dp,
-        bottomStart = if (isUser) 18.dp else 4.dp,
-        bottomEnd = if (isUser) 4.dp else 18.dp,
+        topStart = 14.dp,
+        topEnd = 14.dp,
+        bottomStart = if (isUser) 14.dp else 4.dp,
+        bottomEnd = if (isUser) 4.dp else 14.dp,
       ),
       color = bubbleColor,
-      tonalElevation = 1.dp,
+      border = BorderStroke(1.dp, bubbleBorderColor),
+      tonalElevation = 0.dp,
     ) {
       MessageBubbleContent(
         selectionEnabled = selectionEnabled,
@@ -624,7 +688,11 @@ private fun ToolEventsSummary(events: List<ToolEvent>, color: Color) {
   var expanded by remember(events.size) { mutableStateOf(false) }
   val summary = events.joinToString(", ") { it.name }
 
-  Surface(shape = RoundedCornerShape(10.dp), color = color.copy(alpha = 0.10f)) {
+  Surface(
+    shape = RoundedCornerShape(10.dp),
+    color = MaterialTheme.colorScheme.background,
+    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+  ) {
     Column(
       modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 5.dp),
       verticalArrangement = Arrangement.spacedBy(5.dp),
@@ -1044,7 +1112,7 @@ private fun SessionListItem(
               contentDescription = "Session actions for $title"
             },
           ) {
-            Text("\u2630", style = MaterialTheme.typography.titleMedium)
+            Icon(Icons.Filled.Menu, contentDescription = null)
           }
           DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
             menuContent { menuOpen = false }
@@ -1115,6 +1183,7 @@ private fun FilesDialog(
       ) {
         item {
           OutlinedButton(onClick = controller::refreshWorkspaceFiles, modifier = Modifier.fillMaxWidth()) {
+            Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(17.dp))
             Text(t(language, "Refresh", "\u5237\u65b0"))
           }
         }
@@ -1220,7 +1289,7 @@ private fun WorkspaceFileTreeNode(
           contentDescription = "File actions for ${node.path}"
         },
       ) {
-        Text("\u2630", style = MaterialTheme.typography.titleMedium)
+        Icon(Icons.Filled.Menu, contentDescription = null)
       }
       DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
         if (!node.isDirectory) {

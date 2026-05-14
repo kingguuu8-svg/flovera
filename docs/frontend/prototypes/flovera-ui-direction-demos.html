@@ -1,0 +1,800 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Flovera UI Direction Demos</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0f1011;
+      color: #eceff1;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: #0f1011;
+    }
+
+    .page {
+      width: min(1440px, 100%);
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    .intro {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 22px;
+    }
+
+    .intro h1 {
+      margin: 0 0 8px;
+      font-size: 24px;
+      font-weight: 720;
+      letter-spacing: 0;
+    }
+
+    .intro p {
+      margin: 0;
+      max-width: 760px;
+      color: #a9afb5;
+      font-size: 14px;
+      line-height: 1.65;
+    }
+
+    .legend {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      color: #adb4ba;
+      font-size: 12px;
+    }
+
+    .legend span {
+      border: 1px solid #2a2e33;
+      border-radius: 999px;
+      padding: 6px 10px;
+      background: #151719;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(270px, 1fr));
+      gap: 18px;
+      align-items: start;
+    }
+
+    .direction {
+      border: 1px solid var(--stroke);
+      background: var(--outer);
+      border-radius: 14px;
+      padding: 12px;
+    }
+
+    .direction-title {
+      min-height: 70px;
+      padding: 4px 2px 12px;
+    }
+
+    .direction-title h2 {
+      margin: 0 0 7px;
+      font-size: 15px;
+      font-weight: 720;
+      letter-spacing: 0;
+      color: var(--title);
+    }
+
+    .direction-title p {
+      margin: 0;
+      font-size: 12px;
+      line-height: 1.55;
+      color: var(--muted);
+    }
+
+    .phone {
+      position: relative;
+      overflow: hidden;
+      width: 100%;
+      aspect-ratio: 9 / 18.5;
+      border-radius: 30px;
+      border: 1px solid var(--phone-stroke);
+      background: var(--screen);
+      box-shadow: 0 18px 42px rgba(0, 0, 0, 0.36);
+    }
+
+    .status {
+      height: 28px;
+      padding: 9px 18px 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: var(--soft);
+      font-size: 10px;
+      font-weight: 650;
+    }
+
+    .web {
+      position: absolute;
+      inset: 28px 0 0;
+      display: flex;
+      flex-direction: column;
+      background: var(--web);
+    }
+
+    .web-preview {
+      flex: 1;
+      padding: 16px;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      gap: 12px;
+    }
+
+    .web-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      color: var(--soft);
+      font-size: 11px;
+    }
+
+    .web-head strong {
+      color: var(--text);
+      font-size: 13px;
+    }
+
+    .canvas {
+      border: 1px solid var(--canvas-stroke);
+      background: var(--canvas);
+      border-radius: var(--canvas-radius);
+      padding: 14px;
+      display: grid;
+      align-content: start;
+      gap: 10px;
+      overflow: hidden;
+    }
+
+    .cal-row,
+    .file-row,
+    .metric-row {
+      display: grid;
+      grid-template-columns: 24px 1fr auto;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+      color: var(--text);
+      font-size: 12px;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 0 4px var(--accent-soft);
+      justify-self: center;
+    }
+
+    .line {
+      min-width: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .tag {
+      border-radius: 999px;
+      padding: 4px 7px;
+      background: var(--chip);
+      color: var(--soft);
+      font-size: 10px;
+    }
+
+    .agent-fab {
+      position: absolute;
+      right: 14px;
+      bottom: 16px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      height: 40px;
+      padding: 0 13px;
+      border: 1px solid var(--fab-stroke);
+      border-radius: var(--fab-radius);
+      background: var(--fab);
+      color: var(--fab-text);
+      font-size: 13px;
+      font-weight: 680;
+      box-shadow: 0 14px 24px rgba(0, 0, 0, 0.30);
+    }
+
+    .conversation {
+      position: absolute;
+      left: var(--panel-left);
+      right: var(--panel-right);
+      bottom: var(--panel-bottom);
+      height: 64%;
+      border: 1px solid var(--panel-stroke);
+      background: var(--panel);
+      border-radius: var(--panel-radius);
+      box-shadow: 0 20px 52px rgba(0, 0, 0, 0.44);
+      overflow: hidden;
+      display: grid;
+      grid-template-rows: 44px 1fr 50px;
+    }
+
+    .bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 12px;
+      border-bottom: 1px solid var(--panel-line);
+    }
+
+    .bar-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 720;
+    }
+
+    .actions {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .icon-btn {
+      width: 30px;
+      height: 30px;
+      border: 0;
+      border-radius: var(--icon-radius);
+      color: var(--icon);
+      background: transparent;
+      display: grid;
+      place-items: center;
+    }
+
+    .icon-btn.primary {
+      color: var(--accent);
+      background: var(--accent-soft);
+    }
+
+    .messages {
+      overflow: hidden;
+      padding: 13px 11px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .bubble {
+      max-width: 84%;
+      padding: 10px 11px;
+      border-radius: var(--bubble-radius);
+      font-size: 12px;
+      line-height: 1.5;
+      color: var(--text);
+    }
+
+    .bubble.assistant {
+      align-self: flex-start;
+      background: var(--assistant);
+      border: 1px solid var(--bubble-stroke);
+    }
+
+    .bubble.user {
+      align-self: flex-end;
+      background: var(--user);
+      border: 1px solid var(--user-stroke);
+    }
+
+    .tool {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--soft);
+      background: var(--tool);
+      border: 1px solid var(--tool-stroke);
+      border-radius: var(--tool-radius);
+      padding: 8px 9px;
+      font-size: 11px;
+    }
+
+    .input {
+      display: grid;
+      grid-template-columns: 1fr 34px;
+      gap: 8px;
+      align-items: center;
+      padding: 8px 10px;
+      border-top: 1px solid var(--panel-line);
+    }
+
+    .input-text {
+      min-width: 0;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      padding: 0 10px;
+      border: 1px solid var(--input-stroke);
+      border-radius: var(--input-radius);
+      background: var(--input);
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .menu-pop {
+      position: absolute;
+      right: 10px;
+      top: 47px;
+      width: 130px;
+      border: 1px solid var(--menu-stroke);
+      border-radius: var(--menu-radius);
+      background: var(--menu);
+      box-shadow: 0 16px 30px rgba(0, 0, 0, 0.35);
+      padding: 6px;
+      display: grid;
+      gap: 2px;
+    }
+
+    .menu-item {
+      display: grid;
+      grid-template-columns: 20px 1fr;
+      align-items: center;
+      gap: 6px;
+      min-height: 30px;
+      padding: 0 8px;
+      border-radius: calc(var(--menu-radius) - 4px);
+      color: var(--text);
+      font-size: 12px;
+    }
+
+    .menu-item.active {
+      background: var(--menu-active);
+      color: var(--accent);
+    }
+
+    svg {
+      width: 18px;
+      height: 18px;
+      stroke: currentColor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      fill: none;
+      flex: 0 0 auto;
+    }
+
+    .icon-solid {
+      fill: currentColor;
+      stroke: none;
+    }
+
+    .a {
+      --outer: #141618;
+      --screen: #101112;
+      --web: #111315;
+      --canvas: #171a1d;
+      --canvas-stroke: #262b30;
+      --canvas-radius: 8px;
+      --stroke: #24282d;
+      --phone-stroke: #2d3238;
+      --title: #edf1f2;
+      --text: #e9ecef;
+      --muted: #9aa2aa;
+      --soft: #aab2b9;
+      --accent: #76c4d8;
+      --accent-soft: rgba(118, 196, 216, 0.13);
+      --chip: #21262a;
+      --fab: #172229;
+      --fab-stroke: #315765;
+      --fab-text: #def3f8;
+      --fab-radius: 999px;
+      --panel: #151719;
+      --panel-stroke: #2a3036;
+      --panel-line: #252a2f;
+      --panel-left: 10px;
+      --panel-right: 10px;
+      --panel-bottom: 66px;
+      --panel-radius: 18px;
+      --icon: #b7bec5;
+      --icon-radius: 8px;
+      --assistant: #202328;
+      --user: #233640;
+      --bubble-stroke: #2c3137;
+      --user-stroke: #365a67;
+      --bubble-radius: 14px;
+      --tool: #181b1f;
+      --tool-stroke: #2b3138;
+      --tool-radius: 10px;
+      --input: #101214;
+      --input-stroke: #30363d;
+      --input-radius: 10px;
+      --menu: #181b1f;
+      --menu-stroke: #30363d;
+      --menu-radius: 12px;
+      --menu-active: #1e2c31;
+    }
+
+    .b {
+      --outer: #121416;
+      --screen: #0d0f10;
+      --web: #0e1011;
+      --canvas: #15191c;
+      --canvas-stroke: #31363b;
+      --canvas-radius: 2px;
+      --stroke: #252a2e;
+      --phone-stroke: #31373d;
+      --title: #f1f3f4;
+      --text: #e8eaec;
+      --muted: #9da5ac;
+      --soft: #aeb6bd;
+      --accent: #8cc7ff;
+      --accent-soft: rgba(140, 199, 255, 0.12);
+      --chip: #1f252a;
+      --fab: #161b20;
+      --fab-stroke: #36506a;
+      --fab-text: #e4f2ff;
+      --fab-radius: 8px;
+      --panel: #121416;
+      --panel-stroke: #343a40;
+      --panel-line: #282e34;
+      --panel-left: 0;
+      --panel-right: 30px;
+      --panel-bottom: 0;
+      --panel-radius: 0 16px 0 0;
+      --icon: #b8c0c7;
+      --icon-radius: 6px;
+      --assistant: #1b2025;
+      --user: #203044;
+      --bubble-stroke: #30363c;
+      --user-stroke: #36506c;
+      --bubble-radius: 8px;
+      --tool: #161b1f;
+      --tool-stroke: #333a41;
+      --tool-radius: 6px;
+      --input: #0e1113;
+      --input-stroke: #373f46;
+      --input-radius: 6px;
+      --menu: #15191d;
+      --menu-stroke: #363d44;
+      --menu-radius: 8px;
+      --menu-active: #1d2935;
+    }
+
+    .c {
+      --outer: #161614;
+      --screen: #121210;
+      --web: #141411;
+      --canvas: #1d1e19;
+      --canvas-stroke: #33372e;
+      --canvas-radius: 16px;
+      --stroke: #292b25;
+      --phone-stroke: #32352d;
+      --title: #f2f1ea;
+      --text: #efeee7;
+      --muted: #aaa99e;
+      --soft: #b6b4a9;
+      --accent: #d2d985;
+      --accent-soft: rgba(210, 217, 133, 0.13);
+      --chip: #28291f;
+      --fab: #23251b;
+      --fab-stroke: #4a4f2e;
+      --fab-text: #f3f7c9;
+      --fab-radius: 14px;
+      --panel: #181913;
+      --panel-stroke: #34382b;
+      --panel-line: #292c23;
+      --panel-left: 10px;
+      --panel-right: 10px;
+      --panel-bottom: 18px;
+      --panel-radius: 24px;
+      --icon: #c3c2b8;
+      --icon-radius: 12px;
+      --assistant: #22231c;
+      --user: #343626;
+      --bubble-stroke: #34372b;
+      --user-stroke: #4c5130;
+      --bubble-radius: 18px;
+      --tool: #1d1f18;
+      --tool-stroke: #35382b;
+      --tool-radius: 14px;
+      --input: #11120f;
+      --input-stroke: #393c2f;
+      --input-radius: 14px;
+      --menu: #1c1e17;
+      --menu-stroke: #3a3d30;
+      --menu-radius: 16px;
+      --menu-active: #2a2d20;
+    }
+
+    .d {
+      --outer: #101313;
+      --screen: #090c0c;
+      --web: #0b0e0e;
+      --canvas: #101817;
+      --canvas-stroke: #24413d;
+      --canvas-radius: 4px;
+      --stroke: #1e2a2a;
+      --phone-stroke: #29413e;
+      --title: #edf7f5;
+      --text: #e4efed;
+      --muted: #91a7a3;
+      --soft: #a8bcb8;
+      --accent: #5ce6d1;
+      --accent-soft: rgba(92, 230, 209, 0.12);
+      --chip: #14211f;
+      --fab: #0f2220;
+      --fab-stroke: #25635b;
+      --fab-text: #dafbf6;
+      --fab-radius: 6px;
+      --panel: #0e1313;
+      --panel-stroke: #24403d;
+      --panel-line: #1a2b2a;
+      --panel-left: 10px;
+      --panel-right: 10px;
+      --panel-bottom: 62px;
+      --panel-radius: 10px;
+      --icon: #acc2bf;
+      --icon-radius: 4px;
+      --assistant: #13201f;
+      --user: #18322f;
+      --bubble-stroke: #25423f;
+      --user-stroke: #28685f;
+      --bubble-radius: 6px;
+      --tool: #101817;
+      --tool-stroke: #24403d;
+      --tool-radius: 4px;
+      --input: #090d0d;
+      --input-stroke: #2a4845;
+      --input-radius: 4px;
+      --menu: #101818;
+      --menu-stroke: #2a4845;
+      --menu-radius: 6px;
+      --menu-active: #142724;
+    }
+
+    @media (max-width: 1180px) {
+      .grid {
+        grid-template-columns: repeat(2, minmax(280px, 1fr));
+      }
+    }
+
+    @media (max-width: 680px) {
+      .page {
+        padding: 16px;
+      }
+
+      .intro {
+        display: block;
+      }
+
+      .legend {
+        justify-content: flex-start;
+        margin-top: 14px;
+      }
+
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="intro">
+      <div>
+        <h1>Flovera UI 方向原型</h1>
+        <p>四个 demo 使用同一套信息结构：Web 是主界面，Agent 是可进入的控制台，二级入口收在 More 内。选择重点是气质、密度、圆角、图标重量和面板打开方式。</p>
+      </div>
+      <div class="legend">
+        <span>Web first</span>
+        <span>Agent console</span>
+        <span>Workspace tools</span>
+      </div>
+    </section>
+
+    <section class="grid">
+      <article class="direction a">
+        <div class="direction-title">
+          <h2>A. Quiet Workbench</h2>
+          <p>最稳妥的主线：深灰、低噪音、小圆角，像一个安静的本地工作台。</p>
+        </div>
+        <div class="phone">
+          <div class="status"><span>9:41</span><span>Flovera</span></div>
+          <div class="web">
+            <div class="web-preview">
+              <div class="web-head"><strong>calendar.html</strong><span>local workspace</span></div>
+              <div class="canvas">
+                <div class="cal-row"><span class="dot"></span><span class="line">Today focus block</span><span class="tag">09:30</span></div>
+                <div class="cal-row"><span class="dot"></span><span class="line">Review generated notes</span><span class="tag">14:00</span></div>
+                <div class="metric-row"><span class="dot"></span><span class="line">Workspace files changed</span><span class="tag">3</span></div>
+              </div>
+              <div class="web-head"><span>HTML selected by user</span><span>ready</span></div>
+            </div>
+          </div>
+          <button class="agent-fab">
+            <svg viewBox="0 0 24 24"><path d="M8 10h8M8 14h5"/><path d="M5 5h14v12H8l-3 3z"/></svg>
+            Agent
+          </button>
+          <div class="conversation">
+            <div class="bar">
+              <div class="bar-title">
+                <svg viewBox="0 0 24 24"><path d="M8 10h8M8 14h5"/><path d="M5 5h14v12H8l-3 3z"/></svg>
+                Conversation
+              </div>
+              <div class="actions">
+                <button class="icon-btn"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+                <button class="icon-btn"><svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+              </div>
+            </div>
+            <div class="messages">
+              <div class="bubble user">做一个今日计划页面</div>
+              <div class="bubble assistant">已创建 calendar.html，并写入本地 workspace。</div>
+              <div class="tool"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg> write_file: calendar.html</div>
+            </div>
+            <div class="input">
+              <div class="input-text">Message Flovera</div>
+              <button class="icon-btn primary"><svg viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4z"/><path d="M22 2 11 13"/></svg></button>
+            </div>
+            <div class="menu-pop">
+              <div class="menu-item active"><svg viewBox="0 0 24 24"><path d="M21 15a4 4 0 0 1-4 4H7l-4 4V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg>Sessions</div>
+              <div class="menu-item"><svg viewBox="0 0 24 24"><path d="M3 7h5l2 2h11v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>Files</div>
+              <div class="menu-item"><svg viewBox="0 0 24 24"><path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6V22a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-.6 1.7 1.7 0 0 0-1.88.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1H2a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 .6-1 1.7 1.7 0 0 0-.34-1.88l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6V2a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 .6 1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.22.35.42.67.6 1H22a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-.6 1z"/></svg>Settings</div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="direction b">
+        <div class="direction-title">
+          <h2>B. Compact IDE</h2>
+          <p>更硬朗、更工程化：边缘抽屉式 conversation，信息密度最高。</p>
+        </div>
+        <div class="phone">
+          <div class="status"><span>9:41</span><span>Workspace</span></div>
+          <div class="web">
+            <div class="web-preview">
+              <div class="web-head"><strong>index.html</strong><span>preview</span></div>
+              <div class="canvas">
+                <div class="file-row"><span class="dot"></span><span class="line">src/components/calendar.js</span><span class="tag">edit</span></div>
+                <div class="file-row"><span class="dot"></span><span class="line">assets/theme.css</span><span class="tag">new</span></div>
+                <div class="file-row"><span class="dot"></span><span class="line">README.md</span><span class="tag">sync</span></div>
+              </div>
+              <div class="web-head"><span>fit to screen</span><span>drag canvas</span></div>
+            </div>
+          </div>
+          <button class="agent-fab">
+            <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+            Agent
+          </button>
+          <div class="conversation">
+            <div class="bar">
+              <div class="bar-title">
+                <svg viewBox="0 0 24 24"><path d="M4 17 10 11 4 5"/><path d="M12 19h8"/></svg>
+                Agent
+              </div>
+              <div class="actions">
+                <button class="icon-btn"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg></button>
+                <button class="icon-btn"><svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+              </div>
+            </div>
+            <div class="messages">
+              <div class="bubble user">把日历做成周视图</div>
+              <div class="bubble assistant">我会更新布局并保持移动端拖拽区域稳定。</div>
+              <div class="tool"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/><path d="M8 4v16M4 9h16"/></svg> edit_file: theme.css</div>
+            </div>
+            <div class="input">
+              <div class="input-text">Ask agent</div>
+              <button class="icon-btn primary"><svg viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4z"/><path d="M22 2 11 13"/></svg></button>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="direction c">
+        <div class="direction-title">
+          <h2>C. Calm Assistant</h2>
+          <p>更柔和、更像日常工具：适合降低学习压力，但可能弱化工程感。</p>
+        </div>
+        <div class="phone">
+          <div class="status"><span>9:41</span><span>Flovera</span></div>
+          <div class="web">
+            <div class="web-preview">
+              <div class="web-head"><strong>planner.html</strong><span>local</span></div>
+              <div class="canvas">
+                <div class="cal-row"><span class="dot"></span><span class="line">Morning writing</span><span class="tag">done</span></div>
+                <div class="cal-row"><span class="dot"></span><span class="line">Build web alarm demo</span><span class="tag">next</span></div>
+                <div class="cal-row"><span class="dot"></span><span class="line">Refine session flow</span><span class="tag">later</span></div>
+              </div>
+              <div class="web-head"><span>tap Agent to edit</span><span>saved</span></div>
+            </div>
+          </div>
+          <button class="agent-fab">
+            <svg viewBox="0 0 24 24"><path d="M8 10h8M8 14h5"/><path d="M5 5h14v12H8l-3 3z"/></svg>
+            Agent
+          </button>
+          <div class="conversation">
+            <div class="bar">
+              <div class="bar-title">
+                <svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+                Compose
+              </div>
+              <div class="actions">
+                <button class="icon-btn"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+                <button class="icon-btn"><svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+              </div>
+            </div>
+            <div class="messages">
+              <div class="bubble user">增加提醒按钮</div>
+              <div class="bubble assistant">已添加按钮，并预留 Flovera 通知接口调用。</div>
+              <div class="tool"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg> notify bridge: ready</div>
+            </div>
+            <div class="input">
+              <div class="input-text">Tell Flovera what to change</div>
+              <button class="icon-btn primary"><svg viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4z"/><path d="M22 2 11 13"/></svg></button>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="direction d">
+        <div class="direction-title">
+          <h2>D. Terminal Glass</h2>
+          <p>更强 agent/terminal 气质：识别度高，但日常使用可能偏冷。</p>
+        </div>
+        <div class="phone">
+          <div class="status"><span>9:41</span><span>Agent online</span></div>
+          <div class="web">
+            <div class="web-preview">
+              <div class="web-head"><strong>dashboard.html</strong><span>runtime</span></div>
+              <div class="canvas">
+                <div class="metric-row"><span class="dot"></span><span class="line">agent_loop</span><span class="tag">idle</span></div>
+                <div class="metric-row"><span class="dot"></span><span class="line">workspace_files</span><span class="tag">12</span></div>
+                <div class="metric-row"><span class="dot"></span><span class="line">web_bridge</span><span class="tag">ready</span></div>
+              </div>
+              <div class="web-head"><span>controlled interface</span><span>enabled</span></div>
+            </div>
+          </div>
+          <button class="agent-fab">
+            <svg viewBox="0 0 24 24"><path d="M4 17 10 11 4 5"/><path d="M12 19h8"/></svg>
+            Agent
+          </button>
+          <div class="conversation">
+            <div class="bar">
+              <div class="bar-title">
+                <svg viewBox="0 0 24 24"><path d="M4 17 10 11 4 5"/><path d="M12 19h8"/></svg>
+                Runtime
+              </div>
+              <div class="actions">
+                <button class="icon-btn"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg></button>
+                <button class="icon-btn"><svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+              </div>
+            </div>
+            <div class="messages">
+              <div class="bubble user">检查 workspace 状态</div>
+              <div class="bubble assistant">已扫描根目录，发现 2 个 HTML 可展示文件。</div>
+              <div class="tool"><svg viewBox="0 0 24 24"><path d="M3 7h5l2 2h11v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg> list_files: complete</div>
+            </div>
+            <div class="input">
+              <div class="input-text">Command or request</div>
+              <button class="icon-btn primary"><svg viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4z"/><path d="M22 2 11 13"/></svg></button>
+            </div>
+          </div>
+        </div>
+      </article>
+    </section>
+  </main>
+</body>
+</html>
