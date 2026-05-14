@@ -221,16 +221,33 @@ so future work can be planned without losing the product direction.
 
 ### Agent-Controlled App Settings
 
+- Treat workspace snapshots and restore as the safety floor before broad agent
+  authority is enabled.
 - Add a workspace-scoped `.flovera/` directory for Flovera metadata and
   agent-visible app configuration.
 - Expose selected settings to the agent through `.flovera`, including provider,
   API configuration, active model, tool permissions, theme mode, theme color,
   custom request body templates, and app capability flags.
-- Add a user setting that decides whether the agent may modify app settings.
+- Add an Agent Authority Mode setting:
+  - Safe: agent can read app capabilities and selected settings, but cannot
+    modify app behavior.
+  - Assisted: agent can propose setting changes and the user confirms before
+    they take effect.
+  - Full Authority: agent can directly modify broad app settings after an
+    automatic restore point is created.
 - Support a high-trust mode where the user can hand broad app-control authority
-  to the agent, with the change logged and reversible.
+  to the agent, with every change logged, inspectable, and reversible.
+- Let the agent change low-risk settings first, such as theme mode, theme color,
+  language, selected HTML, HTML pins, active provider, active model, network
+  switch, tool permissions, and max iterations.
+- Later expand authority to high-impact settings such as custom request bodies,
+  URL routes, tool manifests, MCP manifests, and provider-specific request
+  options.
 - Keep secrets and source-separated config rules intact: no API key or private
   local path should be committed into source.
+- Expose secret existence through references instead of plaintext, such as
+  `apiKeyRef: deepseek.default`, so the agent can select a key slot without
+  reading or copying the secret value.
 
 ### Custom URL Routing And Request Model
 
@@ -265,6 +282,11 @@ so future work can be planned without losing the product direction.
 - Snapshot scope should cover workspace files, `.flovera` metadata, selected
   HTML state, and enough session metadata to make restore understandable.
 - Support user-named snapshots for archival use.
+- Create automatic restore points before the agent changes high-impact settings,
+  custom routes, request templates, tool manifests, MCP manifests, or broad
+  authority settings.
+- Make restore an app-owned capability, not something that depends on the agent
+  repairing its own mistake.
 - Restore should be explicit and confirm destructive overwrites.
 
 ### Main Surface HTML Quick Picker
