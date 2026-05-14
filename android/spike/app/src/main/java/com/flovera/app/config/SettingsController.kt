@@ -1,6 +1,7 @@
 package com.flovera.app.config
 
 import com.flovera.app.koog.ModelProviderCatalog
+import kotlinx.serialization.Serializable
 
 data class ModelSettingsDraft(
   val providerId: String,
@@ -16,7 +17,7 @@ class SettingsController(private val store: SettingsStore) {
   fun loadResult(): SettingsLoadResult {
     val result = store.loadResult()
     val loaded = result.settings
-    val normalized = normalizeAppearance(normalizeLanguage(normalizeProviderAndModel(loaded)))
+    val normalized = normalizeAuthorityMode(normalizeAppearance(normalizeLanguage(normalizeProviderAndModel(loaded))))
     if (normalized != loaded) store.save(normalized)
     return result.copy(settings = normalized)
   }
@@ -71,6 +72,34 @@ class SettingsController(private val store: SettingsStore) {
     return updated
   }
 
+  fun setAuthorityMode(settings: AppSettings, authorityMode: String): AppSettings {
+    val updated = settings.copy(agentAuthorityMode = normalizeAuthorityModeId(authorityMode))
+    store.save(updated)
+    return updated
+  }
+
+  fun applySettingsProposal(settings: AppSettings, changes: SettingsProposalChanges): AppSettings {
+    val provider = changes.provider
+      ?.let { ModelProviderCatalog.findProvider(it.trim()) }
+      ?: ModelProviderCatalog.findProvider(settings.provider)
+      ?: ModelProviderCatalog.defaultProvider
+    val model = changes.model?.trim()?.takeIf { it.isNotBlank() } ?: settings.model.ifBlank { provider.defaultModel }
+    val maxIterations = changes.maxAgentIterations?.coerceIn(1, 80) ?: settings.maxAgentIterations
+    val updated = settings.copy(
+      provider = provider.id,
+      model = model,
+      selectedHtmlPath = changes.selectedHtmlPath?.trim() ?: settings.selectedHtmlPath,
+      maxAgentIterations = maxIterations,
+      networkEnabled = changes.networkEnabled ?: settings.networkEnabled,
+      language = changes.language?.let { normalizeLanguageId(it) } ?: settings.language,
+      themeMode = changes.themeMode?.let { normalizeThemeMode(it) } ?: settings.themeMode,
+      themeColor = changes.themeColor?.let { normalizeThemeColor(it) } ?: settings.themeColor,
+      agentAuthorityMode = changes.agentAuthorityMode?.let { normalizeAuthorityModeId(it) } ?: settings.agentAuthorityMode,
+    )
+    store.save(updated)
+    return updated
+  }
+
   fun setActiveSession(settings: AppSettings, sessionId: String?): AppSettings {
     val updated = settings.copy(activeSessionId = sessionId)
     store.save(updated)
@@ -106,6 +135,10 @@ class SettingsController(private val store: SettingsStore) {
     )
   }
 
+  private fun normalizeAuthorityMode(settings: AppSettings): AppSettings {
+    return settings.copy(agentAuthorityMode = normalizeAuthorityModeId(settings.agentAuthorityMode))
+  }
+
   private fun normalizeLanguageId(language: String): String {
     return when (language) {
       "zh" -> "zh"
@@ -126,4 +159,24 @@ class SettingsController(private val store: SettingsStore) {
     val valid = Regex("^#[0-9A-F]{6}$").matches(normalized)
     return if (valid) normalized else AppSettings().themeColor
   }
+
+  private fun normalizeAuthorityModeId(authorityMode: String): String {
+    return when (authorityMode) {
+      "assisted" -> "assisted"
+      else -> "safe"
+    }
+  }
 }
+
+@Serializable
+data class SettingsProposalChanges(
+  val provider: String? = null,
+  val model: String? = null,
+  val selectedHtmlPath: String? = null,
+  val maxAgentIterations: Int? = null,
+  val networkEnabled: Boolean? = null,
+  val language: String? = null,
+  val themeMode: String? = null,
+  val themeColor: String? = null,
+  val agentAuthorityMode: String? = null,
+)

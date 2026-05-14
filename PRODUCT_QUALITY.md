@@ -235,6 +235,9 @@ so future work can be planned without losing the product direction.
     they take effect.
   - Full Authority: agent can directly modify broad app settings after an
     automatic restore point is created.
+- Current implementation target is Safe plus Assisted. Full Authority remains a
+  pending backlog item until app settings restore, tool manifests, and high-risk
+  confirmation boundaries are mature enough.
 - Support a high-trust mode where the user can hand broad app-control authority
   to the agent, with every change logged, inspectable, and reversible.
 - Let the agent change low-risk settings first, such as theme mode, theme color,

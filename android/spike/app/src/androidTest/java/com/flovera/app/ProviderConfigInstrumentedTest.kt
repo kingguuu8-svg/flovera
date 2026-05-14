@@ -3,9 +3,11 @@ package com.flovera.app
 import androidx.test.platform.app.InstrumentationRegistry
 import com.flovera.app.config.AppSettings
 import com.flovera.app.config.ModelSettingsDraft
+import com.flovera.app.config.SettingsProposalChanges
 import com.flovera.app.config.SettingsController
 import com.flovera.app.config.SettingsStore
 import com.flovera.app.koog.ModelProviderCatalog
+import com.flovera.app.workspace.WorkspaceManager
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -37,6 +39,53 @@ class ProviderConfigInstrumentedTest {
   fun networkToolsDefaultToDisabled() {
     assertFalse(AppSettings().networkEnabled)
     assertTrue(AppSettings(networkEnabled = true).networkEnabled)
+  }
+
+  @Test
+  fun fullAuthorityIsNotEnabledInCurrentSettings() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val store = SettingsStore(context)
+    val original = store.load()
+    try {
+      val controller = SettingsController(store)
+
+      val normalized = controller.setAuthorityMode(AppSettings(), "full")
+
+      assertEquals("safe", normalized.agentAuthorityMode)
+    } finally {
+      store.save(original)
+    }
+  }
+
+  @Test
+  fun settingsControllerAppliesAssistedProposalChanges() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val store = SettingsStore(context)
+    val original = store.load()
+    try {
+      val controller = SettingsController(store)
+
+      val updated = controller.applySettingsProposal(
+        AppSettings(),
+        SettingsProposalChanges(
+          themeMode = "light",
+          themeColor = "#c989b8",
+          networkEnabled = true,
+          language = "zh",
+          maxAgentIterations = 120,
+          agentAuthorityMode = "assisted",
+        ),
+      )
+
+      assertEquals("light", updated.themeMode)
+      assertEquals("#C989B8", updated.themeColor)
+      assertTrue(updated.networkEnabled)
+      assertEquals("zh", updated.language)
+      assertEquals(80, updated.maxAgentIterations)
+      assertEquals("assisted", updated.agentAuthorityMode)
+    } finally {
+      store.save(original)
+    }
   }
 
   @Test
@@ -180,6 +229,46 @@ class ProviderConfigInstrumentedTest {
       assertTrue(controller.state.value.status.contains("invalid"))
     } finally {
       store.save(original)
+    }
+  }
+
+  @Test
+  fun agentControllerAppliesSettingsProposalFromWorkspace() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val store = SettingsStore(context)
+    val original = store.load()
+    val workspaceId = "settings-proposal-${System.currentTimeMillis()}"
+    val workspace = WorkspaceManager(context, workspaceId)
+    try {
+      store.save(AppSettings(activeWorkspaceId = workspaceId))
+      val controller = AgentController(context)
+      workspace.writeFile(
+        ".flovera/proposals/theme.json",
+        """
+        {
+          "type": "settings",
+          "title": "Switch preview",
+          "reason": "The generated page is selected.",
+          "changes": {
+            "themeColor": "#9AA7FF",
+            "selectedHtmlPath": "index.html"
+          }
+        }
+        """.trimIndent(),
+        createAutoSnapshot = false,
+      )
+
+      controller.refreshWorkspaceFiles()
+      assertEquals(1, controller.state.value.settingsProposals.size)
+
+      controller.approveSettingsProposal(".flovera/proposals/theme.json")
+
+      assertEquals("#9AA7FF", controller.state.value.settings.themeColor)
+      assertEquals("index.html", controller.state.value.settings.selectedHtmlPath)
+      assertTrue(controller.state.value.settingsProposals.isEmpty())
+    } finally {
+      store.save(original)
+      workspace.root.deleteRecursively()
     }
   }
 }

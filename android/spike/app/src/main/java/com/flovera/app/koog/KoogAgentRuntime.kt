@@ -54,6 +54,11 @@ class KoogAgentRuntime : AgentRuntime {
       - window.Flovera.notify(JSON.stringify({ title: "Title", body: "Body" }))
       - window.Flovera.postEvent(JSON.stringify({ type: "notification", title: "Title", body: "Body" }))
       Always guard these calls with if (window.Flovera) and make the behavior clear in the UI.
+      Flovera app metadata is exposed under .flovera/.
+      - Read .flovera/settings-view.json to understand non-secret app settings.
+      - Read .flovera/capabilities.json to understand available app capabilities.
+      - Do not edit app behavior directly. If you need an app setting changed, write a JSON proposal under .flovera/proposals/.
+      - Proposal schema: {"type":"settings","title":"Short title","reason":"Why this helps","changes":{"themeColor":"#76C4D8","networkEnabled":true,"selectedHtmlPath":"index.html","maxAgentIterations":30}}
       Network tools are ${if (networkEnabled) "enabled. Use fetch_url and download_file only when they directly help the user's request." else "disabled for this run."}
       When the user asks you to create files, call the tools and then summarize the files changed.
 

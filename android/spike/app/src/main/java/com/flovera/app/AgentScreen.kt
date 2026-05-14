@@ -83,6 +83,7 @@ import com.flovera.app.session.SessionMessage
 import com.flovera.app.session.ToolEvent
 import com.flovera.app.web.FloveraWebBridge
 import com.flovera.app.workspace.WorkspaceFileNode
+import com.flovera.app.workspace.WorkspaceSettingsProposal
 import com.flovera.app.workspace.WorkspaceSnapshotRecord
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -1672,10 +1673,12 @@ private fun SettingsDialog(
   var languageDraft by remember(state.settings.language) { mutableStateOf(state.settings.language) }
   var themeModeDraft by remember(state.settings.themeMode) { mutableStateOf(state.settings.themeMode) }
   var themeColorDraft by remember(state.settings.themeColor) { mutableStateOf(state.settings.themeColor) }
+  var authorityModeDraft by remember(state.settings.agentAuthorityMode) { mutableStateOf(state.settings.agentAuthorityMode) }
   val selectedProvider = ModelProviderCatalog.findProvider(providerDraft) ?: ModelProviderCatalog.defaultProvider
   var providerMenuOpen by remember { mutableStateOf(false) }
   var modelMenuOpen by remember { mutableStateOf(false) }
   var languageMenuOpen by remember { mutableStateOf(false) }
+  var authorityMenuOpen by remember { mutableStateOf(false) }
   val themeColorPreview = remember(themeColorDraft) { parseUiColor(themeColorDraft) ?: Color(0xFF76C4D8) }
 
   AlertDialog(
@@ -1758,6 +1761,48 @@ private fun SettingsDialog(
             )
           }
         }
+        Text(t(language, "Agent authority", "Agent \u6743\u9650"), style = MaterialTheme.typography.titleSmall)
+        Box {
+          OutlinedButton(onClick = { authorityMenuOpen = true }, modifier = Modifier.fillMaxWidth()) {
+            Text(authorityModeLabel(language, authorityModeDraft))
+          }
+          DropdownMenu(expanded = authorityMenuOpen, onDismissRequest = { authorityMenuOpen = false }) {
+            DropdownMenuItem(
+              text = { Text(authorityModeLabel(language, "safe")) },
+              onClick = {
+                authorityMenuOpen = false
+                authorityModeDraft = "safe"
+              },
+            )
+            DropdownMenuItem(
+              text = { Text(authorityModeLabel(language, "assisted")) },
+              onClick = {
+                authorityMenuOpen = false
+                authorityModeDraft = "assisted"
+              },
+            )
+          }
+        }
+        Text(
+          t(
+            language,
+            "Full Authority is planned, but not enabled in this build.",
+            "Full Authority \u5df2\u7eb3\u5165\u5f85\u5b9e\u73b0\uff0c\u5f53\u524d\u7248\u672c\u4e0d\u5f00\u653e\u3002",
+          ),
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
+          style = MaterialTheme.typography.bodySmall,
+        )
+        if (state.settingsProposals.isNotEmpty()) {
+          Text(t(language, "Pending proposals", "\u5f85\u786e\u8ba4\u63d0\u6848"), style = MaterialTheme.typography.titleSmall)
+          state.settingsProposals.forEach { proposal ->
+            SettingsProposalItem(
+              proposal = proposal,
+              language = language,
+              onApprove = { controller.approveSettingsProposal(proposal.path) },
+              onReject = { controller.rejectSettingsProposal(proposal.path) },
+            )
+          }
+        }
         Text(t(language, "Appearance", "\u5916\u89c2"), style = MaterialTheme.typography.titleSmall)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
           OutlinedButton(
@@ -1814,6 +1859,7 @@ private fun SettingsDialog(
             language = languageDraft,
             themeMode = themeModeDraft,
             themeColor = themeColorDraft,
+            authorityMode = authorityModeDraft,
           )
           onDismiss()
         },
@@ -1827,6 +1873,66 @@ private fun SettingsDialog(
       }
     },
   )
+}
+
+@Composable
+private fun SettingsProposalItem(
+  proposal: WorkspaceSettingsProposal,
+  language: String,
+  onApprove: () -> Unit,
+  onReject: () -> Unit,
+) {
+  Surface(
+    modifier = Modifier.fillMaxWidth(),
+    shape = RoundedCornerShape(8.dp),
+    color = MaterialTheme.colorScheme.surfaceVariant,
+  ) {
+    Column(
+      modifier = Modifier.fillMaxWidth().padding(10.dp),
+      verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+      Text(proposal.title, style = MaterialTheme.typography.bodyLarge)
+      if (proposal.reason.isNotBlank()) {
+        Text(proposal.reason, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+      }
+      Text(
+        settingsProposalSummary(proposal),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.bodySmall,
+      )
+      Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        OutlinedButton(onClick = onApprove) {
+          Text(t(language, "Apply", "\u5e94\u7528"))
+        }
+        TextButton(onClick = onReject) {
+          Text(t(language, "Reject", "\u62d2\u7edd"))
+        }
+      }
+    }
+  }
+}
+
+private fun settingsProposalSummary(proposal: WorkspaceSettingsProposal): String {
+  val changes = proposal.changes
+  val parts = listOfNotNull(
+    changes.provider?.let { "provider=$it" },
+    changes.model?.let { "model=$it" },
+    changes.selectedHtmlPath?.let { "selectedHtml=$it" },
+    changes.maxAgentIterations?.let { "maxIterations=$it" },
+    changes.networkEnabled?.let { "network=$it" },
+    changes.language?.let { "language=$it" },
+    changes.themeMode?.let { "themeMode=$it" },
+    changes.themeColor?.let { "themeColor=$it" },
+    changes.agentAuthorityMode?.let { "authority=$it" },
+  )
+  return parts.ifEmpty { listOf(proposal.path) }.joinToString(", ")
+}
+
+private fun authorityModeLabel(language: String, authorityMode: String): String {
+  return when (authorityMode) {
+    "assisted" -> t(language, "Assisted: agent proposes, user confirms", "Assisted\uff1aagent \u63d0\u6848\uff0c\u7528\u6237\u786e\u8ba4")
+    else -> t(language, "Safe: read-only app settings", "Safe\uff1a\u53ea\u8bfb app \u8bbe\u7f6e")
+  }
 }
 
 private fun languageLabel(language: String): String = if (language == "zh") "\u4e2d\u6587" else "English"

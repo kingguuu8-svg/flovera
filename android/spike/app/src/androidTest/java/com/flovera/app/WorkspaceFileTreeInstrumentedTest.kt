@@ -124,6 +124,40 @@ class WorkspaceFileTreeInstrumentedTest {
   }
 
   @Test
+  fun workspaceFloveraMetadataExposesCapabilitiesAndSettingsProposals() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "metadata-${System.currentTimeMillis()}").also {
+      it.ensureSeedFiles()
+      it.ensureFloveraMetadata(FloveraSettingsView(networkEnabled = true, authorityMode = "assisted"))
+    }
+
+    workspace.writeFile(
+      ".flovera/proposals/theme.json",
+      """
+      {
+        "type": "settings",
+        "title": "Use softer theme",
+        "reason": "Match current workspace page",
+        "changes": {
+          "themeColor": "#C989B8",
+          "selectedHtmlPath": "index.html"
+        }
+      }
+      """.trimIndent(),
+      createAutoSnapshot = false,
+    )
+
+    val capabilities = workspace.readFile(".flovera/capabilities.json")
+    val proposals = workspace.listSettingsProposals()
+
+    assertTrue(capabilities.contains("\"networkTools\": true"))
+    assertTrue(capabilities.contains("\"directSettingsWrite\": false"))
+    assertEquals(1, proposals.size)
+    assertEquals("Use softer theme", proposals.first().title)
+    assertEquals("#C989B8", proposals.first().changes.themeColor)
+  }
+
+  @Test
   fun workspaceAutomaticSnapshotsKeepLatestThreeBeforeFileChanges() {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val workspace = WorkspaceManager(context, "snapshot-auto-${System.currentTimeMillis()}")

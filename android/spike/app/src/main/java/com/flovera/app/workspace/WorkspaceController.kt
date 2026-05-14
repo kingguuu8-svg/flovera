@@ -13,6 +13,7 @@ data class WorkspaceSnapshot(
   val selectedHtmlUrl: String?,
   val workspaceRootUrl: String,
   val snapshots: List<WorkspaceSnapshotRecord>,
+  val settingsProposals: List<WorkspaceSettingsProposal>,
 )
 
 class WorkspaceController(context: Context, workspaceId: String) {
@@ -41,6 +42,7 @@ class WorkspaceController(context: Context, workspaceId: String) {
         language = settings.language,
         themeMode = settings.themeMode,
         themeColor = settings.themeColor,
+        authorityMode = settings.agentAuthorityMode,
         apiKeyRef = if (settings.apiKeyFor(settings.provider).isBlank()) "" else "${settings.provider}.default",
       ),
     )
@@ -64,6 +66,10 @@ class WorkspaceController(context: Context, workspaceId: String) {
 
   fun deleteSnapshot(id: String): Boolean = workspace.deleteSnapshot(id)
 
+  fun listSettingsProposals(): List<WorkspaceSettingsProposal> = workspace.listSettingsProposals()
+
+  fun deleteSettingsProposal(path: String): Boolean = workspace.deleteSettingsProposal(path)
+
   fun snapshot(currentSelectedHtmlPath: String): WorkspaceSnapshot {
     val htmlFiles = workspace.listHtmlFiles()
     val selectedHtmlPath = chooseHtmlPath(currentSelectedHtmlPath, htmlFiles)
@@ -75,6 +81,7 @@ class WorkspaceController(context: Context, workspaceId: String) {
       selectedHtmlUrl = workspace.displayUrl(selectedHtmlPath),
       workspaceRootUrl = workspace.rootUrl(),
       snapshots = workspace.listSnapshots(),
+      settingsProposals = workspace.listSettingsProposals(),
     )
   }
 

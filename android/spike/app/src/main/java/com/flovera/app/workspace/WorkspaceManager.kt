@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.webkit.MimeTypeMap
+import com.flovera.app.config.SettingsProposalChanges
 import com.flovera.app.storage.readUtf8Text
 import com.flovera.app.storage.writeBytesAtomically
 import com.flovera.app.storage.writeStreamAtomically
@@ -28,6 +29,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
   private val snapshotStore = WorkspaceSnapshotStore(appContext, workspaceId, root)
   private val json = Json {
     prettyPrint = true
+    ignoreUnknownKeys = true
     encodeDefaults = true
   }
 
@@ -113,6 +115,8 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
         FloveraWorkspaceManifest(
           workspaceId = root.name,
           settingsViewPath = ".flovera/settings-view.json",
+          capabilitiesPath = ".flovera/capabilities.json",
+          proposalsPath = ".flovera/proposals",
         ),
       ),
       overwrite = false,
@@ -124,11 +128,44 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
       overwrite = true,
       createAutoSnapshot = false,
     )
+    writeFile(
+      path = ".flovera/capabilities.json",
+      content = json.encodeToString(FloveraCapabilities.fromSettings(settingsView)),
+      overwrite = true,
+      createAutoSnapshot = false,
+    )
+    safeFile(".flovera/proposals").mkdirs()
   }
 
   fun readAgentRules(): String = readFile("AGENT.md")
 
   fun listSnapshots(): List<WorkspaceSnapshotRecord> = snapshotStore.list()
+
+  fun listSettingsProposals(): List<WorkspaceSettingsProposal> {
+    val proposalsDir = safeFile(".flovera/proposals")
+    return proposalsDir.listFiles()
+      ?.filter { it.isFile && it.extension.equals("json", ignoreCase = true) }
+      ?.mapNotNull { file ->
+        runCatching {
+          val decoded = json.decodeFromString<WorkspaceSettingsProposalFile>(readUtf8Text(file))
+          WorkspaceSettingsProposal(
+            path = relativeToRoot(file),
+            title = decoded.title.ifBlank { file.nameWithoutExtension },
+            reason = decoded.reason,
+            changes = decoded.changes,
+            createdAtMillis = file.lastModified(),
+          )
+        }.getOrNull()
+      }
+      ?.sortedByDescending { it.createdAtMillis }
+      ?: emptyList()
+  }
+
+  fun deleteSettingsProposal(path: String): Boolean {
+    val file = safeFile(path)
+    if (!file.isFile || !relativeToRoot(file).startsWith(".flovera/proposals/")) return false
+    return file.delete()
+  }
 
   fun createManualSnapshot(name: String, selectedHtmlPath: String = ""): WorkspaceSnapshotRecord {
     return snapshotStore.createManual(name, selectedHtmlPath)
@@ -355,6 +392,8 @@ data class FloveraWorkspaceManifest(
   val version: Int = 1,
   val workspaceId: String,
   val settingsViewPath: String,
+  val capabilitiesPath: String,
+  val proposalsPath: String,
 )
 
 @Serializable
@@ -369,5 +408,48 @@ data class FloveraSettingsView(
   val language: String = "",
   val themeMode: String = "",
   val themeColor: String = "",
+  val authorityMode: String = "safe",
   val apiKeyRef: String = "",
+)
+
+@Serializable
+data class FloveraCapabilities(
+  val workspaceFiles: Boolean = true,
+  val webPreview: Boolean = true,
+  val snapshots: Boolean = true,
+  val notifications: Boolean = true,
+  val networkTools: Boolean = false,
+  val pythonRuntime: Boolean = false,
+  val webSearch: Boolean = false,
+  val settingsView: Boolean = true,
+  val settingsProposals: Boolean = true,
+  val directSettingsWrite: Boolean = false,
+  val authorityMode: String = "safe",
+  val supportedAuthorityModes: List<String> = listOf("safe", "assisted"),
+  val pendingAuthorityModes: List<String> = listOf("full"),
+) {
+  companion object {
+    fun fromSettings(settingsView: FloveraSettingsView): FloveraCapabilities {
+      return FloveraCapabilities(
+        networkTools = settingsView.networkEnabled,
+        authorityMode = settingsView.authorityMode,
+      )
+    }
+  }
+}
+
+@Serializable
+data class WorkspaceSettingsProposalFile(
+  val type: String = "settings",
+  val title: String = "",
+  val reason: String = "",
+  val changes: SettingsProposalChanges = SettingsProposalChanges(),
+)
+
+data class WorkspaceSettingsProposal(
+  val path: String,
+  val title: String,
+  val reason: String,
+  val changes: SettingsProposalChanges,
+  val createdAtMillis: Long,
 )

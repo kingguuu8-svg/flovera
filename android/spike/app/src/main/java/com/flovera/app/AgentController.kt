@@ -15,6 +15,7 @@ import com.flovera.app.session.SessionController
 import com.flovera.app.session.SessionMessage
 import com.flovera.app.workspace.WorkspaceController
 import com.flovera.app.workspace.WorkspaceFileNode
+import com.flovera.app.workspace.WorkspaceSettingsProposal
 import com.flovera.app.workspace.WorkspaceSnapshotRecord
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -37,6 +38,7 @@ data class AgentScreenState(
   val selectedHtmlUrl: String? = null,
   val workspaceRootUrl: String = "",
   val workspaceSnapshots: List<WorkspaceSnapshotRecord> = emptyList(),
+  val settingsProposals: List<WorkspaceSettingsProposal> = emptyList(),
   val status: String = "Idle",
   val isRunning: Boolean = false,
   val assistantDraft: SessionMessage? = null,
@@ -84,6 +86,7 @@ class AgentController(context: Context) {
       selectedHtmlUrl = workspaceSnapshot.selectedHtmlUrl,
       workspaceRootUrl = workspaceSnapshot.workspaceRootUrl,
       workspaceSnapshots = workspaceSnapshot.snapshots,
+      settingsProposals = workspaceSnapshot.settingsProposals,
       status = settingsLoad.warning ?: "Ready",
     )
   }
@@ -132,6 +135,7 @@ class AgentController(context: Context) {
     language: String = _state.value.settings.language,
     themeMode: String = _state.value.settings.themeMode,
     themeColor: String = _state.value.settings.themeColor,
+    authorityMode: String = _state.value.settings.agentAuthorityMode,
   ) {
     val current = _state.value
     val modelSettings = settingsController.saveModelSettings(
@@ -147,13 +151,24 @@ class AgentController(context: Context) {
       themeMode,
       themeColor,
     )
-    val draft = settingsController.draftFor(settings)
+    val settingsWithAuthority = settingsController.setAuthorityMode(settings, authorityMode)
+    val draft = settingsController.draftFor(settingsWithAuthority)
+    workspaceController.syncFloveraSettings(settingsWithAuthority)
+    val workspaceSnapshot = workspaceController.snapshot(settingsWithAuthority.selectedHtmlPath)
     _state.update {
       it.copy(
-        settings = settings,
+        settings = settingsWithAuthority,
         providerDraft = draft.providerId,
         modelDraft = draft.model,
         apiKeyDraft = draft.apiKey,
+        workspaceFiles = workspaceSnapshot.files,
+        workspaceTree = workspaceSnapshot.tree,
+        htmlFiles = workspaceSnapshot.htmlFiles,
+        selectedHtmlPath = workspaceSnapshot.selectedHtmlPath,
+        selectedHtmlUrl = workspaceSnapshot.selectedHtmlUrl,
+        workspaceRootUrl = workspaceSnapshot.workspaceRootUrl,
+        workspaceSnapshots = workspaceSnapshot.snapshots,
+        settingsProposals = workspaceSnapshot.settingsProposals,
         status = "Settings saved",
       )
     }
@@ -203,6 +218,18 @@ class AgentController(context: Context) {
   fun deleteWorkspaceSnapshot(snapshotId: String) {
     val deleted = workspaceController.deleteSnapshot(snapshotId)
     refreshWorkspaceState(status = if (deleted) "Snapshot deleted" else "Snapshot could not be deleted")
+  }
+
+  fun approveSettingsProposal(path: String) {
+    val proposal = workspaceController.listSettingsProposals().firstOrNull { it.path == path } ?: return
+    val settings = settingsController.applySettingsProposal(_state.value.settings, proposal.changes)
+    workspaceController.deleteSettingsProposal(path)
+    refreshWorkspaceState(settings = settings, status = "Settings proposal applied: ${proposal.title}")
+  }
+
+  fun rejectSettingsProposal(path: String) {
+    val deleted = workspaceController.deleteSettingsProposal(path)
+    refreshWorkspaceState(status = if (deleted) "Settings proposal rejected" else "Settings proposal not found")
   }
 
   fun workspaceFileUri(path: String): Uri? {
@@ -418,6 +445,7 @@ class AgentController(context: Context) {
         selectedHtmlUrl = workspaceSnapshot.selectedHtmlUrl,
         workspaceRootUrl = workspaceSnapshot.workspaceRootUrl,
         workspaceSnapshots = workspaceSnapshot.snapshots,
+        settingsProposals = workspaceSnapshot.settingsProposals,
         isRunning = isRunning,
         assistantDraft = if (isRunning) it.assistantDraft else null,
         status = status,

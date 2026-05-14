@@ -17,6 +17,7 @@ data class AppSettings(
   val language: String = "en",
   val themeMode: String = "dark",
   val themeColor: String = "#76C4D8",
+  val agentAuthorityMode: String = "safe",
 ) {
   fun apiKeyFor(providerId: String = provider): String {
     val keyed = providerApiKeys[providerId].orEmpty()
