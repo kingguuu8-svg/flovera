@@ -15,7 +15,7 @@ source project.
 | Verification docs | Public verification path is documented without depending on private devices | Not done |
 | Contribution docs | Contribution and issue-reporting rules are documented | Done: `CONTRIBUTING.md` |
 | Security docs | Vulnerability/security reporting and secret-handling policy are documented | Done: `SECURITY.md` |
-| Third-party notices | Major dependencies and licenses are documented | Not done |
+| Third-party notices | Major dependencies and licenses are documented | Done: `THIRD_PARTY_NOTICES.md`; run final dependency license audit before binary release |
 | Legacy material | Old QEMU/VPS route remains archived and clearly separated from the current product | Partially done |
 | Release hygiene | Generated APKs, build outputs, local properties, and signing files are ignored | Partially done; repeat `git status --ignored` audit |
 
