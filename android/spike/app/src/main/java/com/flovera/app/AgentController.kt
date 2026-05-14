@@ -15,6 +15,7 @@ import com.flovera.app.session.SessionController
 import com.flovera.app.session.SessionMessage
 import com.flovera.app.workspace.WorkspaceController
 import com.flovera.app.workspace.WorkspaceFileNode
+import com.flovera.app.workspace.WorkspaceSnapshotRecord
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -35,6 +36,7 @@ data class AgentScreenState(
   val selectedHtmlPath: String = "",
   val selectedHtmlUrl: String? = null,
   val workspaceRootUrl: String = "",
+  val workspaceSnapshots: List<WorkspaceSnapshotRecord> = emptyList(),
   val status: String = "Idle",
   val isRunning: Boolean = false,
   val assistantDraft: SessionMessage? = null,
@@ -55,11 +57,16 @@ class AgentController(context: Context) {
     val loadedSettings = settingsLoad.settings
     workspaceController = WorkspaceController(appContext, loadedSettings.activeWorkspaceId).also { it.ensureSeedFiles() }
     val session = sessionController.initialSession(loadedSettings.activeSessionId)
-    val workspaceSnapshot = workspaceController.snapshot(loadedSettings.selectedHtmlPath)
+    workspaceController.syncFloveraSettings(loadedSettings)
+    var workspaceSnapshot = workspaceController.snapshot(loadedSettings.selectedHtmlPath)
     val settings = settingsController.normalizeSelectedHtml(
       settingsController.setActiveSession(loadedSettings, session?.id),
       workspaceSnapshot.selectedHtmlPath,
     )
+    if (settings != loadedSettings) {
+      workspaceController.syncFloveraSettings(settings)
+      workspaceSnapshot = workspaceController.snapshot(settings.selectedHtmlPath)
+    }
     val modelDraft = settingsController.draftFor(settings)
     _state.value = AgentScreenState(
       settings = settings,
@@ -76,6 +83,7 @@ class AgentController(context: Context) {
       selectedHtmlPath = workspaceSnapshot.selectedHtmlPath,
       selectedHtmlUrl = workspaceSnapshot.selectedHtmlUrl,
       workspaceRootUrl = workspaceSnapshot.workspaceRootUrl,
+      workspaceSnapshots = workspaceSnapshot.snapshots,
       status = settingsLoad.warning ?: "Ready",
     )
   }
@@ -174,6 +182,27 @@ class AgentController(context: Context) {
   fun renameWorkspacePath(path: String, newName: String) {
     val status = workspaceController.rename(path, newName)
     refreshWorkspaceState(status = status)
+  }
+
+  fun createWorkspaceSnapshot(name: String) {
+    val current = _state.value
+    val snapshot = workspaceController.createSnapshot(name, current.selectedHtmlPath)
+    refreshWorkspaceState(status = "Snapshot created: ${snapshot.name}")
+  }
+
+  fun restoreWorkspaceSnapshot(snapshotId: String) {
+    val restored = workspaceController.restoreSnapshot(snapshotId) ?: return
+    val settings = if (restored.selectedHtmlPath.isBlank()) {
+      _state.value.settings
+    } else {
+      settingsController.setSelectedHtml(_state.value.settings, restored.selectedHtmlPath)
+    }
+    refreshWorkspaceState(settings = settings, status = "Snapshot restored: ${restored.name}")
+  }
+
+  fun deleteWorkspaceSnapshot(snapshotId: String) {
+    val deleted = workspaceController.deleteSnapshot(snapshotId)
+    refreshWorkspaceState(status = if (deleted) "Snapshot deleted" else "Snapshot could not be deleted")
   }
 
   fun workspaceFileUri(path: String): Uri? {
@@ -368,8 +397,13 @@ class AgentController(context: Context) {
     isRunning: Boolean = _state.value.isRunning,
     status: String = _state.value.status,
   ) {
-    val workspaceSnapshot = workspaceController.snapshot(settings.selectedHtmlPath)
+    workspaceController.syncFloveraSettings(settings)
+    var workspaceSnapshot = workspaceController.snapshot(settings.selectedHtmlPath)
     val normalizedSettings = settingsController.normalizeSelectedHtml(settings, workspaceSnapshot.selectedHtmlPath)
+    if (normalizedSettings != settings) {
+      workspaceController.syncFloveraSettings(normalizedSettings)
+      workspaceSnapshot = workspaceController.snapshot(normalizedSettings.selectedHtmlPath)
+    }
     _state.update {
       it.copy(
         settings = normalizedSettings,
@@ -383,6 +417,7 @@ class AgentController(context: Context) {
         selectedHtmlPath = workspaceSnapshot.selectedHtmlPath,
         selectedHtmlUrl = workspaceSnapshot.selectedHtmlUrl,
         workspaceRootUrl = workspaceSnapshot.workspaceRootUrl,
+        workspaceSnapshots = workspaceSnapshot.snapshots,
         isRunning = isRunning,
         assistantDraft = if (isRunning) it.assistantDraft else null,
         status = status,

@@ -2,6 +2,7 @@ package com.flovera.app.workspace
 
 import android.content.Context
 import android.net.Uri
+import com.flovera.app.config.AppSettings
 import java.io.File
 
 data class WorkspaceSnapshot(
@@ -11,6 +12,7 @@ data class WorkspaceSnapshot(
   val selectedHtmlPath: String,
   val selectedHtmlUrl: String?,
   val workspaceRootUrl: String,
+  val snapshots: List<WorkspaceSnapshotRecord>,
 )
 
 class WorkspaceController(context: Context, workspaceId: String) {
@@ -26,6 +28,24 @@ class WorkspaceController(context: Context, workspaceId: String) {
 
   fun writeAgentRules(content: String): String = workspace.writeFile("AGENT.md", content)
 
+  fun syncFloveraSettings(settings: AppSettings) {
+    workspace.ensureFloveraMetadata(
+      FloveraSettingsView(
+        provider = settings.provider,
+        model = settings.model,
+        activeWorkspaceId = settings.activeWorkspaceId,
+        activeSessionId = settings.activeSessionId,
+        selectedHtmlPath = settings.selectedHtmlPath,
+        maxAgentIterations = settings.maxAgentIterations,
+        networkEnabled = settings.networkEnabled,
+        language = settings.language,
+        themeMode = settings.themeMode,
+        themeColor = settings.themeColor,
+        apiKeyRef = if (settings.apiKeyFor(settings.provider).isBlank()) "" else "${settings.provider}.default",
+      ),
+    )
+  }
+
   fun importSharedFile(uri: Uri): String = workspace.importUriToRoot(uri)
 
   fun rename(path: String, newName: String): String = workspace.rename(path, newName)
@@ -35,6 +55,14 @@ class WorkspaceController(context: Context, workspaceId: String) {
   fun mimeType(path: String): String = workspace.mimeType(path)
 
   fun displayUrl(path: String): String? = workspace.displayUrl(path)
+
+  fun createSnapshot(name: String, selectedHtmlPath: String): WorkspaceSnapshotRecord {
+    return workspace.createManualSnapshot(name, selectedHtmlPath)
+  }
+
+  fun restoreSnapshot(id: String): WorkspaceSnapshotRecord? = workspace.restoreSnapshot(id)
+
+  fun deleteSnapshot(id: String): Boolean = workspace.deleteSnapshot(id)
 
   fun snapshot(currentSelectedHtmlPath: String): WorkspaceSnapshot {
     val htmlFiles = workspace.listHtmlFiles()
@@ -46,6 +74,7 @@ class WorkspaceController(context: Context, workspaceId: String) {
       selectedHtmlPath = selectedHtmlPath,
       selectedHtmlUrl = workspace.displayUrl(selectedHtmlPath),
       workspaceRootUrl = workspace.rootUrl(),
+      snapshots = workspace.listSnapshots(),
     )
   }
 

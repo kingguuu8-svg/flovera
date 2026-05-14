@@ -83,6 +83,7 @@ import com.flovera.app.session.SessionMessage
 import com.flovera.app.session.ToolEvent
 import com.flovera.app.web.FloveraWebBridge
 import com.flovera.app.workspace.WorkspaceFileNode
+import com.flovera.app.workspace.WorkspaceSnapshotRecord
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -100,6 +101,7 @@ private enum class AgentPanel {
   Conversation,
   HtmlFiles,
   Files,
+  Snapshots,
   AgentFile,
   Settings,
 }
@@ -163,6 +165,13 @@ fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
     )
 
     AgentPanel.Files -> FilesDialog(
+      state = state,
+      controller = controller,
+      language = language,
+      onDismiss = { activePanel = null },
+    )
+
+    AgentPanel.Snapshots -> SnapshotsDialog(
       state = state,
       controller = controller,
       language = language,
@@ -399,6 +408,13 @@ private fun ConversationDialog(
                   onClick = {
                     moreMenuOpen = false
                     onOpenPanel(AgentPanel.Files)
+                  },
+                )
+                DropdownMenuItem(
+                  text = { Text(t(language, "Snapshots", "\u5feb\u7167")) },
+                  onClick = {
+                    moreMenuOpen = false
+                    onOpenPanel(AgentPanel.Snapshots)
                   },
                 )
                 DropdownMenuItem(
@@ -787,6 +803,10 @@ private fun InlineMarkdownText(
 
 private fun formatMessageTime(timestampMillis: Long): String {
   return SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(timestampMillis))
+}
+
+private fun formatSnapshotTime(timestampMillis: Long): String {
+  return SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(timestampMillis))
 }
 
 private fun collapsedMessageContent(content: String): String {
@@ -1411,6 +1431,173 @@ private fun shareWorkspaceFile(context: Context, controller: AgentController, pa
     context.startActivity(Intent.createChooser(intent, "Share"))
   } catch (_: ActivityNotFoundException) {
     controller.reportStatus("No app can share $path")
+  }
+}
+
+@Composable
+private fun SnapshotsDialog(
+  state: AgentScreenState,
+  controller: AgentController,
+  language: String,
+  onDismiss: () -> Unit,
+) {
+  var snapshotName by remember { mutableStateOf("") }
+  var restoreTarget by remember { mutableStateOf<WorkspaceSnapshotRecord?>(null) }
+  var deleteTarget by remember { mutableStateOf<WorkspaceSnapshotRecord?>(null) }
+
+  AlertDialog(
+    onDismissRequest = onDismiss,
+    title = { Text(t(language, "Workspace Snapshots", "Workspace \u5feb\u7167")) },
+    text = {
+      Column(
+        modifier = Modifier.fillMaxWidth().heightIn(max = 560.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+      ) {
+        OutlinedTextField(
+          value = snapshotName,
+          onValueChange = { snapshotName = it },
+          label = { Text(t(language, "Snapshot name", "\u5feb\u7167\u540d\u79f0")) },
+          singleLine = true,
+          modifier = Modifier.fillMaxWidth(),
+        )
+        Button(
+          onClick = {
+            controller.createWorkspaceSnapshot(snapshotName)
+            snapshotName = ""
+          },
+          modifier = Modifier.fillMaxWidth(),
+        ) {
+          Text(t(language, "Create Manual Snapshot", "\u521b\u5efa\u624b\u52a8\u5feb\u7167"))
+        }
+        Text(
+          text = t(
+            language,
+            "Automatic snapshots are created before workspace file changes and keep the latest 3.",
+            "\u6587\u4ef6\u53d8\u66f4\u524d\u4f1a\u81ea\u52a8\u521b\u5efa\u5feb\u7167\uff0c\u4ec5\u4fdd\u7559\u6700\u8fd1 3 \u4e2a\u3002",
+          ),
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
+          style = MaterialTheme.typography.bodySmall,
+        )
+        LazyColumn(
+          modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 340.dp),
+          verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+          if (state.workspaceSnapshots.isEmpty()) {
+            item {
+              Text(t(language, "No snapshots yet.", "\u6682\u65e0\u5feb\u7167\u3002"), style = MaterialTheme.typography.bodyMedium)
+            }
+          }
+          items(state.workspaceSnapshots, key = { it.id }) { snapshot ->
+            SnapshotListItem(
+              snapshot = snapshot,
+              language = language,
+              onRestore = { restoreTarget = snapshot },
+              onDelete = { deleteTarget = snapshot },
+            )
+          }
+        }
+      }
+    },
+    confirmButton = {
+      TextButton(onClick = onDismiss) {
+        Text(t(language, "Close", "\u5173\u95ed"))
+      }
+    },
+  )
+
+  restoreTarget?.let { snapshot ->
+    AlertDialog(
+      onDismissRequest = { restoreTarget = null },
+      title = { Text(t(language, "Restore snapshot?", "\u6062\u590d\u5feb\u7167\uff1f")) },
+      text = {
+        Text(
+          t(
+            language,
+            "This will overwrite the current workspace with ${snapshot.name}.",
+            "\u8fd9\u4f1a\u7528 ${snapshot.name} \u8986\u76d6\u5f53\u524d workspace\u3002",
+          ),
+        )
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            controller.restoreWorkspaceSnapshot(snapshot.id)
+            restoreTarget = null
+          },
+        ) {
+          Text(t(language, "Restore", "\u6062\u590d"))
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { restoreTarget = null }) {
+          Text(t(language, "Cancel", "\u53d6\u6d88"))
+        }
+      },
+    )
+  }
+
+  deleteTarget?.let { snapshot ->
+    AlertDialog(
+      onDismissRequest = { deleteTarget = null },
+      title = { Text(t(language, "Delete snapshot?", "\u5220\u9664\u5feb\u7167\uff1f")) },
+      text = { Text(snapshot.name) },
+      confirmButton = {
+        Button(
+          onClick = {
+            controller.deleteWorkspaceSnapshot(snapshot.id)
+            deleteTarget = null
+          },
+        ) {
+          Text(t(language, "Delete", "\u5220\u9664"))
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { deleteTarget = null }) {
+          Text(t(language, "Cancel", "\u53d6\u6d88"))
+        }
+      },
+    )
+  }
+}
+
+@Composable
+private fun SnapshotListItem(
+  snapshot: WorkspaceSnapshotRecord,
+  language: String,
+  onRestore: () -> Unit,
+  onDelete: () -> Unit,
+) {
+  val kind = if (snapshot.kind == "auto") t(language, "Auto", "\u81ea\u52a8") else t(language, "Manual", "\u624b\u52a8")
+
+  Surface(
+    modifier = Modifier.fillMaxWidth(),
+    shape = RoundedCornerShape(8.dp),
+    color = MaterialTheme.colorScheme.surfaceVariant,
+  ) {
+    Column(
+      modifier = Modifier.fillMaxWidth().padding(10.dp),
+      verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+      Text(snapshot.name, style = MaterialTheme.typography.bodyLarge)
+      Text(
+        "$kind / ${formatSnapshotTime(snapshot.createdAtMillis)} / ${snapshot.fileCount} files / ${snapshot.totalBytes} bytes",
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.bodySmall,
+      )
+      if (snapshot.reason.isNotBlank()) {
+        Text(snapshot.reason, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+      }
+      Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        OutlinedButton(onClick = onRestore) {
+          Text(t(language, "Restore", "\u6062\u590d"))
+        }
+        if (snapshot.kind != "auto") {
+          TextButton(onClick = onDelete) {
+            Text(t(language, "Delete", "\u5220\u9664"))
+          }
+        }
+      }
+    }
   }
 }
 

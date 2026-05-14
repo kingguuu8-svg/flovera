@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.core.content.FileProvider
 import androidx.test.platform.app.InstrumentationRegistry
 import com.flovera.app.workspace.WorkspaceController
+import com.flovera.app.workspace.FloveraSettingsView
 import com.flovera.app.workspace.WorkspaceManager
 import java.io.File
 import org.junit.Assert.assertEquals
@@ -99,5 +100,42 @@ class WorkspaceFileTreeInstrumentedTest {
     assertEquals("Imported shared-note (1).txt", second)
     assertEquals("from another app", workspace.readFile("shared-note.txt"))
     assertEquals("from another app", workspace.readFile("shared-note (1).txt"))
+  }
+
+  @Test
+  fun workspaceSnapshotsRestoreFilesAndMetadata() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "snapshot-restore-${System.currentTimeMillis()}").also {
+      it.ensureSeedFiles()
+      it.ensureFloveraMetadata(FloveraSettingsView(provider = "deepseek", model = "deepseek-v4-pro", apiKeyRef = "deepseek.default"))
+    }
+
+    workspace.writeFile("notes/today.md", "alpha")
+    val snapshot = workspace.createManualSnapshot("baseline", selectedHtmlPath = "index.html")
+    workspace.writeFile("notes/today.md", "beta")
+    workspace.writeFile(".flovera/settings-view.json", """{"provider":"changed"}""")
+
+    val restored = workspace.restoreSnapshot(snapshot.id)
+
+    assertEquals(snapshot.id, restored?.id)
+    assertEquals("alpha", workspace.readFile("notes/today.md"))
+    assertTrue(workspace.readFile(".flovera/settings-view.json").contains("deepseek-v4-pro"))
+    assertTrue(workspace.deleteSnapshot(snapshot.id))
+  }
+
+  @Test
+  fun workspaceAutomaticSnapshotsKeepLatestThreeBeforeFileChanges() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "snapshot-auto-${System.currentTimeMillis()}")
+
+    workspace.writeFile("counter.txt", "one")
+    workspace.writeFile("counter.txt", "two")
+    workspace.writeFile("counter.txt", "three")
+    workspace.writeFile("counter.txt", "four")
+
+    val automatic = workspace.listSnapshots().filter { it.kind == "auto" }
+
+    assertEquals(3, automatic.size)
+    assertEquals("three", workspace.restoreSnapshot(automatic.first().id)?.let { workspace.readFile("counter.txt") })
   }
 }

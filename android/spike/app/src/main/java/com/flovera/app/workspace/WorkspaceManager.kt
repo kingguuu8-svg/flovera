@@ -9,6 +9,9 @@ import com.flovera.app.storage.writeBytesAtomically
 import com.flovera.app.storage.writeStreamAtomically
 import com.flovera.app.storage.writeUtf8TextAtomically
 import java.io.File
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 
 data class WorkspaceFileNode(
   val name: String,
@@ -22,6 +25,11 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
   private val appContext = context.applicationContext
   private val workspacesRoot = File(context.filesDir, "workspaces")
   val root: File = File(workspacesRoot, workspaceId).apply { mkdirs() }
+  private val snapshotStore = WorkspaceSnapshotStore(appContext, workspaceId, root)
+  private val json = Json {
+    prettyPrint = true
+    encodeDefaults = true
+  }
 
   fun ensureSeedFiles() {
     writeFile(
@@ -32,6 +40,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
         This workspace is owned by the Android app. The agent can read, write, and edit files here through approved tools.
       """.trimIndent(),
       overwrite = false,
+      createAutoSnapshot = false,
     )
     writeFile(
       path = "AGENT.md",
@@ -49,6 +58,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
         - Always check window.Flovera exists before calling it, and keep these calls user-visible and intentional.
       """.trimIndent(),
       overwrite = false,
+      createAutoSnapshot = false,
     )
     writeFile(
       path = "index.html",
@@ -91,10 +101,42 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
         </html>
       """.trimIndent(),
       overwrite = false,
+      createAutoSnapshot = false,
+    )
+    ensureFloveraMetadata()
+  }
+
+  fun ensureFloveraMetadata(settingsView: FloveraSettingsView = FloveraSettingsView()) {
+    writeFile(
+      path = ".flovera/manifest.json",
+      content = json.encodeToString(
+        FloveraWorkspaceManifest(
+          workspaceId = root.name,
+          settingsViewPath = ".flovera/settings-view.json",
+        ),
+      ),
+      overwrite = false,
+      createAutoSnapshot = false,
+    )
+    writeFile(
+      path = ".flovera/settings-view.json",
+      content = json.encodeToString(settingsView),
+      overwrite = true,
+      createAutoSnapshot = false,
     )
   }
 
   fun readAgentRules(): String = readFile("AGENT.md")
+
+  fun listSnapshots(): List<WorkspaceSnapshotRecord> = snapshotStore.list()
+
+  fun createManualSnapshot(name: String, selectedHtmlPath: String = ""): WorkspaceSnapshotRecord {
+    return snapshotStore.createManual(name, selectedHtmlPath)
+  }
+
+  fun restoreSnapshot(id: String): WorkspaceSnapshotRecord? = snapshotStore.restore(id)
+
+  fun deleteSnapshot(id: String): Boolean = snapshotStore.delete(id)
 
   fun listHtmlFiles(): List<String> {
     if (!root.exists()) return emptyList()
@@ -168,16 +210,32 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     }
   }
 
-  fun writeFile(path: String, content: String, overwrite: Boolean = true): String {
+  fun writeFile(
+    path: String,
+    content: String,
+    overwrite: Boolean = true,
+    createAutoSnapshot: Boolean = true,
+  ): String {
     val file = safeFile(path)
     if (file.exists() && !overwrite) return "File already exists: ${relativeToRoot(file)}"
+    if (createAutoSnapshot) {
+      snapshotStore.createAutomatic("write_file:${relativeToRoot(file)}")
+    }
     writeUtf8TextAtomically(file, content)
     return "Wrote ${content.length} chars to ${relativeToRoot(file)}"
   }
 
-  fun writeBytes(path: String, content: ByteArray, overwrite: Boolean = true): String {
+  fun writeBytes(
+    path: String,
+    content: ByteArray,
+    overwrite: Boolean = true,
+    createAutoSnapshot: Boolean = true,
+  ): String {
     val file = safeFile(path)
     if (file.exists() && !overwrite) return "File already exists: ${relativeToRoot(file)}"
+    if (createAutoSnapshot) {
+      snapshotStore.createAutomatic("write_bytes:${relativeToRoot(file)}")
+    }
     writeBytesAtomically(file, content)
     return "Wrote ${content.size} bytes to ${relativeToRoot(file)}"
   }
@@ -186,6 +244,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     val name = uniqueRootFileName(sanitizeRootFileName(displayName(uri) ?: uri.lastPathSegment.orEmpty()))
     val target = safeFile(name)
     val input = appContext.contentResolver.openInputStream(uri) ?: return "Could not open shared file: $uri"
+    snapshotStore.createAutomatic("import:${relativeToRoot(target)}")
     writeStreamAtomically(target, input)
     return "Imported ${relativeToRoot(target)}"
   }
@@ -196,6 +255,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     val current = readUtf8Text(file)
     if (!current.contains(oldText)) return "Old text was not found in $path"
     val updated = current.replace(oldText, newText, ignoreCase = false)
+    snapshotStore.createAutomatic("edit_file:${relativeToRoot(file)}")
     writeUtf8TextAtomically(file, updated)
     return "Edited ${relativeToRoot(file)}"
   }
@@ -213,6 +273,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
       return "Path escapes workspace: $newName"
     }
     if (target.exists()) return "Target already exists: ${relativeToRoot(target)}"
+    snapshotStore.createAutomatic("rename:${relativeToRoot(file)}")
     return if (file.renameTo(target)) {
       "Renamed ${relativeToRoot(file)} to ${relativeToRoot(target)}"
     } else {
@@ -288,3 +349,25 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     return file.canonicalFile.toRelativeString(root.canonicalFile).ifBlank { "." }
   }
 }
+
+@Serializable
+data class FloveraWorkspaceManifest(
+  val version: Int = 1,
+  val workspaceId: String,
+  val settingsViewPath: String,
+)
+
+@Serializable
+data class FloveraSettingsView(
+  val provider: String = "",
+  val model: String = "",
+  val activeWorkspaceId: String = "",
+  val activeSessionId: String? = null,
+  val selectedHtmlPath: String = "",
+  val maxAgentIterations: Int = 0,
+  val networkEnabled: Boolean = false,
+  val language: String = "",
+  val themeMode: String = "",
+  val themeColor: String = "",
+  val apiKeyRef: String = "",
+)
