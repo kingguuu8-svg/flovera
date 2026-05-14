@@ -32,6 +32,7 @@ renderers.
 |-- docs/archive/legacy-qemu-vps/  Historical QEMU/VPS route
 |-- PRODUCT_QUALITY.md             Product quality model and backlog
 |-- docs/OPEN_SOURCE_READINESS.md  Open-source readiness checklist
+|-- CHANGELOG.md                   Pre-release change notes
 |-- LICENSE                        MIT license
 `-- .env.example                   Local environment template
 ```
@@ -89,6 +90,8 @@ source. `.env.example` is only a template for local development.
 
 Before publishing or cutting a release, run the checks in
 `docs/OPEN_SOURCE_READINESS.md`.
+
+Pre-release changes are tracked in `CHANGELOG.md`.
 
 ## License
 
