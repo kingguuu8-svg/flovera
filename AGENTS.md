@@ -1,50 +1,67 @@
 # AGENTS.md
 
-本文件规定本仓库内 AI 协作和代码处理规则。
+This file defines repository-local rules for AI collaboration.
 
-## 第一性原则
+## First Principles
 
-- 不假设用户需求天然正确；需求模糊时先澄清，需求明确时直接执行。
-- 主动指出误解、技术风险和更短路径。
-- 遇到问题追根因，不用临时补丁掩盖问题。
-- 每个技术决策都必须能回答“为什么”。
-- 输出只保留影响决策的信息。
+- Do not assume the user request is correct by default.
+- Clarify ambiguous requirements before implementation.
+- If the goal is clear but the path is not the shortest, say so and propose the better path.
+- Find root causes instead of hiding problems with temporary patches.
+- Every technical decision must be able to answer "why".
+- Keep output focused on information that changes decisions.
 
-## 当前项目方向
+## Current Project Direction
 
-- 当前主线是 Flovera：Android-local workspace agent app。
-- Android app 负责会话、workspace、WebView 展示、权限、设置和 agent 运行入口。
-- Koog 是当前 agent runtime 上游框架。
-- 旧 QEMU/VPS 路线只作为归档研究材料，位于 `docs/archive/legacy-qemu-vps/`。
+- The active product is Flovera: an Android-local workspace agent app.
+- The Android app owns sessions, workspace files, WebView display, permissions, settings, and the agent entry point.
+- Koog is the upstream agent runtime framework.
+- Legacy QEMU/VPS material is archived under `docs/archive/legacy-qemu-vps/`.
 
-## 复用和修改规则
+## Reuse And Editing Rules
 
-- 优先复用已有文件和目录，不创建无意义重复版本。
-- 历史、回滚和对比统一依赖 git 分支、commit、diff 和 tag，不维护手工备份副本。
-- 禁止擅自删除、重写或回滚用户已有改动。
-- 不允许用 `git reset --hard`、`git checkout -- <file>` 等破坏性命令，除非用户明确要求。
-- PyTorch 如后续需要，只允许使用 CUDA 版。
+- Reuse existing files and directories before creating new ones.
+- Use git branches, commits, diffs, and tags for history and rollback.
+- Do not delete, rewrite, or revert user changes without explicit instruction.
+- Do not use destructive git commands such as `git reset --hard` or `git checkout -- <file>` unless the user explicitly asks.
+- If PyTorch is ever introduced, only CUDA builds are allowed.
 
-## Git 规则
+## Git Rules
 
-- 日常修改使用工作分支。
-- 本地 commit 可以小步、频繁，用作可审查的工作单元。
-- 每次 commit 必须说明改了什么以及为什么改，不允许 `misc update` 这类空泛信息。
-- 每次 commit 后向用户说明变更内容和原因。
-- 远端 push 必须经过用户对该次 push 的明确同意；不要擅自 push。
-- push 应代表较大的、连贯的版本检查点，不要每改一点就 push 一层。
-- 不经用户明确同意，不创建或更新 GitHub Release。
-- 保持最新 push 和 release 状态一致；如果创建或更新 release，它必须对应最新已推送版本。
+- Local commits may be small and frequent.
+- Each commit must explain what changed and why.
+- Do not use empty commit messages such as `misc update`.
+- After each commit, tell the user what changed and why.
+- Do not push to a remote unless the user explicitly approves that specific push.
+- Pushes should represent larger coherent checkpoints, not every small local change.
+- Do not create or update a GitHub Release unless the user explicitly approves it.
+- Keep the latest pushed commit and the latest release aligned.
 
-## 真机验证规则
+## Public Markdown Rules
 
-- 真机验证中，非必要不使用视觉点击方式操作。
-- 构建功能时，要考虑命令、测试、语义节点、调试入口等非视觉点击验证方式。
-- 不要使用会卸载用户主 app 或重置权限的验证路径。
-- Android 设备验证优先使用 `android/spike/scripts/verify-flovera-android.ps1`。
+- Internal Markdown files may be committed locally.
+- Internal Markdown files must not be pushed to the public remote.
+- Only open-source-facing Markdown files may be pushed publicly.
+- The public Markdown allowlist is:
+  - `README.md`
+  - `CHANGELOG.md`
+  - `CONTRIBUTING.md`
+  - `SECURITY.md`
+  - `THIRD_PARTY_NOTICES.md`
+- All other Markdown files are internal unless the user explicitly reclassifies them as public-facing.
+- `AGENTS.md`, `PRODUCT_QUALITY.md`, `docs/OPEN_SOURCE_READINESS.md`, archived route docs, release draft notes, and planning docs are internal Markdown.
+- Before any public push, run `scripts/check-public-md-allowlist.ps1 -Ref <public-ref>`.
+- If the check fails, do not push that ref.
 
-## 命令规则
+## Device Verification Rules
 
-- 本环境执行 shell 命令时使用 `rtk` 前缀。
-- 等待长时间命令时，不使用 `sleep 30s` 循环轮询。
-- 对构建和验证命令保留可复现记录，优先写入 `scripts/` 或文档。
+- Avoid visual clicking during real-device verification unless it is necessary.
+- Prefer command, test, semantic node, and debug-entry verification paths.
+- Do not use verification paths that uninstall the user's main app or reset permissions.
+- Prefer `android/spike/scripts/verify-flovera-android.ps1` for Android verification.
+
+## Command Rules
+
+- Use the `rtk` prefix for shell commands in this environment.
+- Do not wait for long commands with `sleep 30s` polling loops.
+- Keep build and verification commands reproducible, preferably in scripts or docs.

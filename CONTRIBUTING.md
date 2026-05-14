@@ -48,6 +48,16 @@ main Flovera app or resets app permissions.
 - Do not push changes without maintainer approval for that specific push.
 - Do not create or update a release without maintainer approval.
 - Keep the latest pushed commit and the latest release aligned.
+- Public pushes must only include the public Markdown allowlist:
+  `README.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, `SECURITY.md`, and
+  `THIRD_PARTY_NOTICES.md`.
+- Project management Markdown, agent rules, internal planning docs, archive
+  notes, readiness checklists, and release drafts may exist in local commits but
+  must not be pushed to the public remote.
+- Any Markdown file outside the allowlist is internal unless the maintainer
+  explicitly reclassifies it as public-facing.
+- Before a public push, run
+  `scripts/check-public-md-allowlist.ps1 -Ref <public-ref>`.
 
 ## Product Rules
 
