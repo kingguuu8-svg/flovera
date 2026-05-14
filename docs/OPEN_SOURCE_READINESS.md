@@ -13,8 +13,8 @@ source project.
 | README | Public README describes current Flovera direction, not legacy QEMU/VPS route | Not done |
 | Build docs | Fresh contributor can build the Android app from documented commands | Not done |
 | Verification docs | Public verification path is documented without depending on private devices | Not done |
-| Contribution docs | Contribution and issue-reporting rules are documented | Not done |
-| Security docs | Vulnerability/security reporting and secret-handling policy are documented | Not done |
+| Contribution docs | Contribution and issue-reporting rules are documented | Done: `CONTRIBUTING.md` |
+| Security docs | Vulnerability/security reporting and secret-handling policy are documented | Done: `SECURITY.md` |
 | Third-party notices | Major dependencies and licenses are documented | Not done |
 | Legacy material | Old QEMU/VPS route remains archived and clearly separated from the current product | Partially done |
 | Release hygiene | Generated APKs, build outputs, local properties, and signing files are ignored | Partially done; repeat `git status --ignored` audit |
