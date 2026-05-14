@@ -36,9 +36,18 @@ main Flovera app or resets app permissions.
 
 - Keep commits small and purposeful.
 - Use clear commit messages such as `android: add session snapshot restore`.
+- Explain what changed and why for each commit.
 - Do not mix unrelated implementation, formatting, and documentation changes.
 - Do not revert another contributor's work unless the issue and decision are
   explicit.
+
+## Push And Release Rules
+
+- Local commits may be small and frequent.
+- Remote pushes should be larger coherent checkpoints.
+- Do not push changes without maintainer approval for that specific push.
+- Do not create or update a release without maintainer approval.
+- Keep the latest pushed commit and the latest release aligned.
 
 ## Product Rules
 
