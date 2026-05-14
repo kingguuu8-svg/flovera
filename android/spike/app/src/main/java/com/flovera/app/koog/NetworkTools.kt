@@ -243,6 +243,7 @@ private fun NetworkResponse.formatForSearch(query: String): String {
     return "No web results for: $query"
   }
   return buildString {
+    appendLine("status: $statusCode")
     appendLine("query: $query")
     appendLine("final_url: $finalUrl")
     appendLine("results:")

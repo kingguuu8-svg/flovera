@@ -10,6 +10,7 @@ import com.flovera.app.session.AgentSessionStore
 import com.flovera.app.session.SessionController
 import com.flovera.app.session.SessionMessage
 import com.flovera.app.workspace.WorkspaceManager
+import java.io.File
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -105,6 +106,49 @@ class AgentRunControllerInstrumentedTest {
     assertFalse(callbackCalled)
   }
 
+  @Test
+  fun runControllerSavesWorkspaceErrorLogOnRuntimeFailure() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val store = AgentSessionStore(context)
+    val sessions = SessionController(store)
+    val session = store.create("Failure ${System.currentTimeMillis()}")
+    val workspace = WorkspaceManager(context, "failure-run-${System.currentTimeMillis()}").also { it.ensureSeedFiles() }
+    val controller = AgentRunController(runtime = FailingAgentRuntime(), scope = this)
+    var finishedSession: AgentSession? = null
+    var succeeded: Boolean? = null
+
+    val job = controller.submit(
+      input = "trigger failure",
+      settings = AppSettings(apiKey = "secret-must-not-be-logged", networkEnabled = true, webSearchEnabled = true),
+      session = session,
+      workspace = workspace,
+      appendUserPrompt = sessions::appendUserPrompt,
+      appendContextRecord = sessions::appendContextRecord,
+      appendMessage = sessions::appendMessage,
+      onStarted = { _, _ -> },
+      onDraft = { },
+      onFinished = { updated, success ->
+        finishedSession = updated
+        succeeded = success
+      },
+    )
+
+    assertNotNull(job)
+    job!!.join()
+
+    assertEquals(false, succeeded)
+    val errorMessage = finishedSession?.messages?.lastOrNull()
+    assertEquals("error", errorMessage?.role)
+    assertTrue(errorMessage?.content?.contains("Error log saved: .flovera/logs/agent-error-") == true)
+    val logs = File(workspace.root, ".flovera/logs").listFiles().orEmpty()
+    assertEquals(1, logs.size)
+    val logText = logs.single().readText()
+    assertTrue(logText.contains("DeepSeekLLMClient"))
+    assertTrue(logText.contains("fake_tool_before_failure"))
+    assertTrue(logText.contains("networkEnabled: true"))
+    assertFalse(logText.contains("secret-must-not-be-logged"))
+  }
+
   private class FakeAgentRuntime : AgentRuntime {
     var inputSeen: String = ""
 
@@ -118,6 +162,19 @@ class AgentRunControllerInstrumentedTest {
       inputSeen = input
       recorder.record("fake_tool", "{}", "ok")
       return "assistant output"
+    }
+  }
+
+  private class FailingAgentRuntime : AgentRuntime {
+    override suspend fun run(
+      input: String,
+      settings: AppSettings,
+      session: AgentSession,
+      workspace: WorkspaceManager,
+      recorder: ToolEventRecorder,
+    ): String {
+      recorder.record("fake_tool_before_failure", "{}", "ok")
+      error("Error from client: DeepSeekLLMClient\nStatus code: 400\nreasoning_content must be passed back")
     }
   }
 }

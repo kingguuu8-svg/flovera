@@ -7,7 +7,11 @@ import com.flovera.app.koog.ToolEventRecorder
 import com.flovera.app.session.AgentSession
 import com.flovera.app.session.ContextUsageRecord
 import com.flovera.app.session.SessionMessage
+import com.flovera.app.session.ToolEvent
 import com.flovera.app.workspace.WorkspaceManager
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -63,7 +67,23 @@ class AgentRunController(
           SessionMessage(role = "assistant", content = output, toolEvents = recorder.snapshot())
         },
         onFailure = { error ->
-          SessionMessage(role = "error", content = error.message ?: error.toString(), toolEvents = recorder.snapshot())
+          val events = recorder.snapshot()
+          val logPath = saveErrorLog(
+            error = error,
+            settings = settings,
+            session = withContext,
+            input = trimmed,
+            toolEvents = events,
+            workspace = workspace,
+          )
+          val message = buildString {
+            append(error.message ?: error.toString())
+            appendLine()
+            appendLine()
+            append("Error log saved: ")
+            append(logPath)
+          }
+          SessionMessage(role = "error", content = message, toolEvents = events)
         },
       )
       val updated = appendMessage(withContext, assistantMessage)
@@ -99,5 +119,66 @@ class AgentRunController(
 
   private fun approximateTokens(chars: Int): Int {
     return ((chars + 3) / 4).coerceAtLeast(1)
+  }
+
+  private fun saveErrorLog(
+    error: Throwable,
+    settings: AppSettings,
+    session: AgentSession,
+    input: String,
+    toolEvents: List<ToolEvent>,
+    workspace: WorkspaceManager,
+  ): String {
+    val timestamp = SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.US).format(Date())
+    val path = ".flovera/logs/agent-error-$timestamp-${UUID.randomUUID()}.md"
+    val content = buildString {
+      appendLine("# Agent Error Log")
+      appendLine()
+      appendLine("- provider: ${settings.provider}")
+      appendLine("- model: ${settings.model}")
+      appendLine("- sessionId: ${session.id}")
+      appendLine("- messageCount: ${session.messages.size}")
+      appendLine("- contextRecords: ${session.contextRecords.size}")
+      appendLine("- networkEnabled: ${settings.networkEnabled}")
+      appendLine("- webSearchEnabled: ${settings.webSearchEnabled}")
+      appendLine("- errorType: ${error.javaClass.name}")
+      appendLine("- errorMessage: ${error.message ?: error.toString()}")
+      appendLine()
+      appendLine("## Current User Input")
+      appendLine()
+      appendLine("```")
+      appendLine(input.take(4_000))
+      appendLine("```")
+      appendLine()
+      appendLine("## Tool Events")
+      appendLine()
+      if (toolEvents.isEmpty()) {
+        appendLine("(none)")
+      } else {
+        toolEvents.forEachIndexed { index, event ->
+          appendLine("### ${index + 1}. ${event.name}")
+          appendLine()
+          appendLine("- timestampMillis: ${event.timestampMillis}")
+          appendLine()
+          appendLine("args:")
+          appendLine("```")
+          appendLine(event.args.take(4_000))
+          appendLine("```")
+          appendLine()
+          appendLine("result:")
+          appendLine("```")
+          appendLine(event.result.take(8_000))
+          appendLine("```")
+          appendLine()
+        }
+      }
+      appendLine("## Stack Trace")
+      appendLine()
+      appendLine("```")
+      appendLine(error.stackTraceToString().take(16_000))
+      appendLine("```")
+    }
+    workspace.writeFile(path = path, content = content, createAutoSnapshot = false)
+    return path
   }
 }

@@ -14,6 +14,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 
 class NetworkToolsInstrumentedTest {
@@ -134,6 +135,21 @@ class NetworkToolsInstrumentedTest {
     assertTrue(client.requestedUrl?.contains("api.search.brave.com") == true)
     assertTrue(result.contains("Flovera"))
     assertTrue(result.contains("https://example.com/flovera"))
+    assertTrue(recorder.snapshot().any { it.name == "web_search" })
+  }
+
+  @Test
+  fun liveBraveWebSearchReturnsResultsWhenApiKeyProvided() = runBlocking {
+    val apiKey = InstrumentationRegistry.getArguments().getString("braveSearchApiKey").orEmpty()
+    assumeTrue("Pass -e braveSearchApiKey to run the live Brave Search test.", apiKey.isNotBlank())
+
+    val recorder = ToolEventRecorder()
+    val result = WebSearchTool(apiKey, recorder).execute(
+      WebSearchTool.Args(query = "flovera android agent", count = 3),
+    )
+
+    assertTrue(result, result.contains("status: 200"))
+    assertTrue(result, result.contains("results:"))
     assertTrue(recorder.snapshot().any { it.name == "web_search" })
   }
 

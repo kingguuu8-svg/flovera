@@ -6,6 +6,7 @@ import ai.koog.utils.io.use
 import com.flovera.app.config.AppSettings
 import com.flovera.app.session.AgentSession
 import com.flovera.app.workspace.WorkspaceManager
+import java.util.UUID
 
 interface AgentRuntime {
   suspend fun run(
@@ -49,7 +50,7 @@ class KoogAgentRuntime : AgentRuntime {
     )
 
     return agent.use {
-      it.run(buildUserInput(input, session), sessionId = session.id)
+      it.run(buildUserInput(input, session), sessionId = "${session.id}-${UUID.randomUUID()}")
     }
   }
 
