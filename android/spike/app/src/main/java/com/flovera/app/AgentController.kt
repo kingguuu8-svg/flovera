@@ -290,9 +290,12 @@ class AgentController(context: Context) {
     val current = _state.value
     if (current.isRunning) return
     val session = current.session ?: return
+    val selectedMessage = session.messages.getOrNull(messageIndex) ?: return
+    if (selectedMessage.role != "user") return
     val restored = sessionController.revertToBeforeMessage(session.id, messageIndex) ?: return
     refreshWorkspaceState(
       session = restored,
+      input = selectedMessage.content,
       isRunning = false,
       status = "Conversation reverted",
     )
@@ -343,6 +346,7 @@ class AgentController(context: Context) {
   private fun refreshWorkspaceState(
     settings: AppSettings = _state.value.settings,
     session: AgentSession? = _state.value.session,
+    input: String = _state.value.input,
     isRunning: Boolean = _state.value.isRunning,
     status: String = _state.value.status,
   ) {
@@ -352,6 +356,7 @@ class AgentController(context: Context) {
       it.copy(
         settings = normalizedSettings,
         session = session,
+        input = input,
         sessions = sessionController.listActive(),
         archivedSessions = sessionController.listArchived(),
         workspaceFiles = workspaceSnapshot.files,

@@ -153,11 +153,34 @@ class SessionManagementInstrumentedTest {
     store.appendMessage(two, SessionMessage(role = "user", content = "three"))
 
     controller.openSession(session.id)
-    controller.revertSessionToMessage(1)
+    controller.revertSessionToMessage(2)
 
     val reverted = controller.state.value.session
-    assertEquals(1, reverted?.messages?.size)
-    assertEquals("one", reverted?.messages?.single()?.content)
+    assertEquals(2, reverted?.messages?.size)
+    assertEquals("two", reverted?.messages?.last()?.content)
+    assertEquals("three", controller.state.value.input)
+  }
+
+  @Test
+  fun controllerRejectsRevertFromAssistantMessage() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val controller = AgentController(context)
+    controller.newSession()
+    val session = controller.state.value.session
+    assertNotNull(session)
+
+    val store = AgentSessionStore(context)
+    val one = store.appendMessage(session!!, SessionMessage(role = "user", content = "one"))
+    val two = store.appendMessage(one, SessionMessage(role = "assistant", content = "two"))
+    store.appendMessage(two, SessionMessage(role = "user", content = "three"))
+
+    controller.openSession(session.id)
+    controller.updateInput("draft")
+    controller.revertSessionToMessage(1)
+
+    val unchanged = controller.state.value.session
+    assertEquals(3, unchanged?.messages?.size)
+    assertEquals("draft", controller.state.value.input)
   }
 
   @Test

@@ -4,6 +4,7 @@ import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -92,6 +93,28 @@ class AgentScreenInteractionInstrumentedTest {
       assertFalse(controller.state.value.sessions.any { it.id == draftId })
       assertTrue(controller.state.value.session?.id != draftId)
     }
+  }
+
+  @Test
+  fun conversationHeaderDoesNotExposeSessionTitle() {
+    val context = composeRule.activity.applicationContext
+    SettingsStore(context).save(AppSettings(language = "en"))
+    val store = AgentSessionStore(context)
+    val title = "Hidden title ${System.currentTimeMillis()}"
+    val session = store.appendMessage(
+      store.create(title),
+      SessionMessage(role = "user", content = "hello"),
+    )
+    val controller = AgentController(context)
+    controller.openSession(session.id)
+
+    composeRule.setContent {
+      AgentScreen(controller)
+    }
+
+    composeRule.onNodeWithText(">").performClick()
+    composeRule.onNodeWithText("Conversation").assertIsDisplayed()
+    assertEquals(0, composeRule.onAllNodesWithText(title).fetchSemanticsNodes().size)
   }
 
   @Test

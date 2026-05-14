@@ -353,7 +353,7 @@ private fun ConversationDialog(
               text = if (isDraftSession) {
                 t(language, "New conversation", "\u65b0\u5bf9\u8bdd")
               } else {
-                state.session?.title ?: t(language, "Conversation", "\u5bf9\u8bdd")
+                t(language, "Conversation", "\u5bf9\u8bdd")
               },
               style = MaterialTheme.typography.titleMedium,
             )
@@ -400,7 +400,7 @@ private fun ConversationDialog(
             ) { index, message ->
               MessageBubble(
                 message = message,
-                onRevert = if (state.isRunning) null else ({ pendingRevertIndex = index }),
+                onRevert = if (!state.isRunning && message.role == "user") ({ pendingRevertIndex = index }) else null,
               )
             }
             state.assistantDraft?.let { draft ->
