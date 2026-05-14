@@ -60,6 +60,7 @@ justification.
 | Permission | App requests permissions at cold start before a user action | Creates distrust and startup friction | Ask only at the point of use, with clear product context |
 | Config | API keys, provider choices, or workspace paths are hardcoded | Blocks sharing, open source, and user control | Store runtime config outside source and keep secrets out of git |
 | Verification | Manual visual clicking is the only way to test a path | Slow and brittle for iterative development | Prefer instrumentation, adb, semantics, and scriptable journeys |
+| Verification | Device verification freshly installs the user's main app | Resets the real usage state and may require permissions or install approval again | Update the already-installed package only; refuse fresh installs unless explicitly requested |
 
 ## Experience Models
 
@@ -214,6 +215,7 @@ Use this checklist before calling a feature product-ready:
 - Error states preserve data and explain the failed layer.
 - The agent is told about capabilities it can actually use.
 - A real-device verification path exists for the behavior, or the gap is documented.
+- Real-device verification preserves the existing Flovera install, app data, and permission state.
 
 ## How To Extend This Document
 

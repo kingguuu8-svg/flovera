@@ -1,7 +1,8 @@
 param(
   [string]$DeviceSerial = "",
   [switch]$SkipDevice,
-  [switch]$SkipRelease
+  [switch]$SkipRelease,
+  [switch]$AllowFreshInstall
 )
 
 $ErrorActionPreference = "Stop"
@@ -44,6 +45,55 @@ function Assert-InstalledPackage {
   $Version = ($PackageDump | Select-String -Pattern "versionCode=" | Select-Object -First 1).Line.Trim()
   $LastUpdate = ($PackageDump | Select-String -Pattern "lastUpdateTime=" | Select-Object -First 1).Line.Trim()
   Write-Host "$PackageName $Version $LastUpdate"
+}
+
+function Get-InstalledPackageInfo {
+  param(
+    [string]$AdbPath,
+    [string]$Serial,
+    [string]$PackageName
+  )
+
+  $PackageDump = & $AdbPath "-s" $Serial "shell" "dumpsys" "package" $PackageName 2>&1
+  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  $PackageText = $PackageDump -join "`n"
+  if ($PackageText -notmatch "Package \[$([regex]::Escape($PackageName))\]") {
+    return $null
+  }
+
+  $FirstInstall = ($PackageDump | Select-String -Pattern "firstInstallTime=" | Select-Object -First 1).Line.Trim()
+  $LastUpdate = ($PackageDump | Select-String -Pattern "lastUpdateTime=" | Select-Object -First 1).Line.Trim()
+  return [pscustomobject]@{
+    FirstInstallTime = $FirstInstall
+    LastUpdateTime = $LastUpdate
+  }
+}
+
+function Install-PackageUpdate {
+  param(
+    [string]$AdbPath,
+    [string]$Serial,
+    [string]$PackageName,
+    [string]$ApkPath,
+    [string[]]$InstallArgs,
+    [switch]$AllowFreshInstall
+  )
+
+  $Before = Get-InstalledPackageInfo -AdbPath $AdbPath -Serial $Serial -PackageName $PackageName
+  if (-not $Before -and -not $AllowFreshInstall) {
+    throw "$PackageName is not installed on $Serial. Refusing fresh install because device verification must preserve app permissions and data. Install it manually once or pass -AllowFreshInstall deliberately."
+  }
+
+  & $AdbPath "-s" $Serial "install" @InstallArgs $ApkPath
+  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  $After = Get-InstalledPackageInfo -AdbPath $AdbPath -Serial $Serial -PackageName $PackageName
+  if (-not $After) {
+    throw "$PackageName was not found after install."
+  }
+  if ($Before -and $Before.FirstInstallTime -and $After.FirstInstallTime -ne $Before.FirstInstallTime) {
+    throw "$PackageName firstInstallTime changed during verification. This indicates a reinstall, not an update."
+  }
 }
 
 function Find-Aapt {
@@ -138,11 +188,9 @@ try {
     throw "No online Android device found. Pass -DeviceSerial or use -SkipDevice."
   }
 
-  & $Adb "-s" $DeviceSerial "install" "-r" "-t" "-d" "-g" $FloveraDebugApk
-  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-  & $Adb "-s" $DeviceSerial "install" "-r" "-t" "-d" "-g" $LegacyDebugApk
-  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-  & $Adb "-s" $DeviceSerial "install" "-r" "-t" "-d" "-g" $AndroidTestApk
+  Install-PackageUpdate -AdbPath $Adb -Serial $DeviceSerial -PackageName "com.flovera.app" -ApkPath $FloveraDebugApk -InstallArgs @("-r", "-t", "-d") -AllowFreshInstall:$AllowFreshInstall
+  Install-PackageUpdate -AdbPath $Adb -Serial $DeviceSerial -PackageName "com.example.ailinuxvmspike" -ApkPath $LegacyDebugApk -InstallArgs @("-r", "-t", "-d") -AllowFreshInstall:$AllowFreshInstall
+  & $Adb "-s" $DeviceSerial "install" "-r" "-t" "-d" $AndroidTestApk
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
   Assert-InstalledPackage -AdbPath $Adb -Serial $DeviceSerial -PackageName "com.flovera.app"
   Assert-InstalledPackage -AdbPath $Adb -Serial $DeviceSerial -PackageName "com.example.ailinuxvmspike"
