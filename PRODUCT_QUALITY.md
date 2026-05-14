@@ -55,6 +55,7 @@ justification.
 | Conversation | Closing the conversation kills a running loop | Hiding UI should not cancel work | Agent loop continues unless the user explicitly stops it |
 | Conversation | Revert keeps the selected message | "Revert to here" usually means go back before the chosen point | Revert removes the selected message and everything after it |
 | WebView | Main surface shows app chrome instead of the workspace | Flovera's main output is the user's generated web surface | Display selected HTML full screen, with controls hidden behind app UI |
+| WebView | Main surface exposes multiple unrelated control entries | Scattered entry points make the app feel like a debug panel instead of a workspace | Main surface keeps one Agent entry; secondary controls live inside the conversation |
 | WebView | Empty web surface is bright or unrelated to app tone | Looks like a broken browser rather than product empty state | Dark neutral empty state matching Flovera visual language |
 | WebView | Workspace HTML can trigger app behavior without a named interface | Creates hidden capabilities and security confusion | Expose controlled, documented `window.Flovera` events |
 | Permission | App requests permissions at cold start before a user action | Creates distrust and startup friction | Ask only at the point of use, with clear product context |
@@ -126,10 +127,11 @@ Acceptance criteria:
 
 Main path:
 
-1. User opens Files from the main menu.
-2. Workspace appears as a tree.
-3. User taps a file to open it.
-4. User opens the row menu only for management actions.
+1. User opens Conversation from the main workspace surface.
+2. User opens Files from the conversation secondary menu.
+3. Workspace appears as a tree.
+4. User taps a file to open it.
+5. User opens the row menu only for management actions.
 
 Counter-paths:
 
@@ -155,9 +157,10 @@ Main path:
 
 1. User opens the app.
 2. The main screen is a full-screen workspace preview.
-3. User selects an HTML file from the menu.
-4. The selected HTML loads without browser chrome.
-5. HTML can intentionally call controlled app events through `window.Flovera`.
+3. User opens the conversation secondary menu.
+4. User selects an HTML file.
+5. The selected HTML loads without browser chrome.
+6. HTML can intentionally call controlled app events through `window.Flovera`.
 
 Counter-paths:
 
@@ -181,10 +184,11 @@ Acceptance criteria:
 
 Main path:
 
-1. User opens settings from the app menu.
-2. User selects provider and model.
-3. User enters API key.
-4. Agent loop uses that configuration without hardcoded secrets.
+1. User opens Conversation from the main workspace surface.
+2. User opens settings from the conversation secondary menu.
+3. User selects provider and model.
+4. User enters API key.
+5. Agent loop uses that configuration without hardcoded secrets.
 
 Counter-paths:
 
@@ -206,6 +210,7 @@ Acceptance criteria:
 Use this checklist before calling a feature product-ready:
 
 - Main click semantics match user intent.
+- Main surface exposes a single Agent entry; secondary management actions live under Conversation.
 - Empty state creates no persistent junk.
 - Repeated use does not create management debt.
 - Secondary actions are discoverable but not visually dominant.

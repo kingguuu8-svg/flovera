@@ -33,6 +33,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -90,7 +91,6 @@ fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
   val state by controller.state.collectAsStateWithLifecycle()
   val language = state.settings.language
   val context = LocalContext.current
-  var menuOpen by remember { mutableStateOf(false) }
   var activePanel by remember { mutableStateOf<AgentPanel?>(null) }
 
   LaunchedEffect(state.status) {
@@ -102,51 +102,16 @@ fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
   Box(modifier = modifier.fillMaxSize()) {
     WorkspaceWebView(url = state.selectedHtmlUrl, workspaceRootUrl = state.workspaceRootUrl)
 
-    Surface(
-      modifier = Modifier.align(Alignment.CenterStart).padding(start = 8.dp),
-      shape = RoundedCornerShape(999.dp),
-      color = MaterialTheme.colorScheme.primary.copy(alpha = 0.92f),
-      shadowElevation = 3.dp,
+    FloatingActionButton(
+      onClick = { activePanel = AgentPanel.Conversation },
+      modifier = Modifier
+        .align(Alignment.BottomEnd)
+        .padding(18.dp)
+        .semantics { contentDescription = "Open agent conversation" },
+      containerColor = MaterialTheme.colorScheme.primary,
+      contentColor = MaterialTheme.colorScheme.onPrimary,
     ) {
-      TextButton(onClick = { activePanel = AgentPanel.Conversation }) {
-        Text(">", color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.titleLarge)
-      }
-    }
-
-    Box(modifier = Modifier.align(Alignment.TopEnd).padding(12.dp)) {
-      OutlinedButton(onClick = { menuOpen = true }) {
-        Text(t(language, "Menu", "\u83dc\u5355"))
-      }
-      DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-        DropdownMenuItem(
-          text = { Text(t(language, "Select HTML", "\u9009\u62e9 HTML")) },
-          onClick = {
-            menuOpen = false
-            activePanel = AgentPanel.HtmlFiles
-          },
-        )
-        DropdownMenuItem(
-          text = { Text(t(language, "Files", "\u6587\u4ef6")) },
-          onClick = {
-            menuOpen = false
-            activePanel = AgentPanel.Files
-          },
-        )
-        DropdownMenuItem(
-          text = { Text("AGENT.md") },
-          onClick = {
-            menuOpen = false
-            activePanel = AgentPanel.AgentFile
-          },
-        )
-        DropdownMenuItem(
-          text = { Text(t(language, "Settings", "\u8bbe\u7f6e")) },
-          onClick = {
-            menuOpen = false
-            activePanel = AgentPanel.Settings
-          },
-        )
-      }
+      Text(t(language, "Agent", "Agent"), style = MaterialTheme.typography.labelLarge)
     }
   }
 
@@ -155,6 +120,7 @@ fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
       state = state,
       controller = controller,
       language = language,
+      onOpenPanel = { activePanel = it },
       onDismiss = {
         controller.discardEmptyDraftSession()
         activePanel = null
@@ -311,6 +277,7 @@ private fun ConversationDialog(
   state: AgentScreenState,
   controller: AgentController,
   language: String,
+  onOpenPanel: (AgentPanel) -> Unit,
   onDismiss: () -> Unit,
 ) {
   val listState = rememberLazyListState()
@@ -318,6 +285,7 @@ private fun ConversationDialog(
   val visibleMessageCount = messages.size + if (state.assistantDraft == null) 0 else 1
   var pendingRevertIndex by remember { mutableStateOf<Int?>(null) }
   var sessionPickerOpen by remember { mutableStateOf(false) }
+  var moreMenuOpen by remember { mutableStateOf(false) }
   val isDraftSession = state.session != null && state.session.messages.isEmpty()
 
   LaunchedEffect(state.session?.id, visibleMessageCount) {
@@ -345,6 +313,9 @@ private fun ConversationDialog(
           horizontalArrangement = Arrangement.SpaceBetween,
           verticalAlignment = Alignment.CenterVertically,
         ) {
+          TextButton(onClick = onDismiss) {
+            Text(t(language, "Close", "\u5173\u95ed"))
+          }
           Column(modifier = Modifier.weight(1f)) {
             Text(
               text = if (isDraftSession) {
@@ -368,11 +339,50 @@ private fun ConversationDialog(
             OutlinedButton(onClick = controller::newSession, enabled = !state.isRunning) {
               Text(t(language, "New", "\u65b0\u5efa"))
             }
-            OutlinedButton(onClick = { sessionPickerOpen = true }) {
-              Text(t(language, "Sessions", "Sessions"))
-            }
-            TextButton(onClick = onDismiss) {
-              Text(t(language, "Close", "\u5173\u95ed"))
+            Box {
+              OutlinedButton(
+                onClick = { moreMenuOpen = true },
+                modifier = Modifier.semantics { contentDescription = "Conversation more" },
+              ) {
+                Text(t(language, "More", "\u66f4\u591a"))
+              }
+              DropdownMenu(expanded = moreMenuOpen, onDismissRequest = { moreMenuOpen = false }) {
+                DropdownMenuItem(
+                  text = { Text(t(language, "Sessions", "Sessions")) },
+                  onClick = {
+                    moreMenuOpen = false
+                    sessionPickerOpen = true
+                  },
+                )
+                DropdownMenuItem(
+                  text = { Text(t(language, "Select HTML", "\u9009\u62e9 HTML")) },
+                  onClick = {
+                    moreMenuOpen = false
+                    onOpenPanel(AgentPanel.HtmlFiles)
+                  },
+                )
+                DropdownMenuItem(
+                  text = { Text(t(language, "Files", "\u6587\u4ef6")) },
+                  onClick = {
+                    moreMenuOpen = false
+                    onOpenPanel(AgentPanel.Files)
+                  },
+                )
+                DropdownMenuItem(
+                  text = { Text("AGENT.md") },
+                  onClick = {
+                    moreMenuOpen = false
+                    onOpenPanel(AgentPanel.AgentFile)
+                  },
+                )
+                DropdownMenuItem(
+                  text = { Text(t(language, "Settings", "\u8bbe\u7f6e")) },
+                  onClick = {
+                    moreMenuOpen = false
+                    onOpenPanel(AgentPanel.Settings)
+                  },
+                )
+              }
             }
           }
         }

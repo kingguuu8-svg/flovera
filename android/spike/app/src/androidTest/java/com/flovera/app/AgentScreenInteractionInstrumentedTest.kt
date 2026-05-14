@@ -67,7 +67,8 @@ class AgentScreenInteractionInstrumentedTest {
       AgentScreen(controller)
     }
 
-    composeRule.onNodeWithText(">").performClick()
+    composeRule.onNodeWithText("Agent").performClick()
+    composeRule.onNodeWithText("More").performClick()
     composeRule.onNodeWithText("Sessions").performClick()
     composeRule.onNodeWithTag("open-session-${target.id}").performScrollTo().performClick()
 
@@ -86,7 +87,7 @@ class AgentScreenInteractionInstrumentedTest {
       AgentScreen(controller)
     }
 
-    composeRule.onNodeWithText(">").performClick()
+    composeRule.onNodeWithText("Agent").performClick()
     composeRule.onNodeWithText("New").performClick()
 
     val draftId = controller.state.value.session?.id
@@ -122,9 +123,31 @@ class AgentScreenInteractionInstrumentedTest {
       AgentScreen(controller)
     }
 
-    composeRule.onNodeWithText(">").performClick()
+    composeRule.onNodeWithText("Agent").performClick()
     composeRule.onNodeWithText("Conversation").assertIsDisplayed()
     assertEquals(0, composeRule.onAllNodesWithText(title).fetchSemanticsNodes().size)
+  }
+
+  @Test
+  fun mainSurfaceExposesOnlyAgentEntryAndConversationOwnsSecondaryEntries() {
+    val context = composeRule.activity.applicationContext
+    SettingsStore(context).save(AppSettings(language = "en"))
+    val controller = AgentController(context)
+
+    composeRule.setContent {
+      AgentScreen(controller)
+    }
+
+    composeRule.onNodeWithText("Agent").assertIsDisplayed()
+    assertEquals(0, composeRule.onAllNodesWithText("Menu").fetchSemanticsNodes().size)
+
+    composeRule.onNodeWithText("Agent").performClick()
+    composeRule.onNodeWithText("More").performClick()
+    composeRule.onNodeWithText("Sessions").assertIsDisplayed()
+    composeRule.onNodeWithText("Select HTML").assertIsDisplayed()
+    composeRule.onNodeWithText("Files").assertIsDisplayed()
+    composeRule.onNodeWithText("AGENT.md").assertIsDisplayed()
+    composeRule.onNodeWithText("Settings").assertIsDisplayed()
   }
 
   @Test
@@ -137,7 +160,8 @@ class AgentScreenInteractionInstrumentedTest {
       AgentScreen(controller)
     }
 
-    composeRule.onNodeWithText("Menu").performClick()
+    composeRule.onNodeWithText("Agent").performClick()
+    composeRule.onNodeWithText("More").performClick()
     composeRule.onNodeWithText("Files").performClick()
     composeRule.onNodeWithText("index.html", substring = true).performClick()
 
@@ -158,7 +182,8 @@ class AgentScreenInteractionInstrumentedTest {
       AgentScreen(controller)
     }
 
-    composeRule.onNodeWithText("Menu").performClick()
+    composeRule.onNodeWithText("Agent").performClick()
+    composeRule.onNodeWithText("More").performClick()
     composeRule.onNodeWithText("AGENT.md").performClick()
     composeRule.onAllNodes(hasSetTextAction())[0].performTextClearance()
     composeRule.onAllNodes(hasSetTextAction())[0].performTextInput("discard me")
@@ -180,7 +205,8 @@ class AgentScreenInteractionInstrumentedTest {
       AgentScreen(controller)
     }
 
-    composeRule.onNodeWithText("Menu").performClick()
+    composeRule.onNodeWithText("Agent").performClick()
+    composeRule.onNodeWithText("More").performClick()
     composeRule.onNodeWithText("Settings").performClick()
     composeRule.onAllNodes(hasSetTextAction())[0].performTextClearance()
     composeRule.onAllNodes(hasSetTextAction())[0].performTextInput("discard-model")
@@ -191,13 +217,14 @@ class AgentScreenInteractionInstrumentedTest {
       assertEquals("en", controller.state.value.settings.language)
     }
 
-    composeRule.onNodeWithText("Menu").performClick()
+    composeRule.onNodeWithText("Agent").performClick()
+    composeRule.onNodeWithText("More").performClick()
     composeRule.onNodeWithText("Settings").performClick()
     composeRule.onNodeWithText("Language: English").performClick()
     composeRule.onNodeWithText("\u4e2d\u6587").performClick()
     composeRule.onNodeWithText("Save").performClick()
 
-    composeRule.onNodeWithText("\u83dc\u5355").assertIsDisplayed()
+    composeRule.onNodeWithText("Agent").assertIsDisplayed()
     composeRule.runOnIdle {
       assertEquals("zh", controller.state.value.settings.language)
     }
