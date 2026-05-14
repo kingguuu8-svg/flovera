@@ -21,8 +21,10 @@ data class SettingsLoadResult(
   val warning: String? = null,
 )
 
-class SettingsStore(context: Context) {
-  private val settingsFile = File(context.filesDir, "settings.json")
+class SettingsStore(
+  context: Context,
+  private val settingsFile: File = File(context.filesDir, "settings.json"),
+) {
   private val settingsCipher = SettingsCipher()
   private val json = Json {
     prettyPrint = true

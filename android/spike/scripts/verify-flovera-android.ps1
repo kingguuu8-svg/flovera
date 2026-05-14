@@ -146,6 +146,20 @@ function Assert-LaunchesMainActivity {
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
+function Stop-AppPackages {
+  param(
+    [string]$AdbPath,
+    [string]$Serial
+  )
+
+  & $AdbPath "-s" $Serial "shell" "am" "force-stop" "com.flovera.app"
+  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  & $AdbPath "-s" $Serial "shell" "am" "force-stop" "com.flovera.app.test"
+  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  & $AdbPath "-s" $Serial "shell" "am" "force-stop" "com.example.ailinuxvmspike"
+  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
+
 function Invoke-AdbInstrumentation {
   param(
     [string]$AdbPath,
@@ -185,6 +199,7 @@ function Invoke-AdbInstrumentation {
     Remove-Job -Job $Job -Force
     $Output = if (Test-Path $OutputFile) { Get-Content $OutputFile } else { @() }
     $Output | Select-Object -Last 80 | ForEach-Object { Write-Host $_ }
+    Stop-AppPackages -AdbPath $AdbPath -Serial $Serial
     throw "Instrumentation did not finish within ${TimeoutSeconds}s. Last output was printed above."
   }
   Receive-Job -Job $Job | Out-Null
@@ -192,13 +207,42 @@ function Invoke-AdbInstrumentation {
 
   $Output = if (Test-Path $OutputFile) { Get-Content $OutputFile } else { @() }
   $Output | ForEach-Object { Write-Host $_ }
+  $OutputText = $Output -join "`n"
 
   Remove-Item -LiteralPath $OutputFile -Force -ErrorAction SilentlyContinue
   $ExitCode = if (Test-Path $ExitFile) { [int](Get-Content $ExitFile | Select-Object -First 1) } else { 1 }
   Remove-Item -LiteralPath $ExitFile -Force -ErrorAction SilentlyContinue
 
   if ($ExitCode -ne 0) { exit $ExitCode }
-  return $Output -join "`n"
+  Assert-InstrumentationSucceeded -InstrumentationText $OutputText
+}
+
+function Get-InstrumentationClassFilters {
+  param([string]$ProjectRoot)
+
+  $TestRoot = Join-Path $ProjectRoot "app\src\androidTest\java\com\flovera\app"
+  $Tests = Get-ChildItem -Path $TestRoot -Filter "*Test.kt" |
+    Sort-Object Name |
+    ForEach-Object { "com.flovera.app.$($_.BaseName)" }
+  if (-not $Tests) {
+    throw "No instrumentation test classes were found under $TestRoot."
+  }
+  return $Tests
+}
+
+function Assert-InstrumentationSucceeded {
+  param([string]$InstrumentationText)
+
+  if ($InstrumentationText -match "FAILURES!!!" -or
+      $InstrumentationText -match "There were \d+ failures" -or
+      $InstrumentationText -match "INSTRUMENTATION_STATUS_CODE: -2" -or
+      $InstrumentationText -match "INSTRUMENTATION_RESULT: shortMsg=") {
+    exit 1
+  }
+  if ($InstrumentationText -notmatch "OK \(\d+ tests?\)") {
+    Write-Error "Instrumentation finished without an OK test summary."
+    exit 1
+  }
 }
 
 $Gradle = Join-Path $ProjectRoot "gradlew.bat"
@@ -254,22 +298,21 @@ try {
   Assert-LaunchesMainActivity -AdbPath $Adb -Serial $DeviceSerial -PackageName "com.flovera.app"
   Assert-LaunchesMainActivity -AdbPath $Adb -Serial $DeviceSerial -PackageName "com.example.ailinuxvmspike"
 
-  $InstrumentationText = Invoke-AdbInstrumentation `
-    -AdbPath $Adb `
-    -Serial $DeviceSerial `
-    -Runner "com.flovera.app.test/androidx.test.runner.AndroidJUnitRunner" `
-    -ClassFilter $InstrumentationClass `
-    -TimeoutSeconds $InstrumentationTimeoutSeconds
-  if ($InstrumentationText -match "FAILURES!!!" -or
-      $InstrumentationText -match "There were \d+ failures" -or
-      $InstrumentationText -match "INSTRUMENTATION_STATUS_CODE: -2" -or
-      $InstrumentationText -match "INSTRUMENTATION_RESULT: shortMsg=") {
-    exit 1
+  $InstrumentationFilters = if ($InstrumentationClass) {
+    @($InstrumentationClass)
+  } else {
+    Get-InstrumentationClassFilters -ProjectRoot $ProjectRoot
   }
-  if ($InstrumentationText -notmatch "OK \(\d+ tests\)") {
-    Write-Error "Instrumentation finished without an OK test summary."
-    exit 1
+  foreach ($ClassFilter in $InstrumentationFilters) {
+    Stop-AppPackages -AdbPath $Adb -Serial $DeviceSerial
+    Invoke-AdbInstrumentation `
+      -AdbPath $Adb `
+      -Serial $DeviceSerial `
+      -Runner "com.flovera.app.test/androidx.test.runner.AndroidJUnitRunner" `
+      -ClassFilter $ClassFilter `
+      -TimeoutSeconds $InstrumentationTimeoutSeconds
   }
+  Write-Host "Instrumentation shards completed: $($InstrumentationFilters.Count)"
 } finally {
   Pop-Location
 }

@@ -44,10 +44,14 @@ data class AgentScreenState(
   val assistantDraft: SessionMessage? = null,
 )
 
-class AgentController(context: Context) {
+class AgentController(
+  context: Context,
+  settingsStore: SettingsStore = SettingsStore(context.applicationContext),
+  sessionStore: AgentSessionStore = AgentSessionStore(context.applicationContext),
+) {
   private val appContext = context.applicationContext
-  private val settingsController = SettingsController(SettingsStore(appContext))
-  private val sessionController = SessionController(AgentSessionStore(appContext))
+  private val settingsController = SettingsController(settingsStore)
+  private val sessionController = SessionController(sessionStore)
   private val agentRunController = AgentRunController()
   private var workspaceController: WorkspaceController
 

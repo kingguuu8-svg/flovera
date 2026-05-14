@@ -36,8 +36,10 @@ data class ToolEvent(
   val timestampMillis: Long = System.currentTimeMillis(),
 )
 
-class AgentSessionStore(context: Context) {
-  private val root = File(context.filesDir, "sessions")
+class AgentSessionStore(
+  context: Context,
+  private val root: File = File(context.filesDir, "sessions"),
+) {
   private val json = Json {
     prettyPrint = true
     ignoreUnknownKeys = true
