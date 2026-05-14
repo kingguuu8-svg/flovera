@@ -1,6 +1,7 @@
 # Generated VM/rootfs artifacts
 artifacts/*
 !artifacts/README.md
+docs/archive/legacy-qemu-vps/runtime/artifacts/screenshots/
 *.img
 *.qcow2
 *.raw

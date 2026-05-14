@@ -4,6 +4,15 @@ This directory keeps the older QEMU, Linux guest, VPS, terminal, verification, a
 
 The files are preserved for historical comparison, but they are no longer the active product direction on this branch.
 
+Legacy runtime files that used to live at the repository root are archived under
+`runtime/`:
+
+- `runtime/rootfs/`
+- `runtime/vm/`
+- `runtime/bridge/`
+- `runtime/scripts/`
+- `runtime/artifacts/`
+
 Current active direction:
 
 - Android-local Koog agent runtime
@@ -16,4 +25,3 @@ Current active direction:
 Use the root docs entrypoint for current planning:
 
 - [Project docs](../../README.md)
-

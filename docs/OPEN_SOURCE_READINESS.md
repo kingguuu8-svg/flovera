@@ -16,7 +16,7 @@ source project.
 | Contribution docs | Contribution and issue-reporting rules are documented | Done: `CONTRIBUTING.md` |
 | Security docs | Vulnerability/security reporting and secret-handling policy are documented | Done: `SECURITY.md` |
 | Third-party notices | Major dependencies and licenses are documented | Done: `THIRD_PARTY_NOTICES.md`; run final dependency license audit before binary release |
-| Legacy material | Old QEMU/VPS route remains archived and clearly separated from the current product | Not done: legacy runtime directories still exist at repository root |
+| Legacy material | Old QEMU/VPS route remains archived and clearly separated from the current product | Done: legacy docs and runtime files live under `docs/archive/legacy-qemu-vps/` |
 | Release hygiene | Generated APKs, build outputs, local properties, and signing files are ignored | Partially done; repeat `git status --ignored` audit |
 
 ## Pre-Publish Audit Commands
