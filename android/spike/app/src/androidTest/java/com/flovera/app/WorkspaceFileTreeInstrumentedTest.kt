@@ -1,0 +1,103 @@
+package com.flovera.app
+
+import android.net.Uri
+import androidx.core.content.FileProvider
+import androidx.test.platform.app.InstrumentationRegistry
+import com.flovera.app.workspace.WorkspaceController
+import com.flovera.app.workspace.WorkspaceManager
+import java.io.File
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class WorkspaceFileTreeInstrumentedTest {
+  @Test
+  fun workspaceTreeIncludesNestedFilesAndSupportsRename() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "tree-${System.currentTimeMillis()}").also { it.ensureSeedFiles() }
+    workspace.writeFile("nested/page.html", "<!doctype html><title>Nested</title>")
+    workspace.writeFile("nested/data.json", "{}")
+
+    val nested = workspace.fileTree().children.firstOrNull { it.path == "nested" }
+    assertNotNull(nested)
+    assertTrue(nested!!.isDirectory)
+    assertTrue(nested.children.any { it.path == "nested/page.html" })
+    assertEquals("text/html", workspace.mimeType("nested/page.html"))
+
+    val uri = FileProvider.getUriForFile(
+      context,
+      "${context.packageName}.workspacefiles",
+      workspace.exportableFile("nested/page.html")!!,
+    )
+    assertEquals("content", uri.scheme)
+
+    val result = workspace.rename("nested/page.html", "home.html")
+    assertTrue(result.startsWith("Renamed"))
+    assertTrue(workspace.listHtmlFiles().contains("nested/home.html"))
+  }
+
+  @Test
+  fun workspaceControllerSnapshotNormalizesHtmlSelection() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val controller = WorkspaceController(context, "workspace-controller-${System.currentTimeMillis()}")
+      .also { it.ensureSeedFiles() }
+
+    val initial = controller.snapshot("index.html")
+    assertEquals("index.html", initial.selectedHtmlPath)
+    assertNotNull(initial.selectedHtmlUrl)
+    assertTrue(initial.htmlFiles.contains("index.html"))
+
+    val missing = controller.snapshot("missing.html")
+    assertEquals("", missing.selectedHtmlPath)
+    assertEquals(null, missing.selectedHtmlUrl)
+  }
+
+  @Test
+  fun workspaceWritesTextEditsAndBytesAtomically() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "atomic-workspace-${System.currentTimeMillis()}")
+    val textFile = File(workspace.root, "notes/today.md")
+    val bytesFile = File(workspace.root, "assets/icon.bin")
+
+    workspace.writeFile("notes/today.md", "alpha")
+    workspace.editFile("notes/today.md", "alpha", "beta")
+    workspace.writeBytes("assets/icon.bin", byteArrayOf(1, 2, 3))
+
+    assertEquals("beta", workspace.readFile("notes/today.md"))
+    assertEquals(listOf(1.toByte(), 2.toByte(), 3.toByte()), bytesFile.readBytes().toList())
+    listOf(textFile, bytesFile).forEach { file ->
+      assertTrue(file.isFile)
+      assertFalse(File(file.absolutePath + ".new").exists())
+      assertFalse(File(file.absolutePath + ".bak").exists())
+    }
+  }
+
+  @Test
+  fun workspaceReadPreviewTruncatesLargeText() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "preview-workspace-${System.currentTimeMillis()}")
+    workspace.writeFile("large.txt", "a".repeat(128))
+
+    val preview = workspace.readFilePreview("large.txt", maxChars = 16)
+
+    assertTrue(preview.startsWith("a".repeat(16)))
+    assertTrue(preview.contains("[truncated: showing first 16 chars"))
+  }
+
+  @Test
+  fun workspaceImportsSharedFilesToRootWithUniqueNames() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "shared-import-${System.currentTimeMillis()}")
+    val shared = File(context.cacheDir, "shared-note.txt").apply { writeText("from another app") }
+
+    val first = workspace.importUriToRoot(Uri.fromFile(shared))
+    val second = workspace.importUriToRoot(Uri.fromFile(shared))
+
+    assertEquals("Imported shared-note.txt", first)
+    assertEquals("Imported shared-note (1).txt", second)
+    assertEquals("from another app", workspace.readFile("shared-note.txt"))
+    assertEquals("from another app", workspace.readFile("shared-note (1).txt"))
+  }
+}

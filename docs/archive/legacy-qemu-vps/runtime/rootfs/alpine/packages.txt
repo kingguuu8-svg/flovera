@@ -1,0 +1,8 @@
+# Required baseline for the AI Linux workspace.
+ca-certificates
+curl
+python3
+git
+nodejs
+openssh-client
+dropbear
