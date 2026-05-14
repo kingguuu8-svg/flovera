@@ -35,7 +35,7 @@ class AgentScreenInteractionInstrumentedTest {
       AgentScreen(controller)
     }
 
-    composeRule.onNodeWithText("\u53ef\u9009\u62e9 HTML \u8fdb\u884c\u6253\u5f00").assertIsDisplayed()
+    composeRule.onNodeWithText("\u53ef\u9009\u62e9 HTML / Markdown / Text \u8fdb\u884c\u6253\u5f00").assertIsDisplayed()
   }
 
   @Test
@@ -188,6 +188,31 @@ class AgentScreenInteractionInstrumentedTest {
     composeRule.runOnIdle {
       assertEquals("index.html", controller.state.value.selectedHtmlPath)
       assertTrue(controller.state.value.selectedHtmlUrl?.endsWith("index.html") == true)
+    }
+  }
+
+  @Test
+  fun tappingMarkdownFileOpensNativePreviewOverPreviousHtml() {
+    val context = composeRule.activity.applicationContext
+    SettingsStore(context).save(AppSettings(language = "en", selectedHtmlPath = "index.html"))
+    val controller = AgentController(context)
+
+    composeRule.setContent {
+      AgentScreen(controller)
+    }
+
+    composeRule.onNodeWithText("Agent").performClick()
+    composeRule.onNodeWithContentDescription("More").performClick()
+    composeRule.onNodeWithText("Files").performClick()
+    composeRule.onNodeWithText("README.md", substring = true).performClick()
+
+    composeRule.onNodeWithText("README.md").assertIsDisplayed()
+    composeRule.onNodeWithText("Android Agent Workspace").assertIsDisplayed()
+    composeRule.runOnIdle {
+      assertEquals("index.html", controller.state.value.selectedHtmlPath)
+      assertTrue(controller.state.value.selectedHtmlUrl?.endsWith("index.html") == true)
+      assertEquals("README.md", controller.state.value.selectedPreviewPath)
+      assertTrue(controller.state.value.selectedPreviewContent.contains("Android Agent Workspace"))
     }
   }
 

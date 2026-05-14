@@ -61,6 +61,8 @@ class WorkspaceController(context: Context, workspaceId: String) {
 
   fun displayUrl(path: String): String? = workspace.displayUrl(path)
 
+  fun previewTextFile(path: String): String = workspace.readFilePreview(path, maxChars = 128 * 1024)
+
   fun createSnapshot(name: String, selectedHtmlPath: String): WorkspaceSnapshotRecord {
     return workspace.createManualSnapshot(name, selectedHtmlPath)
   }

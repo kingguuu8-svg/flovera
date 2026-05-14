@@ -36,6 +36,9 @@ data class AgentScreenState(
   val htmlFiles: List<String> = emptyList(),
   val selectedHtmlPath: String = "",
   val selectedHtmlUrl: String? = null,
+  val selectedPreviewPath: String = "",
+  val selectedPreviewContent: String = "",
+  val selectedPreviewMimeType: String = "",
   val workspaceRootUrl: String = "",
   val workspaceSnapshots: List<WorkspaceSnapshotRecord> = emptyList(),
   val settingsProposals: List<WorkspaceSettingsProposal> = emptyList(),
@@ -88,6 +91,8 @@ class AgentController(
       htmlFiles = workspaceSnapshot.htmlFiles,
       selectedHtmlPath = workspaceSnapshot.selectedHtmlPath,
       selectedHtmlUrl = workspaceSnapshot.selectedHtmlUrl,
+      selectedPreviewPath = workspaceSnapshot.selectedHtmlPath,
+      selectedPreviewMimeType = if (workspaceSnapshot.selectedHtmlPath.isBlank()) "" else "text/html",
       workspaceRootUrl = workspaceSnapshot.workspaceRootUrl,
       workspaceSnapshots = workspaceSnapshot.snapshots,
       settingsProposals = workspaceSnapshot.settingsProposals,
@@ -173,6 +178,9 @@ class AgentController(
         htmlFiles = workspaceSnapshot.htmlFiles,
         selectedHtmlPath = workspaceSnapshot.selectedHtmlPath,
         selectedHtmlUrl = workspaceSnapshot.selectedHtmlUrl,
+        selectedPreviewPath = workspaceSnapshot.selectedHtmlPath,
+        selectedPreviewContent = "",
+        selectedPreviewMimeType = if (workspaceSnapshot.selectedHtmlPath.isBlank()) "" else "text/html",
         workspaceRootUrl = workspaceSnapshot.workspaceRootUrl,
         workspaceSnapshots = workspaceSnapshot.snapshots,
         settingsProposals = workspaceSnapshot.settingsProposals,
@@ -190,7 +198,23 @@ class AgentController(
   fun selectHtmlFile(path: String) {
     val current = _state.value
     val settings = settingsController.setSelectedHtml(current.settings, path)
-    refreshWorkspaceState(settings = settings, status = "Displaying $path")
+    refreshWorkspaceState(settings = settings, status = "Displaying $path", resetPreviewToSelectedHtml = true)
+  }
+
+  fun selectWorkspacePreview(path: String) {
+    if (path.endsWith(".html", ignoreCase = true) || path.endsWith(".htm", ignoreCase = true)) {
+      selectHtmlFile(path)
+      return
+    }
+    val content = workspaceController.previewTextFile(path)
+    _state.update {
+      it.copy(
+        selectedPreviewPath = path,
+        selectedPreviewContent = content,
+        selectedPreviewMimeType = workspaceController.mimeType(path),
+        status = "Previewing $path",
+      )
+    }
   }
 
   fun setHtmlPinned(path: String, pinned: Boolean) {
@@ -436,6 +460,7 @@ class AgentController(
     input: String = _state.value.input,
     isRunning: Boolean = _state.value.isRunning,
     status: String = _state.value.status,
+    resetPreviewToSelectedHtml: Boolean = false,
   ) {
     workspaceController.syncFloveraSettings(settings)
     var workspaceSnapshot = workspaceController.snapshot(settings.selectedHtmlPath)
@@ -445,6 +470,22 @@ class AgentController(
       workspaceSnapshot = workspaceController.snapshot(normalizedSettings.selectedHtmlPath)
     }
     _state.update {
+      val previewPath = when {
+        resetPreviewToSelectedHtml -> workspaceSnapshot.selectedHtmlPath
+        it.selectedPreviewPath.isBlank() -> workspaceSnapshot.selectedHtmlPath
+        else -> it.selectedPreviewPath
+      }
+      val previewContent = when {
+        resetPreviewToSelectedHtml -> ""
+        it.selectedPreviewPath.isBlank() -> ""
+        else -> it.selectedPreviewContent
+      }
+      val previewMimeType = when {
+        resetPreviewToSelectedHtml && workspaceSnapshot.selectedHtmlPath.isNotBlank() -> "text/html"
+        resetPreviewToSelectedHtml -> ""
+        it.selectedPreviewMimeType.isBlank() && workspaceSnapshot.selectedHtmlPath.isNotBlank() -> "text/html"
+        else -> it.selectedPreviewMimeType
+      }
       it.copy(
         settings = normalizedSettings,
         session = session,
@@ -456,6 +497,9 @@ class AgentController(
         htmlFiles = workspaceSnapshot.htmlFiles,
         selectedHtmlPath = workspaceSnapshot.selectedHtmlPath,
         selectedHtmlUrl = workspaceSnapshot.selectedHtmlUrl,
+        selectedPreviewPath = previewPath,
+        selectedPreviewContent = previewContent,
+        selectedPreviewMimeType = previewMimeType,
         workspaceRootUrl = workspaceSnapshot.workspaceRootUrl,
         workspaceSnapshots = workspaceSnapshot.snapshots,
         settingsProposals = workspaceSnapshot.settingsProposals,

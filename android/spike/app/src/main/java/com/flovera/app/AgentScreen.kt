@@ -108,7 +108,7 @@ private enum class AgentPanel {
   Settings,
 }
 
-private const val EmptyWebPrompt = "\u53ef\u9009\u62e9 HTML \u8fdb\u884c\u6253\u5f00"
+private const val EmptyWebPrompt = "\u53ef\u9009\u62e9 HTML / Markdown / Text \u8fdb\u884c\u6253\u5f00"
 
 @Composable
 fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
@@ -124,7 +124,7 @@ fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
   }
 
   Box(modifier = modifier.fillMaxSize()) {
-    WorkspaceWebView(url = state.selectedHtmlUrl, workspaceRootUrl = state.workspaceRootUrl)
+    WorkspacePreview(state = state)
 
     Row(
       modifier = Modifier
@@ -209,6 +209,62 @@ fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
     )
 
     null -> Unit
+  }
+}
+
+@Composable
+private fun WorkspacePreview(state: AgentScreenState) {
+  val previewPath = state.selectedPreviewPath
+  val previewContent = state.selectedPreviewContent
+  val mimeType = state.selectedPreviewMimeType
+  val htmlUrl = state.selectedHtmlUrl
+  val isTextPreview = previewPath.isNotBlank() &&
+    !previewPath.endsWith(".html", ignoreCase = true) &&
+    !previewPath.endsWith(".htm", ignoreCase = true)
+
+  if (isTextPreview) {
+    WorkspaceTextPreview(
+      path = previewPath,
+      content = previewContent,
+      mimeType = mimeType,
+    )
+    return
+  }
+
+  WorkspaceWebView(url = htmlUrl, workspaceRootUrl = state.workspaceRootUrl)
+}
+
+@Composable
+private fun WorkspaceTextPreview(path: String, content: String, mimeType: String) {
+  Surface(
+    modifier = Modifier.fillMaxSize(),
+    color = MaterialTheme.colorScheme.background,
+  ) {
+    Column(
+      modifier = Modifier.fillMaxSize().padding(18.dp).verticalScroll(rememberScrollState()),
+      verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+      Text(path, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleMedium)
+      Text(mimeType.ifBlank { "text/plain" }, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+      if (path.endsWith(".md", ignoreCase = true) || path.endsWith(".markdown", ignoreCase = true)) {
+        MarkdownMessageText(content = content, color = MaterialTheme.colorScheme.onSurface)
+      } else {
+        Surface(
+          modifier = Modifier.fillMaxWidth(),
+          shape = FloveraSmallShape,
+          color = MaterialTheme.colorScheme.surface,
+          border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        ) {
+          Text(
+            text = content,
+            modifier = Modifier.padding(12.dp),
+            color = MaterialTheme.colorScheme.onSurface,
+            fontFamily = FontFamily.Monospace,
+            style = MaterialTheme.typography.bodySmall,
+          )
+        }
+      }
+    }
   }
 }
 
@@ -1275,12 +1331,8 @@ private fun FilesDialog(
                 }
               },
               onDefaultOpen = { path ->
-                if (path.endsWith(".html", ignoreCase = true)) {
-                  controller.selectHtmlFile(path)
-                  onDismiss()
-                } else {
-                  openWorkspaceFile(context, controller, path)
-                }
+                controller.selectWorkspacePreview(path)
+                onDismiss()
               },
               onOpenWith = { path -> openWorkspaceFile(context, controller, path) },
               onShare = { path -> shareWorkspaceFile(context, controller, path) },
