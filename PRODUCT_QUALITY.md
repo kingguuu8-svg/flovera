@@ -205,6 +205,78 @@ Acceptance criteria:
 - Provider settings are validated and normalized.
 - Network tools default to disabled.
 
+## Product Backlog
+
+These items are not committed implementation requirements yet. They are queued
+so future work can be planned without losing the product direction.
+
+### Context Records And Compression
+
+- Track context usage for each agent run and session.
+- Show how much context has been used, what was compressed, and what summary is
+  currently active.
+- Persist compression records so the user can understand why an old detail was
+  retained, summarized, or dropped.
+- Treat compression as part of session history, not as invisible runtime state.
+
+### Agent-Controlled App Settings
+
+- Add a workspace-scoped `.flovera/` directory for Flovera metadata and
+  agent-visible app configuration.
+- Expose selected settings to the agent through `.flovera`, including provider,
+  API configuration, active model, tool permissions, theme mode, theme color,
+  custom request body templates, and app capability flags.
+- Add a user setting that decides whether the agent may modify app settings.
+- Support a high-trust mode where the user can hand broad app-control authority
+  to the agent, with the change logged and reversible.
+- Keep secrets and source-separated config rules intact: no API key or private
+  local path should be committed into source.
+
+### Custom URL Routing And Request Model
+
+- Add a configurable URL routing model for workspace HTML and app-controlled
+  internal routes.
+- Let advanced settings define request body templates and per-route behavior
+  when the app calls provider APIs or app tools.
+- Record route and request-template changes as auditable settings changes.
+
+### Web Search And Tool Expansion
+
+- Add Brave Search API support as the first non-provider web search path.
+- Expose web search as an agent tool behind an explicit permission setting.
+- Let the agent propose additional restricted tools and MCP integrations.
+- Add a user approval flow before proposed tools or MCP entries become active.
+- Keep tool availability visible to the agent only when the corresponding user
+  permission is enabled.
+
+### Rendering Coverage
+
+- Extend workspace rendering beyond HTML and Markdown.
+- Candidate formats: plain text, images, PDF, JSON, CSV, office documents, and
+  code previews.
+- Prefer lightweight native or WebView-based renderers before adding heavy
+  dependencies.
+- Each renderer needs clear fallback behavior when Android cannot render the
+  format locally.
+
+### Workspace Snapshots
+
+- Add workspace snapshot save and restore.
+- Snapshot scope should cover workspace files, `.flovera` metadata, selected
+  HTML state, and enough session metadata to make restore understandable.
+- Support user-named snapshots for archival use.
+- Restore should be explicit and confirm destructive overwrites.
+
+### Main Surface HTML Quick Picker
+
+- Add a quick HTML selector beside the main Agent entry.
+- The button opens a popup list of HTML files in the workspace.
+- The list supports pinning so frequently used HTML surfaces stay at the top.
+- Sorting should favor pinned files first, then recently opened or recently
+  changed files.
+- Selecting an item opens it directly in the main WebView without exposing URL
+  chrome.
+
 ## Review Checklist
 
 Use this checklist before calling a feature product-ready:
