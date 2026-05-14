@@ -540,7 +540,11 @@ private fun ConversationDialog(
             Text(t(language, "Network", "\u8054\u7f51"), style = MaterialTheme.typography.bodyMedium)
             Text(
               text = if (state.settings.networkEnabled) {
-                t(language, "fetch_url and download_file available", "fetch_url \u548c download_file \u53ef\u7528")
+                if (state.settings.webSearchEnabled && state.settings.braveSearchApiKey.isNotBlank()) {
+                  t(language, "fetch_url, download_file, and web_search available", "fetch_url\u3001download_file \u548c web_search \u53ef\u7528")
+                } else {
+                  t(language, "fetch_url and download_file available", "fetch_url \u548c download_file \u53ef\u7528")
+                }
               } else {
                 t(language, "network tools disabled", "\u8054\u7f51\u5de5\u5177\u5df2\u5173\u95ed")
               },
@@ -1719,6 +1723,8 @@ private fun SettingsDialog(
   var themeModeDraft by remember(state.settings.themeMode) { mutableStateOf(state.settings.themeMode) }
   var themeColorDraft by remember(state.settings.themeColor) { mutableStateOf(state.settings.themeColor) }
   var authorityModeDraft by remember(state.settings.agentAuthorityMode) { mutableStateOf(state.settings.agentAuthorityMode) }
+  var webSearchEnabledDraft by remember(state.settings.webSearchEnabled) { mutableStateOf(state.settings.webSearchEnabled) }
+  var braveSearchApiKeyDraft by remember(state.settings.braveSearchApiKey) { mutableStateOf(state.settings.braveSearchApiKey) }
   val selectedProvider = ModelProviderCatalog.findProvider(providerDraft) ?: ModelProviderCatalog.defaultProvider
   var providerMenuOpen by remember { mutableStateOf(false) }
   var modelMenuOpen by remember { mutableStateOf(false) }
@@ -1782,6 +1788,37 @@ private fun SettingsDialog(
           value = apiKeyDraft,
           onValueChange = { apiKeyDraft = it },
           label = { Text(selectedProvider.apiKeyLabel) },
+          singleLine = true,
+          modifier = Modifier.fillMaxWidth(),
+        )
+        Text(t(language, "Web search", "Web search"), style = MaterialTheme.typography.titleSmall)
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Column(modifier = Modifier.weight(1f)) {
+            Text(t(language, "Brave Search", "Brave Search"), style = MaterialTheme.typography.bodyMedium)
+            Text(
+              t(
+                language,
+                "Requires Network enabled in each conversation.",
+                "\u9700\u8981\u5728\u6bcf\u6b21\u5bf9\u8bdd\u4e2d\u6253\u5f00\u8054\u7f51\u5f00\u5173\u3002",
+              ),
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+              style = MaterialTheme.typography.bodySmall,
+            )
+          }
+          Switch(
+            checked = webSearchEnabledDraft,
+            onCheckedChange = { webSearchEnabledDraft = it },
+            modifier = Modifier.semantics { contentDescription = "Web search switch" },
+          )
+        }
+        OutlinedTextField(
+          value = braveSearchApiKeyDraft,
+          onValueChange = { braveSearchApiKeyDraft = it },
+          label = { Text(t(language, "Brave Search API key", "Brave Search API key")) },
           singleLine = true,
           modifier = Modifier.fillMaxWidth(),
         )
@@ -1905,6 +1942,8 @@ private fun SettingsDialog(
             themeMode = themeModeDraft,
             themeColor = themeColorDraft,
             authorityMode = authorityModeDraft,
+            webSearchEnabled = webSearchEnabledDraft,
+            braveSearchApiKey = braveSearchApiKeyDraft,
           )
           onDismiss()
         },
@@ -2007,6 +2046,7 @@ private fun settingsProposalSummary(proposal: WorkspaceSettingsProposal): String
     changes.selectedHtmlPath?.let { "selectedHtml=$it" },
     changes.maxAgentIterations?.let { "maxIterations=$it" },
     changes.networkEnabled?.let { "network=$it" },
+    changes.webSearchEnabled?.let { "webSearch=$it" },
     changes.language?.let { "language=$it" },
     changes.themeMode?.let { "themeMode=$it" },
     changes.themeColor?.let { "themeColor=$it" },

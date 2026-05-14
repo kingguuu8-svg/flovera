@@ -15,6 +15,8 @@ data class AppSettings(
   val pinnedHtmlPaths: List<String> = emptyList(),
   val maxAgentIterations: Int = 20,
   val networkEnabled: Boolean = false,
+  val webSearchEnabled: Boolean = false,
+  val braveSearchApiKey: String = "",
   val language: String = "en",
   val themeMode: String = "dark",
   val themeColor: String = "#76C4D8",

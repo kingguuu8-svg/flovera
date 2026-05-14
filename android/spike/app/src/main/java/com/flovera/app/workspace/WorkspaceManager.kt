@@ -406,11 +406,13 @@ data class FloveraSettingsView(
   val pinnedHtmlPaths: List<String> = emptyList(),
   val maxAgentIterations: Int = 0,
   val networkEnabled: Boolean = false,
+  val webSearchEnabled: Boolean = false,
   val language: String = "",
   val themeMode: String = "",
   val themeColor: String = "",
   val authorityMode: String = "safe",
   val apiKeyRef: String = "",
+  val braveSearchApiKeyRef: String = "",
 )
 
 @Serializable
@@ -433,6 +435,7 @@ data class FloveraCapabilities(
     fun fromSettings(settingsView: FloveraSettingsView): FloveraCapabilities {
       return FloveraCapabilities(
         networkTools = settingsView.networkEnabled,
+        webSearch = settingsView.webSearchEnabled,
         authorityMode = settingsView.authorityMode,
       )
     }

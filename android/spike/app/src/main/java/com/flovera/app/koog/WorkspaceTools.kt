@@ -13,6 +13,8 @@ fun workspaceToolRegistry(
   workspace: WorkspaceManager,
   recorder: ToolEventRecorder,
   networkEnabled: Boolean = false,
+  webSearchEnabled: Boolean = false,
+  braveSearchApiKey: String = "",
 ): ToolRegistry = ToolRegistry {
   tool(ListFilesTool(workspace, recorder))
   tool(ReadFileTool(workspace, recorder))
@@ -21,6 +23,9 @@ fun workspaceToolRegistry(
   if (networkEnabled) {
     tool(FetchUrlTool(recorder))
     tool(DownloadFileTool(workspace, recorder))
+    if (webSearchEnabled && braveSearchApiKey.isNotBlank()) {
+      tool(WebSearchTool(braveSearchApiKey, recorder))
+    }
   }
 }
 

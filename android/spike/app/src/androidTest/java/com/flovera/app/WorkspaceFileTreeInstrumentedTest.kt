@@ -128,7 +128,7 @@ class WorkspaceFileTreeInstrumentedTest {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val workspace = WorkspaceManager(context, "metadata-${System.currentTimeMillis()}").also {
       it.ensureSeedFiles()
-      it.ensureFloveraMetadata(FloveraSettingsView(networkEnabled = true, authorityMode = "assisted"))
+      it.ensureFloveraMetadata(FloveraSettingsView(networkEnabled = true, webSearchEnabled = true, authorityMode = "assisted"))
     }
 
     workspace.writeFile(
@@ -151,6 +151,7 @@ class WorkspaceFileTreeInstrumentedTest {
     val proposals = workspace.listSettingsProposals()
 
     assertTrue(capabilities.contains("\"networkTools\": true"))
+    assertTrue(capabilities.contains("\"webSearch\": true"))
     assertTrue(capabilities.contains("\"directSettingsWrite\": false"))
     assertEquals(1, proposals.size)
     assertEquals("Use softer theme", proposals.first().title)

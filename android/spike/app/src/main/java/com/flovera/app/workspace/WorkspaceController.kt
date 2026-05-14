@@ -40,11 +40,13 @@ class WorkspaceController(context: Context, workspaceId: String) {
         pinnedHtmlPaths = settings.pinnedHtmlPaths,
         maxAgentIterations = settings.maxAgentIterations,
         networkEnabled = settings.networkEnabled,
+        webSearchEnabled = settings.webSearchEnabled,
         language = settings.language,
         themeMode = settings.themeMode,
         themeColor = settings.themeColor,
         authorityMode = settings.agentAuthorityMode,
         apiKeyRef = if (settings.apiKeyFor(settings.provider).isBlank()) "" else "${settings.provider}.default",
+        braveSearchApiKeyRef = if (settings.braveSearchApiKey.isBlank()) "" else "brave.default",
       ),
     )
   }

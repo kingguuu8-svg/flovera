@@ -38,6 +38,7 @@ class ProviderConfigInstrumentedTest {
   @Test
   fun networkToolsDefaultToDisabled() {
     assertFalse(AppSettings().networkEnabled)
+    assertFalse(AppSettings().webSearchEnabled)
     assertTrue(AppSettings(networkEnabled = true).networkEnabled)
   }
 
@@ -71,6 +72,7 @@ class ProviderConfigInstrumentedTest {
           themeMode = "light",
           themeColor = "#c989b8",
           networkEnabled = true,
+          webSearchEnabled = true,
           language = "zh",
           maxAgentIterations = 120,
           agentAuthorityMode = "assisted",
@@ -80,6 +82,7 @@ class ProviderConfigInstrumentedTest {
       assertEquals("light", updated.themeMode)
       assertEquals("#C989B8", updated.themeColor)
       assertTrue(updated.networkEnabled)
+      assertTrue(updated.webSearchEnabled)
       assertEquals("zh", updated.language)
       assertEquals(80, updated.maxAgentIterations)
       assertEquals("assisted", updated.agentAuthorityMode)
@@ -102,6 +105,24 @@ class ProviderConfigInstrumentedTest {
 
       assertEquals(listOf("nested/page.html", "index.html"), second.pinnedHtmlPaths)
       assertEquals(listOf("nested/page.html"), unpinned.pinnedHtmlPaths)
+    } finally {
+      store.save(original)
+    }
+  }
+
+  @Test
+  fun settingsControllerPersistsWebSearchSettings() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val store = SettingsStore(context)
+    val original = store.load()
+    try {
+      val controller = SettingsController(store)
+
+      val updated = controller.setWebSearch(AppSettings(), enabled = true, braveApiKey = " brave-key ")
+
+      assertTrue(updated.webSearchEnabled)
+      assertEquals("brave-key", updated.braveSearchApiKey)
+      assertEquals("brave-key", store.load().braveSearchApiKey)
     } finally {
       store.save(original)
     }

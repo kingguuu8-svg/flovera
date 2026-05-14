@@ -57,6 +57,15 @@ class SettingsController(private val store: SettingsStore) {
     return updated
   }
 
+  fun setWebSearch(settings: AppSettings, enabled: Boolean, braveApiKey: String): AppSettings {
+    val updated = settings.copy(
+      webSearchEnabled = enabled,
+      braveSearchApiKey = braveApiKey.trim(),
+    )
+    store.save(updated)
+    return updated
+  }
+
   fun setLanguage(settings: AppSettings, language: String): AppSettings {
     val updated = settings.copy(language = normalizeLanguageId(language))
     store.save(updated)
@@ -91,6 +100,7 @@ class SettingsController(private val store: SettingsStore) {
       selectedHtmlPath = changes.selectedHtmlPath?.trim() ?: settings.selectedHtmlPath,
       maxAgentIterations = maxIterations,
       networkEnabled = changes.networkEnabled ?: settings.networkEnabled,
+      webSearchEnabled = changes.webSearchEnabled ?: settings.webSearchEnabled,
       language = changes.language?.let { normalizeLanguageId(it) } ?: settings.language,
       themeMode = changes.themeMode?.let { normalizeThemeMode(it) } ?: settings.themeMode,
       themeColor = changes.themeColor?.let { normalizeThemeColor(it) } ?: settings.themeColor,
@@ -188,6 +198,7 @@ data class SettingsProposalChanges(
   val selectedHtmlPath: String? = null,
   val maxAgentIterations: Int? = null,
   val networkEnabled: Boolean? = null,
+  val webSearchEnabled: Boolean? = null,
   val language: String? = null,
   val themeMode: String? = null,
   val themeColor: String? = null,

@@ -28,12 +28,23 @@ class KoogAgentRuntime : AgentRuntime {
     val provider = ModelProviderCatalog.requireProvider(settings.provider)
     val apiKey = settings.apiKeyFor(provider.id)
     require(apiKey.isNotBlank()) { "${provider.label} API key is not configured." }
+    val webSearchAvailable = settings.networkEnabled && settings.webSearchEnabled && settings.braveSearchApiKey.isNotBlank()
 
     val agent = AIAgent(
       promptExecutor = MultiLLMPromptExecutor(provider.createClient(apiKey)),
       llmModel = provider.createModel(settings.model),
-      toolRegistry = workspaceToolRegistry(workspace, recorder, networkEnabled = settings.networkEnabled),
-      systemPrompt = buildSystemPrompt(workspace.readAgentRules(), settings.networkEnabled),
+      toolRegistry = workspaceToolRegistry(
+        workspace = workspace,
+        recorder = recorder,
+        networkEnabled = settings.networkEnabled,
+        webSearchEnabled = webSearchAvailable,
+        braveSearchApiKey = settings.braveSearchApiKey,
+      ),
+      systemPrompt = buildSystemPrompt(
+        agentRules = workspace.readAgentRules(),
+        networkEnabled = settings.networkEnabled,
+        webSearchAvailable = webSearchAvailable,
+      ),
       maxIterations = settings.maxAgentIterations,
     )
 
@@ -42,7 +53,7 @@ class KoogAgentRuntime : AgentRuntime {
     }
   }
 
-  private fun buildSystemPrompt(agentRules: String, networkEnabled: Boolean): String {
+  private fun buildSystemPrompt(agentRules: String, networkEnabled: Boolean, webSearchAvailable: Boolean): String {
     return """
       You are an Android-local workspace agent.
       You can talk with the user and use tools to inspect or modify the current workspace.
@@ -60,6 +71,7 @@ class KoogAgentRuntime : AgentRuntime {
       - Do not edit app behavior directly. If you need an app setting changed, write a JSON proposal under .flovera/proposals/.
       - Proposal schema: {"type":"settings","title":"Short title","reason":"Why this helps","changes":{"themeColor":"#76C4D8","networkEnabled":true,"selectedHtmlPath":"index.html","maxAgentIterations":30}}
       Network tools are ${if (networkEnabled) "enabled. Use fetch_url and download_file only when they directly help the user's request." else "disabled for this run."}
+      Web search is ${if (webSearchAvailable) "enabled through web_search. Use it when current public information is needed." else "disabled for this run."}
       When the user asks you to create files, call the tools and then summarize the files changed.
 
       Workspace AGENT.md:

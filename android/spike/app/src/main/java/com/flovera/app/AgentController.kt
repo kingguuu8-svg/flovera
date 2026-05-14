@@ -140,6 +140,8 @@ class AgentController(
     themeMode: String = _state.value.settings.themeMode,
     themeColor: String = _state.value.settings.themeColor,
     authorityMode: String = _state.value.settings.agentAuthorityMode,
+    webSearchEnabled: Boolean = _state.value.settings.webSearchEnabled,
+    braveSearchApiKey: String = _state.value.settings.braveSearchApiKey,
   ) {
     val current = _state.value
     val modelSettings = settingsController.saveModelSettings(
@@ -156,12 +158,13 @@ class AgentController(
       themeColor,
     )
     val settingsWithAuthority = settingsController.setAuthorityMode(settings, authorityMode)
-    val draft = settingsController.draftFor(settingsWithAuthority)
-    workspaceController.syncFloveraSettings(settingsWithAuthority)
-    val workspaceSnapshot = workspaceController.snapshot(settingsWithAuthority.selectedHtmlPath)
+    val settingsWithSearch = settingsController.setWebSearch(settingsWithAuthority, webSearchEnabled, braveSearchApiKey)
+    val draft = settingsController.draftFor(settingsWithSearch)
+    workspaceController.syncFloveraSettings(settingsWithSearch)
+    val workspaceSnapshot = workspaceController.snapshot(settingsWithSearch.selectedHtmlPath)
     _state.update {
       it.copy(
-        settings = settingsWithAuthority,
+        settings = settingsWithSearch,
         providerDraft = draft.providerId,
         modelDraft = draft.model,
         apiKeyDraft = draft.apiKey,
