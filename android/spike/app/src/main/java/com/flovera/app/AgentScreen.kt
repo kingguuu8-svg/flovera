@@ -79,6 +79,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.flovera.app.koog.ModelProviderCatalog
+import com.flovera.app.session.ContextUsageRecord
 import com.flovera.app.session.SessionMessage
 import com.flovera.app.session.ToolEvent
 import com.flovera.app.web.FloveraWebBridge
@@ -334,6 +335,7 @@ private fun ConversationDialog(
 ) {
   val listState = rememberLazyListState()
   val messages = state.session?.messages.orEmpty()
+  val latestContextRecord = state.session?.contextRecords?.lastOrNull()
   val visibleMessageCount = messages.size + if (state.assistantDraft == null) 0 else 1
   var pendingRevertIndex by remember { mutableStateOf<Int?>(null) }
   var sessionPickerOpen by remember { mutableStateOf(false) }
@@ -384,6 +386,13 @@ private fun ConversationDialog(
               color = MaterialTheme.colorScheme.onSurfaceVariant,
               style = MaterialTheme.typography.bodySmall,
             )
+            if (!isDraftSession && latestContextRecord != null) {
+              Text(
+                text = formatContextUsage(latestContextRecord, language),
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.82f),
+                style = MaterialTheme.typography.bodySmall,
+              )
+            }
           }
           Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             OutlinedButton(
@@ -818,6 +827,19 @@ private fun InlineMarkdownText(
 
 private fun formatMessageTime(timestampMillis: Long): String {
   return SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(timestampMillis))
+}
+
+private fun formatContextUsage(record: ContextUsageRecord, language: String): String {
+  val compression = if (record.compressed) {
+    t(language, "compressed", "\u5df2\u538b\u7f29")
+  } else {
+    t(language, "no compression", "\u672a\u538b\u7f29")
+  }
+  return t(
+    language,
+    "Context ~${record.approximateTokens} tokens / ${record.messageCount} messages / $compression",
+    "\u4e0a\u4e0b\u6587\u7ea6 ${record.approximateTokens} tokens / ${record.messageCount} \u6761\u6d88\u606f / $compression",
+  )
 }
 
 private fun formatSnapshotTime(timestampMillis: Long): String {

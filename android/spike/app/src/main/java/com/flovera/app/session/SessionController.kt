@@ -48,6 +48,10 @@ class SessionController(private val store: AgentSessionStore) {
     return store.appendMessage(session, message)
   }
 
+  fun appendContextRecord(session: AgentSession, record: ContextUsageRecord): AgentSession {
+    return store.appendContextRecord(session, record)
+  }
+
   fun appendUserPrompt(session: AgentSession, prompt: String): AgentSession {
     val withPrompt = store.appendMessage(session, SessionMessage(role = "user", content = prompt))
     if (session.messages.isNotEmpty()) return withPrompt

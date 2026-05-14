@@ -18,6 +18,7 @@ data class AgentSession(
   val archivedAtMillis: Long? = null,
   val pinnedAtMillis: Long? = null,
   val messages: List<SessionMessage> = emptyList(),
+  val contextRecords: List<ContextUsageRecord> = emptyList(),
 )
 
 @Serializable
@@ -34,6 +35,21 @@ data class ToolEvent(
   val args: String,
   val result: String,
   val timestampMillis: Long = System.currentTimeMillis(),
+)
+
+@Serializable
+data class ContextUsageRecord(
+  val id: String,
+  val source: String,
+  val createdAtMillis: Long = System.currentTimeMillis(),
+  val messageCount: Int,
+  val inputChars: Int,
+  val historyChars: Int,
+  val rulesChars: Int,
+  val workspaceListingChars: Int,
+  val approximateTokens: Int,
+  val compressed: Boolean = false,
+  val summary: String = "",
 )
 
 class AgentSessionStore(
@@ -153,6 +169,15 @@ class AgentSessionStore(
     return updated
   }
 
+  fun appendContextRecord(session: AgentSession, record: ContextUsageRecord): AgentSession {
+    val updated = session.copy(
+      updatedAtMillis = System.currentTimeMillis(),
+      contextRecords = (session.contextRecords + record).takeLast(CONTEXT_RECORD_LIMIT),
+    )
+    save(updated)
+    return updated
+  }
+
   fun truncateMessages(id: String, messageCount: Int): AgentSession? {
     val session = load(id) ?: return null
     val normalizedCount = messageCount.coerceIn(0, session.messages.size)
@@ -186,6 +211,8 @@ class AgentSessionStore(
   private fun fileFor(id: String): File = File(root, "$id.json")
 
   private companion object {
+    const val CONTEXT_RECORD_LIMIT = 80
+
     val sessionSort = compareByDescending<AgentSession> { it.pinnedAtMillis != null }
       .thenByDescending { it.updatedAtMillis }
   }

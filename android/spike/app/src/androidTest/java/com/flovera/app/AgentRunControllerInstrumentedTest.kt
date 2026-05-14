@@ -40,6 +40,7 @@ class AgentRunControllerInstrumentedTest {
       session = session,
       workspace = workspace,
       appendUserPrompt = sessions::appendUserPrompt,
+      appendContextRecord = sessions::appendContextRecord,
       appendMessage = sessions::appendMessage,
       onStarted = { withUser, draft ->
         startedSession = withUser
@@ -58,6 +59,8 @@ class AgentRunControllerInstrumentedTest {
     assertEquals("create file", runtime.inputSeen)
     assertEquals("Working...", startedDraft?.content)
     assertEquals(1, startedSession?.messages?.size)
+    assertEquals(1, startedSession?.contextRecords?.size)
+    assertTrue(startedSession?.contextRecords?.single()?.approximateTokens ?: 0 > 0)
     assertEquals("user", startedSession?.messages?.single()?.role)
     assertEquals("create file", startedSession?.messages?.single()?.content)
     assertEquals("fake_tool", drafts.single().toolEvents.single().name)
@@ -82,6 +85,10 @@ class AgentRunControllerInstrumentedTest {
       session = session,
       workspace = workspace,
       appendUserPrompt = { current, _ ->
+        callbackCalled = true
+        current
+      },
+      appendContextRecord = { current, _ ->
         callbackCalled = true
         current
       },

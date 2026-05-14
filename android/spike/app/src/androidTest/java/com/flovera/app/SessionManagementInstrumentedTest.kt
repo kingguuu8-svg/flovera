@@ -4,6 +4,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.flovera.app.config.AppSettings
 import com.flovera.app.config.SettingsStore
 import com.flovera.app.session.AgentSessionStore
+import com.flovera.app.session.ContextUsageRecord
 import com.flovera.app.session.SessionController
 import com.flovera.app.session.SessionMessage
 import java.io.File
@@ -82,6 +83,32 @@ class SessionManagementInstrumentedTest {
     assertTrue(sessionFile.isFile)
     assertFalse(File(sessionFile.absolutePath + ".new").exists())
     assertFalse(File(sessionFile.absolutePath + ".bak").exists())
+  }
+
+  @Test
+  fun sessionStorePersistsContextUsageRecords() {
+    val store = isolatedSessionStore("context-record").store
+    val session = store.create("Context ${System.currentTimeMillis()}")
+
+    val updated = store.appendContextRecord(
+      session,
+      ContextUsageRecord(
+        id = "record-1",
+        source = "agent_run",
+        messageCount = 3,
+        inputChars = 12,
+        historyChars = 34,
+        rulesChars = 56,
+        workspaceListingChars = 78,
+        approximateTokens = 45,
+        compressed = false,
+        summary = "No compression was applied.",
+      ),
+    )
+
+    val loaded = store.load(updated.id)
+    assertEquals(1, loaded?.contextRecords?.size)
+    assertEquals(45, loaded?.contextRecords?.single()?.approximateTokens)
   }
 
   @Test
