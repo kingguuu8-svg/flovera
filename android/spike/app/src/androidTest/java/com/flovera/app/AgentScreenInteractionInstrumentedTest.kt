@@ -130,7 +130,7 @@ class AgentScreenInteractionInstrumentedTest {
   }
 
   @Test
-  fun mainSurfaceExposesOnlyAgentEntryAndConversationOwnsSecondaryEntries() {
+  fun mainSurfaceExposesAgentAndHtmlQuickPickerWhileConversationOwnsSecondaryEntries() {
     val context = composeRule.activity.applicationContext
     SettingsStore(context).save(AppSettings(language = "en"))
     val controller = AgentController(context)
@@ -140,6 +140,7 @@ class AgentScreenInteractionInstrumentedTest {
     }
 
     composeRule.onNodeWithText("Agent").assertIsDisplayed()
+    composeRule.onNodeWithText("HTML").assertIsDisplayed()
     assertEquals(0, composeRule.onAllNodesWithText("Menu").fetchSemanticsNodes().size)
 
     composeRule.onNodeWithText("Agent").performClick()
@@ -149,6 +150,24 @@ class AgentScreenInteractionInstrumentedTest {
     composeRule.onNodeWithText("Files").assertIsDisplayed()
     composeRule.onNodeWithText("AGENT.md").assertIsDisplayed()
     composeRule.onNodeWithText("Settings").assertIsDisplayed()
+  }
+
+  @Test
+  fun htmlQuickPickerOpensWorkspaceHtmlFromMainSurface() {
+    val context = composeRule.activity.applicationContext
+    SettingsStore(context).save(AppSettings(language = "en"))
+    val controller = AgentController(context)
+
+    composeRule.setContent {
+      AgentScreen(controller)
+    }
+
+    composeRule.onNodeWithContentDescription("Open HTML quick picker").performClick()
+    composeRule.onNodeWithText("index.html", substring = true).performClick()
+
+    composeRule.runOnIdle {
+      assertEquals("index.html", controller.state.value.selectedHtmlPath)
+    }
   }
 
   @Test

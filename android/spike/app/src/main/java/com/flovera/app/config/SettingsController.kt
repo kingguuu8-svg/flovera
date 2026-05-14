@@ -112,6 +112,19 @@ class SettingsController(private val store: SettingsStore) {
     return updated
   }
 
+  fun setPinnedHtmlPath(settings: AppSettings, path: String, pinned: Boolean): AppSettings {
+    val normalized = path.trim()
+    val current = settings.pinnedHtmlPaths.filter { it.isNotBlank() && it != normalized }
+    val updatedPins = if (pinned && normalized.isNotBlank()) {
+      listOf(normalized) + current
+    } else {
+      current
+    }
+    val updated = settings.copy(pinnedHtmlPaths = updatedPins.distinct())
+    store.save(updated)
+    return updated
+  }
+
   fun normalizeSelectedHtml(settings: AppSettings, selectedHtmlPath: String): AppSettings {
     val updated = settings.copy(selectedHtmlPath = selectedHtmlPath)
     if (updated != settings) store.save(updated)

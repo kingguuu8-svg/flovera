@@ -403,6 +403,7 @@ data class FloveraSettingsView(
   val activeWorkspaceId: String = "",
   val activeSessionId: String? = null,
   val selectedHtmlPath: String = "",
+  val pinnedHtmlPaths: List<String> = emptyList(),
   val maxAgentIterations: Int = 0,
   val networkEnabled: Boolean = false,
   val language: String = "",

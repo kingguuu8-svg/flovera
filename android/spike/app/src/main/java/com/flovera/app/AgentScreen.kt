@@ -125,23 +125,37 @@ fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
   Box(modifier = modifier.fillMaxSize()) {
     WorkspaceWebView(url = state.selectedHtmlUrl, workspaceRootUrl = state.workspaceRootUrl)
 
-    FloatingActionButton(
-      onClick = { activePanel = AgentPanel.Conversation },
+    Row(
       modifier = Modifier
         .align(Alignment.BottomEnd)
-        .padding(18.dp)
-        .semantics { contentDescription = "Open agent conversation" },
-      shape = FloveraFabShape,
-      containerColor = FloveraFabContainer,
-      contentColor = FloveraFabText,
+        .padding(18.dp),
+      horizontalArrangement = Arrangement.spacedBy(10.dp),
+      verticalAlignment = Alignment.CenterVertically,
     ) {
-      Row(
-        modifier = Modifier.padding(horizontal = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+      FloatingActionButton(
+        onClick = { activePanel = AgentPanel.HtmlFiles },
+        modifier = Modifier.semantics { contentDescription = "Open HTML quick picker" },
+        shape = FloveraFabShape,
+        containerColor = FloveraFabContainer,
+        contentColor = FloveraFabText,
       ) {
-        Icon(Icons.Filled.Menu, contentDescription = null, modifier = Modifier.size(18.dp))
-        Text(t(language, "Agent", "Agent"), style = MaterialTheme.typography.labelLarge)
+        Text("HTML", modifier = Modifier.padding(horizontal = 4.dp), style = MaterialTheme.typography.labelLarge)
+      }
+      FloatingActionButton(
+        onClick = { activePanel = AgentPanel.Conversation },
+        modifier = Modifier.semantics { contentDescription = "Open agent conversation" },
+        shape = FloveraFabShape,
+        containerColor = FloveraFabContainer,
+        contentColor = FloveraFabText,
+      ) {
+        Row(
+          modifier = Modifier.padding(horizontal = 4.dp),
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Icon(Icons.Filled.Menu, contentDescription = null, modifier = Modifier.size(18.dp))
+          Text(t(language, "Agent", "Agent"), style = MaterialTheme.typography.labelLarge)
+        }
       }
     }
   }
@@ -931,6 +945,13 @@ private fun HtmlFilesDialog(
   language: String,
   onDismiss: () -> Unit,
 ) {
+  val sortedHtmlFiles = remember(state.htmlFiles, state.settings.pinnedHtmlPaths) {
+    state.htmlFiles.sortedWith(
+      compareByDescending<String> { it in state.settings.pinnedHtmlPaths }
+        .thenBy { it.lowercase() },
+    )
+  }
+
   AlertDialog(
     onDismissRequest = onDismiss,
     title = { Text(t(language, "Select HTML", "\u9009\u62e9 HTML")) },
@@ -939,21 +960,23 @@ private fun HtmlFilesDialog(
         modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 420.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
       ) {
-        if (state.htmlFiles.isEmpty()) {
+        if (sortedHtmlFiles.isEmpty()) {
           item {
             Text(t(language, "No HTML files in this workspace.", "\u5f53\u524d workspace \u6ca1\u6709 HTML \u6587\u4ef6\u3002"), style = MaterialTheme.typography.bodyMedium)
           }
         }
-        items(state.htmlFiles) { path ->
-          OutlinedButton(
-            onClick = {
+        items(sortedHtmlFiles) { path ->
+          HtmlFilePickerRow(
+            path = path,
+            selected = path == state.selectedHtmlPath,
+            pinned = path in state.settings.pinnedHtmlPaths,
+            language = language,
+            onOpen = {
               controller.selectHtmlFile(path)
               onDismiss()
             },
-            modifier = Modifier.fillMaxWidth(),
-          ) {
-            Text(if (path == state.selectedHtmlPath) t(language, "$path  selected", "$path  \u5df2\u9009\u4e2d") else path)
-          }
+            onPin = { pinned -> controller.setHtmlPinned(path, pinned) },
+          )
         }
       }
     },
@@ -1873,6 +1896,48 @@ private fun SettingsDialog(
       }
     },
   )
+}
+
+@Composable
+private fun HtmlFilePickerRow(
+  path: String,
+  selected: Boolean,
+  pinned: Boolean,
+  language: String,
+  onOpen: () -> Unit,
+  onPin: (Boolean) -> Unit,
+) {
+  var menuOpen by remember { mutableStateOf(false) }
+  Row(
+    modifier = Modifier.fillMaxWidth(),
+    horizontalArrangement = Arrangement.spacedBy(8.dp),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    OutlinedButton(
+      onClick = onOpen,
+      modifier = Modifier.weight(1f),
+    ) {
+      val marker = if (pinned) "* " else ""
+      Text(if (selected) t(language, "$marker$path  selected", "$marker$path  \u5df2\u9009\u4e2d") else "$marker$path")
+    }
+    Box {
+      IconButton(
+        onClick = { menuOpen = true },
+        modifier = Modifier.semantics { contentDescription = "HTML actions for $path" },
+      ) {
+        Icon(Icons.Filled.Menu, contentDescription = null)
+      }
+      DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+        DropdownMenuItem(
+          text = { Text(if (pinned) t(language, "Unpin", "\u53d6\u6d88\u7f6e\u9876") else t(language, "Pin", "\u7f6e\u9876")) },
+          onClick = {
+            menuOpen = false
+            onPin(!pinned)
+          },
+        )
+      }
+    }
+  }
 }
 
 @Composable

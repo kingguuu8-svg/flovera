@@ -12,6 +12,7 @@ data class AppSettings(
   val activeWorkspaceId: String = "default",
   val activeSessionId: String? = null,
   val selectedHtmlPath: String = "",
+  val pinnedHtmlPaths: List<String> = emptyList(),
   val maxAgentIterations: Int = 20,
   val networkEnabled: Boolean = false,
   val language: String = "en",

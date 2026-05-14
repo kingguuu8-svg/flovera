@@ -186,6 +186,11 @@ class AgentController(context: Context) {
     refreshWorkspaceState(settings = settings, status = "Displaying $path")
   }
 
+  fun setHtmlPinned(path: String, pinned: Boolean) {
+    val settings = settingsController.setPinnedHtmlPath(_state.value.settings, path, pinned)
+    refreshWorkspaceState(settings = settings, status = if (pinned) "HTML pinned" else "HTML unpinned")
+  }
+
   fun refreshWorkspaceFiles() {
     refreshWorkspaceState(status = "Workspace refreshed")
   }

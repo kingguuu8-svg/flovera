@@ -89,6 +89,25 @@ class ProviderConfigInstrumentedTest {
   }
 
   @Test
+  fun settingsControllerPinsHtmlPathsDistinctly() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val store = SettingsStore(context)
+    val original = store.load()
+    try {
+      val controller = SettingsController(store)
+
+      val first = controller.setPinnedHtmlPath(AppSettings(), "index.html", true)
+      val second = controller.setPinnedHtmlPath(first, "nested/page.html", true)
+      val unpinned = controller.setPinnedHtmlPath(second, "index.html", false)
+
+      assertEquals(listOf("nested/page.html", "index.html"), second.pinnedHtmlPaths)
+      assertEquals(listOf("nested/page.html"), unpinned.pinnedHtmlPaths)
+    } finally {
+      store.save(original)
+    }
+  }
+
+  @Test
   fun settingsControllerNormalizesAndPersistsAppearance() {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val store = SettingsStore(context)
