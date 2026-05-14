@@ -184,6 +184,28 @@ class SessionManagementInstrumentedTest {
   }
 
   @Test
+  fun controllerRevertsFirstUserMessageIntoDraftInput() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val controller = AgentController(context)
+    controller.newSession()
+    val session = controller.state.value.session
+    assertNotNull(session)
+
+    val store = AgentSessionStore(context)
+    val one = store.appendMessage(session!!, SessionMessage(role = "user", content = "rewrite me"))
+    store.appendMessage(one, SessionMessage(role = "assistant", content = "answer"))
+
+    controller.openSession(session.id)
+    controller.revertSessionToMessage(0)
+
+    val state = controller.state.value
+    assertEquals("rewrite me", state.input)
+    assertTrue(state.session?.messages?.isEmpty() == true)
+    assertNull(store.load(session.id))
+    assertFalse(state.sessions.any { it.id == session.id })
+  }
+
+  @Test
   fun sessionControllerFallsBackWhenSavedSessionIsArchived() {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val store = AgentSessionStore(context)

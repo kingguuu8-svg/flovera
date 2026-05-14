@@ -27,7 +27,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -61,8 +60,6 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -97,7 +94,7 @@ fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
   var activePanel by remember { mutableStateOf<AgentPanel?>(null) }
 
   LaunchedEffect(state.status) {
-    if (state.status !in setOf("Idle", "Ready")) {
+    if (shouldShowStatusToast(state.status)) {
       Toast.makeText(context, state.status, Toast.LENGTH_SHORT).show()
     }
   }
@@ -1316,7 +1313,6 @@ private fun openWorkspaceFile(context: Context, controller: AgentController, pat
     .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
   try {
     context.startActivity(Intent.createChooser(intent, "Open with"))
-    controller.reportStatus("Opening $path")
   } catch (_: ActivityNotFoundException) {
     controller.reportStatus("No app can open $path")
   }
@@ -1334,10 +1330,28 @@ private fun shareWorkspaceFile(context: Context, controller: AgentController, pa
     .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
   try {
     context.startActivity(Intent.createChooser(intent, "Share"))
-    controller.reportStatus("Sharing $path")
   } catch (_: ActivityNotFoundException) {
     controller.reportStatus("No app can share $path")
   }
+}
+
+fun shouldShowStatusToast(status: String): Boolean {
+  val normalized = status.trim()
+  if (normalized.isBlank() || normalized == "Idle" || normalized == "Ready") return false
+  val lower = normalized.lowercase()
+  return lower.startsWith("imported ") ||
+    listOf(
+      "could not",
+      "does not exist",
+      "failed",
+      "invalid",
+      "missing",
+      "no app",
+      "not available",
+      "not granted",
+      "permission",
+      "unable",
+    ).any { it in lower }
 }
 
 @Composable
@@ -1449,8 +1463,6 @@ private fun SettingsDialog(
           onValueChange = { apiKeyDraft = it },
           label = { Text(selectedProvider.apiKeyLabel) },
           singleLine = true,
-          visualTransformation = PasswordVisualTransformation(),
-          keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
           modifier = Modifier.fillMaxWidth(),
         )
         Box {

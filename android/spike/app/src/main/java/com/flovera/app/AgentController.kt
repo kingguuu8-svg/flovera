@@ -292,7 +292,19 @@ class AgentController(context: Context) {
     val session = current.session ?: return
     val selectedMessage = session.messages.getOrNull(messageIndex) ?: return
     if (selectedMessage.role != "user") return
-    val restored = sessionController.revertToBeforeMessage(session.id, messageIndex) ?: return
+    val restored = sessionController.revertToBeforeMessage(session.id, messageIndex)
+    if (restored == null && messageIndex == 0) {
+      val settings = settingsController.setActiveSession(current.settings, null)
+      refreshWorkspaceState(
+        settings = settings,
+        session = sessionController.createSession(),
+        input = selectedMessage.content,
+        isRunning = false,
+        status = "Conversation reverted",
+      )
+      return
+    }
+    if (restored == null) return
     refreshWorkspaceState(
       session = restored,
       input = selectedMessage.content,

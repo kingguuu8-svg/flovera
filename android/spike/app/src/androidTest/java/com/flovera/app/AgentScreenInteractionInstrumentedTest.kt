@@ -38,6 +38,16 @@ class AgentScreenInteractionInstrumentedTest {
   }
 
   @Test
+  fun statusToastOnlyCoversFailuresAndInvisibleSuccesses() {
+    assertFalse(shouldShowStatusToast("Session loaded"))
+    assertFalse(shouldShowStatusToast("Conversation reverted"))
+    assertFalse(shouldShowStatusToast("Displaying index.html"))
+    assertTrue(shouldShowStatusToast("No app can open notes.txt"))
+    assertTrue(shouldShowStatusToast("Invalid file name: bad/name"))
+    assertTrue(shouldShowStatusToast("Imported shared.txt"))
+  }
+
+  @Test
   fun tappingSessionRowOpensSession() {
     val context = composeRule.activity.applicationContext
     SettingsStore(context).save(AppSettings(language = "en"))
