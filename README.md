@@ -1,11 +1,8 @@
 # Flovera
 
-Flovera is an Android-local workspace agent app.
-
-The current product direction is not a phone-hosted Linux VM. Flovera runs an
-agent inside an Android app, gives it a scoped local workspace, persists
-sessions, and uses WebView as the primary surface for generated HTML/web
-artifacts.
+Flovera is an Android-local workspace agent app. It runs an agent inside the
+Android app, gives it a scoped local workspace, persists sessions, and uses
+WebView as the primary surface for generated HTML/web artifacts.
 
 ## Current Status
 
@@ -28,17 +25,13 @@ renderers.
 ```text
 .
 |-- android/spike/                 Android app source
-|-- docs/                          Current docs and archived research
-|-- docs/archive/legacy-qemu-vps/  Historical QEMU/VPS route
+|-- docs/                          Project docs
 |-- PRODUCT_QUALITY.md             Product quality model and backlog
 |-- docs/OPEN_SOURCE_READINESS.md  Open-source readiness checklist
 |-- CHANGELOG.md                   Pre-release change notes
 |-- LICENSE                        MIT license
 `-- .env.example                   Local environment template
 ```
-
-The old QEMU/VPS work is kept as archived research. It is not the active product
-path.
 
 ## Android Build
 
