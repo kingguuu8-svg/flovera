@@ -266,6 +266,31 @@ so future work can be planned without losing the product direction.
 - Keep tool availability visible to the agent only when the corresponding user
   permission is enabled.
 
+### Controlled Python Runtime
+
+- Add Python as a workspace-scoped execution tool, not as a general Android
+  terminal or full IDE.
+- Expose a minimal agent tool such as `run_python(path, args?, stdin?)`.
+- Capture `stdout`, `stderr`, `exit_code`, and runtime duration for each run.
+- Enforce timeout and cancellation so scripts cannot freeze the app.
+- Start with Python standard library support; do not require arbitrary `pip`
+  package installation in v1.
+- Allow scripts to read and write only inside the active workspace unless a
+  future explicit permission grants broader access.
+- Follow existing network/tool permission settings when Python code performs
+  HTTP requests.
+- Support `.flovera/tools/` and a tool manifest so the agent can create,
+  register, and reuse small Python tools.
+- Treat Python as the agent's scriptable capability layer for file processing,
+  data conversion, validation, workspace maintenance, and generating web
+  artifacts.
+- Preserve the product boundary: Kotlin/Android owns permissions, secrets,
+  WebView, notifications, lifecycle, timeout, and restore; Python only runs
+  inside the controlled runtime.
+- Make the runtime complete enough for the agent to write lightweight agent
+  programs inside the workspace using standard library features such as HTTP,
+  JSON, SQLite, path handling, compression, and local modules.
+
 ### Rendering Coverage
 
 - Extend workspace rendering beyond HTML and Markdown.
