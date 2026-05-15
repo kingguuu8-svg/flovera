@@ -748,9 +748,9 @@ private fun ConversationDialog(
             }
             itemsIndexed(
               items = state.queuedInputs,
-              key = { index, queued -> "queued-$index-$queued" },
+              key = { index, queued -> "queued-$index-${queued.mode}-${queued.content}" },
             ) { _, queued ->
-              QueuedMessageBubble(content = queued, language = language)
+              QueuedMessageBubble(input = queued, language = language)
             }
           }
         }
@@ -807,6 +807,20 @@ private fun ConversationDialog(
               } else {
                 Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(20.dp))
               }
+            }
+          }
+        }
+        if (state.isRunning) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            OutlinedButton(
+              onClick = controller::guideAgentRun,
+              modifier = Modifier.semantics { contentDescription = "Guide agent" },
+            ) {
+              Text(t(language, "Guide next run", "\u5f15\u5bfc\u4e0b\u4e00\u8f6e"))
             }
           }
         }
@@ -944,7 +958,7 @@ private fun CompressionDivider(message: SessionMessage) {
 }
 
 @Composable
-private fun QueuedMessageBubble(content: String, language: String) {
+private fun QueuedMessageBubble(input: QueuedAgentInput, language: String) {
   Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
     Surface(
       modifier = Modifier.fillMaxWidth(0.84f),
@@ -958,11 +972,15 @@ private fun QueuedMessageBubble(content: String, language: String) {
         verticalArrangement = Arrangement.spacedBy(6.dp),
       ) {
         Text(
-          text = t(language, "Queued", "\u5df2\u6392\u961f"),
+          text = if (input.mode == QUEUED_INPUT_GUIDANCE) {
+            t(language, "Guidance queued", "\u5f15\u5bfc\u5df2\u6392\u961f")
+          } else {
+            t(language, "Queued", "\u5df2\u6392\u961f")
+          },
           color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
           style = MaterialTheme.typography.labelSmall,
         )
-        MarkdownMessageText(content = content, color = MaterialTheme.colorScheme.onSurface)
+        MarkdownMessageText(content = input.content, color = MaterialTheme.colorScheme.onSurface)
       }
     }
   }

@@ -275,7 +275,7 @@ class AgentScreenInteractionInstrumentedTest {
     composeRule.onNodeWithText("Queued").assertIsDisplayed()
     composeRule.onNodeWithText("second task").assertIsDisplayed()
     composeRule.runOnIdle {
-      assertEquals(listOf("second task"), controller.state.value.queuedInputs)
+      assertEquals(listOf("second task"), controller.state.value.queuedInputs.map { it.content })
     }
 
     runtime.finishNext()
@@ -294,6 +294,46 @@ class AgentScreenInteractionInstrumentedTest {
       assertTrue(contents.contains("assistant output for first task"))
       assertTrue(contents.contains("assistant output for second task"))
     }
+  }
+
+  @Test
+  fun runningAgentAcceptsGuidanceForNextRun() {
+    val context = composeRule.activity.applicationContext
+    SettingsStore(context).save(AppSettings(language = "en"))
+    val runtime = QueueingAgentRuntime()
+    val controller = AgentController(
+      context,
+      agentRunController = AgentRunController(runtime = runtime),
+    )
+
+    composeRule.setContent {
+      AgentScreen(controller)
+    }
+
+    composeRule.onNodeWithText("Agent").performClick()
+    composeRule.onAllNodes(hasSetTextAction())[0].performTextInput("first task")
+    composeRule.onNodeWithContentDescription("Send message").performClick()
+
+    composeRule.waitUntil(timeoutMillis = 5_000) { runtime.inputCount() == 1 && controller.state.value.isRunning }
+    composeRule.onAllNodes(hasSetTextAction())[0].performTextInput("keep the UI compact")
+    composeRule.onNodeWithContentDescription("Guide agent").performClick()
+
+    assertTrue(composeRule.onAllNodesWithText("Guidance queued").fetchSemanticsNodes().isNotEmpty())
+    composeRule.onNodeWithText("keep the UI compact").assertIsDisplayed()
+    composeRule.runOnIdle {
+      assertEquals(listOf(QUEUED_INPUT_GUIDANCE), controller.state.value.queuedInputs.map { it.mode })
+    }
+
+    runtime.finishNext()
+    composeRule.waitUntil(timeoutMillis = 5_000) { runtime.inputCount() == 2 }
+    composeRule.runOnIdle {
+      val guidedInput = runtime.inputsSnapshot().last()
+      assertTrue(guidedInput.contains("Guidance while the previous agent run was active"))
+      assertTrue(guidedInput.contains("keep the UI compact"))
+    }
+
+    runtime.finishNext()
+    composeRule.waitUntil(timeoutMillis = 5_000) { !controller.state.value.isRunning }
   }
 
   @Test

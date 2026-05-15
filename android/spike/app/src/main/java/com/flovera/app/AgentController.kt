@@ -47,8 +47,26 @@ data class AgentScreenState(
   val status: String = "Idle",
   val isRunning: Boolean = false,
   val assistantDraft: SessionMessage? = null,
-  val queuedInputs: List<String> = emptyList(),
+  val queuedInputs: List<QueuedAgentInput> = emptyList(),
 )
+
+data class QueuedAgentInput(
+  val content: String,
+  val mode: String = QUEUED_INPUT_REQUEST,
+)
+
+const val QUEUED_INPUT_REQUEST = "request"
+const val QUEUED_INPUT_GUIDANCE = "guidance"
+
+private fun QueuedAgentInput.toRunInput(): String {
+  if (mode != QUEUED_INPUT_GUIDANCE) return content
+  return """
+    Guidance while the previous agent run was active:
+    $content
+
+    Continue the current task using this guidance. If the task was already completed, revise or continue only when useful.
+  """.trimIndent()
+}
 
 class AgentController(
   context: Context,
@@ -432,16 +450,27 @@ class AgentController(
     val trimmed = current.input.trim()
     if (trimmed.isBlank()) return
     if (current.isRunning) {
-      _state.update {
-        it.copy(
-          input = "",
-          queuedInputs = it.queuedInputs + trimmed,
-          status = "Message queued",
-        )
-      }
+      enqueueInput(trimmed, QUEUED_INPUT_REQUEST, "Message queued")
       return
     }
     startAgentRun(trimmed, current.session ?: sessionController.createSession())
+  }
+
+  fun guideAgentRun() {
+    val current = _state.value
+    val trimmed = current.input.trim()
+    if (!current.isRunning || trimmed.isBlank()) return
+    enqueueInput(trimmed, QUEUED_INPUT_GUIDANCE, "Guidance queued")
+  }
+
+  private fun enqueueInput(input: String, mode: String, status: String) {
+    _state.update {
+      it.copy(
+        input = "",
+        queuedInputs = it.queuedInputs + QueuedAgentInput(content = input, mode = mode),
+        status = status,
+      )
+    }
   }
 
   private fun startAgentRun(input: String, session: AgentSession) {
@@ -500,7 +529,7 @@ class AgentController(
             isRunning = false,
             status = "Running queued message...",
           )
-          startAgentRun(nextInput, updated)
+          startAgentRun(nextInput.toRunInput(), updated)
         }
       },
     )
