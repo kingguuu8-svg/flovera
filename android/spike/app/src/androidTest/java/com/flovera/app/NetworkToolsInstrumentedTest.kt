@@ -139,6 +139,34 @@ class NetworkToolsInstrumentedTest {
   }
 
   @Test
+  fun webSearchExtractsBraveKeyFromPastedTextBeforeSendingHeader() = runBlocking {
+    val recorder = ToolEventRecorder()
+    val client = FakeNetworkHttpClient(
+      NetworkResponse(
+        statusCode = 200,
+        contentType = "application/json",
+        finalUrl = "https://api.search.brave.com/res/v1/web/search?q=flovera",
+        body = """{"web":{"results":[{"title":"Flovera","url":"https://example.com","description":"ok"}]}}"""
+          .encodeToByteArray(),
+        truncated = false,
+      ),
+    )
+    val pasted = """
+      BSAmkdXRBkbVDqD6mHralmPbYtSY5JH
+      unrelated pasted notification text
+      brave key
+      BSAmkdXRBkbVDqD6mHralmPbYtSY5JH
+    """.trimIndent()
+
+    val result = WebSearchTool(pasted, recorder, client).execute(
+      WebSearchTool.Args(query = "flovera", count = 1),
+    )
+
+    assertEquals("BSAmkdXRBkbVDqD6mHralmPbYtSY5JH", client.headersSeen["X-Subscription-Token"])
+    assertTrue(result.contains("status: 200"))
+  }
+
+  @Test
   fun liveBraveWebSearchReturnsResultsWhenApiKeyProvided() = runBlocking {
     val apiKey = InstrumentationRegistry.getArguments().getString("braveSearchApiKey").orEmpty()
     assumeTrue("Pass -e braveSearchApiKey to run the live Brave Search test.", apiKey.isNotBlank())
@@ -148,8 +176,15 @@ class NetworkToolsInstrumentedTest {
       WebSearchTool.Args(query = "flovera android agent", count = 3),
     )
 
-    assertTrue(result, result.contains("status: 200"))
-    assertTrue(result, result.contains("results:"))
+    val reachedBrave = result.contains("status: 200") ||
+      result.contains("USAGE_LIMIT_EXCEEDED") ||
+      result.contains("status: 429")
+    assertTrue(result, reachedBrave)
+    if (result.contains("status: 200")) {
+      assertTrue(result, result.contains("results:"))
+    }
+    assertFalse(result, result.contains("Unexpected char"))
+    assertFalse(result, result.contains("header value", ignoreCase = true))
     assertTrue(recorder.snapshot().any { it.name == "web_search" })
   }
 

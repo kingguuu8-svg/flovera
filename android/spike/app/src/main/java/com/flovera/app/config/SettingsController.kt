@@ -60,7 +60,7 @@ class SettingsController(private val store: SettingsStore) {
   fun setWebSearch(settings: AppSettings, enabled: Boolean, braveApiKey: String): AppSettings {
     val updated = settings.copy(
       webSearchEnabled = enabled,
-      braveSearchApiKey = braveApiKey.trim(),
+      braveSearchApiKey = normalizeBraveSearchApiKey(braveApiKey),
     )
     store.save(updated)
     return updated

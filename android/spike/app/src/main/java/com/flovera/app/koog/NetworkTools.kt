@@ -3,6 +3,7 @@ package com.flovera.app.koog
 import ai.koog.agents.core.tools.SimpleTool
 import ai.koog.agents.core.tools.annotations.LLMDescription
 import ai.koog.serialization.typeToken
+import com.flovera.app.config.normalizeBraveSearchApiKey
 import com.flovera.app.workspace.WorkspaceManager
 import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
@@ -125,7 +126,8 @@ class WebSearchTool(
 
   override suspend fun execute(args: Args): String {
     val result = runCatching {
-      require(braveSearchApiKey.isNotBlank()) { "Brave Search API key is not configured." }
+      val normalizedApiKey = normalizeBraveSearchApiKey(braveSearchApiKey)
+      require(normalizedApiKey.isNotBlank()) { "Brave Search API key is not configured." }
       val query = args.query.trim()
       require(query.isNotBlank()) { "Search query is required." }
       val count = args.count.coerceIn(1, 10)
@@ -136,14 +138,24 @@ class WebSearchTool(
         maxBytes = MAX_SEARCH_RESPONSE_BYTES,
         headers = mapOf(
           "Accept" to "application/json",
-          "X-Subscription-Token" to braveSearchApiKey,
+          "X-Subscription-Token" to normalizedApiKey,
         ),
       )
       response.formatForSearch(query)
-    }.getOrElse { it.message ?: it.toString() }
+    }.getOrElse { sanitizeBraveSearchError(it, braveSearchApiKey) }
     recorder.record(name, "query=${args.query}, count=${args.count}", result)
     return result
   }
+}
+
+private fun sanitizeBraveSearchError(error: Throwable, apiKey: String): String {
+  val raw = error.message ?: error.toString()
+  val normalized = normalizeBraveSearchApiKey(apiKey)
+  val redacted = listOf(apiKey, normalized)
+    .filter { it.isNotBlank() }
+    .fold(raw) { current, secret -> current.replace(secret, "[redacted]") }
+    .replace(Regex("header value:.*", RegexOption.DOT_MATCHES_ALL), "header value: [redacted]")
+  return "Brave Search request failed: $redacted"
 }
 
 object NetworkUrlPolicy {

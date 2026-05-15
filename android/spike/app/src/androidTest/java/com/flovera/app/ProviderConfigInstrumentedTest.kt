@@ -129,6 +129,30 @@ class ProviderConfigInstrumentedTest {
   }
 
   @Test
+  fun settingsControllerExtractsBraveKeyFromPastedText() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val store = SettingsStore(context)
+    val original = store.load()
+    try {
+      val controller = SettingsController(store)
+      val pasted = """
+        BSAmkdXRBkbVDqD6mHralmPbYtSY5JH
+        unrelated pasted notification text
+        brave key
+        BSAmkdXRBkbVDqD6mHralmPbYtSY5JH
+      """.trimIndent()
+
+      val updated = controller.setWebSearch(AppSettings(), enabled = true, braveApiKey = pasted)
+
+      assertTrue(updated.webSearchEnabled)
+      assertEquals("BSAmkdXRBkbVDqD6mHralmPbYtSY5JH", updated.braveSearchApiKey)
+      assertEquals("BSAmkdXRBkbVDqD6mHralmPbYtSY5JH", store.load().braveSearchApiKey)
+    } finally {
+      store.save(original)
+    }
+  }
+
+  @Test
   fun settingsControllerNormalizesAndPersistsAppearance() {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val store = SettingsStore(context)

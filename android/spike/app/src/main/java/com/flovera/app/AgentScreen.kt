@@ -78,6 +78,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.flovera.app.config.normalizeBraveSearchApiKey
 import com.flovera.app.koog.ModelProviderCatalog
 import com.flovera.app.session.ContextUsageRecord
 import com.flovera.app.session.SessionMessage
@@ -1869,7 +1870,7 @@ private fun SettingsDialog(
         }
         OutlinedTextField(
           value = braveSearchApiKeyDraft,
-          onValueChange = { braveSearchApiKeyDraft = it },
+          onValueChange = { braveSearchApiKeyDraft = normalizeBraveSearchApiKey(it) },
           label = { Text(t(language, "Brave Search API key", "Brave Search API key")) },
           singleLine = true,
           modifier = Modifier.fillMaxWidth(),
