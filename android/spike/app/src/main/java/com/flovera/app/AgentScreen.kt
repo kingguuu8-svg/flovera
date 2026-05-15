@@ -16,6 +16,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -76,6 +77,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -96,6 +98,8 @@ import com.flovera.app.workspace.WorkspaceSnapshotRecord
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import org.json.JSONArray
+import org.json.JSONObject
 
 private val FloveraFabShape = RoundedCornerShape(999.dp)
 private val FloveraPanelShape = RoundedCornerShape(18.dp)
@@ -115,7 +119,7 @@ private enum class AgentPanel {
   Settings,
 }
 
-private const val EmptyWebPrompt = "\u53ef\u9009\u62e9 HTML / Markdown / Text \u8fdb\u884c\u6253\u5f00"
+private const val EmptyWebPrompt = "\u53ef\u9009\u62e9 HTML / Markdown / JSON / CSV / Text \u8fdb\u884c\u6253\u5f00"
 
 @Composable
 fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
@@ -306,22 +310,74 @@ private fun WorkspaceTextPreview(path: String, content: String, mimeType: String
     ) {
       Text(path, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleMedium)
       Text(mimeType.ifBlank { "text/plain" }, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-      if (path.endsWith(".md", ignoreCase = true) || path.endsWith(".markdown", ignoreCase = true)) {
-        MarkdownMessageText(content = content, color = MaterialTheme.colorScheme.onSurface)
-      } else {
-        Surface(
-          modifier = Modifier.fillMaxWidth(),
-          shape = FloveraSmallShape,
-          color = MaterialTheme.colorScheme.surface,
-          border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        ) {
-          Text(
-            text = content,
-            modifier = Modifier.padding(12.dp),
-            color = MaterialTheme.colorScheme.onSurface,
-            fontFamily = FontFamily.Monospace,
-            style = MaterialTheme.typography.bodySmall,
-          )
+      when {
+        isMarkdownPreview(path) -> MarkdownMessageText(content = content, color = MaterialTheme.colorScheme.onSurface)
+        isJsonPreview(path, mimeType) -> WorkspaceJsonPreview(content)
+        isCsvPreview(path, mimeType) -> WorkspaceCsvPreview(content)
+        else -> WorkspacePlainTextPreview(content)
+      }
+    }
+  }
+}
+
+@Composable
+private fun WorkspacePlainTextPreview(content: String) {
+  Surface(
+    modifier = Modifier.fillMaxWidth(),
+    shape = FloveraSmallShape,
+    color = MaterialTheme.colorScheme.surface,
+    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+  ) {
+    Text(
+      text = content,
+      modifier = Modifier.padding(12.dp),
+      color = MaterialTheme.colorScheme.onSurface,
+      fontFamily = FontFamily.Monospace,
+      style = MaterialTheme.typography.bodySmall,
+    )
+  }
+}
+
+@Composable
+private fun WorkspaceJsonPreview(content: String) {
+  Text("JSON preview", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
+  WorkspacePlainTextPreview(prettyJsonPreview(content))
+}
+
+@Composable
+private fun WorkspaceCsvPreview(content: String) {
+  val rows = remember(content) { parseCsvPreview(content) }
+  Text("CSV preview", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
+  if (rows.isEmpty()) {
+    WorkspacePlainTextPreview(content)
+    return
+  }
+  Surface(
+    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+    shape = FloveraSmallShape,
+    color = MaterialTheme.colorScheme.surface,
+    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+  ) {
+    Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+      rows.forEachIndexed { rowIndex, row ->
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+          row.forEach { cell ->
+            Surface(
+              modifier = Modifier.size(width = 132.dp, height = if (rowIndex == 0) 42.dp else 38.dp),
+              shape = RoundedCornerShape(6.dp),
+              color = if (rowIndex == 0) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.background,
+              border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            ) {
+              Text(
+                text = cell,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 7.dp),
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodySmall,
+              )
+            }
+          }
         }
       }
     }
@@ -394,6 +450,63 @@ private fun WorkspaceWebView(url: String?, workspaceRootUrl: String) {
       }
     }
   }
+}
+
+private fun isMarkdownPreview(path: String): Boolean {
+  return path.endsWith(".md", ignoreCase = true) || path.endsWith(".markdown", ignoreCase = true)
+}
+
+private fun isJsonPreview(path: String, mimeType: String): Boolean {
+  return mimeType == "application/json" || path.endsWith(".json", ignoreCase = true)
+}
+
+private fun isCsvPreview(path: String, mimeType: String): Boolean {
+  return mimeType == "text/csv" || path.endsWith(".csv", ignoreCase = true)
+}
+
+private fun prettyJsonPreview(content: String): String {
+  val trimmed = content.trim()
+  if (trimmed.isBlank()) return content
+  return runCatching {
+    when {
+      trimmed.startsWith("{") -> JSONObject(trimmed).toString(2)
+      trimmed.startsWith("[") -> JSONArray(trimmed).toString(2)
+      else -> content
+    }
+  }.getOrDefault(content)
+}
+
+private fun parseCsvPreview(content: String, maxRows: Int = 40, maxColumns: Int = 12): List<List<String>> {
+  return content.lineSequence()
+    .filter { it.isNotBlank() }
+    .take(maxRows)
+    .map { parseCsvLine(it).take(maxColumns) }
+    .toList()
+}
+
+private fun parseCsvLine(line: String): List<String> {
+  val cells = mutableListOf<String>()
+  val current = StringBuilder()
+  var quoted = false
+  var index = 0
+  while (index < line.length) {
+    val char = line[index]
+    when {
+      char == '"' && quoted && index + 1 < line.length && line[index + 1] == '"' -> {
+        current.append('"')
+        index += 1
+      }
+      char == '"' -> quoted = !quoted
+      char == ',' && !quoted -> {
+        cells += current.toString()
+        current.clear()
+      }
+      else -> current.append(char)
+    }
+    index += 1
+  }
+  cells += current.toString()
+  return cells
 }
 
 private fun t(language: String, en: String, zh: String): String = if (language == "zh") zh else en

@@ -45,7 +45,7 @@ class AgentScreenInteractionInstrumentedTest {
       AgentScreen(controller)
     }
 
-    composeRule.onNodeWithText("\u53ef\u9009\u62e9 HTML / Markdown / Text \u8fdb\u884c\u6253\u5f00").assertIsDisplayed()
+    composeRule.onNodeWithText("\u53ef\u9009\u62e9 HTML / Markdown / JSON / CSV / Text \u8fdb\u884c\u6253\u5f00").assertIsDisplayed()
   }
 
   @Test
@@ -381,6 +381,35 @@ class AgentScreenInteractionInstrumentedTest {
       assertEquals("README.md", controller.state.value.selectedPreviewPath)
       assertTrue(controller.state.value.selectedPreviewContent.contains("Android Agent Workspace"))
     }
+  }
+
+  @Test
+  fun structuredWorkspaceFilesRenderAsJsonAndCsvPreviews() {
+    val context = composeRule.activity.applicationContext
+    val workspaceId = "structured-preview-${System.currentTimeMillis()}"
+    SettingsStore(context).save(AppSettings(language = "en", activeWorkspaceId = workspaceId, selectedHtmlPath = "index.html"))
+    val workspace = WorkspaceManager(context, workspaceId).also { it.ensureSeedFiles() }
+    workspace.writeFile("data.json", """{"name":"Flovera","status":"ready"}""", createAutoSnapshot = false)
+    workspace.writeFile("table.csv", "name,status\nFlovera,ready", createAutoSnapshot = false)
+    val controller = AgentController(context)
+    controller.selectWorkspacePreview("data.json")
+
+    composeRule.setContent {
+      AgentScreen(controller)
+    }
+
+    composeRule.onNodeWithText("JSON preview").assertIsDisplayed()
+    composeRule.onNodeWithText("\"name\": \"Flovera\"", substring = true).assertIsDisplayed()
+
+    composeRule.runOnIdle {
+      controller.selectWorkspacePreview("table.csv")
+    }
+
+    composeRule.onNodeWithText("CSV preview").assertIsDisplayed()
+    composeRule.onNodeWithText("name").assertIsDisplayed()
+    composeRule.onNodeWithText("status").assertIsDisplayed()
+    composeRule.onNodeWithText("Flovera").assertIsDisplayed()
+    composeRule.onNodeWithText("ready").assertIsDisplayed()
   }
 
   @Test
