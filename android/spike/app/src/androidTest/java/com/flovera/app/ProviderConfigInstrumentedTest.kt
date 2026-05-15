@@ -36,6 +36,18 @@ class ProviderConfigInstrumentedTest {
   }
 
   @Test
+  fun deepSeekProviderDeclaresContextMetadata() {
+    val provider = ModelProviderCatalog.requireProvider("deepseek")
+    val context = provider.contextFor("deepseek-v4-pro")
+
+    assertEquals(1_000_000, context.contextWindowTokens)
+    assertEquals("deepseek_catalog", context.source)
+    assertEquals("estimate", context.usageSource)
+    assertEquals(82, context.compressionThresholdPercent)
+    assertEquals(1_000_000L, provider.createModel("deepseek-v4-pro").contextLength)
+  }
+
+  @Test
   fun networkToolsDefaultToDisabled() {
     assertFalse(AppSettings().networkEnabled)
     assertFalse(AppSettings().webSearchEnabled)

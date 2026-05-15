@@ -12,6 +12,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -62,6 +63,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -444,11 +447,17 @@ private fun ConversationDialog(
               style = MaterialTheme.typography.bodySmall,
             )
             if (!isDraftSession && latestContextRecord != null) {
-              Text(
-                text = formatContextUsage(latestContextRecord, language),
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.82f),
-                style = MaterialTheme.typography.bodySmall,
-              )
+              Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+              ) {
+                ContextUsageRing(latestContextRecord)
+                Text(
+                  text = formatContextUsage(latestContextRecord, language),
+                  color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.82f),
+                  style = MaterialTheme.typography.bodySmall,
+                )
+              }
             }
           }
           Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -890,17 +899,75 @@ private fun formatMessageTime(timestampMillis: Long): String {
   return SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(timestampMillis))
 }
 
+@Composable
+private fun ContextUsageRing(record: ContextUsageRecord) {
+  val permille = record.contextUsagePermille
+  val rawProgress = ((permille ?: 0).toFloat() / 1_000f).coerceIn(0f, 1f)
+  val progress = if (rawProgress == 0f && record.approximateTokens > 0 && record.modelContextWindowTokens != null) {
+    0.01f
+  } else {
+    rawProgress
+  }
+  val percent = if (permille == null) {
+    "?"
+  } else {
+    val rounded = ((permille + 5) / 10).coerceIn(0, 100)
+    if (rounded == 0 && record.approximateTokens > 0) "<1" else rounded.toString()
+  }
+  val trackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.28f)
+  val progressColor = MaterialTheme.colorScheme.primary
+  Box(contentAlignment = Alignment.Center, modifier = Modifier.size(38.dp)) {
+    Canvas(modifier = Modifier.fillMaxSize()) {
+      val stroke = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
+      drawArc(
+        color = trackColor,
+        startAngle = -90f,
+        sweepAngle = 360f,
+        useCenter = false,
+        style = stroke,
+      )
+      drawArc(
+        color = progressColor,
+        startAngle = -90f,
+        sweepAngle = 360f * progress,
+        useCenter = false,
+        style = stroke,
+      )
+    }
+    Text(
+      text = percent,
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+      style = MaterialTheme.typography.labelSmall,
+    )
+  }
+}
+
 private fun formatContextUsage(record: ContextUsageRecord, language: String): String {
   val compression = if (record.compressed) {
     t(language, "compressed", "\u5df2\u538b\u7f29")
   } else {
     t(language, "no compression", "\u672a\u538b\u7f29")
   }
+  val contextWindow = record.modelContextWindowTokens
+  val contextLabel = if (contextWindow == null) {
+    t(language, "unknown window", "\u672a\u77e5\u7a97\u53e3")
+  } else {
+    val percent = record.contextUsagePermille?.let { formatContextPercent(record, language) }
+      ?: t(language, "estimate", "\u4f30\u7b97")
+    "$percent / ${contextWindow / 1_000}k"
+  }
   return t(
     language,
-    "Context ~${record.approximateTokens} tokens / ${record.messageCount} messages / $compression",
-    "\u4e0a\u4e0b\u6587\u7ea6 ${record.approximateTokens} tokens / ${record.messageCount} \u6761\u6d88\u606f / $compression",
+    "Context ~${record.approximateTokens} tokens / $contextLabel / ${record.messageCount} messages / $compression",
+    "\u4e0a\u4e0b\u6587\u7ea6 ${record.approximateTokens} tokens / $contextLabel / ${record.messageCount} \u6761\u6d88\u606f / $compression",
   )
+}
+
+private fun formatContextPercent(record: ContextUsageRecord, language: String): String {
+  val permille = record.contextUsagePermille ?: return t(language, "estimate", "\u4f30\u7b97")
+  val value = ((permille + 5) / 10).coerceIn(0, 100)
+  if (value == 0 && record.approximateTokens > 0) return t(language, "<1%", "<1%")
+  return "$value%"
 }
 
 private fun formatSnapshotTime(timestampMillis: Long): String {

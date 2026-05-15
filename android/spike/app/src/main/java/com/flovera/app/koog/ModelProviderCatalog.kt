@@ -16,17 +16,32 @@ data class ModelProviderSpec(
   val suggestedModels: List<String>,
   val llmProvider: LLMProvider,
   val createClient: (String) -> LLMClient,
+  val modelContexts: Map<String, ModelContextSpec> = emptyMap(),
+  val defaultContext: ModelContextSpec = ModelContextSpec(),
 ) {
+  fun contextFor(modelId: String): ModelContextSpec {
+    return modelContexts[modelId.ifBlank { defaultModel }] ?: defaultContext
+  }
+
   fun createModel(modelId: String): LLModel {
+    val model = modelId.ifBlank { defaultModel }
+    val context = contextFor(model)
     return LLModel(
       provider = llmProvider,
-      id = modelId.ifBlank { defaultModel },
+      id = model,
       capabilities = agentModelCapabilities,
-      contextLength = 200_000,
+      contextLength = (context.contextWindowTokens ?: 200_000).toLong(),
       maxOutputTokens = 32_000,
     )
   }
 }
+
+data class ModelContextSpec(
+  val contextWindowTokens: Int? = null,
+  val source: String = "unknown",
+  val usageSource: String = "estimate",
+  val compressionThresholdPercent: Int? = null,
+)
 
 object ModelProviderCatalog {
   val providers = listOf(
@@ -35,9 +50,22 @@ object ModelProviderCatalog {
       label = "DeepSeek",
       apiKeyLabel = "DeepSeek API key",
       defaultModel = "deepseek-v4-pro",
-      suggestedModels = listOf("deepseek-v4-pro", "deepseek-chat", "deepseek-reasoner"),
+      suggestedModels = listOf("deepseek-v4-pro", "deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner"),
       llmProvider = LLMProvider.DeepSeek,
       createClient = ::FloveraDeepSeekLLMClient,
+      modelContexts = listOf(
+        "deepseek-v4-pro",
+        "deepseek-v4-flash",
+        "deepseek-chat",
+        "deepseek-reasoner",
+      ).associateWith {
+        ModelContextSpec(
+          contextWindowTokens = 1_000_000,
+          source = "deepseek_catalog",
+          usageSource = "estimate",
+          compressionThresholdPercent = 82,
+        )
+      },
     ),
     ModelProviderSpec(
       id = "openai",

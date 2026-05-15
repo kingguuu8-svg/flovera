@@ -3,6 +3,7 @@ package com.flovera.app.agent
 import com.flovera.app.config.AppSettings
 import com.flovera.app.koog.AgentRuntime
 import com.flovera.app.koog.KoogAgentRuntime
+import com.flovera.app.koog.ModelProviderCatalog
 import com.flovera.app.koog.ToolEventRecorder
 import com.flovera.app.session.AgentSession
 import com.flovera.app.session.ContextUsageRecord
@@ -39,7 +40,7 @@ class AgentRunController(
     if (trimmed.isBlank()) return null
 
     val withUser = appendUserPrompt(session, trimmed)
-    val withContext = appendContextRecord(withUser, estimateContextUsage(trimmed, withUser, workspace))
+    val withContext = appendContextRecord(withUser, estimateContextUsage(trimmed, settings, withUser, workspace))
     val agentRunId = "${withContext.id}-${UUID.randomUUID()}"
     onStarted(withContext, SessionMessage(role = "assistant", content = "Working..."))
 
@@ -96,6 +97,7 @@ class AgentRunController(
 
   private fun estimateContextUsage(
     input: String,
+    settings: AppSettings,
     session: AgentSession,
     workspace: WorkspaceManager,
   ): ContextUsageRecord {
@@ -106,15 +108,26 @@ class AgentRunController(
     val rulesChars = workspace.readAgentRules().length
     val workspaceListingChars = workspace.listFiles(".").length
     val totalChars = input.length + historyChars + rulesChars + workspaceListingChars
+    val approximateTokens = approximateTokens(totalChars)
+    val provider = ModelProviderCatalog.findProvider(settings.provider)
+    val modelContext = provider?.contextFor(settings.model)
+    val contextWindowTokens = modelContext?.contextWindowTokens
     return ContextUsageRecord(
       id = UUID.randomUUID().toString(),
       source = "agent_run",
+      provider = provider?.id ?: settings.provider,
+      model = settings.model,
       messageCount = session.messages.size,
       inputChars = input.length,
       historyChars = historyChars,
       rulesChars = rulesChars,
       workspaceListingChars = workspaceListingChars,
-      approximateTokens = approximateTokens(totalChars),
+      approximateTokens = approximateTokens,
+      modelContextWindowTokens = contextWindowTokens,
+      modelContextSource = modelContext?.source ?: "unknown",
+      tokenUsageSource = modelContext?.usageSource ?: "estimate",
+      contextUsagePermille = usagePermille(approximateTokens, contextWindowTokens),
+      compressionThresholdPercent = modelContext?.compressionThresholdPercent,
       compressed = false,
       summary = "No compression was applied for this run.",
     )
@@ -122,6 +135,11 @@ class AgentRunController(
 
   private fun approximateTokens(chars: Int): Int {
     return ((chars + 3) / 4).coerceAtLeast(1)
+  }
+
+  private fun usagePermille(tokens: Int, contextWindowTokens: Int?): Int? {
+    if (contextWindowTokens == null || contextWindowTokens <= 0) return null
+    return ((tokens.toLong() * 1_000L) / contextWindowTokens).coerceIn(0L, 1_000L).toInt()
   }
 
   private fun saveErrorLog(
