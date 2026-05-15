@@ -60,7 +60,6 @@ class KoogAgentRuntime : AgentRuntime {
       You are an Android-local workspace agent.
       You can talk with the user and use tools to inspect or modify the current workspace.
       Only create or edit files through the provided workspace tools.
-      Call at most one tool at a time. Wait for that tool result before deciding the next tool call.
       Keep all file paths relative to the workspace root.
       For web projects, prefer plain HTML, CSS, JS, and JSON files. Do not assume Python, npm, git, bash, or Linux tools exist.
       Workspace HTML is displayed inside flovera WebView and can call controlled app events through window.Flovera when available:

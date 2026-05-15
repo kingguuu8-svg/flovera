@@ -2,7 +2,6 @@ package com.flovera.app.koog
 
 import ai.koog.prompt.executor.clients.LLMClient
 import ai.koog.prompt.executor.clients.anthropic.AnthropicLLMClient
-import ai.koog.prompt.executor.clients.deepseek.DeepSeekLLMClient
 import ai.koog.prompt.executor.clients.openai.OpenAILLMClient
 import ai.koog.prompt.executor.clients.openrouter.OpenRouterLLMClient
 import ai.koog.prompt.llm.LLMCapability
@@ -38,7 +37,7 @@ object ModelProviderCatalog {
       defaultModel = "deepseek-v4-pro",
       suggestedModels = listOf("deepseek-v4-pro", "deepseek-chat", "deepseek-reasoner"),
       llmProvider = LLMProvider.DeepSeek,
-      createClient = ::DeepSeekLLMClient,
+      createClient = ::FloveraDeepSeekLLMClient,
     ),
     ModelProviderSpec(
       id = "openai",

@@ -1,0 +1,253 @@
+package com.flovera.app.koog
+
+import ai.koog.http.client.KoogHttpClient
+import ai.koog.prompt.dsl.ModerationResult
+import ai.koog.prompt.dsl.Prompt
+import ai.koog.prompt.executor.clients.deepseek.DeepSeekClientSettings
+import ai.koog.prompt.executor.clients.deepseek.DeepSeekModels
+import ai.koog.prompt.executor.clients.deepseek.DeepSeekParams
+import ai.koog.prompt.executor.clients.deepseek.models.DeepSeekChatCompletionResponse
+import ai.koog.prompt.executor.clients.deepseek.models.DeepSeekChatCompletionStreamResponse
+import ai.koog.prompt.executor.clients.openai.base.AbstractOpenAILLMClient
+import ai.koog.prompt.executor.clients.openai.base.OpenAICompatibleToolDescriptorSchemaGenerator
+import ai.koog.prompt.executor.clients.openai.base.models.OpenAIMessage
+import ai.koog.prompt.executor.clients.openai.base.models.OpenAIResponseFormat
+import ai.koog.prompt.executor.clients.openai.base.models.OpenAIStreamOptions
+import ai.koog.prompt.executor.clients.openai.base.models.OpenAITool
+import ai.koog.prompt.executor.clients.openai.base.models.OpenAIToolChoice
+import ai.koog.prompt.executor.clients.serialization.AdditionalPropertiesFlatteningSerializer
+import ai.koog.prompt.llm.LLMProvider
+import ai.koog.prompt.llm.LLModel
+import ai.koog.prompt.message.LLMChoice
+import ai.koog.prompt.message.ResponseMetaInfo
+import ai.koog.prompt.params.LLMParams
+import ai.koog.prompt.streaming.StreamFrame
+import ai.koog.prompt.streaming.buildStreamFrameFlow
+import io.github.oshai.kotlinlogging.KotlinLogging
+import io.ktor.client.HttpClient
+import kotlinx.coroutines.flow.Flow
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
+import kotlin.time.Clock
+
+class FloveraDeepSeekLLMClient(
+  private val settings: DeepSeekClientSettings = DeepSeekClientSettings(),
+  httpClient: KoogHttpClient,
+  clock: Clock = Clock.System,
+  toolsConverter: OpenAICompatibleToolDescriptorSchemaGenerator = OpenAICompatibleToolDescriptorSchemaGenerator(),
+) : AbstractOpenAILLMClient<DeepSeekChatCompletionResponse, DeepSeekChatCompletionStreamResponse>(
+  settings = settings,
+  httpClient = httpClient,
+  clock = clock,
+  logger = staticLogger,
+  toolsConverter = toolsConverter,
+) {
+  constructor(
+    apiKey: String,
+    settings: DeepSeekClientSettings = DeepSeekClientSettings(),
+    baseClient: HttpClient = HttpClient(),
+    clock: Clock = Clock.System,
+    toolsConverter: OpenAICompatibleToolDescriptorSchemaGenerator = OpenAICompatibleToolDescriptorSchemaGenerator(),
+  ) : this(
+    settings = settings,
+    httpClient = createConfiguredHttpClient(apiKey, settings, staticLogger, baseClient, DEEPSEEK_CLIENT_NAME),
+    clock = clock,
+    toolsConverter = toolsConverter,
+  )
+
+  override val clientName: String = DEEPSEEK_CLIENT_NAME
+
+  private val reasoningByToolCallId = mutableMapOf<String, String>()
+
+  override fun llmProvider(): LLMProvider = LLMProvider.DeepSeek
+
+  override fun serializeProviderChatRequest(
+    messages: List<OpenAIMessage>,
+    model: LLModel,
+    tools: List<OpenAITool>?,
+    toolChoice: OpenAIToolChoice?,
+    params: LLMParams,
+    stream: Boolean,
+  ): String {
+    val deepSeekParams = params.toFloveraDeepSeekParams()
+    val request = FloveraDeepSeekChatCompletionRequest(
+      messages = prepareDeepSeekMessagesForFlovera(
+        messages = messages,
+        reasoningByToolCallId = reasoningByToolCallId,
+        addJsonResponseHint = params.schema != null,
+      ),
+      model = model.id,
+      frequencyPenalty = deepSeekParams.frequencyPenalty,
+      logprobs = deepSeekParams.logprobs,
+      maxTokens = deepSeekParams.maxTokens,
+      presencePenalty = deepSeekParams.presencePenalty,
+      responseFormat = createResponseFormat(params.schema, model),
+      stop = deepSeekParams.stop,
+      stream = stream,
+      temperature = deepSeekParams.temperature,
+      toolChoice = deepSeekParams.toolChoice?.toOpenAIToolChoice(),
+      tools = tools,
+      topLogprobs = deepSeekParams.topLogprobs,
+      topP = deepSeekParams.topP,
+      additionalProperties = deepSeekParams.additionalProperties,
+    )
+    return json.encodeToString(FloveraDeepSeekChatCompletionRequestSerializer, request)
+  }
+
+  override fun processProviderChatResponse(response: DeepSeekChatCompletionResponse): List<LLMChoice> {
+    require(response.choices.isNotEmpty()) { "Empty choices in response" }
+    response.choices.forEach { choice ->
+      val message = choice.message as? OpenAIMessage.Assistant
+      val reasoning = message?.reasoningContent
+      if (!reasoning.isNullOrBlank()) {
+        message.toolCalls.orEmpty().forEach { toolCall ->
+          reasoningByToolCallId[toolCall.id] = reasoning
+        }
+      }
+    }
+    return response.choices.map { choice ->
+      choice.message.toMessageResponses(
+        choice.finishReason,
+        createMetaInfo(response.usage),
+      )
+    }
+  }
+
+  override fun decodeStreamingResponse(data: String): DeepSeekChatCompletionStreamResponse {
+    return json.decodeFromString(data)
+  }
+
+  override fun decodeResponse(data: String): DeepSeekChatCompletionResponse {
+    return json.decodeFromString(data)
+  }
+
+  override fun processStreamingResponse(response: Flow<DeepSeekChatCompletionStreamResponse>): Flow<StreamFrame> {
+    return buildStreamFrameFlow {
+      var finishReason: String? = null
+      var metaInfo: ResponseMetaInfo? = null
+
+      response.collect { chunk ->
+        chunk.choices.firstOrNull()?.let { choice ->
+          choice.delta.content?.let { emitTextDelta(it) }
+          choice.delta.toolCalls?.forEach { toolCall ->
+            emitToolCallDelta(
+              id = toolCall.id,
+              name = toolCall.function?.name,
+              args = toolCall.function?.arguments,
+              index = toolCall.index,
+            )
+          }
+          choice.finishReason?.let { finishReason = it }
+        }
+        chunk.usage?.let { metaInfo = createMetaInfo(it) }
+      }
+
+      emitEnd(finishReason, metaInfo)
+    }
+  }
+
+  override fun createResponseFormat(schema: LLMParams.Schema?, model: LLModel): OpenAIResponseFormat? {
+    return schema?.let {
+      require(model.supports(it.capability)) {
+        "Model ${model.id} does not support structured output schema ${it.name}"
+      }
+      when (it) {
+        is LLMParams.Schema.JSON -> OpenAIResponseFormat.JsonObject()
+      }
+    }
+  }
+
+  override suspend fun moderate(prompt: Prompt, model: LLModel): ModerationResult {
+    staticLogger.warn { "Moderation is not supported by DeepSeek API" }
+    throw UnsupportedOperationException("Moderation is not supported by DeepSeek API.")
+  }
+
+  override suspend fun models(): List<LLModel> {
+    return DeepSeekModels.models
+  }
+
+  override suspend fun embed(text: String, model: LLModel): List<Double> {
+    staticLogger.warn { "Embedding is not supported by DeepSeek API" }
+    throw UnsupportedOperationException("Embedding is not supported by DeepSeek API.")
+  }
+
+  override suspend fun embed(inputs: List<String>, model: LLModel): List<List<Double>> {
+    staticLogger.warn { "Embedding is not supported by DeepSeek API" }
+    throw UnsupportedOperationException("Embedding is not supported by DeepSeek API.")
+  }
+
+  companion object {
+    private const val DEEPSEEK_CLIENT_NAME = "FloveraDeepSeekLLMClient"
+    private val staticLogger = KotlinLogging.logger { }
+  }
+}
+
+private data class FloveraDeepSeekParams(
+  val temperature: Double?,
+  val maxTokens: Int?,
+  val schema: LLMParams.Schema?,
+  val toolChoice: LLMParams.ToolChoice?,
+  val additionalProperties: Map<String, JsonElement>?,
+  val frequencyPenalty: Double?,
+  val presencePenalty: Double?,
+  val logprobs: Boolean?,
+  val stop: List<String>?,
+  val topLogprobs: Int?,
+  val topP: Double?,
+)
+
+private fun LLMParams.toFloveraDeepSeekParams(): FloveraDeepSeekParams {
+  if (this is DeepSeekParams) {
+    return FloveraDeepSeekParams(
+      temperature = temperature,
+      maxTokens = maxTokens,
+      schema = schema,
+      toolChoice = toolChoice,
+      additionalProperties = additionalProperties,
+      frequencyPenalty = frequencyPenalty,
+      presencePenalty = presencePenalty,
+      logprobs = logprobs,
+      stop = stop,
+      topLogprobs = topLogprobs,
+      topP = topP,
+    )
+  }
+  return FloveraDeepSeekParams(
+    temperature = temperature,
+    maxTokens = maxTokens,
+    schema = schema,
+    toolChoice = toolChoice,
+    additionalProperties = additionalProperties,
+    frequencyPenalty = null,
+    presencePenalty = null,
+    logprobs = null,
+    stop = null,
+    topLogprobs = null,
+    topP = null,
+  )
+}
+
+@Serializable
+private data class FloveraDeepSeekChatCompletionRequest(
+  val messages: List<OpenAIMessage>,
+  val model: String,
+  val stream: Boolean? = null,
+  val temperature: Double? = null,
+  val tools: List<OpenAITool>? = null,
+  val toolChoice: OpenAIToolChoice? = null,
+  val topP: Double? = null,
+  val topLogprobs: Int? = null,
+  val maxTokens: Int? = null,
+  val frequencyPenalty: Double? = null,
+  val presencePenalty: Double? = null,
+  val responseFormat: OpenAIResponseFormat? = null,
+  val stop: List<String>? = null,
+  val logprobs: Boolean? = null,
+  val streamOptions: OpenAIStreamOptions? = null,
+  val additionalProperties: Map<String, JsonElement>? = null,
+)
+
+private object FloveraDeepSeekChatCompletionRequestSerializer :
+  AdditionalPropertiesFlatteningSerializer<FloveraDeepSeekChatCompletionRequest>(
+    FloveraDeepSeekChatCompletionRequest.serializer(),
+  )
