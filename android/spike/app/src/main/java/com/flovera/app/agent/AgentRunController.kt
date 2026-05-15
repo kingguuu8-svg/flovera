@@ -7,6 +7,7 @@ import com.flovera.app.koog.ModelProviderCatalog
 import com.flovera.app.koog.ToolEventRecorder
 import com.flovera.app.session.AgentSession
 import com.flovera.app.session.ContextUsageRecord
+import com.flovera.app.session.RuntimeSessionHistory
 import com.flovera.app.session.SessionMessage
 import com.flovera.app.session.ToolEvent
 import com.flovera.app.workspace.WorkspaceManager
@@ -120,9 +121,9 @@ class AgentRunController(
     session: AgentSession,
     workspace: WorkspaceManager,
   ): ContextUsageRecord {
-    val recentHistory = session.messages.takeLast(12)
+    val recentHistory = RuntimeSessionHistory.entries(session = session, currentInput = input)
     val historyChars = recentHistory.sumOf { message ->
-      message.role.length + message.content.take(1_500).length + 2
+      message.role.length + message.content.length + 2
     }
     val rulesChars = workspace.readAgentRules().length
     val workspaceListingChars = workspace.listFiles(".").length

@@ -5,6 +5,7 @@ import com.flovera.app.config.AppSettings
 import com.flovera.app.config.SettingsStore
 import com.flovera.app.session.AgentSessionStore
 import com.flovera.app.session.ContextUsageRecord
+import com.flovera.app.session.RuntimeSessionHistory
 import com.flovera.app.session.SESSION_ROLE_COMPRESSION
 import com.flovera.app.session.SessionController
 import com.flovera.app.session.SessionMessage
@@ -353,6 +354,43 @@ class SessionManagementInstrumentedTest {
     assertEquals("one", reverted?.messages?.single()?.content)
   }
 
+  @Test
+  fun runtimeHistoryUsesLatestCompressionDividerAsHandoffBoundary() {
+    val store = isolatedSessionStore("runtime-history-compressed").store
+    val session = store.create("Runtime history ${System.currentTimeMillis()}")
+    val one = store.appendMessage(session, SessionMessage(role = "user", content = "old user request"))
+    val two = store.appendMessage(one, SessionMessage(role = "assistant", content = "old assistant result"))
+    val compressed = store.appendCompressionDivider(
+      two,
+      contextRecord("compression-record"),
+      "Keep only the project target and pending task.",
+    )
+    val after = store.appendMessage(compressed, SessionMessage(role = "assistant", content = "new assistant result"))
+    val current = store.appendMessage(after, SessionMessage(role = "user", content = "continue the task"))
+
+    val history = RuntimeSessionHistory.promptText(current, currentInput = "continue the task")
+
+    assertTrue(history.contains("handoff_summary:"))
+    assertTrue(history.contains("Keep only the project target and pending task."))
+    assertTrue(history.contains("assistant: new assistant result"))
+    assertFalse(history.contains("old user request"))
+    assertFalse(history.contains("old assistant result"))
+    assertFalse(history.contains("user: continue the task"))
+  }
+
+  @Test
+  fun runtimeHistoryWithoutCompressionKeepsRecentMessagesAndSkipsCurrentInputDuplicate() {
+    val store = isolatedSessionStore("runtime-history-plain").store
+    val session = store.create("Runtime history plain ${System.currentTimeMillis()}")
+    val one = store.appendMessage(session, SessionMessage(role = "user", content = "one"))
+    val two = store.appendMessage(one, SessionMessage(role = "assistant", content = "two"))
+    val three = store.appendMessage(two, SessionMessage(role = "user", content = "three"))
+
+    val entries = RuntimeSessionHistory.entries(three, currentInput = "three", maxMessages = 12)
+
+    assertEquals(listOf("one", "two"), entries.map { it.content })
+  }
+
   private fun isolatedSessionStore(name: String): SessionStoreHarness {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val root = File(context.cacheDir, "session-tests/$name-${UUID.randomUUID()}")
@@ -385,4 +423,20 @@ class SessionManagementInstrumentedTest {
     val root: File,
     val sessionsRoot: File,
   )
+
+  private fun contextRecord(id: String): ContextUsageRecord {
+    return ContextUsageRecord(
+      id = id,
+      source = "test",
+      provider = "deepseek",
+      model = "deepseek-v4-pro",
+      messageCount = 2,
+      inputChars = 10,
+      historyChars = 20,
+      rulesChars = 0,
+      workspaceListingChars = 0,
+      approximateTokens = 10,
+      contextBudgetStatus = "compression_recommended",
+    )
+  }
 }

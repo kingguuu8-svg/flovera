@@ -5,6 +5,7 @@ import ai.koog.prompt.executor.llms.MultiLLMPromptExecutor
 import ai.koog.utils.io.use
 import com.flovera.app.config.AppSettings
 import com.flovera.app.session.AgentSession
+import com.flovera.app.session.RuntimeSessionHistory
 import com.flovera.app.workspace.WorkspaceManager
 
 interface AgentRuntime {
@@ -83,9 +84,7 @@ class KoogAgentRuntime : AgentRuntime {
   }
 
   private fun buildUserInput(input: String, session: AgentSession): String {
-    val history = session.messages.takeLast(12).joinToString("\n") { message ->
-      "${message.role}: ${message.content.take(1_500)}"
-    }
+    val history = RuntimeSessionHistory.promptText(session = session, currentInput = input)
     return """
       Recent session history:
       ${history.ifBlank { "(empty)" }}
