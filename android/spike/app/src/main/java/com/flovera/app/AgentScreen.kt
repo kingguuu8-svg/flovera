@@ -92,6 +92,7 @@ import com.flovera.app.session.SESSION_ROLE_COMPRESSION
 import com.flovera.app.session.SessionMessage
 import com.flovera.app.session.ToolEvent
 import com.flovera.app.web.FloveraWebBridge
+import com.flovera.app.workspace.WorkspaceControlledToolProposal
 import com.flovera.app.workspace.WorkspaceFileNode
 import com.flovera.app.workspace.WorkspaceSettingsProposal
 import com.flovera.app.workspace.WorkspaceSnapshotRecord
@@ -2402,6 +2403,16 @@ private fun SettingsDialog(
             )
           }
         }
+        if (state.controlledToolProposals.isNotEmpty()) {
+          Text(t(language, "Tool proposals", "\u5de5\u5177\u63d0\u6848"), style = MaterialTheme.typography.titleSmall)
+          state.controlledToolProposals.forEach { proposal ->
+            ControlledToolProposalItem(
+              proposal = proposal,
+              language = language,
+              onDismiss = { controller.dismissControlledToolProposal(proposal.path) },
+            )
+          }
+        }
         Text(t(language, "Appearance", "\u5916\u89c2"), style = MaterialTheme.typography.titleSmall)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
           OutlinedButton(
@@ -2556,6 +2567,46 @@ private fun SettingsProposalItem(
   }
 }
 
+@Composable
+private fun ControlledToolProposalItem(
+  proposal: WorkspaceControlledToolProposal,
+  language: String,
+  onDismiss: () -> Unit,
+) {
+  Surface(
+    modifier = Modifier.fillMaxWidth(),
+    shape = RoundedCornerShape(8.dp),
+    color = MaterialTheme.colorScheme.surfaceVariant,
+  ) {
+    Column(
+      modifier = Modifier.fillMaxWidth().padding(10.dp),
+      verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+      Text(proposal.title, style = MaterialTheme.typography.bodyLarge)
+      if (proposal.reason.isNotBlank()) {
+        Text(proposal.reason, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+      }
+      Text(
+        controlledToolProposalSummary(proposal),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.bodySmall,
+      )
+      Text(
+        t(
+          language,
+          "Recorded only. Tool and MCP installation are not enabled in this build.",
+          "\u4ec5\u8bb0\u5f55\u63d0\u6848\u3002\u5f53\u524d\u7248\u672c\u4e0d\u5f00\u653e\u5de5\u5177\u6216 MCP \u5b89\u88c5\u3002",
+        ),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.bodySmall,
+      )
+      TextButton(onClick = onDismiss) {
+        Text(t(language, "Dismiss", "\u5ffd\u7565"))
+      }
+    }
+  }
+}
+
 private fun settingsProposalSummary(proposal: WorkspaceSettingsProposal): String {
   val changes = proposal.changes
   val parts = listOfNotNull(
@@ -2574,6 +2625,18 @@ private fun settingsProposalSummary(proposal: WorkspaceSettingsProposal): String
     changes.modelCompressionThresholdPercent?.let { "compression=$it%" },
   )
   return parts.ifEmpty { listOf(proposal.path) }.joinToString(", ")
+}
+
+private fun controlledToolProposalSummary(proposal: WorkspaceControlledToolProposal): String {
+  val parts = listOfNotNull(
+    "type=${proposal.type}",
+    proposal.name.takeIf { it.isNotBlank() }?.let { "name=$it" },
+    proposal.command.takeIf { it.isNotBlank() }?.let { "command=$it" },
+    proposal.endpoint.takeIf { it.isNotBlank() }?.let { "endpoint=$it" },
+    proposal.requestedCapabilities.takeIf { it.isNotEmpty() }?.joinToString(prefix = "capabilities=", separator = "|"),
+    proposal.permissions.takeIf { it.isNotEmpty() }?.joinToString(prefix = "permissions=", separator = "|"),
+  )
+  return parts.joinToString(", ")
 }
 
 private fun authorityModeLabel(language: String, authorityMode: String): String {

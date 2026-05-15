@@ -146,10 +146,26 @@ class WorkspaceFileTreeInstrumentedTest {
       """.trimIndent(),
       createAutoSnapshot = false,
     )
+    workspace.writeFile(
+      ".flovera/proposals/search-tool.json",
+      """
+      {
+        "type": "tool",
+        "title": "Add workspace search",
+        "reason": "Find files without scanning manually",
+        "name": "workspace_search",
+        "description": "Search workspace file contents",
+        "requestedCapabilities": ["filesystem"],
+        "permissions": ["read workspace"]
+      }
+      """.trimIndent(),
+      createAutoSnapshot = false,
+    )
 
     val capabilities = workspace.readFile(".flovera/capabilities.json")
     val settingsView = workspace.readFile(".flovera/settings-view.json")
     val proposals = workspace.listSettingsProposals()
+    val toolProposals = workspace.listControlledToolProposals()
 
     assertTrue(capabilities.contains("\"networkTools\": true"))
     assertTrue(capabilities.contains("\"webSearch\": true"))
@@ -158,11 +174,21 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"csv\""))
     assertTrue(capabilities.contains("\"modelContextOverrides\": true"))
     assertTrue(capabilities.contains("\"directSettingsWrite\": false"))
+    assertTrue(capabilities.contains("\"controlledToolProposals\": true"))
+    assertTrue(capabilities.contains("\"controlledMcpProposals\": true"))
+    assertTrue(capabilities.contains("\"directToolInstall\": false"))
+    assertTrue(capabilities.contains("\"directMcpInstall\": false"))
     assertTrue(settingsView.contains("\"modelContextSource\""))
     assertTrue(settingsView.contains("\"compressionThresholdPercent\""))
     assertEquals(1, proposals.size)
     assertEquals("Use softer theme", proposals.first().title)
     assertEquals("#C989B8", proposals.first().changes.themeColor)
+    assertEquals(1, toolProposals.size)
+    assertEquals("tool", toolProposals.first().type)
+    assertEquals("workspace_search", toolProposals.first().name)
+    assertFalse(workspace.deleteSettingsProposal(".flovera/proposals/search-tool.json"))
+    assertTrue(workspace.deleteControlledToolProposal(".flovera/proposals/search-tool.json"))
+    assertTrue(workspace.listControlledToolProposals().isEmpty())
   }
 
   @Test

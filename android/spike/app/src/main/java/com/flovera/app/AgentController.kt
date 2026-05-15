@@ -14,6 +14,7 @@ import com.flovera.app.session.AgentSessionStore
 import com.flovera.app.session.SessionController
 import com.flovera.app.session.SessionMessage
 import com.flovera.app.workspace.WorkspaceController
+import com.flovera.app.workspace.WorkspaceControlledToolProposal
 import com.flovera.app.workspace.WorkspaceFileNode
 import com.flovera.app.workspace.WorkspaceSettingsProposal
 import com.flovera.app.workspace.WorkspaceSnapshotRecord
@@ -44,6 +45,7 @@ data class AgentScreenState(
   val workspaceRootUrl: String = "",
   val workspaceSnapshots: List<WorkspaceSnapshotRecord> = emptyList(),
   val settingsProposals: List<WorkspaceSettingsProposal> = emptyList(),
+  val controlledToolProposals: List<WorkspaceControlledToolProposal> = emptyList(),
   val status: String = "Idle",
   val isRunning: Boolean = false,
   val assistantDraft: SessionMessage? = null,
@@ -119,6 +121,7 @@ class AgentController(
       workspaceRootUrl = workspaceSnapshot.workspaceRootUrl,
       workspaceSnapshots = workspaceSnapshot.snapshots,
       settingsProposals = workspaceSnapshot.settingsProposals,
+      controlledToolProposals = workspaceSnapshot.controlledToolProposals,
       status = settingsLoad.warning ?: "Ready",
     )
   }
@@ -210,6 +213,7 @@ class AgentController(
         workspaceRootUrl = workspaceSnapshot.workspaceRootUrl,
         workspaceSnapshots = workspaceSnapshot.snapshots,
         settingsProposals = workspaceSnapshot.settingsProposals,
+        controlledToolProposals = workspaceSnapshot.controlledToolProposals,
         status = "Settings saved",
       )
     }
@@ -300,6 +304,11 @@ class AgentController(
   fun rejectSettingsProposal(path: String) {
     val deleted = workspaceController.deleteSettingsProposal(path)
     refreshWorkspaceState(status = if (deleted) "Settings proposal rejected" else "Settings proposal not found")
+  }
+
+  fun dismissControlledToolProposal(path: String) {
+    val deleted = workspaceController.deleteControlledToolProposal(path)
+    refreshWorkspaceState(status = if (deleted) "Tool proposal dismissed" else "Tool proposal not found")
   }
 
   fun workspaceFileUri(path: String): Uri? {
@@ -614,6 +623,7 @@ class AgentController(
         workspaceRootUrl = workspaceSnapshot.workspaceRootUrl,
         workspaceSnapshots = workspaceSnapshot.snapshots,
         settingsProposals = workspaceSnapshot.settingsProposals,
+        controlledToolProposals = workspaceSnapshot.controlledToolProposals,
         isRunning = isRunning,
         assistantDraft = if (isRunning) it.assistantDraft else null,
         status = status,

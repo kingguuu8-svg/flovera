@@ -15,6 +15,7 @@ data class WorkspaceSnapshot(
   val workspaceRootUrl: String,
   val snapshots: List<WorkspaceSnapshotRecord>,
   val settingsProposals: List<WorkspaceSettingsProposal>,
+  val controlledToolProposals: List<WorkspaceControlledToolProposal>,
 )
 
 class WorkspaceController(context: Context, workspaceId: String) {
@@ -82,6 +83,10 @@ class WorkspaceController(context: Context, workspaceId: String) {
 
   fun deleteSettingsProposal(path: String): Boolean = workspace.deleteSettingsProposal(path)
 
+  fun listControlledToolProposals(): List<WorkspaceControlledToolProposal> = workspace.listControlledToolProposals()
+
+  fun deleteControlledToolProposal(path: String): Boolean = workspace.deleteControlledToolProposal(path)
+
   fun snapshot(currentSelectedHtmlPath: String): WorkspaceSnapshot {
     val htmlFiles = workspace.listHtmlFiles()
     val selectedHtmlPath = chooseHtmlPath(currentSelectedHtmlPath, htmlFiles)
@@ -94,6 +99,7 @@ class WorkspaceController(context: Context, workspaceId: String) {
       workspaceRootUrl = workspace.rootUrl(),
       snapshots = workspace.listSnapshots(),
       settingsProposals = workspace.listSettingsProposals(),
+      controlledToolProposals = workspace.listControlledToolProposals(),
     )
   }
 

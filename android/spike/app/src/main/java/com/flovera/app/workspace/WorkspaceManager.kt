@@ -148,6 +148,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
       ?.mapNotNull { file ->
         runCatching {
           val decoded = json.decodeFromString<WorkspaceSettingsProposalFile>(readUtf8Text(file))
+          if (!decoded.type.equals("settings", ignoreCase = true)) return@mapNotNull null
           WorkspaceSettingsProposal(
             path = relativeToRoot(file),
             title = decoded.title.ifBlank { file.nameWithoutExtension },
@@ -161,9 +162,51 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
       ?: emptyList()
   }
 
+  fun listControlledToolProposals(): List<WorkspaceControlledToolProposal> {
+    val proposalsDir = safeFile(".flovera/proposals")
+    return proposalsDir.listFiles()
+      ?.filter { it.isFile && it.extension.equals("json", ignoreCase = true) }
+      ?.mapNotNull { file ->
+        runCatching {
+          val decoded = json.decodeFromString<WorkspaceControlledToolProposalFile>(readUtf8Text(file))
+          val normalizedType = decoded.type.lowercase()
+          if (normalizedType !in setOf("tool", "mcp")) return@mapNotNull null
+          WorkspaceControlledToolProposal(
+            path = relativeToRoot(file),
+            type = normalizedType,
+            title = decoded.title.ifBlank { file.nameWithoutExtension },
+            reason = decoded.reason,
+            name = decoded.name,
+            description = decoded.description,
+            command = decoded.command,
+            endpoint = decoded.endpoint,
+            requestedCapabilities = decoded.requestedCapabilities,
+            permissions = decoded.permissions,
+            createdAtMillis = file.lastModified(),
+          )
+        }.getOrNull()
+      }
+      ?.sortedByDescending { it.createdAtMillis }
+      ?: emptyList()
+  }
+
   fun deleteSettingsProposal(path: String): Boolean {
     val file = safeFile(path)
     if (!file.isFile || !relativeToRoot(file).startsWith(".flovera/proposals/")) return false
+    val decoded = runCatching {
+      json.decodeFromString<WorkspaceSettingsProposalFile>(readUtf8Text(file))
+    }.getOrNull() ?: return false
+    if (!decoded.type.equals("settings", ignoreCase = true)) return false
+    return file.delete()
+  }
+
+  fun deleteControlledToolProposal(path: String): Boolean {
+    val file = safeFile(path)
+    if (!file.isFile || !relativeToRoot(file).startsWith(".flovera/proposals/")) return false
+    val decoded = runCatching {
+      json.decodeFromString<WorkspaceControlledToolProposalFile>(readUtf8Text(file))
+    }.getOrNull() ?: return false
+    if (decoded.type.lowercase() !in setOf("tool", "mcp")) return false
     return file.delete()
   }
 
@@ -432,9 +475,15 @@ data class FloveraCapabilities(
   val webSearch: Boolean = false,
   val settingsView: Boolean = true,
   val settingsProposals: Boolean = true,
+  val controlledToolProposals: Boolean = true,
+  val controlledMcpProposals: Boolean = true,
   val modelContextOverrides: Boolean = true,
   val deepSeekThinkingEffort: Boolean = true,
   val directSettingsWrite: Boolean = false,
+  val directToolInstall: Boolean = false,
+  val directMcpInstall: Boolean = false,
+  val executableToolExpansion: Boolean = false,
+  val proposalTypes: List<String> = listOf("settings", "tool", "mcp"),
   val authorityMode: String = "safe",
   val supportedAuthorityModes: List<String> = listOf("safe", "assisted"),
   val pendingAuthorityModes: List<String> = listOf("full"),
@@ -463,5 +512,32 @@ data class WorkspaceSettingsProposal(
   val title: String,
   val reason: String,
   val changes: SettingsProposalChanges,
+  val createdAtMillis: Long,
+)
+
+@Serializable
+data class WorkspaceControlledToolProposalFile(
+  val type: String = "tool",
+  val title: String = "",
+  val reason: String = "",
+  val name: String = "",
+  val description: String = "",
+  val command: String = "",
+  val endpoint: String = "",
+  val requestedCapabilities: List<String> = emptyList(),
+  val permissions: List<String> = emptyList(),
+)
+
+data class WorkspaceControlledToolProposal(
+  val path: String,
+  val type: String,
+  val title: String,
+  val reason: String,
+  val name: String,
+  val description: String,
+  val command: String,
+  val endpoint: String,
+  val requestedCapabilities: List<String>,
+  val permissions: List<String>,
   val createdAtMillis: Long,
 )
