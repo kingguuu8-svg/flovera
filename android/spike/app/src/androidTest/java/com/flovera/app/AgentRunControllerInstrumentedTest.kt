@@ -1,6 +1,7 @@
 package com.flovera.app
 
 import androidx.test.platform.app.InstrumentationRegistry
+import com.flovera.app.agent.AgentContextBudget
 import com.flovera.app.agent.AgentRunController
 import com.flovera.app.config.AppSettings
 import com.flovera.app.koog.AgentRuntime
@@ -68,6 +69,7 @@ class AgentRunControllerInstrumentedTest {
     assertEquals(1_000_000, contextRecord?.modelContextWindowTokens)
     assertEquals("deepseek_catalog", contextRecord?.modelContextSource)
     assertNotNull(contextRecord?.contextUsagePermille)
+    assertEquals(AgentContextBudget.STATUS_SAFE, contextRecord?.contextBudgetStatus)
     assertEquals("user", startedSession?.messages?.single()?.role)
     assertEquals("create file", startedSession?.messages?.single()?.content)
     assertEquals("fake_tool", drafts.single().toolEvents.single().name)
@@ -75,6 +77,36 @@ class AgentRunControllerInstrumentedTest {
     assertEquals(2, finishedSession?.messages?.size)
     assertEquals("assistant output", finishedSession?.messages?.last()?.content)
     assertTrue(finishedSession?.messages?.last()?.toolEvents?.any { it.name == "fake_tool" } == true)
+  }
+
+  @Test
+  fun contextBudgetEvaluatorClassifiesThresholdStates() {
+    val unknown = AgentContextBudget.evaluate(
+      tokens = 1_000,
+      contextWindowTokens = null,
+      compressionThresholdPercent = 82,
+    )
+    val safe = AgentContextBudget.evaluate(
+      tokens = 100,
+      contextWindowTokens = 1_000,
+      compressionThresholdPercent = 82,
+    )
+    val watch = AgentContextBudget.evaluate(
+      tokens = 700,
+      contextWindowTokens = 1_000,
+      compressionThresholdPercent = 82,
+    )
+    val recommended = AgentContextBudget.evaluate(
+      tokens = 830,
+      contextWindowTokens = 1_000,
+      compressionThresholdPercent = 82,
+    )
+
+    assertEquals(AgentContextBudget.STATUS_UNKNOWN, unknown.status)
+    assertEquals(AgentContextBudget.STATUS_SAFE, safe.status)
+    assertEquals(AgentContextBudget.STATUS_WATCH, watch.status)
+    assertEquals(AgentContextBudget.STATUS_COMPRESSION_RECOMMENDED, recommended.status)
+    assertEquals(830, recommended.usagePermille)
   }
 
   @Test

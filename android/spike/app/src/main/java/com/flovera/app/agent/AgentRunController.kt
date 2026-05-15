@@ -112,6 +112,11 @@ class AgentRunController(
     val provider = ModelProviderCatalog.findProvider(settings.provider)
     val modelContext = provider?.contextFor(settings.model)
     val contextWindowTokens = modelContext?.contextWindowTokens
+    val budget = AgentContextBudget.evaluate(
+      tokens = approximateTokens,
+      contextWindowTokens = contextWindowTokens,
+      compressionThresholdPercent = modelContext?.compressionThresholdPercent,
+    )
     return ContextUsageRecord(
       id = UUID.randomUUID().toString(),
       source = "agent_run",
@@ -126,8 +131,10 @@ class AgentRunController(
       modelContextWindowTokens = contextWindowTokens,
       modelContextSource = modelContext?.source ?: "unknown",
       tokenUsageSource = modelContext?.usageSource ?: "estimate",
-      contextUsagePermille = usagePermille(approximateTokens, contextWindowTokens),
+      contextUsagePermille = budget.usagePermille,
       compressionThresholdPercent = modelContext?.compressionThresholdPercent,
+      contextBudgetStatus = budget.status,
+      contextBudgetReason = budget.reason,
       compressed = false,
       summary = "No compression was applied for this run.",
     )
@@ -135,11 +142,6 @@ class AgentRunController(
 
   private fun approximateTokens(chars: Int): Int {
     return ((chars + 3) / 4).coerceAtLeast(1)
-  }
-
-  private fun usagePermille(tokens: Int, contextWindowTokens: Int?): Int? {
-    if (contextWindowTokens == null || contextWindowTokens <= 0) return null
-    return ((tokens.toLong() * 1_000L) / contextWindowTokens).coerceIn(0L, 1_000L).toInt()
   }
 
   private fun saveErrorLog(

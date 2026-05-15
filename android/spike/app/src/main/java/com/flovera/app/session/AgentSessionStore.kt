@@ -55,6 +55,8 @@ data class ContextUsageRecord(
   val tokenUsageSource: String = "estimate",
   val contextUsagePermille: Int? = null,
   val compressionThresholdPercent: Int? = null,
+  val contextBudgetStatus: String = "unknown",
+  val contextBudgetReason: String = "",
   val compressed: Boolean = false,
   val summary: String = "",
 )

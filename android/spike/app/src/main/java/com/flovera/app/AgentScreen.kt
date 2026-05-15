@@ -81,6 +81,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.flovera.app.agent.AgentContextBudget
 import com.flovera.app.config.normalizeBraveSearchApiKey
 import com.flovera.app.koog.ModelProviderCatalog
 import com.flovera.app.session.ContextUsageRecord
@@ -915,7 +916,11 @@ private fun ContextUsageRing(record: ContextUsageRecord) {
     if (rounded == 0 && record.approximateTokens > 0) "<1" else rounded.toString()
   }
   val trackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.28f)
-  val progressColor = MaterialTheme.colorScheme.primary
+  val progressColor = when (record.contextBudgetStatus) {
+    AgentContextBudget.STATUS_WATCH -> MaterialTheme.colorScheme.tertiary
+    AgentContextBudget.STATUS_COMPRESSION_RECOMMENDED -> MaterialTheme.colorScheme.error
+    else -> MaterialTheme.colorScheme.primary
+  }
   Box(contentAlignment = Alignment.Center, modifier = Modifier.size(38.dp)) {
     Canvas(modifier = Modifier.fillMaxSize()) {
       val stroke = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
@@ -956,11 +961,21 @@ private fun formatContextUsage(record: ContextUsageRecord, language: String): St
       ?: t(language, "estimate", "\u4f30\u7b97")
     "$percent / ${contextWindow / 1_000}k"
   }
+  val budgetStatus = formatContextBudgetStatus(record.contextBudgetStatus, language)
   return t(
     language,
-    "Context ~${record.approximateTokens} tokens / $contextLabel / ${record.messageCount} messages / $compression",
-    "\u4e0a\u4e0b\u6587\u7ea6 ${record.approximateTokens} tokens / $contextLabel / ${record.messageCount} \u6761\u6d88\u606f / $compression",
+    "Context ~${record.approximateTokens} tokens / $contextLabel / ${record.messageCount} messages / $compression / $budgetStatus",
+    "\u4e0a\u4e0b\u6587\u7ea6 ${record.approximateTokens} tokens / $contextLabel / ${record.messageCount} \u6761\u6d88\u606f / $compression / $budgetStatus",
   )
+}
+
+private fun formatContextBudgetStatus(status: String, language: String): String {
+  return when (status) {
+    AgentContextBudget.STATUS_SAFE -> t(language, "safe", "\u5b89\u5168")
+    AgentContextBudget.STATUS_WATCH -> t(language, "watch", "\u63a5\u8fd1\u9608\u503c")
+    AgentContextBudget.STATUS_COMPRESSION_RECOMMENDED -> t(language, "compression soon", "\u5f85\u538b\u7f29")
+    else -> t(language, "unknown budget", "\u672a\u77e5\u9884\u7b97")
+  }
 }
 
 private fun formatContextPercent(record: ContextUsageRecord, language: String): String {
