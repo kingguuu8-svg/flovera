@@ -45,6 +45,7 @@ class AgentLoopInstrumentedTest {
     )
     val output = KoogAgentRuntime().run(
       input = "Create hello.txt with exact content OK using workspace tools.",
+      agentRunId = "${session.id}-instrumented-file",
       settings = settings,
       session = withUser,
       workspace = workspace,
@@ -99,6 +100,7 @@ class AgentLoopInstrumentedTest {
 
     val output = KoogAgentRuntime().run(
       input = prompt,
+      agentRunId = "${session.id}-instrumented-network",
       settings = settings,
       session = withUser,
       workspace = workspace,

@@ -40,6 +40,7 @@ class AgentRunController(
 
     val withUser = appendUserPrompt(session, trimmed)
     val withContext = appendContextRecord(withUser, estimateContextUsage(trimmed, withUser, workspace))
+    val agentRunId = "${withContext.id}-${UUID.randomUUID()}"
     onStarted(withContext, SessionMessage(role = "assistant", content = "Working..."))
 
     return scope.launch {
@@ -55,6 +56,7 @@ class AgentRunController(
       val result = runCatching {
         runtime.run(
           input = trimmed,
+          agentRunId = agentRunId,
           settings = settings,
           session = withContext,
           workspace = workspace,
@@ -70,6 +72,7 @@ class AgentRunController(
           val events = recorder.snapshot()
           val logPath = saveErrorLog(
             error = error,
+            agentRunId = agentRunId,
             settings = settings,
             session = withContext,
             input = trimmed,
@@ -123,6 +126,7 @@ class AgentRunController(
 
   private fun saveErrorLog(
     error: Throwable,
+    agentRunId: String,
     settings: AppSettings,
     session: AgentSession,
     input: String,
@@ -137,6 +141,7 @@ class AgentRunController(
       appendLine("- provider: ${settings.provider}")
       appendLine("- model: ${settings.model}")
       appendLine("- sessionId: ${session.id}")
+      appendLine("- agentRunId: $agentRunId")
       appendLine("- messageCount: ${session.messages.size}")
       appendLine("- contextRecords: ${session.contextRecords.size}")
       appendLine("- networkEnabled: ${settings.networkEnabled}")

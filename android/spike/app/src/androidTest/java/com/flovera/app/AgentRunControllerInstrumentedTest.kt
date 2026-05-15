@@ -146,6 +146,7 @@ class AgentRunControllerInstrumentedTest {
     assertTrue(logText.contains("DeepSeekLLMClient"))
     assertTrue(logText.contains("fake_tool_before_failure"))
     assertTrue(logText.contains("networkEnabled: true"))
+    assertTrue(logText.contains("agentRunId: ${session.id}-"))
     assertFalse(logText.contains("secret-must-not-be-logged"))
   }
 
@@ -154,6 +155,7 @@ class AgentRunControllerInstrumentedTest {
 
     override suspend fun run(
       input: String,
+      agentRunId: String,
       settings: AppSettings,
       session: AgentSession,
       workspace: WorkspaceManager,
@@ -168,6 +170,7 @@ class AgentRunControllerInstrumentedTest {
   private class FailingAgentRuntime : AgentRuntime {
     override suspend fun run(
       input: String,
+      agentRunId: String,
       settings: AppSettings,
       session: AgentSession,
       workspace: WorkspaceManager,
