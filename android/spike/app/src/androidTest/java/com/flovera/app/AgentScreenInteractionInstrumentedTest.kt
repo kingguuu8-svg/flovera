@@ -16,6 +16,7 @@ import androidx.compose.ui.test.performScrollTo
 import com.flovera.app.config.AppSettings
 import com.flovera.app.config.SettingsStore
 import com.flovera.app.agent.AgentRunController
+import com.flovera.app.agent.AgentRunStatusNotifier
 import com.flovera.app.koog.AgentRuntime
 import com.flovera.app.koog.ToolEventRecorder
 import com.flovera.app.session.AgentSession
@@ -226,9 +227,11 @@ class AgentScreenInteractionInstrumentedTest {
     val context = composeRule.activity.applicationContext
     SettingsStore(context).save(AppSettings(language = "en"))
     val runtime = BlockingAgentRuntime()
+    val notifier = FakeAgentRunStatusNotifier()
     val controller = AgentController(
       context,
       agentRunController = AgentRunController(runtime = runtime),
+      agentRunStatusNotifier = notifier,
     )
 
     composeRule.setContent {
@@ -247,6 +250,8 @@ class AgentScreenInteractionInstrumentedTest {
     composeRule.runOnIdle {
       assertEquals("Agent loop interrupted", controller.state.value.status)
       assertEquals("Run interrupted by user.", controller.state.value.session?.messages?.lastOrNull()?.content)
+      assertTrue(notifier.events.contains("running:Working..."))
+      assertTrue(notifier.events.contains("interrupted"))
     }
   }
 
@@ -555,6 +560,22 @@ class AgentScreenInteractionInstrumentedTest {
       synchronized(completions) { completions += completion }
       completion.await()
       return "assistant output for $input"
+    }
+  }
+
+  private class FakeAgentRunStatusNotifier : AgentRunStatusNotifier {
+    val events = mutableListOf<String>()
+
+    override fun running(message: String) {
+      events += "running:$message"
+    }
+
+    override fun finished(succeeded: Boolean) {
+      events += "finished:$succeeded"
+    }
+
+    override fun interrupted() {
+      events += "interrupted"
     }
   }
 

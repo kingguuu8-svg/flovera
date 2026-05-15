@@ -4,7 +4,9 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.core.content.FileProvider
+import com.flovera.app.agent.AgentRunStatusNotifier
 import com.flovera.app.agent.AgentRunController
+import com.flovera.app.agent.AndroidAgentRunStatusNotifier
 import com.flovera.app.config.AppSettings
 import com.flovera.app.config.ModelSettingsDraft
 import com.flovera.app.config.SettingsController
@@ -75,6 +77,7 @@ class AgentController(
   settingsStore: SettingsStore = SettingsStore(context.applicationContext),
   sessionStore: AgentSessionStore = AgentSessionStore(context.applicationContext),
   private val agentRunController: AgentRunController = AgentRunController(),
+  private val agentRunStatusNotifier: AgentRunStatusNotifier = AndroidAgentRunStatusNotifier(context.applicationContext),
 ) {
   private val appContext = context.applicationContext
   private val settingsController = SettingsController(settingsStore)
@@ -495,6 +498,7 @@ class AgentController(
       appendMessage = sessionController::appendMessage,
       onStarted = { withUser, draft ->
         val settings = settingsController.setActiveSession(current.settings, withUser.id)
+        agentRunStatusNotifier.running(draft.content)
         _state.update {
           it.copy(
             settings = settings,
@@ -513,6 +517,7 @@ class AgentController(
         }
       },
       onSessionUpdated = { updatedSession, draft ->
+        agentRunStatusNotifier.running(draft.content)
         _state.update {
           it.copy(
             session = updatedSession,
@@ -526,6 +531,7 @@ class AgentController(
         val status = if (succeeded) "Agent loop completed" else "Agent loop failed"
         val nextInput = _state.value.queuedInputs.firstOrNull()
         if (nextInput == null) {
+          agentRunStatusNotifier.finished(succeeded)
           refreshWorkspaceState(
             session = updated,
             isRunning = false,
@@ -533,6 +539,7 @@ class AgentController(
           )
         } else {
           _state.update { it.copy(queuedInputs = it.queuedInputs.drop(1)) }
+          agentRunStatusNotifier.running("Running queued message...")
           refreshWorkspaceState(
             session = updated,
             isRunning = false,
@@ -561,6 +568,7 @@ class AgentController(
     val interrupted = current.session?.let { session ->
       sessionController.appendMessage(session, SessionMessage(role = "assistant", content = "Run interrupted by user."))
     }
+    agentRunStatusNotifier.interrupted()
     refreshWorkspaceState(
       session = interrupted ?: current.session,
       isRunning = false,
