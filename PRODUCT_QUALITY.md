@@ -319,6 +319,9 @@ so future work can be planned without losing the product direction.
 
 ### Controlled Python Runtime
 
+- This backlog item is gated: do not implement Python runtime support until the
+  user explicitly approves starting that implementation. Other backlog items can
+  continue autonomously in safety-first order.
 - Add Python as a workspace-scoped execution tool, not as a general Android
   terminal or full IDE.
 - Expose a minimal agent tool such as `run_python(path, args?, stdin?)`.
