@@ -56,6 +56,10 @@ class SessionController(private val store: AgentSessionStore) {
     return store.appendCompressionDivider(session, record, summary)
   }
 
+  fun appendCompressionDivider(session: AgentSession, record: ContextUsageRecord): AgentSession {
+    return store.appendCompressionDivider(session, record)
+  }
+
   fun appendUserPrompt(session: AgentSession, prompt: String): AgentSession {
     val withPrompt = store.appendMessage(session, SessionMessage(role = "user", content = prompt))
     if (session.messages.isNotEmpty()) return withPrompt

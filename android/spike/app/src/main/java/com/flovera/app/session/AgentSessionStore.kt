@@ -189,6 +189,10 @@ class AgentSessionStore(
     return updated
   }
 
+  fun appendCompressionDivider(session: AgentSession, record: ContextUsageRecord): AgentSession {
+    return appendCompressionDivider(session, record, SessionHandoffSummarizer.summarize(session, record))
+  }
+
   fun appendCompressionDivider(session: AgentSession, record: ContextUsageRecord, summary: String): AgentSession {
     return appendMessage(
       session,

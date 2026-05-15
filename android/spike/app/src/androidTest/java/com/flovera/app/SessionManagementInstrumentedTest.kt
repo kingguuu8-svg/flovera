@@ -8,6 +8,7 @@ import com.flovera.app.session.ContextUsageRecord
 import com.flovera.app.session.SESSION_ROLE_COMPRESSION
 import com.flovera.app.session.SessionController
 import com.flovera.app.session.SessionMessage
+import com.flovera.app.session.ToolEvent
 import java.io.File
 import java.util.UUID
 import org.junit.Assert.assertEquals
@@ -139,6 +140,50 @@ class SessionManagementInstrumentedTest {
     assertTrue(divider?.content?.contains("Context compressed") == true)
     assertTrue(divider?.content?.contains("record-compress") == true)
     assertTrue(divider?.content?.contains("Keep project facts") == true)
+  }
+
+  @Test
+  fun sessionStoreCanGenerateLocalHandoffSummaryForCompressionDivider() {
+    val store = isolatedSessionStore("handoff-summary").store
+    val session = store.create("Calendar workspace")
+    val one = store.appendMessage(
+      session,
+      SessionMessage(role = "user", content = "Create a weekly calendar HTML page."),
+    )
+    val two = store.appendMessage(
+      one,
+      SessionMessage(
+        role = "assistant",
+        content = "Created calendar.html and updated the preview.",
+        toolEvents = listOf(
+          ToolEvent(name = "write_file", args = "calendar.html", result = "wrote calendar.html"),
+        ),
+      ),
+    )
+    val record = ContextUsageRecord(
+      id = "handoff-record",
+      source = "agent_run",
+      provider = "deepseek",
+      model = "deepseek-v4-pro",
+      messageCount = 2,
+      inputChars = 10,
+      historyChars = 20,
+      rulesChars = 30,
+      workspaceListingChars = 40,
+      approximateTokens = 900_000,
+      contextBudgetStatus = "compression_recommended",
+      compressed = true,
+      summary = "handoff",
+    )
+
+    val updated = store.appendCompressionDivider(two, record)
+    val content = store.load(updated.id)?.messages?.last()?.content.orEmpty()
+
+    assertTrue(content.contains("# Handoff Summary"))
+    assertTrue(content.contains("Create a weekly calendar HTML page."))
+    assertTrue(content.contains("Created calendar.html"))
+    assertTrue(content.contains("write_file"))
+    assertTrue(content.contains("handoff-record"))
   }
 
   @Test
