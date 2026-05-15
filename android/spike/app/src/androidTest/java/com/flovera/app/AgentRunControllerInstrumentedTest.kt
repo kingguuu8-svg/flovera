@@ -3,11 +3,15 @@ package com.flovera.app
 import androidx.test.platform.app.InstrumentationRegistry
 import com.flovera.app.agent.AgentContextBudget
 import com.flovera.app.agent.AgentRunController
+import com.flovera.app.agent.HANDOFF_SOURCE_LLM
+import com.flovera.app.agent.SessionHandoffCompression
+import com.flovera.app.agent.SessionHandoffCompressor
 import com.flovera.app.config.AppSettings
 import com.flovera.app.koog.AgentRuntime
 import com.flovera.app.koog.ToolEventRecorder
 import com.flovera.app.session.AgentSession
 import com.flovera.app.session.AgentSessionStore
+import com.flovera.app.session.ContextUsageRecord
 import com.flovera.app.session.SESSION_ROLE_COMPRESSION
 import com.flovera.app.session.SessionController
 import com.flovera.app.session.SessionMessage
@@ -51,6 +55,7 @@ class AgentRunControllerInstrumentedTest {
         startedDraft = draft
       },
       onDraft = { draft -> drafts += draft },
+      onSessionUpdated = { _, _ -> },
       onFinished = { updated, success ->
         finishedSession = updated
         succeeded = success
@@ -89,14 +94,18 @@ class AgentRunControllerInstrumentedTest {
     val session = store.create("Compression run ${System.currentTimeMillis()}")
     val workspace = WorkspaceManager(context, "compression-run-${System.currentTimeMillis()}").also { it.ensureSeedFiles() }
     val runtime = FakeAgentRuntime()
+    val compressor = FakeHandoffCompressor("LLM handoff summary")
     val controller = AgentRunController(
       runtime = runtime,
+      handoffCompressor = compressor,
       scope = this,
       shouldCompressContext = { true },
     )
     val drafts = mutableListOf<SessionMessage>()
     var startedSession: AgentSession? = null
     var startedDraft: SessionMessage? = null
+    var preparedSession: AgentSession? = null
+    var preparedDraft: SessionMessage? = null
     var finishedSession: AgentSession? = null
 
     val job = controller.submit(
@@ -113,6 +122,10 @@ class AgentRunControllerInstrumentedTest {
         startedDraft = draft
       },
       onDraft = { drafts += it },
+      onSessionUpdated = { updated, draft ->
+        preparedSession = updated
+        preparedDraft = draft
+      },
       onFinished = { updated, _ -> finishedSession = updated },
     )
 
@@ -120,9 +133,14 @@ class AgentRunControllerInstrumentedTest {
     job!!.join()
 
     assertEquals("Compressing context...", startedDraft?.content)
-    assertTrue(startedSession?.messages?.any { it.role == SESSION_ROLE_COMPRESSION } == true)
+    assertTrue(startedSession?.messages?.any { it.role == SESSION_ROLE_COMPRESSION } == false)
+    assertEquals("Working...", preparedDraft?.content)
+    assertTrue(preparedSession?.messages?.any { it.role == SESSION_ROLE_COMPRESSION } == true)
     assertTrue(runtime.sessionSeen?.messages?.any { it.role == SESSION_ROLE_COMPRESSION } == true)
-    assertTrue(drafts.any { it.content == "Working..." })
+    assertTrue(compressor.called)
+    assertTrue(runtime.sessionSeen?.messages?.any { it.content.contains("LLM handoff summary") } == true)
+    assertEquals(HANDOFF_SOURCE_LLM, runtime.sessionSeen?.contextRecords?.lastOrNull()?.summarySource)
+    assertEquals(true, runtime.sessionSeen?.contextRecords?.lastOrNull()?.compressed)
     assertEquals("assistant", finishedSession?.messages?.last()?.role)
   }
 
@@ -178,7 +196,7 @@ class AgentRunControllerInstrumentedTest {
         callbackCalled = true
         current
       },
-      appendCompressionDivider = { current, _ ->
+      appendCompressionDivider = { current, _, _ ->
         callbackCalled = true
         current
       },
@@ -188,6 +206,7 @@ class AgentRunControllerInstrumentedTest {
       },
       onStarted = { _, _ -> callbackCalled = true },
       onDraft = { callbackCalled = true },
+      onSessionUpdated = { _, _ -> callbackCalled = true },
       onFinished = { _, _ -> callbackCalled = true },
     )
 
@@ -217,6 +236,7 @@ class AgentRunControllerInstrumentedTest {
       appendMessage = sessions::appendMessage,
       onStarted = { _, _ -> },
       onDraft = { },
+      onSessionUpdated = { _, _ -> },
       onFinished = { updated, success ->
         finishedSession = updated
         succeeded = success
@@ -238,6 +258,23 @@ class AgentRunControllerInstrumentedTest {
     assertTrue(logText.contains("networkEnabled: true"))
     assertTrue(logText.contains("agentRunId: ${session.id}-"))
     assertFalse(logText.contains("secret-must-not-be-logged"))
+  }
+
+  private class FakeHandoffCompressor(private val summary: String) : SessionHandoffCompressor {
+    var called: Boolean = false
+
+    override suspend fun compress(
+      settings: AppSettings,
+      session: AgentSession,
+      record: ContextUsageRecord,
+      workspace: WorkspaceManager,
+    ): SessionHandoffCompression {
+      called = true
+      return SessionHandoffCompression(
+        summary = summary,
+        source = HANDOFF_SOURCE_LLM,
+      )
+    }
   }
 
   private class FakeAgentRuntime : AgentRuntime {

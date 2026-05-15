@@ -3,6 +3,7 @@ package com.flovera.app.agent
 import com.flovera.app.config.AppSettings
 import com.flovera.app.koog.AgentRuntime
 import com.flovera.app.koog.KoogAgentRuntime
+import com.flovera.app.koog.KoogSessionHandoffCompressor
 import com.flovera.app.koog.ModelProviderCatalog
 import com.flovera.app.koog.ToolEventRecorder
 import com.flovera.app.session.AgentSession
@@ -23,6 +24,7 @@ import kotlinx.coroutines.launch
 
 class AgentRunController(
   private val runtime: AgentRuntime = KoogAgentRuntime(),
+  private val handoffCompressor: SessionHandoffCompressor = KoogSessionHandoffCompressor(),
   private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
   private val shouldCompressContext: (ContextUsageRecord) -> Boolean = {
     it.contextBudgetStatus == AgentContextBudget.STATUS_COMPRESSION_RECOMMENDED
@@ -35,10 +37,11 @@ class AgentRunController(
     workspace: WorkspaceManager,
     appendUserPrompt: (AgentSession, String) -> AgentSession,
     appendContextRecord: (AgentSession, ContextUsageRecord) -> AgentSession,
-    appendCompressionDivider: (AgentSession, ContextUsageRecord) -> AgentSession,
+    appendCompressionDivider: (AgentSession, ContextUsageRecord, String) -> AgentSession,
     appendMessage: (AgentSession, SessionMessage) -> AgentSession,
     onStarted: (AgentSession, SessionMessage) -> Unit,
     onDraft: (SessionMessage) -> Unit,
+    onSessionUpdated: (AgentSession, SessionMessage) -> Unit,
     onFinished: (AgentSession, Boolean) -> Unit,
   ): Job? {
     val trimmed = input.trim()
@@ -46,25 +49,41 @@ class AgentRunController(
 
     val withUser = appendUserPrompt(session, trimmed)
     val contextRecord = estimateContextUsage(trimmed, settings, withUser, workspace)
-    val withContext = appendContextRecord(withUser, contextRecord)
     val contextCompressed = shouldCompressContext(contextRecord)
-    val preparedSession = if (contextCompressed) {
-      appendCompressionDivider(withContext, contextRecord)
+    val startedSession = if (contextCompressed) {
+      withUser
     } else {
-      withContext
+      appendContextRecord(withUser, contextRecord)
     }
-    val agentRunId = "${preparedSession.id}-${UUID.randomUUID()}"
     val startDraft = if (contextCompressed) {
       SessionMessage(role = "assistant", content = "Compressing context...")
     } else {
       SessionMessage(role = "assistant", content = "Working...")
     }
-    onStarted(preparedSession, startDraft)
+    onStarted(startedSession, startDraft)
 
     return scope.launch {
-      if (contextCompressed) {
-        onDraft(SessionMessage(role = "assistant", content = "Working..."))
+      val preparedSession = if (contextCompressed) {
+        val compression = handoffCompressor.compress(
+          settings = settings,
+          session = withUser,
+          record = contextRecord,
+          workspace = workspace,
+        )
+        val compressedRecord = contextRecord.copy(
+          compressed = true,
+          summary = compression.summary,
+          summarySource = compression.source,
+          compressionError = compression.error,
+        )
+        val withContext = appendContextRecord(withUser, compressedRecord)
+        appendCompressionDivider(withContext, compressedRecord, compression.summary).also { compressedSession ->
+          onSessionUpdated(compressedSession, SessionMessage(role = "assistant", content = "Working..."))
+        }
+      } else {
+        startedSession
       }
+      val agentRunId = "${preparedSession.id}-${UUID.randomUUID()}"
       val recorder = ToolEventRecorder { events ->
         onDraft(
           SessionMessage(

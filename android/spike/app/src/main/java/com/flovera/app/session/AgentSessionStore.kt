@@ -61,6 +61,8 @@ data class ContextUsageRecord(
   val contextBudgetReason: String = "",
   val compressed: Boolean = false,
   val summary: String = "",
+  val summarySource: String = "",
+  val compressionError: String = "",
 )
 
 class AgentSessionStore(
@@ -206,6 +208,10 @@ class AgentSessionStore(
           appendLine("- model: ${record.model}")
           appendLine("- approximateTokens: ${record.approximateTokens}")
           appendLine("- budgetStatus: ${record.contextBudgetStatus}")
+          appendLine("- summarySource: ${record.summarySource.ifBlank { "local" }}")
+          if (record.compressionError.isNotBlank()) {
+            appendLine("- compressionError: ${record.compressionError}")
+          }
           appendLine()
           append(summary.trim().ifBlank { "No handoff summary was provided." })
         },

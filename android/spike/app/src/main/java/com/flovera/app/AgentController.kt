@@ -455,6 +455,15 @@ class AgentController(
           it.copy(assistantDraft = draft)
         }
       },
+      onSessionUpdated = { updatedSession, draft ->
+        _state.update {
+          it.copy(
+            session = updatedSession,
+            sessions = sessionController.listActive(),
+            assistantDraft = draft,
+          )
+        }
+      },
       onFinished = { updated, succeeded ->
         val status = if (succeeded) "Agent loop completed" else "Agent loop failed"
         refreshWorkspaceState(
