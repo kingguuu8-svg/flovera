@@ -411,6 +411,10 @@ data class FloveraSettingsView(
   val themeMode: String = "",
   val themeColor: String = "",
   val authorityMode: String = "safe",
+  val modelContextWindowTokens: Int? = null,
+  val modelContextSource: String = "unknown",
+  val tokenUsageSource: String = "estimate",
+  val compressionThresholdPercent: Int? = null,
   val apiKeyRef: String = "",
   val braveSearchApiKeyRef: String = "",
 )
@@ -426,6 +430,7 @@ data class FloveraCapabilities(
   val webSearch: Boolean = false,
   val settingsView: Boolean = true,
   val settingsProposals: Boolean = true,
+  val modelContextOverrides: Boolean = true,
   val directSettingsWrite: Boolean = false,
   val authorityMode: String = "safe",
   val supportedAuthorityModes: List<String> = listOf("safe", "assisted"),

@@ -130,12 +130,12 @@ class AgentRunController(
     val totalChars = input.length + historyChars + rulesChars + workspaceListingChars
     val approximateTokens = approximateTokens(totalChars)
     val provider = ModelProviderCatalog.findProvider(settings.provider)
-    val modelContext = provider?.contextFor(settings.model)
-    val contextWindowTokens = modelContext?.contextWindowTokens
+    val modelContext = ModelProviderCatalog.contextFor(settings)
+    val contextWindowTokens = modelContext.contextWindowTokens
     val budget = AgentContextBudget.evaluate(
       tokens = approximateTokens,
       contextWindowTokens = contextWindowTokens,
-      compressionThresholdPercent = modelContext?.compressionThresholdPercent,
+      compressionThresholdPercent = modelContext.compressionThresholdPercent,
     )
     return ContextUsageRecord(
       id = UUID.randomUUID().toString(),
@@ -149,10 +149,10 @@ class AgentRunController(
       workspaceListingChars = workspaceListingChars,
       approximateTokens = approximateTokens,
       modelContextWindowTokens = contextWindowTokens,
-      modelContextSource = modelContext?.source ?: "unknown",
-      tokenUsageSource = modelContext?.usageSource ?: "estimate",
+      modelContextSource = modelContext.source,
+      tokenUsageSource = modelContext.usageSource,
       contextUsagePermille = budget.usagePermille,
-      compressionThresholdPercent = modelContext?.compressionThresholdPercent,
+      compressionThresholdPercent = modelContext.compressionThresholdPercent,
       contextBudgetStatus = budget.status,
       contextBudgetReason = budget.reason,
       compressed = false,

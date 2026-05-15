@@ -3,6 +3,12 @@ package com.flovera.app.config
 import kotlinx.serialization.Serializable
 
 @Serializable
+data class ModelContextOverride(
+  val contextWindowTokens: Int? = null,
+  val compressionThresholdPercent: Int? = null,
+)
+
+@Serializable
 data class AppSettings(
   val provider: String = "deepseek",
   val model: String = "deepseek-v4-pro",
@@ -21,6 +27,7 @@ data class AppSettings(
   val themeMode: String = "dark",
   val themeColor: String = "#76C4D8",
   val agentAuthorityMode: String = "safe",
+  val modelContextOverrides: Map<String, ModelContextOverride> = emptyMap(),
 ) {
   fun apiKeyFor(providerId: String = provider): String {
     val keyed = providerApiKeys[providerId].orEmpty()
@@ -39,5 +46,29 @@ data class AppSettings(
       apiKey = if (providerId == "deepseek") normalized else apiKey,
       providerApiKeys = updatedKeys,
     )
+  }
+
+  fun modelContextOverrideFor(providerId: String = provider, modelId: String = model): ModelContextOverride? {
+    return modelContextOverrides[modelContextOverrideKey(providerId, modelId)]
+  }
+
+  fun withModelContextOverride(
+    providerId: String = provider,
+    modelId: String = model,
+    override: ModelContextOverride?,
+  ): AppSettings {
+    val key = modelContextOverrideKey(providerId, modelId)
+    val updated = if (override == null || override == ModelContextOverride()) {
+      modelContextOverrides - key
+    } else {
+      modelContextOverrides + (key to override)
+    }
+    return copy(modelContextOverrides = updated)
+  }
+
+  companion object {
+    fun modelContextOverrideKey(providerId: String, modelId: String): String {
+      return "${providerId.trim()}:${modelId.trim()}"
+    }
   }
 }

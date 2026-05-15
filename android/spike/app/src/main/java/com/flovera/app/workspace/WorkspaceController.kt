@@ -3,6 +3,7 @@ package com.flovera.app.workspace
 import android.content.Context
 import android.net.Uri
 import com.flovera.app.config.AppSettings
+import com.flovera.app.koog.ModelProviderCatalog
 import java.io.File
 
 data class WorkspaceSnapshot(
@@ -30,6 +31,7 @@ class WorkspaceController(context: Context, workspaceId: String) {
   fun writeAgentRules(content: String): String = workspace.writeFile("AGENT.md", content)
 
   fun syncFloveraSettings(settings: AppSettings) {
+    val modelContext = ModelProviderCatalog.contextFor(settings)
     workspace.ensureFloveraMetadata(
       FloveraSettingsView(
         provider = settings.provider,
@@ -45,6 +47,10 @@ class WorkspaceController(context: Context, workspaceId: String) {
         themeMode = settings.themeMode,
         themeColor = settings.themeColor,
         authorityMode = settings.agentAuthorityMode,
+        modelContextWindowTokens = modelContext.contextWindowTokens,
+        modelContextSource = modelContext.source,
+        tokenUsageSource = modelContext.usageSource,
+        compressionThresholdPercent = modelContext.compressionThresholdPercent,
         apiKeyRef = if (settings.apiKeyFor(settings.provider).isBlank()) "" else "${settings.provider}.default",
         braveSearchApiKeyRef = if (settings.braveSearchApiKey.isBlank()) "" else "brave.default",
       ),

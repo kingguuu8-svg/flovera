@@ -7,6 +7,8 @@ import ai.koog.prompt.executor.clients.openrouter.OpenRouterLLMClient
 import ai.koog.prompt.llm.LLMCapability
 import ai.koog.prompt.llm.LLMProvider
 import ai.koog.prompt.llm.LLModel
+import com.flovera.app.config.AppSettings
+import com.flovera.app.config.ModelContextOverride
 
 data class ModelProviderSpec(
   val id: String,
@@ -23,9 +25,9 @@ data class ModelProviderSpec(
     return modelContexts[modelId.ifBlank { defaultModel }] ?: defaultContext
   }
 
-  fun createModel(modelId: String): LLModel {
+  fun createModel(modelId: String, contextSpec: ModelContextSpec? = null): LLModel {
     val model = modelId.ifBlank { defaultModel }
-    val context = contextFor(model)
+    val context = contextSpec ?: contextFor(model)
     return LLModel(
       provider = llmProvider,
       id = model,
@@ -102,6 +104,26 @@ object ModelProviderCatalog {
 
   fun requireProvider(providerId: String): ModelProviderSpec {
     return findProvider(providerId) ?: error("Unsupported model provider: $providerId")
+  }
+
+  fun contextFor(settings: AppSettings): ModelContextSpec {
+    val provider = findProvider(settings.provider) ?: defaultProvider
+    val model = settings.model.ifBlank { provider.defaultModel }
+    val base = provider.contextFor(model)
+    return base.withOverride(settings.modelContextOverrideFor(provider.id, model))
+  }
+
+  private fun ModelContextSpec.withOverride(override: ModelContextOverride?): ModelContextSpec {
+    if (override == null) return this
+    val window = override.contextWindowTokens?.takeIf { it > 0 }
+    val threshold = override.compressionThresholdPercent?.coerceIn(1, 100)
+    if (window == null && threshold == null) return this
+    return copy(
+      contextWindowTokens = window ?: contextWindowTokens,
+      source = "user_override",
+      usageSource = "estimate",
+      compressionThresholdPercent = threshold ?: compressionThresholdPercent,
+    )
   }
 }
 

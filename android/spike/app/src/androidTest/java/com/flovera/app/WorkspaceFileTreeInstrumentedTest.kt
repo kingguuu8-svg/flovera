@@ -148,11 +148,15 @@ class WorkspaceFileTreeInstrumentedTest {
     )
 
     val capabilities = workspace.readFile(".flovera/capabilities.json")
+    val settingsView = workspace.readFile(".flovera/settings-view.json")
     val proposals = workspace.listSettingsProposals()
 
     assertTrue(capabilities.contains("\"networkTools\": true"))
     assertTrue(capabilities.contains("\"webSearch\": true"))
+    assertTrue(capabilities.contains("\"modelContextOverrides\": true"))
     assertTrue(capabilities.contains("\"directSettingsWrite\": false"))
+    assertTrue(settingsView.contains("\"modelContextSource\""))
+    assertTrue(settingsView.contains("\"compressionThresholdPercent\""))
     assertEquals(1, proposals.size)
     assertEquals("Use softer theme", proposals.first().title)
     assertEquals("#C989B8", proposals.first().changes.themeColor)

@@ -32,10 +32,11 @@ class KoogAgentRuntime : AgentRuntime {
     val apiKey = settings.apiKeyFor(provider.id)
     require(apiKey.isNotBlank()) { "${provider.label} API key is not configured." }
     val webSearchAvailable = settings.networkEnabled && settings.webSearchEnabled && settings.braveSearchApiKey.isNotBlank()
+    val modelContext = ModelProviderCatalog.contextFor(settings)
 
     val agent = AIAgent(
       promptExecutor = MultiLLMPromptExecutor(provider.createClient(apiKey)),
-      llmModel = provider.createModel(settings.model),
+      llmModel = provider.createModel(settings.model, modelContext),
       toolRegistry = workspaceToolRegistry(
         workspace = workspace,
         recorder = recorder,
@@ -73,7 +74,7 @@ class KoogAgentRuntime : AgentRuntime {
       - Read .flovera/capabilities.json only when the user's request depends on available app capabilities.
       - Do not inspect .flovera by default for ordinary file edits or simple questions.
       - Do not edit app behavior directly. If you need an app setting changed, write a JSON proposal under .flovera/proposals/.
-      - Proposal schema: {"type":"settings","title":"Short title","reason":"Why this helps","changes":{"themeColor":"#76C4D8","networkEnabled":true,"selectedHtmlPath":"index.html","maxAgentIterations":30}}
+      - Proposal schema: {"type":"settings","title":"Short title","reason":"Why this helps","changes":{"themeColor":"#76C4D8","networkEnabled":true,"selectedHtmlPath":"index.html","maxAgentIterations":30,"modelContextWindowTokens":1000000,"modelCompressionThresholdPercent":82}}
       Network tools are ${if (networkEnabled) "enabled. Use fetch_url and download_file only when they directly help the user's request." else "disabled for this run."}
       Web search is ${if (webSearchAvailable) "enabled through web_search. Use it when current public information is needed." else "disabled for this run."}
       When the user asks you to create files, call the tools and then summarize the files changed.

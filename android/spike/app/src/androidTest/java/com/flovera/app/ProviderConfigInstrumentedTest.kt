@@ -2,6 +2,7 @@ package com.flovera.app
 
 import androidx.test.platform.app.InstrumentationRegistry
 import com.flovera.app.config.AppSettings
+import com.flovera.app.config.ModelContextOverride
 import com.flovera.app.config.ModelSettingsDraft
 import com.flovera.app.config.SettingsProposalChanges
 import com.flovera.app.config.SettingsController
@@ -48,6 +49,27 @@ class ProviderConfigInstrumentedTest {
   }
 
   @Test
+  fun modelContextMetadataCanBeOverriddenFromSettings() {
+    val settings = AppSettings()
+      .withModelContextOverride(
+        providerId = "deepseek",
+        modelId = "deepseek-v4-pro",
+        override = ModelContextOverride(
+          contextWindowTokens = 256_000,
+          compressionThresholdPercent = 70,
+        ),
+      )
+
+    val context = ModelProviderCatalog.contextFor(settings)
+    val model = ModelProviderCatalog.requireProvider("deepseek").createModel(settings.model, context)
+
+    assertEquals(256_000, context.contextWindowTokens)
+    assertEquals("user_override", context.source)
+    assertEquals(70, context.compressionThresholdPercent)
+    assertEquals(256_000L, model.contextLength)
+  }
+
+  @Test
   fun networkToolsDefaultToDisabled() {
     assertFalse(AppSettings().networkEnabled)
     assertFalse(AppSettings().webSearchEnabled)
@@ -88,6 +110,8 @@ class ProviderConfigInstrumentedTest {
           language = "zh",
           maxAgentIterations = 120,
           agentAuthorityMode = "assisted",
+          modelContextWindowTokens = 512_000,
+          modelCompressionThresholdPercent = 75,
         ),
       )
 
@@ -98,6 +122,9 @@ class ProviderConfigInstrumentedTest {
       assertEquals("zh", updated.language)
       assertEquals(80, updated.maxAgentIterations)
       assertEquals("assisted", updated.agentAuthorityMode)
+      val override = updated.modelContextOverrideFor("deepseek", "deepseek-v4-pro")
+      assertEquals(512_000, override?.contextWindowTokens)
+      assertEquals(75, override?.compressionThresholdPercent)
     } finally {
       store.save(original)
     }

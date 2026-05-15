@@ -105,7 +105,7 @@ class SettingsController(private val store: SettingsStore) {
       themeMode = changes.themeMode?.let { normalizeThemeMode(it) } ?: settings.themeMode,
       themeColor = changes.themeColor?.let { normalizeThemeColor(it) } ?: settings.themeColor,
       agentAuthorityMode = changes.agentAuthorityMode?.let { normalizeAuthorityModeId(it) } ?: settings.agentAuthorityMode,
-    )
+    ).withMergedModelContextOverride(provider.id, model, changes)
     store.save(updated)
     return updated
   }
@@ -162,6 +162,22 @@ class SettingsController(private val store: SettingsStore) {
     return settings.copy(agentAuthorityMode = normalizeAuthorityModeId(settings.agentAuthorityMode))
   }
 
+  private fun AppSettings.withMergedModelContextOverride(
+    providerId: String,
+    modelId: String,
+    changes: SettingsProposalChanges,
+  ): AppSettings {
+    val hasContextChange = changes.modelContextWindowTokens != null || changes.modelCompressionThresholdPercent != null
+    if (!hasContextChange) return this
+    val current = modelContextOverrideFor(providerId, modelId) ?: ModelContextOverride()
+    val updated = current.copy(
+      contextWindowTokens = changes.modelContextWindowTokens?.takeIf { it > 0 } ?: current.contextWindowTokens,
+      compressionThresholdPercent = changes.modelCompressionThresholdPercent?.coerceIn(1, 100)
+        ?: current.compressionThresholdPercent,
+    )
+    return withModelContextOverride(providerId, modelId, updated)
+  }
+
   private fun normalizeLanguageId(language: String): String {
     return when (language) {
       "zh" -> "zh"
@@ -203,4 +219,6 @@ data class SettingsProposalChanges(
   val themeMode: String? = null,
   val themeColor: String? = null,
   val agentAuthorityMode: String? = null,
+  val modelContextWindowTokens: Int? = null,
+  val modelCompressionThresholdPercent: Int? = null,
 )

@@ -2243,6 +2243,8 @@ private fun settingsProposalSummary(proposal: WorkspaceSettingsProposal): String
     changes.themeMode?.let { "themeMode=$it" },
     changes.themeColor?.let { "themeColor=$it" },
     changes.agentAuthorityMode?.let { "authority=$it" },
+    changes.modelContextWindowTokens?.let { "context=$it" },
+    changes.modelCompressionThresholdPercent?.let { "compression=$it%" },
   )
   return parts.ifEmpty { listOf(proposal.path) }.joinToString(", ")
 }
