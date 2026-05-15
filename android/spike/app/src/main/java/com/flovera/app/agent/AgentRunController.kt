@@ -23,6 +23,9 @@ import kotlinx.coroutines.launch
 class AgentRunController(
   private val runtime: AgentRuntime = KoogAgentRuntime(),
   private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
+  private val shouldCompressContext: (ContextUsageRecord) -> Boolean = {
+    it.contextBudgetStatus == AgentContextBudget.STATUS_COMPRESSION_RECOMMENDED
+  },
 ) {
   fun submit(
     input: String,
@@ -31,6 +34,7 @@ class AgentRunController(
     workspace: WorkspaceManager,
     appendUserPrompt: (AgentSession, String) -> AgentSession,
     appendContextRecord: (AgentSession, ContextUsageRecord) -> AgentSession,
+    appendCompressionDivider: (AgentSession, ContextUsageRecord) -> AgentSession,
     appendMessage: (AgentSession, SessionMessage) -> AgentSession,
     onStarted: (AgentSession, SessionMessage) -> Unit,
     onDraft: (SessionMessage) -> Unit,
@@ -40,11 +44,26 @@ class AgentRunController(
     if (trimmed.isBlank()) return null
 
     val withUser = appendUserPrompt(session, trimmed)
-    val withContext = appendContextRecord(withUser, estimateContextUsage(trimmed, settings, withUser, workspace))
-    val agentRunId = "${withContext.id}-${UUID.randomUUID()}"
-    onStarted(withContext, SessionMessage(role = "assistant", content = "Working..."))
+    val contextRecord = estimateContextUsage(trimmed, settings, withUser, workspace)
+    val withContext = appendContextRecord(withUser, contextRecord)
+    val contextCompressed = shouldCompressContext(contextRecord)
+    val preparedSession = if (contextCompressed) {
+      appendCompressionDivider(withContext, contextRecord)
+    } else {
+      withContext
+    }
+    val agentRunId = "${preparedSession.id}-${UUID.randomUUID()}"
+    val startDraft = if (contextCompressed) {
+      SessionMessage(role = "assistant", content = "Compressing context...")
+    } else {
+      SessionMessage(role = "assistant", content = "Working...")
+    }
+    onStarted(preparedSession, startDraft)
 
     return scope.launch {
+      if (contextCompressed) {
+        onDraft(SessionMessage(role = "assistant", content = "Working..."))
+      }
       val recorder = ToolEventRecorder { events ->
         onDraft(
           SessionMessage(
@@ -59,7 +78,7 @@ class AgentRunController(
           input = trimmed,
           agentRunId = agentRunId,
           settings = settings,
-          session = withContext,
+          session = preparedSession,
           workspace = workspace,
           recorder = recorder,
         )
@@ -75,7 +94,7 @@ class AgentRunController(
             error = error,
             agentRunId = agentRunId,
             settings = settings,
-            session = withContext,
+            session = preparedSession,
             input = trimmed,
             toolEvents = events,
             workspace = workspace,
@@ -90,7 +109,7 @@ class AgentRunController(
           SessionMessage(role = "error", content = message, toolEvents = events)
         },
       )
-      val updated = appendMessage(withContext, assistantMessage)
+      val updated = appendMessage(preparedSession, assistantMessage)
       onFinished(updated, result.isSuccess)
     }
   }

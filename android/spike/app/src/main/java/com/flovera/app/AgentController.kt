@@ -423,6 +423,7 @@ class AgentController(
       workspace = workspaceController.runtimeWorkspace(),
       appendUserPrompt = sessionController::appendUserPrompt,
       appendContextRecord = sessionController::appendContextRecord,
+      appendCompressionDivider = sessionController::appendCompressionDivider,
       appendMessage = sessionController::appendMessage,
       onStarted = { withUser, draft ->
         val settings = settingsController.setActiveSession(current.settings, withUser.id)

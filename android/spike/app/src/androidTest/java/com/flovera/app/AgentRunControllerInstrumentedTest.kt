@@ -8,6 +8,7 @@ import com.flovera.app.koog.AgentRuntime
 import com.flovera.app.koog.ToolEventRecorder
 import com.flovera.app.session.AgentSession
 import com.flovera.app.session.AgentSessionStore
+import com.flovera.app.session.SESSION_ROLE_COMPRESSION
 import com.flovera.app.session.SessionController
 import com.flovera.app.session.SessionMessage
 import com.flovera.app.workspace.WorkspaceManager
@@ -43,6 +44,7 @@ class AgentRunControllerInstrumentedTest {
       workspace = workspace,
       appendUserPrompt = sessions::appendUserPrompt,
       appendContextRecord = sessions::appendContextRecord,
+      appendCompressionDivider = sessions::appendCompressionDivider,
       appendMessage = sessions::appendMessage,
       onStarted = { withUser, draft ->
         startedSession = withUser
@@ -77,6 +79,51 @@ class AgentRunControllerInstrumentedTest {
     assertEquals(2, finishedSession?.messages?.size)
     assertEquals("assistant output", finishedSession?.messages?.last()?.content)
     assertTrue(finishedSession?.messages?.last()?.toolEvents?.any { it.name == "fake_tool" } == true)
+  }
+
+  @Test
+  fun runControllerShowsCompressionDraftAndAddsDividerWhenBudgetRequiresIt() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val store = AgentSessionStore(context)
+    val sessions = SessionController(store)
+    val session = store.create("Compression run ${System.currentTimeMillis()}")
+    val workspace = WorkspaceManager(context, "compression-run-${System.currentTimeMillis()}").also { it.ensureSeedFiles() }
+    val runtime = FakeAgentRuntime()
+    val controller = AgentRunController(
+      runtime = runtime,
+      scope = this,
+      shouldCompressContext = { true },
+    )
+    val drafts = mutableListOf<SessionMessage>()
+    var startedSession: AgentSession? = null
+    var startedDraft: SessionMessage? = null
+    var finishedSession: AgentSession? = null
+
+    val job = controller.submit(
+      input = "continue after compression",
+      settings = AppSettings(),
+      session = session,
+      workspace = workspace,
+      appendUserPrompt = sessions::appendUserPrompt,
+      appendContextRecord = sessions::appendContextRecord,
+      appendCompressionDivider = sessions::appendCompressionDivider,
+      appendMessage = sessions::appendMessage,
+      onStarted = { withContext, draft ->
+        startedSession = withContext
+        startedDraft = draft
+      },
+      onDraft = { drafts += it },
+      onFinished = { updated, _ -> finishedSession = updated },
+    )
+
+    assertNotNull(job)
+    job!!.join()
+
+    assertEquals("Compressing context...", startedDraft?.content)
+    assertTrue(startedSession?.messages?.any { it.role == SESSION_ROLE_COMPRESSION } == true)
+    assertTrue(runtime.sessionSeen?.messages?.any { it.role == SESSION_ROLE_COMPRESSION } == true)
+    assertTrue(drafts.any { it.content == "Working..." })
+    assertEquals("assistant", finishedSession?.messages?.last()?.role)
   }
 
   @Test
@@ -131,6 +178,10 @@ class AgentRunControllerInstrumentedTest {
         callbackCalled = true
         current
       },
+      appendCompressionDivider = { current, _ ->
+        callbackCalled = true
+        current
+      },
       appendMessage = { current, _ ->
         callbackCalled = true
         current
@@ -162,6 +213,7 @@ class AgentRunControllerInstrumentedTest {
       workspace = workspace,
       appendUserPrompt = sessions::appendUserPrompt,
       appendContextRecord = sessions::appendContextRecord,
+      appendCompressionDivider = sessions::appendCompressionDivider,
       appendMessage = sessions::appendMessage,
       onStarted = { _, _ -> },
       onDraft = { },
@@ -190,6 +242,7 @@ class AgentRunControllerInstrumentedTest {
 
   private class FakeAgentRuntime : AgentRuntime {
     var inputSeen: String = ""
+    var sessionSeen: AgentSession? = null
 
     override suspend fun run(
       input: String,
@@ -200,6 +253,7 @@ class AgentRunControllerInstrumentedTest {
       recorder: ToolEventRecorder,
     ): String {
       inputSeen = input
+      sessionSeen = session
       recorder.record("fake_tool", "{}", "ok")
       return "assistant output"
     }
