@@ -9,6 +9,8 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
+const val SESSION_ROLE_COMPRESSION = "compression"
+
 @Serializable
 data class AgentSession(
   val id: String,
@@ -185,6 +187,26 @@ class AgentSessionStore(
     )
     save(updated)
     return updated
+  }
+
+  fun appendCompressionDivider(session: AgentSession, record: ContextUsageRecord, summary: String): AgentSession {
+    return appendMessage(
+      session,
+      SessionMessage(
+        role = SESSION_ROLE_COMPRESSION,
+        content = buildString {
+          appendLine("Context compressed")
+          appendLine()
+          appendLine("- recordId: ${record.id}")
+          appendLine("- provider: ${record.provider}")
+          appendLine("- model: ${record.model}")
+          appendLine("- approximateTokens: ${record.approximateTokens}")
+          appendLine("- budgetStatus: ${record.contextBudgetStatus}")
+          appendLine()
+          append(summary.trim().ifBlank { "No handoff summary was provided." })
+        },
+      ),
+    )
   }
 
   fun truncateMessages(id: String, messageCount: Int): AgentSession? {

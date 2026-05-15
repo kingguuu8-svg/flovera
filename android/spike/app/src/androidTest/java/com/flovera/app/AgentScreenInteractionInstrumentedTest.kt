@@ -15,6 +15,7 @@ import androidx.compose.ui.test.performScrollTo
 import com.flovera.app.config.AppSettings
 import com.flovera.app.config.SettingsStore
 import com.flovera.app.session.AgentSessionStore
+import com.flovera.app.session.ContextUsageRecord
 import com.flovera.app.session.SessionMessage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -127,6 +128,47 @@ class AgentScreenInteractionInstrumentedTest {
     composeRule.onNodeWithText("Agent").performClick()
     composeRule.onNodeWithText("Conversation").assertIsDisplayed()
     assertEquals(0, composeRule.onAllNodesWithText(title).fetchSemanticsNodes().size)
+  }
+
+  @Test
+  fun conversationRendersCompressionDividerSeparatelyFromAssistantBubble() {
+    val context = composeRule.activity.applicationContext
+    SettingsStore(context).save(AppSettings(language = "en"))
+    val store = AgentSessionStore(context)
+    val session = store.appendMessage(
+      store.create("Compression visible ${System.currentTimeMillis()}"),
+      SessionMessage(role = "user", content = "before compression"),
+    )
+    val withDivider = store.appendCompressionDivider(
+      session,
+      ContextUsageRecord(
+        id = "divider-record",
+        source = "agent_run",
+        provider = "deepseek",
+        model = "deepseek-v4-pro",
+        messageCount = 4,
+        inputChars = 10,
+        historyChars = 20,
+        rulesChars = 30,
+        workspaceListingChars = 40,
+        approximateTokens = 900_000,
+        contextBudgetStatus = "compression_recommended",
+        compressed = true,
+        summary = "handoff",
+      ),
+      "Remember the active workspace and pending UI polish.",
+    )
+    val controller = AgentController(context)
+    controller.openSession(withDivider.id)
+
+    composeRule.setContent {
+      AgentScreen(controller)
+    }
+
+    composeRule.onNodeWithText("Agent").performClick()
+    composeRule.onNodeWithText("Context compressed").assertIsDisplayed()
+    composeRule.onNodeWithText("Show handoff summary").performClick()
+    composeRule.onNodeWithText("Remember the active workspace", substring = true).assertIsDisplayed()
   }
 
   @Test

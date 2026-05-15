@@ -85,6 +85,7 @@ import com.flovera.app.agent.AgentContextBudget
 import com.flovera.app.config.normalizeBraveSearchApiKey
 import com.flovera.app.koog.ModelProviderCatalog
 import com.flovera.app.session.ContextUsageRecord
+import com.flovera.app.session.SESSION_ROLE_COMPRESSION
 import com.flovera.app.session.SessionMessage
 import com.flovera.app.session.ToolEvent
 import com.flovera.app.web.FloveraWebBridge
@@ -551,10 +552,14 @@ private fun ConversationDialog(
               items = messages,
               key = { index, message -> "${message.timestampMillis}-${message.role}-$index" },
             ) { index, message ->
-              MessageBubble(
-                message = message,
-                onRevert = if (!state.isRunning && message.role == "user") ({ pendingRevertIndex = index }) else null,
-              )
+              if (message.role == SESSION_ROLE_COMPRESSION) {
+                CompressionDivider(message)
+              } else {
+                MessageBubble(
+                  message = message,
+                  onRevert = if (!state.isRunning && message.role == "user") ({ pendingRevertIndex = index }) else null,
+                )
+              }
             }
             state.assistantDraft?.let { draft ->
               item(key = "assistant-draft") {
@@ -660,6 +665,58 @@ private fun ConversationDialog(
       language = language,
       onDismiss = { sessionPickerOpen = false },
     )
+  }
+}
+
+@Composable
+private fun CompressionDivider(message: SessionMessage) {
+  var expanded by remember(message.timestampMillis, message.content) { mutableStateOf(false) }
+  Surface(
+    modifier = Modifier.fillMaxWidth(),
+    shape = FloveraSmallShape,
+    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.42f),
+    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.44f)),
+    tonalElevation = 0.dp,
+  ) {
+    Column(
+      modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+      horizontalAlignment = Alignment.CenterHorizontally,
+      verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+      Text(
+        text = "Context compressed",
+        color = MaterialTheme.colorScheme.onPrimaryContainer,
+        style = MaterialTheme.typography.labelMedium,
+        fontWeight = FontWeight.SemiBold,
+      )
+      Text(
+        text = formatMessageTime(message.timestampMillis),
+        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.68f),
+        style = MaterialTheme.typography.labelSmall,
+      )
+      TextButton(onClick = { expanded = !expanded }) {
+        Text(
+          text = if (expanded) "Hide handoff summary" else "Show handoff summary",
+          color = MaterialTheme.colorScheme.onPrimaryContainer,
+          style = MaterialTheme.typography.labelSmall,
+        )
+      }
+      if (expanded) {
+        Surface(
+          modifier = Modifier.fillMaxWidth(),
+          shape = FloveraSmallShape,
+          color = MaterialTheme.colorScheme.background.copy(alpha = 0.78f),
+          border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        ) {
+          Box(modifier = Modifier.padding(10.dp)) {
+            MarkdownMessageText(
+              content = message.content,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+          }
+        }
+      }
+    }
   }
 }
 

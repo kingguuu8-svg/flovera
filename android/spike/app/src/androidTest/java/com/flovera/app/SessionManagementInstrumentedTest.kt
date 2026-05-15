@@ -5,6 +5,7 @@ import com.flovera.app.config.AppSettings
 import com.flovera.app.config.SettingsStore
 import com.flovera.app.session.AgentSessionStore
 import com.flovera.app.session.ContextUsageRecord
+import com.flovera.app.session.SESSION_ROLE_COMPRESSION
 import com.flovera.app.session.SessionController
 import com.flovera.app.session.SessionMessage
 import java.io.File
@@ -109,6 +110,35 @@ class SessionManagementInstrumentedTest {
     val loaded = store.load(updated.id)
     assertEquals(1, loaded?.contextRecords?.size)
     assertEquals(45, loaded?.contextRecords?.single()?.approximateTokens)
+  }
+
+  @Test
+  fun sessionStoreAppendsCompressionDividerMessage() {
+    val store = isolatedSessionStore("compression-divider").store
+    val session = store.create("Compression ${System.currentTimeMillis()}")
+    val record = ContextUsageRecord(
+      id = "record-compress",
+      source = "agent_run",
+      provider = "deepseek",
+      model = "deepseek-v4-pro",
+      messageCount = 8,
+      inputChars = 12,
+      historyChars = 34,
+      rulesChars = 56,
+      workspaceListingChars = 78,
+      approximateTokens = 900_000,
+      contextBudgetStatus = "compression_recommended",
+      compressed = true,
+      summary = "handoff",
+    )
+
+    val updated = store.appendCompressionDivider(session, record, "Keep project facts and pending tasks.")
+    val divider = store.load(updated.id)?.messages?.single()
+
+    assertEquals(SESSION_ROLE_COMPRESSION, divider?.role)
+    assertTrue(divider?.content?.contains("Context compressed") == true)
+    assertTrue(divider?.content?.contains("record-compress") == true)
+    assertTrue(divider?.content?.contains("Keep project facts") == true)
   }
 
   @Test
