@@ -273,12 +273,40 @@ so future work can be planned without losing the product direction.
   entry should declare context window, token usage source, tool support,
   thinking/reasoning replay requirements, streaming support, and compression
   thresholds.
+- Add DeepSeek-specific thinking intensity controls when supported by the active
+  DeepSeek model, and expose the chosen intensity through settings-view and
+  auditable settings proposals.
 - Support model capabilities from built-in catalog entries, provider discovery
   when available, and user overrides when the provider cannot reliably expose
   the metadata.
 - Never present context percentages as exact unless the model context window and
   usage source are known; otherwise label them as estimates.
 - Record route and request-template changes as auditable settings changes.
+
+### Agent Rules And Runtime Control
+
+- Separate system rules from user/workspace rules:
+  - System rules are app-owned product and safety constraints.
+  - User rules are workspace-owned instructions, stored in `AGENT.md` or a
+    future `.flovera/rules/` structure.
+  - The UI should make the boundary visible so users know which rules they can
+    edit and which rules are product constraints.
+- Allow users to forcibly interrupt a running agent loop. Interruption should
+  cancel active model/tool work when possible, mark the run as interrupted, and
+  leave the session in a coherent state.
+- Support sending information while the agent is already working:
+  - Queue mode: the new message waits for the current run to finish, then starts
+    the next run automatically.
+  - Guided-thinking mode: the new message is treated as steering/context for
+    the current run if the runtime can accept it safely.
+- Keep queued or steering messages visible in the conversation so the user can
+  see what will happen next and cancel pending input before it runs.
+- Let the agent continue background work when Flovera is not focused, within
+  Android lifecycle limits.
+- Show ongoing background status in the Android notification shade, including
+  current run state, interruption action, and failure/success outcome.
+- Background execution must preserve existing settings, session persistence,
+  error logs, and notification permission boundaries.
 
 ### Web Search And Tool Expansion
 
