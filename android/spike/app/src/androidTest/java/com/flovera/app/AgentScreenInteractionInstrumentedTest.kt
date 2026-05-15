@@ -24,6 +24,7 @@ import com.flovera.app.session.ContextUsageRecord
 import com.flovera.app.session.SessionMessage
 import com.flovera.app.workspace.WorkspaceManager
 import java.io.ByteArrayOutputStream
+import java.util.Collections
 import kotlinx.coroutines.CompletableDeferred
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -242,10 +243,56 @@ class AgentScreenInteractionInstrumentedTest {
     composeRule.onNodeWithContentDescription("Interrupt agent").performClick()
     composeRule.waitUntil(timeoutMillis = 5_000) { !controller.state.value.isRunning }
 
-    composeRule.onNodeWithText("Run interrupted by user.").assertIsDisplayed()
+    assertTrue(composeRule.onAllNodesWithText("Run interrupted by user.").fetchSemanticsNodes().isNotEmpty())
     composeRule.runOnIdle {
       assertEquals("Agent loop interrupted", controller.state.value.status)
       assertEquals("Run interrupted by user.", controller.state.value.session?.messages?.lastOrNull()?.content)
+    }
+  }
+
+  @Test
+  fun runningAgentQueuesNextMessageAndStartsItAfterCurrentRun() {
+    val context = composeRule.activity.applicationContext
+    SettingsStore(context).save(AppSettings(language = "en"))
+    val runtime = QueueingAgentRuntime()
+    val controller = AgentController(
+      context,
+      agentRunController = AgentRunController(runtime = runtime),
+    )
+
+    composeRule.setContent {
+      AgentScreen(controller)
+    }
+
+    composeRule.onNodeWithText("Agent").performClick()
+    composeRule.onAllNodes(hasSetTextAction())[0].performTextInput("first task")
+    composeRule.onNodeWithContentDescription("Send message").performClick()
+
+    composeRule.waitUntil(timeoutMillis = 5_000) { runtime.inputCount() == 1 && controller.state.value.isRunning }
+    composeRule.onAllNodes(hasSetTextAction())[0].performTextInput("second task")
+    composeRule.onNodeWithContentDescription("Queue message").performClick()
+
+    composeRule.onNodeWithText("Queued").assertIsDisplayed()
+    composeRule.onNodeWithText("second task").assertIsDisplayed()
+    composeRule.runOnIdle {
+      assertEquals(listOf("second task"), controller.state.value.queuedInputs)
+    }
+
+    runtime.finishNext()
+    composeRule.waitUntil(timeoutMillis = 5_000) { runtime.inputCount() == 2 }
+    composeRule.runOnIdle {
+      assertTrue(controller.state.value.queuedInputs.isEmpty())
+      assertEquals("second task", runtime.inputsSnapshot().last())
+    }
+
+    runtime.finishNext()
+    composeRule.waitUntil(timeoutMillis = 5_000) { !controller.state.value.isRunning }
+    composeRule.runOnIdle {
+      val contents = controller.state.value.session?.messages?.map { it.content }.orEmpty()
+      assertTrue(contents.contains("first task"))
+      assertTrue(contents.contains("second task"))
+      assertTrue(contents.contains("assistant output for first task"))
+      assertTrue(contents.contains("assistant output for second task"))
     }
   }
 
@@ -409,6 +456,36 @@ class AgentScreenInteractionInstrumentedTest {
     ): String {
       never.await()
       return "unreachable"
+    }
+  }
+
+  private class QueueingAgentRuntime : AgentRuntime {
+    private val inputs = Collections.synchronizedList(mutableListOf<String>())
+    private val completions = Collections.synchronizedList(mutableListOf<CompletableDeferred<Unit>>())
+
+    fun inputCount(): Int = synchronized(inputs) { inputs.size }
+
+    fun inputsSnapshot(): List<String> = synchronized(inputs) { inputs.toList() }
+
+    fun finishNext() {
+      synchronized(completions) {
+        completions.firstOrNull { !it.isCompleted }
+      }?.complete(Unit)
+    }
+
+    override suspend fun run(
+      input: String,
+      agentRunId: String,
+      settings: AppSettings,
+      session: AgentSession,
+      workspace: WorkspaceManager,
+      recorder: ToolEventRecorder,
+    ): String {
+      val completion = CompletableDeferred<Unit>()
+      synchronized(inputs) { inputs += input }
+      synchronized(completions) { completions += completion }
+      completion.await()
+      return "assistant output for $input"
     }
   }
 

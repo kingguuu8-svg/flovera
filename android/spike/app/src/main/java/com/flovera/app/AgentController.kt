@@ -47,6 +47,7 @@ data class AgentScreenState(
   val status: String = "Idle",
   val isRunning: Boolean = false,
   val assistantDraft: SessionMessage? = null,
+  val queuedInputs: List<String> = emptyList(),
 )
 
 class AgentController(
@@ -426,11 +427,25 @@ class AgentController(
 
   fun submit() {
     val current = _state.value
-    val session = current.session ?: sessionController.createSession()
-    if (current.isRunning) return
+    val trimmed = current.input.trim()
+    if (trimmed.isBlank()) return
+    if (current.isRunning) {
+      _state.update {
+        it.copy(
+          input = "",
+          queuedInputs = it.queuedInputs + trimmed,
+          status = "Message queued",
+        )
+      }
+      return
+    }
+    startAgentRun(trimmed, current.session ?: sessionController.createSession())
+  }
 
+  private fun startAgentRun(input: String, session: AgentSession) {
+    val current = _state.value
     activeRunJob = agentRunController.submit(
-      input = current.input,
+      input = input,
       settings = current.settings,
       session = session,
       workspace = workspaceController.runtimeWorkspace(),
@@ -469,13 +484,33 @@ class AgentController(
       onFinished = { updated, succeeded ->
         activeRunJob = null
         val status = if (succeeded) "Agent loop completed" else "Agent loop failed"
-        refreshWorkspaceState(
-          session = updated,
-          isRunning = false,
-          status = status,
-        )
+        val nextInput = _state.value.queuedInputs.firstOrNull()
+        if (nextInput == null) {
+          refreshWorkspaceState(
+            session = updated,
+            isRunning = false,
+            status = status,
+          )
+        } else {
+          _state.update { it.copy(queuedInputs = it.queuedInputs.drop(1)) }
+          refreshWorkspaceState(
+            session = updated,
+            isRunning = false,
+            status = "Running queued message...",
+          )
+          startAgentRun(nextInput, updated)
+        }
       },
     )
+  }
+
+  fun clearQueuedInputs() {
+    _state.update {
+      it.copy(
+        queuedInputs = emptyList(),
+        status = "Queued messages cleared",
+      )
+    }
   }
 
   fun interruptAgentRun() {

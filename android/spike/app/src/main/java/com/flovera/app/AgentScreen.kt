@@ -452,7 +452,7 @@ private fun ConversationDialog(
   val listState = rememberLazyListState()
   val messages = state.session?.messages.orEmpty()
   val latestContextRecord = state.session?.contextRecords?.lastOrNull()
-  val visibleMessageCount = messages.size + if (state.assistantDraft == null) 0 else 1
+  val visibleMessageCount = messages.size + state.queuedInputs.size + if (state.assistantDraft == null) 0 else 1
   var pendingRevertIndex by remember { mutableStateOf<Int?>(null) }
   var sessionPickerOpen by remember { mutableStateOf(false) }
   var moreMenuOpen by remember { mutableStateOf(false) }
@@ -633,6 +633,12 @@ private fun ConversationDialog(
                 MessageBubble(message = draft, onRevert = null)
               }
             }
+            itemsIndexed(
+              items = state.queuedInputs,
+              key = { index, queued -> "queued-$index-$queued" },
+            ) { _, queued ->
+              QueuedMessageBubble(content = queued, language = language)
+            }
           }
         }
 
@@ -656,6 +662,21 @@ private fun ConversationDialog(
             ),
             modifier = Modifier.weight(1f),
           )
+          if (state.isRunning) {
+            Surface(
+              modifier = Modifier
+                .size(52.dp)
+                .semantics { contentDescription = "Queue message" }
+                .clickable(onClick = controller::submit),
+              shape = RoundedCornerShape(12.dp),
+              color = MaterialTheme.colorScheme.primaryContainer,
+              contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            ) {
+              Box(contentAlignment = Alignment.Center) {
+                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(20.dp))
+              }
+            }
+          }
           Surface(
             modifier = Modifier
               .size(52.dp)
@@ -673,6 +694,22 @@ private fun ConversationDialog(
               } else {
                 Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(20.dp))
               }
+            }
+          }
+        }
+        if (state.queuedInputs.isNotEmpty()) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            Text(
+              text = t(language, "${state.queuedInputs.size} queued", "\u5df2\u6392\u961f ${state.queuedInputs.size} \u6761"),
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+              style = MaterialTheme.typography.bodySmall,
+            )
+            TextButton(onClick = controller::clearQueuedInputs) {
+              Text(t(language, "Clear queue", "\u6e05\u7a7a\u961f\u5217"))
             }
           }
         }
@@ -788,6 +825,31 @@ private fun CompressionDivider(message: SessionMessage) {
             )
           }
         }
+      }
+    }
+  }
+}
+
+@Composable
+private fun QueuedMessageBubble(content: String, language: String) {
+  Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+    Surface(
+      modifier = Modifier.fillMaxWidth(0.84f),
+      shape = RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp, bottomStart = 14.dp, bottomEnd = 4.dp),
+      color = FloveraUserBubbleColor.copy(alpha = 0.72f),
+      border = BorderStroke(1.dp, FloveraUserBubbleBorder.copy(alpha = 0.72f)),
+      tonalElevation = 0.dp,
+    ) {
+      Column(
+        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+      ) {
+        Text(
+          text = t(language, "Queued", "\u5df2\u6392\u961f"),
+          color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
+          style = MaterialTheme.typography.labelSmall,
+        )
+        MarkdownMessageText(content = content, color = MaterialTheme.colorScheme.onSurface)
       }
     }
   }
