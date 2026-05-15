@@ -10,6 +10,7 @@ import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.ImageView
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
@@ -223,10 +224,13 @@ private fun WorkspacePreview(state: AgentScreenState) {
   val previewPath = state.selectedPreviewPath
   val previewContent = state.selectedPreviewContent
   val mimeType = state.selectedPreviewMimeType
+  val previewUri = state.selectedPreviewUri
   val htmlUrl = state.selectedHtmlUrl
+  val isImagePreview = previewPath.isNotBlank() && mimeType.startsWith("image/")
   val isTextPreview = previewPath.isNotBlank() &&
     !previewPath.endsWith(".html", ignoreCase = true) &&
-    !previewPath.endsWith(".htm", ignoreCase = true)
+    !previewPath.endsWith(".htm", ignoreCase = true) &&
+    !isImagePreview
 
   if (isTextPreview) {
     WorkspaceTextPreview(
@@ -237,7 +241,57 @@ private fun WorkspacePreview(state: AgentScreenState) {
     return
   }
 
+  if (isImagePreview) {
+    WorkspaceImagePreview(
+      path = previewPath,
+      mimeType = mimeType,
+      uri = previewUri,
+    )
+    return
+  }
+
   WorkspaceWebView(url = htmlUrl, workspaceRootUrl = state.workspaceRootUrl)
+}
+
+@Composable
+private fun WorkspaceImagePreview(path: String, mimeType: String, uri: String) {
+  Surface(
+    modifier = Modifier.fillMaxSize(),
+    color = MaterialTheme.colorScheme.background,
+  ) {
+    Column(
+      modifier = Modifier.fillMaxSize().padding(18.dp),
+      verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+      Text(path, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleMedium)
+      Text(mimeType.ifBlank { "image/*" }, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+      Surface(
+        modifier = Modifier.fillMaxWidth().weight(1f),
+        shape = FloveraSmallShape,
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+      ) {
+        if (uri.isBlank()) {
+          Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("Image preview unavailable", color = MaterialTheme.colorScheme.onSurfaceVariant)
+          }
+        } else {
+          AndroidView(
+            modifier = Modifier.fillMaxSize().semantics { contentDescription = "Image preview for $path" },
+            factory = { context ->
+              ImageView(context).apply {
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                adjustViewBounds = true
+              }
+            },
+            update = { imageView ->
+              imageView.setImageURI(Uri.parse(uri))
+            },
+          )
+        }
+      }
+    }
+  }
 }
 
 @Composable

@@ -39,6 +39,7 @@ data class AgentScreenState(
   val selectedPreviewPath: String = "",
   val selectedPreviewContent: String = "",
   val selectedPreviewMimeType: String = "",
+  val selectedPreviewUri: String = "",
   val workspaceRootUrl: String = "",
   val workspaceSnapshots: List<WorkspaceSnapshotRecord> = emptyList(),
   val settingsProposals: List<WorkspaceSettingsProposal> = emptyList(),
@@ -93,6 +94,7 @@ class AgentController(
       selectedHtmlUrl = workspaceSnapshot.selectedHtmlUrl,
       selectedPreviewPath = workspaceSnapshot.selectedHtmlPath,
       selectedPreviewMimeType = if (workspaceSnapshot.selectedHtmlPath.isBlank()) "" else "text/html",
+      selectedPreviewUri = "",
       workspaceRootUrl = workspaceSnapshot.workspaceRootUrl,
       workspaceSnapshots = workspaceSnapshot.snapshots,
       settingsProposals = workspaceSnapshot.settingsProposals,
@@ -181,6 +183,7 @@ class AgentController(
         selectedPreviewPath = workspaceSnapshot.selectedHtmlPath,
         selectedPreviewContent = "",
         selectedPreviewMimeType = if (workspaceSnapshot.selectedHtmlPath.isBlank()) "" else "text/html",
+        selectedPreviewUri = "",
         workspaceRootUrl = workspaceSnapshot.workspaceRootUrl,
         workspaceSnapshots = workspaceSnapshot.snapshots,
         settingsProposals = workspaceSnapshot.settingsProposals,
@@ -206,12 +209,20 @@ class AgentController(
       selectHtmlFile(path)
       return
     }
-    val content = workspaceController.previewTextFile(path)
+    val mimeType = workspaceController.mimeType(path)
+    val isImage = mimeType.startsWith("image/")
+    val canPreviewAsText = canPreviewAsText(path, mimeType)
+    val content = when {
+      isImage -> ""
+      canPreviewAsText -> workspaceController.previewTextFile(path)
+      else -> "No built-in preview for $mimeType. Use Open with or Share from the file menu."
+    }
     _state.update {
       it.copy(
         selectedPreviewPath = path,
         selectedPreviewContent = content,
-        selectedPreviewMimeType = workspaceController.mimeType(path),
+        selectedPreviewMimeType = mimeType,
+        selectedPreviewUri = if (isImage) workspaceFileUri(path)?.toString().orEmpty() else "",
         status = "Previewing $path",
       )
     }
@@ -487,6 +498,11 @@ class AgentController(
         it.selectedPreviewMimeType.isBlank() && workspaceSnapshot.selectedHtmlPath.isNotBlank() -> "text/html"
         else -> it.selectedPreviewMimeType
       }
+      val previewUri = when {
+        resetPreviewToSelectedHtml -> ""
+        it.selectedPreviewPath.isBlank() -> ""
+        else -> it.selectedPreviewUri
+      }
       it.copy(
         settings = normalizedSettings,
         session = session,
@@ -501,6 +517,7 @@ class AgentController(
         selectedPreviewPath = previewPath,
         selectedPreviewContent = previewContent,
         selectedPreviewMimeType = previewMimeType,
+        selectedPreviewUri = previewUri,
         workspaceRootUrl = workspaceSnapshot.workspaceRootUrl,
         workspaceSnapshots = workspaceSnapshot.snapshots,
         settingsProposals = workspaceSnapshot.settingsProposals,
@@ -509,6 +526,13 @@ class AgentController(
         status = status,
       )
     }
+  }
+
+  private fun canPreviewAsText(path: String, mimeType: String): Boolean {
+    val extension = path.substringAfterLast('.', missingDelimiterValue = "").lowercase()
+    return mimeType.startsWith("text/") ||
+      mimeType == "application/json" ||
+      extension in setOf("md", "markdown", "json", "js", "css", "csv", "xml", "kt", "java", "py")
   }
 
   private fun activateSession(session: AgentSession, status: String) {

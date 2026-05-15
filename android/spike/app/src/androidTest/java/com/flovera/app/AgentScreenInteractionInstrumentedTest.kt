@@ -1,6 +1,7 @@
 package com.flovera.app
 
 import androidx.activity.ComponentActivity
+import android.graphics.Bitmap
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -17,6 +18,8 @@ import com.flovera.app.config.SettingsStore
 import com.flovera.app.session.AgentSessionStore
 import com.flovera.app.session.ContextUsageRecord
 import com.flovera.app.session.SessionMessage
+import com.flovera.app.workspace.WorkspaceManager
+import java.io.ByteArrayOutputStream
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -259,6 +262,35 @@ class AgentScreenInteractionInstrumentedTest {
   }
 
   @Test
+  fun tappingImageFileOpensNativeImagePreviewOverPreviousHtml() {
+    val context = composeRule.activity.applicationContext
+    val workspaceId = "image-preview-${System.currentTimeMillis()}"
+    SettingsStore(context).save(AppSettings(language = "en", activeWorkspaceId = workspaceId, selectedHtmlPath = "index.html"))
+    val workspace = WorkspaceManager(context, workspaceId).also { it.ensureSeedFiles() }
+    workspace.writeBytes("sample.png", testPngBytes(), createAutoSnapshot = false)
+    val controller = AgentController(context)
+
+    composeRule.setContent {
+      AgentScreen(controller)
+    }
+
+    composeRule.onNodeWithText("Agent").performClick()
+    composeRule.onNodeWithContentDescription("More").performClick()
+    composeRule.onNodeWithText("Files").performClick()
+    composeRule.onNodeWithText("sample.png", substring = true).performClick()
+
+    composeRule.onNodeWithText("sample.png").assertIsDisplayed()
+    composeRule.onNodeWithContentDescription("Image preview for sample.png").assertIsDisplayed()
+    composeRule.runOnIdle {
+      assertEquals("index.html", controller.state.value.selectedHtmlPath)
+      assertEquals("sample.png", controller.state.value.selectedPreviewPath)
+      assertEquals("image/png", controller.state.value.selectedPreviewMimeType)
+      assertTrue(controller.state.value.selectedPreviewUri.startsWith("content://"))
+      assertEquals("", controller.state.value.selectedPreviewContent)
+    }
+  }
+
+  @Test
   fun agentRulesCancelKeepsPersistedRules() {
     val context = composeRule.activity.applicationContext
     SettingsStore(context).save(AppSettings(language = "en"))
@@ -278,6 +310,14 @@ class AgentScreenInteractionInstrumentedTest {
 
     composeRule.runOnIdle {
       assertEquals(original, controller.state.value.agentRulesDraft)
+    }
+  }
+
+  private fun testPngBytes(): ByteArray {
+    val bitmap = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+    return ByteArrayOutputStream().use { output ->
+      bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)
+      output.toByteArray()
     }
   }
 
