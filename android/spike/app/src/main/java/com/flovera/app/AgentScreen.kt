@@ -659,14 +659,20 @@ private fun ConversationDialog(
           Surface(
             modifier = Modifier
               .size(52.dp)
-              .semantics { contentDescription = "Send message" }
-              .clickable(enabled = !state.isRunning, onClick = controller::submit),
+              .semantics { contentDescription = if (state.isRunning) "Interrupt agent" else "Send message" }
+              .clickable(
+                onClick = if (state.isRunning) controller::interruptAgentRun else controller::submit,
+              ),
             shape = RoundedCornerShape(12.dp),
-            color = if (state.isRunning) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.primaryContainer,
-            contentColor = if (state.isRunning) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onPrimaryContainer,
+            color = if (state.isRunning) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer,
+            contentColor = if (state.isRunning) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer,
           ) {
             Box(contentAlignment = Alignment.Center) {
-              Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(20.dp))
+              if (state.isRunning) {
+                Icon(Icons.Filled.Close, contentDescription = null, modifier = Modifier.size(20.dp))
+              } else {
+                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(20.dp))
+              }
             }
           }
         }

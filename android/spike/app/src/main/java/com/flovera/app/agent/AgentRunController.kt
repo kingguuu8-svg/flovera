@@ -16,6 +16,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -93,15 +94,21 @@ class AgentRunController(
           ),
         )
       }
-      val result = runCatching {
-        runtime.run(
-          input = trimmed,
-          agentRunId = agentRunId,
-          settings = settings,
-          session = preparedSession,
-          workspace = workspace,
-          recorder = recorder,
+      val result = try {
+        Result.success(
+          runtime.run(
+            input = trimmed,
+            agentRunId = agentRunId,
+            settings = settings,
+            session = preparedSession,
+            workspace = workspace,
+            recorder = recorder,
+          ),
         )
+      } catch (error: CancellationException) {
+        throw error
+      } catch (error: Throwable) {
+        Result.failure(error)
       }
 
       val assistantMessage = result.fold(

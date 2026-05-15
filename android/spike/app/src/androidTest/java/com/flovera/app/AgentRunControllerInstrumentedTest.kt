@@ -17,6 +17,7 @@ import com.flovera.app.session.SessionController
 import com.flovera.app.session.SessionMessage
 import com.flovera.app.workspace.WorkspaceManager
 import java.io.File
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -258,6 +259,60 @@ class AgentRunControllerInstrumentedTest {
     assertTrue(logText.contains("networkEnabled: true"))
     assertTrue(logText.contains("agentRunId: ${session.id}-"))
     assertFalse(logText.contains("secret-must-not-be-logged"))
+  }
+
+  @Test
+  fun runControllerCancellationDoesNotPersistFailureMessage() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val store = AgentSessionStore(context)
+    val sessions = SessionController(store)
+    val session = store.create("Cancel run ${System.currentTimeMillis()}")
+    val workspace = WorkspaceManager(context, "cancel-run-${System.currentTimeMillis()}").also { it.ensureSeedFiles() }
+    val runtime = BlockingAgentRuntime()
+    val controller = AgentRunController(runtime = runtime, scope = this)
+    var finishedCalled = false
+
+    val job = controller.submit(
+      input = "long task",
+      settings = AppSettings(),
+      session = session,
+      workspace = workspace,
+      appendUserPrompt = sessions::appendUserPrompt,
+      appendContextRecord = sessions::appendContextRecord,
+      appendCompressionDivider = sessions::appendCompressionDivider,
+      appendMessage = sessions::appendMessage,
+      onStarted = { _, _ -> },
+      onDraft = { },
+      onSessionUpdated = { _, _ -> },
+      onFinished = { _, _ -> finishedCalled = true },
+    )
+
+    assertNotNull(job)
+    runtime.started.await()
+    job!!.cancel()
+    job.join()
+
+    assertFalse(finishedCalled)
+    assertEquals(1, store.load(session.id)?.messages?.size)
+    assertEquals("user", store.load(session.id)?.messages?.single()?.role)
+  }
+
+  private class BlockingAgentRuntime : AgentRuntime {
+    val started = CompletableDeferred<Unit>()
+    private val never = CompletableDeferred<Unit>()
+
+    override suspend fun run(
+      input: String,
+      agentRunId: String,
+      settings: AppSettings,
+      session: AgentSession,
+      workspace: WorkspaceManager,
+      recorder: ToolEventRecorder,
+    ): String {
+      started.complete(Unit)
+      never.await()
+      return "unreachable"
+    }
   }
 
   private class FakeHandoffCompressor(private val summary: String) : SessionHandoffCompressor {

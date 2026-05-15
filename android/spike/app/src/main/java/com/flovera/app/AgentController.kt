@@ -17,6 +17,7 @@ import com.flovera.app.workspace.WorkspaceController
 import com.flovera.app.workspace.WorkspaceFileNode
 import com.flovera.app.workspace.WorkspaceSettingsProposal
 import com.flovera.app.workspace.WorkspaceSnapshotRecord
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -52,11 +53,12 @@ class AgentController(
   context: Context,
   settingsStore: SettingsStore = SettingsStore(context.applicationContext),
   sessionStore: AgentSessionStore = AgentSessionStore(context.applicationContext),
+  private val agentRunController: AgentRunController = AgentRunController(),
 ) {
   private val appContext = context.applicationContext
   private val settingsController = SettingsController(settingsStore)
   private val sessionController = SessionController(sessionStore)
-  private val agentRunController = AgentRunController()
+  private var activeRunJob: Job? = null
   private var workspaceController: WorkspaceController
 
   private val _state = MutableStateFlow(AgentScreenState())
@@ -427,7 +429,7 @@ class AgentController(
     val session = current.session ?: sessionController.createSession()
     if (current.isRunning) return
 
-    agentRunController.submit(
+    activeRunJob = agentRunController.submit(
       input = current.input,
       settings = current.settings,
       session = session,
@@ -465,6 +467,7 @@ class AgentController(
         }
       },
       onFinished = { updated, succeeded ->
+        activeRunJob = null
         val status = if (succeeded) "Agent loop completed" else "Agent loop failed"
         refreshWorkspaceState(
           session = updated,
@@ -472,6 +475,21 @@ class AgentController(
           status = status,
         )
       },
+    )
+  }
+
+  fun interruptAgentRun() {
+    val current = _state.value
+    if (!current.isRunning) return
+    activeRunJob?.cancel()
+    activeRunJob = null
+    val interrupted = current.session?.let { session ->
+      sessionController.appendMessage(session, SessionMessage(role = "assistant", content = "Run interrupted by user."))
+    }
+    refreshWorkspaceState(
+      session = interrupted ?: current.session,
+      isRunning = false,
+      status = "Agent loop interrupted",
     )
   }
 

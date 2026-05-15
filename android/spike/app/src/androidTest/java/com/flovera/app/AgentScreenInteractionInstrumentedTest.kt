@@ -15,11 +15,16 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performScrollTo
 import com.flovera.app.config.AppSettings
 import com.flovera.app.config.SettingsStore
+import com.flovera.app.agent.AgentRunController
+import com.flovera.app.koog.AgentRuntime
+import com.flovera.app.koog.ToolEventRecorder
+import com.flovera.app.session.AgentSession
 import com.flovera.app.session.AgentSessionStore
 import com.flovera.app.session.ContextUsageRecord
 import com.flovera.app.session.SessionMessage
 import com.flovera.app.workspace.WorkspaceManager
 import java.io.ByteArrayOutputStream
+import kotlinx.coroutines.CompletableDeferred
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -216,6 +221,35 @@ class AgentScreenInteractionInstrumentedTest {
   }
 
   @Test
+  fun runningAgentCanBeInterruptedFromConversation() {
+    val context = composeRule.activity.applicationContext
+    SettingsStore(context).save(AppSettings(language = "en"))
+    val runtime = BlockingAgentRuntime()
+    val controller = AgentController(
+      context,
+      agentRunController = AgentRunController(runtime = runtime),
+    )
+
+    composeRule.setContent {
+      AgentScreen(controller)
+    }
+
+    composeRule.onNodeWithText("Agent").performClick()
+    composeRule.onAllNodes(hasSetTextAction())[0].performTextInput("start long task")
+    composeRule.onNodeWithContentDescription("Send message").performClick()
+
+    composeRule.waitUntil(timeoutMillis = 5_000) { controller.state.value.isRunning }
+    composeRule.onNodeWithContentDescription("Interrupt agent").performClick()
+    composeRule.waitUntil(timeoutMillis = 5_000) { !controller.state.value.isRunning }
+
+    composeRule.onNodeWithText("Run interrupted by user.").assertIsDisplayed()
+    composeRule.runOnIdle {
+      assertEquals("Agent loop interrupted", controller.state.value.status)
+      assertEquals("Run interrupted by user.", controller.state.value.session?.messages?.lastOrNull()?.content)
+    }
+  }
+
+  @Test
   fun mainSurfaceExposesAgentAndHtmlQuickPickerWhileConversationOwnsSecondaryEntries() {
     val context = composeRule.activity.applicationContext
     SettingsStore(context).save(AppSettings(language = "en"))
@@ -359,6 +393,22 @@ class AgentScreenInteractionInstrumentedTest {
     return ByteArrayOutputStream().use { output ->
       bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)
       output.toByteArray()
+    }
+  }
+
+  private class BlockingAgentRuntime : AgentRuntime {
+    private val never = CompletableDeferred<Unit>()
+
+    override suspend fun run(
+      input: String,
+      agentRunId: String,
+      settings: AppSettings,
+      session: AgentSession,
+      workspace: WorkspaceManager,
+      recorder: ToolEventRecorder,
+    ): String {
+      never.await()
+      return "unreachable"
     }
   }
 
