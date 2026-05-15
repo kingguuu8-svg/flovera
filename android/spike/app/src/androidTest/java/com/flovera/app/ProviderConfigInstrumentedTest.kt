@@ -110,6 +110,7 @@ class ProviderConfigInstrumentedTest {
           language = "zh",
           maxAgentIterations = 120,
           agentAuthorityMode = "assisted",
+          deepSeekThinkingEffort = "max",
           modelContextWindowTokens = 512_000,
           modelCompressionThresholdPercent = 75,
         ),
@@ -122,6 +123,7 @@ class ProviderConfigInstrumentedTest {
       assertEquals("zh", updated.language)
       assertEquals(80, updated.maxAgentIterations)
       assertEquals("assisted", updated.agentAuthorityMode)
+      assertEquals("max", updated.deepSeekThinkingEffort)
       val override = updated.modelContextOverrideFor("deepseek", "deepseek-v4-pro")
       assertEquals(512_000, override?.contextWindowTokens)
       assertEquals(75, override?.compressionThresholdPercent)
