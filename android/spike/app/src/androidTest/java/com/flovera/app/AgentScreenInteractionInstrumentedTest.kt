@@ -175,6 +175,47 @@ class AgentScreenInteractionInstrumentedTest {
   }
 
   @Test
+  fun contextUsageHeaderUsesDeepSeekCatalogForOldRecordsAndShowsDetailsOnClick() {
+    val context = composeRule.activity.applicationContext
+    SettingsStore(context).save(AppSettings(language = "en"))
+    val store = AgentSessionStore(context)
+    val session = store.appendMessage(
+      store.create("Context compact ${System.currentTimeMillis()}"),
+      SessionMessage(role = "user", content = "hello"),
+    )
+    val withContext = store.appendContextRecord(
+      session,
+      ContextUsageRecord(
+        id = "legacy-context-record",
+        source = "agent_run",
+        provider = "deepseek",
+        model = "deepseek-v4-pro",
+        messageCount = 1,
+        inputChars = 10,
+        historyChars = 20,
+        rulesChars = 30,
+        workspaceListingChars = 40,
+        approximateTokens = 900_000,
+      ),
+    )
+    val controller = AgentController(context)
+    controller.openSession(withContext.id)
+
+    composeRule.setContent {
+      AgentScreen(controller)
+    }
+
+    composeRule.onNodeWithText("Agent").performClick()
+    composeRule.onNodeWithText("90% · 900k/1M").assertIsDisplayed()
+    assertEquals(0, composeRule.onAllNodesWithText("unknown", substring = true).fetchSemanticsNodes().size)
+
+    composeRule.onNodeWithContentDescription("Context usage details").performClick()
+
+    composeRule.onNodeWithText("Used 900k tokens, total 1M", substring = true).assertIsDisplayed()
+    composeRule.onNodeWithText("Flovera automatically compresses background information", substring = true).assertIsDisplayed()
+  }
+
+  @Test
   fun mainSurfaceExposesAgentAndHtmlQuickPickerWhileConversationOwnsSecondaryEntries() {
     val context = composeRule.activity.applicationContext
     SettingsStore(context).save(AppSettings(language = "en"))

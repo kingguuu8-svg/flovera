@@ -503,15 +503,28 @@ private fun ConversationDialog(
               style = MaterialTheme.typography.bodySmall,
             )
             if (!isDraftSession && latestContextRecord != null) {
+              var contextDetailsOpen by remember(latestContextRecord.id) { mutableStateOf(false) }
               Row(
+                modifier = Modifier
+                  .clickable { contextDetailsOpen = true }
+                  .semantics {
+                    contentDescription = "Context usage details"
+                  },
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
               ) {
                 ContextUsageRing(latestContextRecord)
                 Text(
-                  text = formatContextUsage(latestContextRecord, language),
+                  text = formatContextUsageCompact(latestContextRecord, language),
                   color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.82f),
                   style = MaterialTheme.typography.bodySmall,
+                )
+              }
+              if (contextDetailsOpen) {
+                ContextUsageDetailsDialog(
+                  record = latestContextRecord,
+                  language = language,
+                  onDismiss = { contextDetailsOpen = false },
                 )
               }
             }
@@ -1013,9 +1026,9 @@ private fun formatMessageTime(timestampMillis: Long): String {
 
 @Composable
 private fun ContextUsageRing(record: ContextUsageRecord) {
-  val permille = record.contextUsagePermille
+  val permille = effectiveContextPermille(record)
   val rawProgress = ((permille ?: 0).toFloat() / 1_000f).coerceIn(0f, 1f)
-  val progress = if (rawProgress == 0f && record.approximateTokens > 0 && record.modelContextWindowTokens != null) {
+  val progress = if (rawProgress == 0f && record.approximateTokens > 0 && effectiveContextWindow(record) != null) {
     0.01f
   } else {
     rawProgress
@@ -1058,42 +1071,78 @@ private fun ContextUsageRing(record: ContextUsageRecord) {
   }
 }
 
-private fun formatContextUsage(record: ContextUsageRecord, language: String): String {
-  val compression = if (record.compressed) {
-    t(language, "compressed", "\u5df2\u538b\u7f29")
-  } else {
-    t(language, "no compression", "\u672a\u538b\u7f29")
-  }
-  val contextWindow = record.modelContextWindowTokens
-  val contextLabel = if (contextWindow == null) {
-    t(language, "unknown window", "\u672a\u77e5\u7a97\u53e3")
-  } else {
-    val percent = record.contextUsagePermille?.let { formatContextPercent(record, language) }
-      ?: t(language, "estimate", "\u4f30\u7b97")
-    "$percent / ${contextWindow / 1_000}k"
-  }
-  val budgetStatus = formatContextBudgetStatus(record.contextBudgetStatus, language)
-  return t(
-    language,
-    "Context ~${record.approximateTokens} tokens / $contextLabel / ${record.messageCount} messages / $compression / $budgetStatus",
-    "\u4e0a\u4e0b\u6587\u7ea6 ${record.approximateTokens} tokens / $contextLabel / ${record.messageCount} \u6761\u6d88\u606f / $compression / $budgetStatus",
+@Composable
+private fun ContextUsageDetailsDialog(record: ContextUsageRecord, language: String, onDismiss: () -> Unit) {
+  AlertDialog(
+    onDismissRequest = onDismiss,
+    title = { Text(t(language, "Context", "\u4e0a\u4e0b\u6587")) },
+    text = {
+      Text(
+        text = formatContextUsageDetails(record, language),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.bodyMedium,
+      )
+    },
+    confirmButton = {
+      TextButton(onClick = onDismiss) {
+        Text(t(language, "OK", "\u786e\u5b9a"))
+      }
+    },
   )
 }
 
-private fun formatContextBudgetStatus(status: String, language: String): String {
-  return when (status) {
-    AgentContextBudget.STATUS_SAFE -> t(language, "safe", "\u5b89\u5168")
-    AgentContextBudget.STATUS_WATCH -> t(language, "watch", "\u63a5\u8fd1\u9608\u503c")
-    AgentContextBudget.STATUS_COMPRESSION_RECOMMENDED -> t(language, "compression soon", "\u5f85\u538b\u7f29")
-    else -> t(language, "unknown budget", "\u672a\u77e5\u9884\u7b97")
-  }
+private fun formatContextUsageCompact(record: ContextUsageRecord, language: String): String {
+  val percent = formatContextPercent(record, language)
+  val window = effectiveContextWindow(record)
+  val used = formatTokenCount(record.approximateTokens)
+  val total = window?.let(::formatTokenCount) ?: "?"
+  return "$percent · $used/$total"
+}
+
+private fun formatContextUsageDetails(record: ContextUsageRecord, language: String): String {
+  val window = effectiveContextWindow(record)
+  val used = formatTokenCount(record.approximateTokens)
+  val total = window?.let(::formatTokenCount) ?: t(language, "unknown", "\u672a\u77e5")
+  return t(
+    language,
+    "Used $used tokens, total $total. Flovera automatically compresses background information when the context approaches its budget.",
+    "\u5df2\u7528 $used tokens\uff0c\u5171 $total\u3002Flovera \u4f1a\u5728\u4e0a\u4e0b\u6587\u63a5\u8fd1\u9884\u7b97\u65f6\u81ea\u52a8\u538b\u7f29\u5176\u80cc\u666f\u4fe1\u606f\u3002",
+  )
 }
 
 private fun formatContextPercent(record: ContextUsageRecord, language: String): String {
-  val permille = record.contextUsagePermille ?: return t(language, "estimate", "\u4f30\u7b97")
+  val permille = effectiveContextPermille(record) ?: return t(language, "estimate", "\u4f30\u7b97")
   val value = ((permille + 5) / 10).coerceIn(0, 100)
   if (value == 0 && record.approximateTokens > 0) return t(language, "<1%", "<1%")
   return "$value%"
+}
+
+private fun effectiveContextWindow(record: ContextUsageRecord): Int? {
+  return record.modelContextWindowTokens
+    ?: ModelProviderCatalog.findProvider(record.provider)?.contextFor(record.model)?.contextWindowTokens
+}
+
+private fun effectiveContextPermille(record: ContextUsageRecord): Int? {
+  record.contextUsagePermille?.let { return it }
+  val window = effectiveContextWindow(record) ?: return null
+  if (window <= 0) return null
+  return ((record.approximateTokens.coerceAtLeast(0).toLong() * 1_000L) / window)
+    .coerceIn(0L, 1_000L)
+    .toInt()
+}
+
+private fun formatTokenCount(tokens: Int): String {
+  return when {
+    tokens >= 1_000_000 -> {
+      val value = tokens / 1_000_000.0
+      if (tokens % 1_000_000 == 0) "${tokens / 1_000_000}M" else String.format(Locale.US, "%.1fM", value)
+    }
+    tokens >= 1_000 -> {
+      val value = tokens / 1_000.0
+      if (tokens % 1_000 == 0) "${tokens / 1_000}k" else String.format(Locale.US, "%.1fk", value)
+    }
+    else -> tokens.toString()
+  }
 }
 
 private fun formatSnapshotTime(timestampMillis: Long): String {
