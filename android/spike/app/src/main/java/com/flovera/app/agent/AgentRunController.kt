@@ -1,6 +1,7 @@
 package com.flovera.app.agent
 
 import com.flovera.app.config.AppSettings
+import com.flovera.app.koog.AgentPromptBuilder
 import com.flovera.app.koog.AgentRuntime
 import com.flovera.app.koog.KoogAgentRuntime
 import com.flovera.app.koog.KoogSessionHandoffCompressor
@@ -151,7 +152,11 @@ class AgentRunController(
     val historyChars = recentHistory.sumOf { message ->
       message.role.length + message.content.length + 2
     }
-    val rulesChars = workspace.readAgentRules().length
+    val webSearchAvailable = settings.networkEnabled && settings.webSearchEnabled && settings.braveSearchApiKey.isNotBlank()
+    val rulesChars = AgentPromptBuilder.systemPrompt(
+      networkEnabled = settings.networkEnabled,
+      webSearchAvailable = webSearchAvailable,
+    ).length + workspace.readAgentRules().length
     val workspaceListingChars = workspace.listFiles(".").length
     val totalChars = input.length + historyChars + rulesChars + workspaceListingChars
     val approximateTokens = approximateTokens(totalChars)
