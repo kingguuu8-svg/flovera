@@ -27,6 +27,7 @@ data class AppSettings(
   val themeMode: String = "dark",
   val themeColor: String = "#76C4D8",
   val agentAuthorityMode: String = "safe",
+  val deepSeekThinkingEffort: String = "high",
   val modelContextOverrides: Map<String, ModelContextOverride> = emptyMap(),
 ) {
   fun apiKeyFor(providerId: String = provider): String {

@@ -29,7 +29,7 @@ class KoogSessionHandoffCompressor : SessionHandoffCompressor {
       require(apiKey.isNotBlank()) { "${provider.label} API key is not configured." }
       val context = ModelProviderCatalog.contextFor(settings)
       val agent = AIAgent(
-        promptExecutor = MultiLLMPromptExecutor(provider.createClient(apiKey)),
+        promptExecutor = MultiLLMPromptExecutor(ModelProviderCatalog.createClient(provider, apiKey, settings)),
         llmModel = provider.createModel(settings.model, context),
         toolRegistry = ToolRegistry {},
         systemPrompt = handoffSystemPrompt(),

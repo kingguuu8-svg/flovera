@@ -150,6 +150,7 @@ class AgentController(
     themeMode: String = _state.value.settings.themeMode,
     themeColor: String = _state.value.settings.themeColor,
     authorityMode: String = _state.value.settings.agentAuthorityMode,
+    deepSeekThinkingEffort: String = _state.value.settings.deepSeekThinkingEffort,
     webSearchEnabled: Boolean = _state.value.settings.webSearchEnabled,
     braveSearchApiKey: String = _state.value.settings.braveSearchApiKey,
   ) {
@@ -168,7 +169,8 @@ class AgentController(
       themeColor,
     )
     val settingsWithAuthority = settingsController.setAuthorityMode(settings, authorityMode)
-    val settingsWithSearch = settingsController.setWebSearch(settingsWithAuthority, webSearchEnabled, braveSearchApiKey)
+    val settingsWithThinking = settingsController.setDeepSeekThinkingEffort(settingsWithAuthority, deepSeekThinkingEffort)
+    val settingsWithSearch = settingsController.setWebSearch(settingsWithThinking, webSearchEnabled, braveSearchApiKey)
     val draft = settingsController.draftFor(settingsWithSearch)
     workspaceController.syncFloveraSettings(settingsWithSearch)
     val workspaceSnapshot = workspaceController.snapshot(settingsWithSearch.selectedHtmlPath)

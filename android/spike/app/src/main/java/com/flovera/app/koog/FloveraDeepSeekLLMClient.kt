@@ -23,15 +23,18 @@ import ai.koog.prompt.message.ResponseMetaInfo
 import ai.koog.prompt.params.LLMParams
 import ai.koog.prompt.streaming.StreamFrame
 import ai.koog.prompt.streaming.buildStreamFrameFlow
+import com.flovera.app.config.AppSettings
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.flow.Flow
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 import kotlin.time.Clock
 
-class FloveraDeepSeekLLMClient(
+open class FloveraDeepSeekLLMClient(
   private val settings: DeepSeekClientSettings = DeepSeekClientSettings(),
+  private val requestSettings: FloveraDeepSeekRequestSettings = FloveraDeepSeekRequestSettings(),
   httpClient: KoogHttpClient,
   clock: Clock = Clock.System,
   toolsConverter: OpenAICompatibleToolDescriptorSchemaGenerator = OpenAICompatibleToolDescriptorSchemaGenerator(),
@@ -44,12 +47,14 @@ class FloveraDeepSeekLLMClient(
 ) {
   constructor(
     apiKey: String,
+    requestSettings: FloveraDeepSeekRequestSettings = FloveraDeepSeekRequestSettings(),
     settings: DeepSeekClientSettings = DeepSeekClientSettings(),
     baseClient: HttpClient = HttpClient(),
     clock: Clock = Clock.System,
     toolsConverter: OpenAICompatibleToolDescriptorSchemaGenerator = OpenAICompatibleToolDescriptorSchemaGenerator(),
   ) : this(
     settings = settings,
+    requestSettings = requestSettings,
     httpClient = createConfiguredHttpClient(apiKey, settings, staticLogger, baseClient, DEEPSEEK_CLIENT_NAME),
     clock = clock,
     toolsConverter = toolsConverter,
@@ -85,6 +90,8 @@ class FloveraDeepSeekLLMClient(
       stop = deepSeekParams.stop,
       stream = stream,
       temperature = deepSeekParams.temperature,
+      thinking = requestSettings.thinking,
+      reasoningEffort = requestSettings.reasoningEffort,
       toolChoice = deepSeekParams.toolChoice?.toOpenAIToolChoice(),
       tools = tools,
       topLogprobs = deepSeekParams.topLogprobs,
@@ -182,6 +189,35 @@ class FloveraDeepSeekLLMClient(
   }
 }
 
+data class FloveraDeepSeekRequestSettings(
+  val thinking: FloveraDeepSeekThinking? = FloveraDeepSeekThinking("enabled"),
+  val reasoningEffort: String? = "high",
+) {
+  companion object {
+    fun from(settings: AppSettings): FloveraDeepSeekRequestSettings {
+      return when (settings.deepSeekThinkingEffort) {
+        "off" -> FloveraDeepSeekRequestSettings(
+          thinking = FloveraDeepSeekThinking("disabled"),
+          reasoningEffort = null,
+        )
+        "max" -> FloveraDeepSeekRequestSettings(
+          thinking = FloveraDeepSeekThinking("enabled"),
+          reasoningEffort = "max",
+        )
+        else -> FloveraDeepSeekRequestSettings(
+          thinking = FloveraDeepSeekThinking("enabled"),
+          reasoningEffort = "high",
+        )
+      }
+    }
+  }
+}
+
+@Serializable
+data class FloveraDeepSeekThinking(
+  val type: String,
+)
+
 private data class FloveraDeepSeekParams(
   val temperature: Double?,
   val maxTokens: Int?,
@@ -244,6 +280,9 @@ private data class FloveraDeepSeekChatCompletionRequest(
   val stop: List<String>? = null,
   val logprobs: Boolean? = null,
   val streamOptions: OpenAIStreamOptions? = null,
+  val thinking: FloveraDeepSeekThinking? = null,
+  @SerialName("reasoning_effort")
+  val reasoningEffort: String? = null,
   val additionalProperties: Map<String, JsonElement>? = null,
 )
 

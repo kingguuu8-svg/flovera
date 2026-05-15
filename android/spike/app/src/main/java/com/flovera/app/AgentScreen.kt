@@ -2086,6 +2086,9 @@ private fun SettingsDialog(
   var themeModeDraft by remember(state.settings.themeMode) { mutableStateOf(state.settings.themeMode) }
   var themeColorDraft by remember(state.settings.themeColor) { mutableStateOf(state.settings.themeColor) }
   var authorityModeDraft by remember(state.settings.agentAuthorityMode) { mutableStateOf(state.settings.agentAuthorityMode) }
+  var deepSeekThinkingEffortDraft by remember(state.settings.deepSeekThinkingEffort) {
+    mutableStateOf(state.settings.deepSeekThinkingEffort)
+  }
   var webSearchEnabledDraft by remember(state.settings.webSearchEnabled) { mutableStateOf(state.settings.webSearchEnabled) }
   var braveSearchApiKeyDraft by remember(state.settings.braveSearchApiKey) { mutableStateOf(state.settings.braveSearchApiKey) }
   val selectedProvider = ModelProviderCatalog.findProvider(providerDraft) ?: ModelProviderCatalog.defaultProvider
@@ -2093,6 +2096,7 @@ private fun SettingsDialog(
   var modelMenuOpen by remember { mutableStateOf(false) }
   var languageMenuOpen by remember { mutableStateOf(false) }
   var authorityMenuOpen by remember { mutableStateOf(false) }
+  var deepSeekThinkingMenuOpen by remember { mutableStateOf(false) }
   val themeColorPreview = remember(themeColorDraft) { parseUiColor(themeColorDraft) ?: Color(0xFF76C4D8) }
 
   AlertDialog(
@@ -2154,6 +2158,25 @@ private fun SettingsDialog(
           singleLine = true,
           modifier = Modifier.fillMaxWidth(),
         )
+        if (selectedProvider.id == "deepseek") {
+          Text(t(language, "DeepSeek", "DeepSeek"), style = MaterialTheme.typography.titleSmall)
+          Box {
+            OutlinedButton(onClick = { deepSeekThinkingMenuOpen = true }, modifier = Modifier.fillMaxWidth()) {
+              Text(deepSeekThinkingEffortLabel(language, deepSeekThinkingEffortDraft))
+            }
+            DropdownMenu(expanded = deepSeekThinkingMenuOpen, onDismissRequest = { deepSeekThinkingMenuOpen = false }) {
+              listOf("off", "high", "max").forEach { effort ->
+                DropdownMenuItem(
+                  text = { Text(deepSeekThinkingEffortLabel(language, effort)) },
+                  onClick = {
+                    deepSeekThinkingMenuOpen = false
+                    deepSeekThinkingEffortDraft = effort
+                  },
+                )
+              }
+            }
+          }
+        }
         Text(t(language, "Web search", "Web search"), style = MaterialTheme.typography.titleSmall)
         Row(
           modifier = Modifier.fillMaxWidth(),
@@ -2305,6 +2328,7 @@ private fun SettingsDialog(
             themeMode = themeModeDraft,
             themeColor = themeColorDraft,
             authorityMode = authorityModeDraft,
+            deepSeekThinkingEffort = deepSeekThinkingEffortDraft,
             webSearchEnabled = webSearchEnabledDraft,
             braveSearchApiKey = braveSearchApiKeyDraft,
           )
@@ -2414,6 +2438,7 @@ private fun settingsProposalSummary(proposal: WorkspaceSettingsProposal): String
     changes.themeMode?.let { "themeMode=$it" },
     changes.themeColor?.let { "themeColor=$it" },
     changes.agentAuthorityMode?.let { "authority=$it" },
+    changes.deepSeekThinkingEffort?.let { "deepSeekThinking=$it" },
     changes.modelContextWindowTokens?.let { "context=$it" },
     changes.modelCompressionThresholdPercent?.let { "compression=$it%" },
   )
@@ -2424,6 +2449,14 @@ private fun authorityModeLabel(language: String, authorityMode: String): String 
   return when (authorityMode) {
     "assisted" -> t(language, "Assisted: agent proposes, user confirms", "Assisted\uff1aagent \u63d0\u6848\uff0c\u7528\u6237\u786e\u8ba4")
     else -> t(language, "Safe: read-only app settings", "Safe\uff1a\u53ea\u8bfb app \u8bbe\u7f6e")
+  }
+}
+
+private fun deepSeekThinkingEffortLabel(language: String, effort: String): String {
+  return when (effort) {
+    "off" -> t(language, "Thinking: off", "\u601d\u8003\uff1a\u5173\u95ed")
+    "max" -> t(language, "Thinking: max", "\u601d\u8003\uff1a\u6700\u9ad8")
+    else -> t(language, "Thinking: high", "\u601d\u8003\uff1a\u9ad8")
   }
 }
 

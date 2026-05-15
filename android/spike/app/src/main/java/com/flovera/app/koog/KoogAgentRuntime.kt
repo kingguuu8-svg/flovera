@@ -35,7 +35,7 @@ class KoogAgentRuntime : AgentRuntime {
     val workspaceUserRules = workspace.readAgentRules()
 
     val agent = AIAgent(
-      promptExecutor = MultiLLMPromptExecutor(provider.createClient(apiKey)),
+      promptExecutor = MultiLLMPromptExecutor(ModelProviderCatalog.createClient(provider, apiKey, settings)),
       llmModel = provider.createModel(settings.model, modelContext),
       toolRegistry = workspaceToolRegistry(
         workspace = workspace,

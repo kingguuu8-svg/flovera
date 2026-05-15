@@ -106,6 +106,16 @@ object ModelProviderCatalog {
     return findProvider(providerId) ?: error("Unsupported model provider: $providerId")
   }
 
+  fun createClient(provider: ModelProviderSpec, apiKey: String, settings: AppSettings): LLMClient {
+    return when (provider.id) {
+      "deepseek" -> FloveraDeepSeekLLMClient(
+        apiKey = apiKey,
+        requestSettings = FloveraDeepSeekRequestSettings.from(settings),
+      )
+      else -> provider.createClient(apiKey)
+    }
+  }
+
   fun contextFor(settings: AppSettings): ModelContextSpec {
     val provider = findProvider(settings.provider) ?: defaultProvider
     val model = settings.model.ifBlank { provider.defaultModel }

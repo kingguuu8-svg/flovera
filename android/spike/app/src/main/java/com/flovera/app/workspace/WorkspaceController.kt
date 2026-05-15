@@ -47,6 +47,7 @@ class WorkspaceController(context: Context, workspaceId: String) {
         themeMode = settings.themeMode,
         themeColor = settings.themeColor,
         authorityMode = settings.agentAuthorityMode,
+        deepSeekThinkingEffort = settings.deepSeekThinkingEffort,
         modelContextWindowTokens = modelContext.contextWindowTokens,
         modelContextSource = modelContext.source,
         tokenUsageSource = modelContext.usageSource,

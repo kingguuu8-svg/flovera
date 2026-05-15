@@ -17,7 +17,9 @@ class SettingsController(private val store: SettingsStore) {
   fun loadResult(): SettingsLoadResult {
     val result = store.loadResult()
     val loaded = result.settings
-    val normalized = normalizeAuthorityMode(normalizeAppearance(normalizeLanguage(normalizeProviderAndModel(loaded))))
+    val normalized = normalizeDeepSeekThinkingEffort(
+      normalizeAuthorityMode(normalizeAppearance(normalizeLanguage(normalizeProviderAndModel(loaded)))),
+    )
     if (normalized != loaded) store.save(normalized)
     return result.copy(settings = normalized)
   }
@@ -87,6 +89,12 @@ class SettingsController(private val store: SettingsStore) {
     return updated
   }
 
+  fun setDeepSeekThinkingEffort(settings: AppSettings, effort: String): AppSettings {
+    val updated = settings.copy(deepSeekThinkingEffort = normalizeDeepSeekThinkingEffortId(effort))
+    store.save(updated)
+    return updated
+  }
+
   fun applySettingsProposal(settings: AppSettings, changes: SettingsProposalChanges): AppSettings {
     val provider = changes.provider
       ?.let { ModelProviderCatalog.findProvider(it.trim()) }
@@ -105,6 +113,8 @@ class SettingsController(private val store: SettingsStore) {
       themeMode = changes.themeMode?.let { normalizeThemeMode(it) } ?: settings.themeMode,
       themeColor = changes.themeColor?.let { normalizeThemeColor(it) } ?: settings.themeColor,
       agentAuthorityMode = changes.agentAuthorityMode?.let { normalizeAuthorityModeId(it) } ?: settings.agentAuthorityMode,
+      deepSeekThinkingEffort = changes.deepSeekThinkingEffort?.let { normalizeDeepSeekThinkingEffortId(it) }
+        ?: settings.deepSeekThinkingEffort,
     ).withMergedModelContextOverride(provider.id, model, changes)
     store.save(updated)
     return updated
@@ -162,6 +172,10 @@ class SettingsController(private val store: SettingsStore) {
     return settings.copy(agentAuthorityMode = normalizeAuthorityModeId(settings.agentAuthorityMode))
   }
 
+  private fun normalizeDeepSeekThinkingEffort(settings: AppSettings): AppSettings {
+    return settings.copy(deepSeekThinkingEffort = normalizeDeepSeekThinkingEffortId(settings.deepSeekThinkingEffort))
+  }
+
   private fun AppSettings.withMergedModelContextOverride(
     providerId: String,
     modelId: String,
@@ -205,6 +219,14 @@ class SettingsController(private val store: SettingsStore) {
       else -> "safe"
     }
   }
+
+  private fun normalizeDeepSeekThinkingEffortId(effort: String): String {
+    return when (effort) {
+      "off" -> "off"
+      "max" -> "max"
+      else -> "high"
+    }
+  }
 }
 
 @Serializable
@@ -219,6 +241,7 @@ data class SettingsProposalChanges(
   val themeMode: String? = null,
   val themeColor: String? = null,
   val agentAuthorityMode: String? = null,
+  val deepSeekThinkingEffort: String? = null,
   val modelContextWindowTokens: Int? = null,
   val modelCompressionThresholdPercent: Int? = null,
 )
