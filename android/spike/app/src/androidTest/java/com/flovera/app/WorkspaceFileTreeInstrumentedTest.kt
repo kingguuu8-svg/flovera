@@ -153,6 +153,9 @@ class WorkspaceFileTreeInstrumentedTest {
 
     assertTrue(capabilities.contains("\"networkTools\": true"))
     assertTrue(capabilities.contains("\"webSearch\": true"))
+    assertTrue(capabilities.contains("\"previewFormats\""))
+    assertTrue(capabilities.contains("\"json\""))
+    assertTrue(capabilities.contains("\"csv\""))
     assertTrue(capabilities.contains("\"modelContextOverrides\": true"))
     assertTrue(capabilities.contains("\"directSettingsWrite\": false"))
     assertTrue(settingsView.contains("\"modelContextSource\""))

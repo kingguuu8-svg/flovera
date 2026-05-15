@@ -424,6 +424,7 @@ data class FloveraSettingsView(
 data class FloveraCapabilities(
   val workspaceFiles: Boolean = true,
   val webPreview: Boolean = true,
+  val previewFormats: List<String> = listOf("html", "markdown", "json", "csv", "text", "image"),
   val snapshots: Boolean = true,
   val notifications: Boolean = true,
   val networkTools: Boolean = false,
