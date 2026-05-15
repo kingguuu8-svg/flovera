@@ -215,6 +215,17 @@ so future work can be planned without losing the product direction.
 - Track context usage for each agent run and session.
 - Show how much context has been used, what was compressed, and what summary is
   currently active.
+- For known models, show context usage as a percentage of the configured model
+  context window. For unknown models, show only absolute usage and the estimate
+  source.
+- Add a compact ring indicator for the active model context budget, starting
+  with DeepSeek-specific model metadata before general provider discovery is
+  mature.
+- Tie automatic compression thresholds to the active model context window and
+  the current estimated request size.
+- When context is close to full, run a session handoff/compression skill,
+  continue the conversation from the compressed state, and insert a visible
+  conversation divider after the compressed summary.
 - Persist compression records so the user can understand why an old detail was
   retained, summarized, or dropped.
 - Treat compression as part of session history, not as invisible runtime state.
@@ -258,6 +269,15 @@ so future work can be planned without losing the product direction.
   internal routes.
 - Let advanced settings define request body templates and per-route behavior
   when the app calls provider APIs or app tools.
+- Treat new model onboarding as part of the request model: each provider/model
+  entry should declare context window, token usage source, tool support,
+  thinking/reasoning replay requirements, streaming support, and compression
+  thresholds.
+- Support model capabilities from built-in catalog entries, provider discovery
+  when available, and user overrides when the provider cannot reliably expose
+  the metadata.
+- Never present context percentages as exact unless the model context window and
+  usage source are known; otherwise label them as estimates.
 - Record route and request-template changes as auditable settings changes.
 
 ### Web Search And Tool Expansion
