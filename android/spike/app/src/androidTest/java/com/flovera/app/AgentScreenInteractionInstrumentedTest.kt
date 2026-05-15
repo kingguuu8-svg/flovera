@@ -263,6 +263,7 @@ class AgentScreenInteractionInstrumentedTest {
     val controller = AgentController(
       context,
       agentRunController = AgentRunController(runtime = runtime),
+      agentRunStatusNotifier = FakeAgentRunStatusNotifier(),
     )
 
     composeRule.setContent {
@@ -309,6 +310,7 @@ class AgentScreenInteractionInstrumentedTest {
     val controller = AgentController(
       context,
       agentRunController = AgentRunController(runtime = runtime),
+      agentRunStatusNotifier = FakeAgentRunStatusNotifier(),
     )
 
     composeRule.setContent {
