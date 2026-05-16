@@ -446,6 +446,7 @@ data class FloveraWorkspaceManifest(
 data class FloveraSettingsView(
   val provider: String = "",
   val providerApiMode: String = "",
+  val providerTransport: String = "",
   val providerBaseUrl: String = "",
   val providerModelsUrl: String = "",
   val providerAuthType: String = "api_key",
@@ -482,6 +483,7 @@ data class FloveraProviderProfileView(
   val id: String,
   val label: String,
   val apiMode: String,
+  val transport: String,
   val aliases: List<String> = emptyList(),
   val defaultModel: String,
   val suggestedModels: List<String> = emptyList(),

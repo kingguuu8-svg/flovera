@@ -12,6 +12,7 @@ import com.flovera.app.config.SettingsStore
 import com.flovera.app.koog.ModelContextSpec
 import com.flovera.app.koog.ModelProviderCatalog
 import com.flovera.app.koog.ProviderRequestProfile
+import com.flovera.app.koog.ProviderTransport
 import com.flovera.app.koog.applyFloveraOpenAIRequestProfileToJson
 import com.flovera.app.workspace.WorkspaceManager
 import java.io.File
@@ -68,16 +69,35 @@ class ProviderConfigInstrumentedTest {
 
     assertEquals("alibaba", alibaba.id)
     assertEquals(LLMProvider.OpenAI, alibaba.llmProvider)
+    assertEquals(ProviderTransport.FloveraOpenAICompatibleChatCompletions, alibaba.transport)
     assertEquals("chat_completions", profile.apiMode.id)
+    assertEquals(ProviderTransport.FloveraOpenAICompatibleChatCompletions, profile.transport)
     assertEquals("https://dashscope-intl.aliyuncs.com/compatible-mode/v1", profile.baseUrl)
     assertEquals("https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models", profile.modelsUrl)
     assertEquals("/v1/chat/completions", profile.chatCompletionsPath)
     assertEquals("generic", profile.requestProfile.compatibilityMode)
     assertFalse(profile.requestProfile.injectOllamaNumCtx)
     assertEquals(LLMProvider.OpenRouter, openRouter.llmProvider)
+    assertEquals(ProviderTransport.KoogOpenRouterChatCompletions, openRouter.transport)
     assertEquals(
       "https://openrouter.ai/api/v1",
       ModelProviderCatalog.runtimeProfileFor(openRouter, AppSettings()).baseUrl,
+    )
+  }
+
+  @Test
+  fun providerProfilesDeclareExplicitTransports() {
+    assertEquals(
+      ProviderTransport.FloveraDeepSeekChatCompletions,
+      ModelProviderCatalog.requireProvider("deepseek").transport,
+    )
+    assertEquals(
+      ProviderTransport.KoogAnthropicMessages,
+      ModelProviderCatalog.requireProvider("anthropic").transport,
+    )
+    assertEquals(
+      ProviderTransport.FloveraOpenAICompatibleChatCompletions,
+      ModelProviderCatalog.requireProvider("moonshot").transport,
     )
   }
 

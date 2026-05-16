@@ -40,6 +40,7 @@ class WorkspaceController(context: Context, workspaceId: String) {
       FloveraSettingsView(
         provider = provider.id,
         providerApiMode = providerProfile.apiMode.id,
+        providerTransport = providerProfile.transport.id,
         providerBaseUrl = providerProfile.baseUrl,
         providerModelsUrl = providerProfile.modelsUrl,
         providerAuthType = providerProfile.authType.id,
@@ -76,6 +77,7 @@ class WorkspaceController(context: Context, workspaceId: String) {
           id = provider.id,
           label = provider.label,
           apiMode = profile.apiMode.id,
+          transport = profile.transport.id,
           aliases = provider.aliases.sorted(),
           defaultModel = provider.defaultModel,
           suggestedModels = provider.suggestedModels,

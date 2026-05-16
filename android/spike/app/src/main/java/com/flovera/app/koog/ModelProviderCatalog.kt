@@ -1,9 +1,6 @@
 package com.flovera.app.koog
 
 import ai.koog.prompt.executor.clients.LLMClient
-import ai.koog.prompt.executor.clients.anthropic.AnthropicLLMClient
-import ai.koog.prompt.executor.clients.openai.OpenAIClientSettings
-import ai.koog.prompt.executor.clients.openrouter.OpenRouterLLMClient
 import ai.koog.prompt.llm.LLMCapability
 import ai.koog.prompt.llm.LLMProvider
 import ai.koog.prompt.llm.LLModel
@@ -17,7 +14,7 @@ data class ModelProviderSpec(
   val defaultModel: String,
   val suggestedModels: List<String>,
   val llmProvider: LLMProvider,
-  val createClient: (String) -> LLMClient,
+  val transport: ProviderTransport,
   val apiMode: ProviderApiMode = ProviderApiMode.ChatCompletions,
   val aliases: Set<String> = emptySet(),
   val baseUrl: String = "",
@@ -53,6 +50,7 @@ data class ProviderRuntimeProfile(
   val providerId: String,
   val label: String,
   val apiMode: ProviderApiMode,
+  val transport: ProviderTransport,
   val llmProvider: LLMProvider,
   val baseUrl: String,
   val modelsUrl: String,
@@ -129,7 +127,7 @@ private data class BuiltInProviderProfile(
       defaultModel = defaultModel,
       suggestedModels = suggestedModels,
       llmProvider = LLMProvider.OpenAI,
-      createClient = { apiKey -> FloveraOpenAICompatibleLLMClient(apiKey) },
+      transport = ProviderTransport.FloveraOpenAICompatibleChatCompletions,
       aliases = aliases,
       baseUrl = baseUrl,
       modelsUrl = modelsUrl,
@@ -315,7 +313,7 @@ object ModelProviderCatalog {
       defaultModel = "deepseek-v4-pro",
       suggestedModels = listOf("deepseek-v4-pro", "deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner"),
       llmProvider = LLMProvider.DeepSeek,
-      createClient = ::FloveraDeepSeekLLMClient,
+      transport = ProviderTransport.FloveraDeepSeekChatCompletions,
       baseUrl = "https://api.deepseek.com",
       defaultMaxTokens = 32_000,
       modelContexts = listOf(
@@ -340,7 +338,7 @@ object ModelProviderCatalog {
       defaultModel = "custom-model",
       suggestedModels = listOf("custom-model", "gpt-oss-120b", "qwen3-coder", "deepseek-chat"),
       llmProvider = LLMProvider.OpenAI,
-      createClient = { apiKey -> FloveraOpenAICompatibleLLMClient(apiKey) },
+      transport = ProviderTransport.FloveraOpenAICompatibleChatCompletions,
       aliases = setOf("custom", "ollama", "local", "vllm", "llamacpp", "openai-compatible-custom"),
       supportsHealthCheck = false,
     ),
@@ -351,7 +349,7 @@ object ModelProviderCatalog {
       defaultModel = "openai/gpt-4.1",
       suggestedModels = listOf("openai/gpt-4.1", "anthropic/claude-sonnet-4.5", "deepseek/deepseek-chat"),
       llmProvider = LLMProvider.OpenRouter,
-      createClient = ::OpenRouterLLMClient,
+      transport = ProviderTransport.KoogOpenRouterChatCompletions,
       aliases = setOf("router"),
       baseUrl = "https://openrouter.ai/api/v1",
       modelsUrl = "https://openrouter.ai/api/v1/models",
@@ -363,7 +361,7 @@ object ModelProviderCatalog {
       defaultModel = "claude-sonnet-4-5",
       suggestedModels = listOf("claude-sonnet-4-5", "claude-3-5-haiku-latest"),
       llmProvider = LLMProvider.Anthropic,
-      createClient = ::AnthropicLLMClient,
+      transport = ProviderTransport.KoogAnthropicMessages,
       apiMode = ProviderApiMode.AnthropicMessages,
       aliases = setOf("claude", "claude-code"),
       baseUrl = "https://api.anthropic.com",
@@ -409,6 +407,7 @@ object ModelProviderCatalog {
       providerId = provider.id,
       label = provider.label,
       apiMode = provider.apiMode,
+      transport = provider.transport,
       llmProvider = provider.llmProvider,
       baseUrl = baseUrl,
       modelsUrl = modelsUrl,
@@ -428,36 +427,12 @@ object ModelProviderCatalog {
 
   fun createClient(provider: ModelProviderSpec, apiKey: String, settings: AppSettings): LLMClient {
     val runtimeProfile = runtimeProfileFor(provider, settings)
-    return when (provider.id) {
-      "deepseek" -> FloveraDeepSeekLLMClient(
-        apiKey = apiKey,
-        requestSettings = FloveraDeepSeekRequestSettings.from(settings),
-      )
-      "custom-openai" -> createOpenAICompatibleClient(runtimeProfile, apiKey, contextFor(settings))
-      else -> when (provider.apiMode) {
-        ProviderApiMode.ChatCompletions -> if (provider.llmProvider == LLMProvider.OpenAI) {
-          createOpenAICompatibleClient(runtimeProfile, apiKey, contextFor(settings))
-        } else {
-          provider.createClient(apiKey)
-        }
-        ProviderApiMode.AnthropicMessages -> provider.createClient(apiKey)
-      }
-    }
-  }
-
-  private fun createOpenAICompatibleClient(
-    runtimeProfile: ProviderRuntimeProfile,
-    apiKey: String,
-    modelContext: ModelContextSpec,
-  ): LLMClient {
-    return FloveraOpenAICompatibleLLMClient(
+    return ProviderTransportFactory.createClient(
+      transport = provider.transport,
+      runtimeProfile = runtimeProfile,
       apiKey = apiKey,
-      settings = OpenAIClientSettings(
-        baseUrl = runtimeProfile.requireBaseUrl(),
-        chatCompletionsPath = runtimeProfile.chatCompletionsPath,
-      ),
-      requestProfile = runtimeProfile.requestProfile,
-      modelContext = modelContext,
+      settings = settings,
+      modelContext = contextFor(settings),
     )
   }
 
