@@ -9,11 +9,6 @@ import ai.koog.prompt.executor.clients.openai.base.models.OpenAIToolChoice
 import ai.koog.prompt.llm.LLModel
 import ai.koog.prompt.params.LLMParams
 import io.ktor.client.HttpClient
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.jsonObject
 import kotlin.time.Clock
 
 open class FloveraOpenAICompatibleLLMClient(
@@ -52,20 +47,9 @@ fun applyFloveraOpenAIRequestProfileToJson(
   requestProfile: ProviderRequestProfile,
   modelContext: ModelContextSpec,
 ): String {
-  if (!requestProfile.injectOllamaNumCtx && requestProfile.omittedRequestFields.isEmpty()) return requestJson
-  val root = profileJson.parseToJsonElement(requestJson).jsonObject.toMutableMap()
-  requestProfile.omittedRequestFields.forEach { field ->
-    root.remove(field)
-  }
-  val numCtx = modelContext.contextWindowTokens?.takeIf { it > 0 }
-  if (requestProfile.injectOllamaNumCtx && numCtx != null) {
-    val options = (root["options"] as? JsonObject)?.toMutableMap() ?: mutableMapOf<String, JsonElement>()
-    options["num_ctx"] = JsonPrimitive(numCtx)
-    root["options"] = JsonObject(options)
-  }
-  return profileJson.encodeToString(JsonObject.serializer(), JsonObject(root))
-}
-
-private val profileJson = Json {
-  encodeDefaults = false
+  return ProviderRequestHooks.apply(
+    requestJson = requestJson,
+    requestProfile = requestProfile,
+    modelContext = modelContext,
+  )
 }

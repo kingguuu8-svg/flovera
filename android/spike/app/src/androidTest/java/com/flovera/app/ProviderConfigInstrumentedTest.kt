@@ -14,6 +14,7 @@ import com.flovera.app.koog.ModelProviderCatalog
 import com.flovera.app.koog.ProviderRequestProfile
 import com.flovera.app.koog.ProviderTransport
 import com.flovera.app.koog.applyFloveraOpenAIRequestProfileToJson
+import com.flovera.app.koog.hookIds
 import com.flovera.app.workspace.WorkspaceManager
 import java.io.File
 import org.junit.Assert.assertEquals
@@ -117,6 +118,7 @@ class ProviderConfigInstrumentedTest {
     )
 
     assertTrue(profile.requestProfile.omittedRequestFields.contains("temperature"))
+    assertEquals(listOf("omit_request_fields"), profile.requestProfile.hookIds())
     assertFalse(updated.contains("\"temperature\""))
     assertTrue(updated.contains("\"top_p\":0.9"))
   }
@@ -206,6 +208,13 @@ class ProviderConfigInstrumentedTest {
     )
 
     assertTrue(updated.contains("\"options\":{\"num_ctx\":65536}"))
+    assertEquals(
+      listOf("inject_ollama_num_ctx"),
+      ProviderRequestProfile(
+        compatibilityMode = "ollama",
+        injectOllamaNumCtx = true,
+      ).hookIds(),
+    )
     assertEquals(request, unchanged)
   }
 

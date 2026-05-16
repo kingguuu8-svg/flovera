@@ -469,6 +469,7 @@ data class FloveraSettingsView(
   val customOpenAIChatCompletionsPath: String = "/v1/chat/completions",
   val customOpenAICompatibilityMode: String = "generic",
   val providerInjectsOllamaNumCtx: Boolean = false,
+  val providerRequestHookIds: List<String> = emptyList(),
   val providerRequestOmittedFields: List<String> = emptyList(),
   val modelContextWindowTokens: Int? = null,
   val modelContextSource: String = "unknown",
@@ -495,6 +496,7 @@ data class FloveraProviderProfileView(
   val defaultMaxTokens: Int? = null,
   val defaultAuxModel: String = "",
   val requestCompatibilityModes: List<String> = listOf("generic"),
+  val requestHooks: List<String> = emptyList(),
   val omittedRequestFields: List<String> = emptyList(),
   val customRequestBody: Boolean = false,
 )

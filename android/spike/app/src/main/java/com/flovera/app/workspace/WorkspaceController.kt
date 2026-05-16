@@ -5,6 +5,7 @@ import android.net.Uri
 import com.flovera.app.config.AppSettings
 import com.flovera.app.koog.ModelContextSpec
 import com.flovera.app.koog.ModelProviderCatalog
+import com.flovera.app.koog.hookIds
 import java.io.File
 
 data class WorkspaceSnapshot(
@@ -63,6 +64,7 @@ class WorkspaceController(context: Context, workspaceId: String) {
         customOpenAIChatCompletionsPath = settings.customOpenAIProvider.chatCompletionsPath,
         customOpenAICompatibilityMode = settings.customOpenAIProvider.compatibilityMode,
         providerInjectsOllamaNumCtx = providerProfile.requestProfile.injectOllamaNumCtx,
+        providerRequestHookIds = providerProfile.requestProfile.hookIds(),
         providerRequestOmittedFields = providerProfile.requestProfile.omittedRequestFields.sorted(),
         modelContextWindowTokens = modelContext.contextWindowTokens,
         modelContextSource = modelContext.source,
@@ -95,6 +97,7 @@ class WorkspaceController(context: Context, workspaceId: String) {
           } else {
             listOf(profile.requestProfile.compatibilityMode)
           },
+          requestHooks = profile.requestProfile.hookIds(),
           omittedRequestFields = profile.requestProfile.omittedRequestFields.sorted(),
           customRequestBody = false,
         )
