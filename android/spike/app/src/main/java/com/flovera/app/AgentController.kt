@@ -489,6 +489,24 @@ class AgentController(
     enqueueInput(trimmed, QUEUED_INPUT_GUIDANCE, "Guidance queued")
   }
 
+  fun markQueuedInputAsGuidance(index: Int) {
+    _state.update {
+      val updated = it.queuedInputs.mapIndexed { itemIndex, input ->
+        if (itemIndex == index) input.copy(mode = QUEUED_INPUT_GUIDANCE) else input
+      }
+      it.copy(queuedInputs = updated, status = "Guidance queued")
+    }
+  }
+
+  fun removeQueuedInput(index: Int) {
+    _state.update {
+      it.copy(
+        queuedInputs = it.queuedInputs.filterIndexed { itemIndex, _ -> itemIndex != index },
+        status = "Queued message removed",
+      )
+    }
+  }
+
   private fun enqueueInput(input: String, mode: String, status: String) {
     _state.update {
       it.copy(

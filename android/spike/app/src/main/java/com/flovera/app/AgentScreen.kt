@@ -669,7 +669,7 @@ private fun ConversationDialog(
   val listState = rememberLazyListState()
   val messages = state.session?.messages.orEmpty()
   val latestContextRecord = state.session?.contextRecords?.lastOrNull()
-  val visibleMessageCount = messages.size + state.queuedInputs.size + if (state.assistantDraft == null) 0 else 1
+  val visibleMessageCount = messages.size + if (state.assistantDraft == null) 0 else 1
   var pendingRevertIndex by remember { mutableStateOf<Int?>(null) }
   var sessionPickerOpen by remember { mutableStateOf(false) }
   var moreMenuOpen by remember { mutableStateOf(false) }
@@ -850,13 +850,16 @@ private fun ConversationDialog(
                 MessageBubble(message = draft, onRevert = null)
               }
             }
-            itemsIndexed(
-              items = state.queuedInputs,
-              key = { index, queued -> "queued-$index-${queued.mode}-${queued.content}" },
-            ) { _, queued ->
-              QueuedMessageBubble(input = queued, language = language)
-            }
           }
+        }
+
+        if (state.queuedInputs.isNotEmpty()) {
+          QueuedMessagesPanel(
+            inputs = state.queuedInputs,
+            language = language,
+            onGuide = controller::markQueuedInputAsGuidance,
+            onRemove = controller::removeQueuedInput,
+          )
         }
 
         Row(
@@ -879,68 +882,25 @@ private fun ConversationDialog(
             ),
             modifier = Modifier.weight(1f),
           )
-          if (state.isRunning) {
-            Surface(
-              modifier = Modifier
-                .size(52.dp)
-                .semantics { contentDescription = "Queue message" }
-                .clickable(onClick = controller::submit),
-              shape = RoundedCornerShape(12.dp),
-              color = MaterialTheme.colorScheme.primaryContainer,
-              contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-            ) {
-              Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(20.dp))
-              }
-            }
-          }
+          val hasInput = state.input.isNotBlank()
+          val actionStopsRun = state.isRunning && !hasInput
           Surface(
             modifier = Modifier
               .size(52.dp)
-              .semantics { contentDescription = if (state.isRunning) "Interrupt agent" else "Send message" }
+              .semantics { contentDescription = if (actionStopsRun) "Interrupt agent" else "Send message" }
               .clickable(
-                onClick = if (state.isRunning) controller::interruptAgentRun else controller::submit,
+                onClick = if (actionStopsRun) controller::interruptAgentRun else controller::submit,
               ),
             shape = RoundedCornerShape(12.dp),
-            color = if (state.isRunning) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer,
-            contentColor = if (state.isRunning) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer,
+            color = if (actionStopsRun) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer,
+            contentColor = if (actionStopsRun) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer,
           ) {
             Box(contentAlignment = Alignment.Center) {
-              if (state.isRunning) {
+              if (actionStopsRun) {
                 Icon(Icons.Filled.Close, contentDescription = null, modifier = Modifier.size(20.dp))
               } else {
                 Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(20.dp))
               }
-            }
-          }
-        }
-        if (state.isRunning) {
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End,
-            verticalAlignment = Alignment.CenterVertically,
-          ) {
-            OutlinedButton(
-              onClick = controller::guideAgentRun,
-              modifier = Modifier.semantics { contentDescription = "Guide agent" },
-            ) {
-              Text(t(language, "Guide next run", "\u5f15\u5bfc\u4e0b\u4e00\u8f6e"))
-            }
-          }
-        }
-        if (state.queuedInputs.isNotEmpty()) {
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-          ) {
-            Text(
-              text = t(language, "${state.queuedInputs.size} queued", "\u5df2\u6392\u961f ${state.queuedInputs.size} \u6761"),
-              color = MaterialTheme.colorScheme.onSurfaceVariant,
-              style = MaterialTheme.typography.bodySmall,
-            )
-            TextButton(onClick = controller::clearQueuedInputs) {
-              Text(t(language, "Clear queue", "\u6e05\u7a7a\u961f\u5217"))
             }
           }
         }
@@ -1062,30 +1022,80 @@ private fun CompressionDivider(message: SessionMessage) {
 }
 
 @Composable
-private fun QueuedMessageBubble(input: QueuedAgentInput, language: String) {
-  Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-    Surface(
-      modifier = Modifier.fillMaxWidth(0.84f),
-      shape = RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp, bottomStart = 14.dp, bottomEnd = 4.dp),
-      color = FloveraUserBubbleColor.copy(alpha = 0.72f),
-      border = BorderStroke(1.dp, FloveraUserBubbleBorder.copy(alpha = 0.72f)),
-      tonalElevation = 0.dp,
+private fun QueuedMessagesPanel(
+  inputs: List<QueuedAgentInput>,
+  language: String,
+  onGuide: (Int) -> Unit,
+  onRemove: (Int) -> Unit,
+) {
+  Surface(
+    modifier = Modifier.fillMaxWidth(),
+    shape = RoundedCornerShape(14.dp),
+    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.62f),
+    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+  ) {
+    Column(
+      modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+      verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-      Column(
-        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-      ) {
-        Text(
-          text = if (input.mode == QUEUED_INPUT_GUIDANCE) {
-            t(language, "Guidance queued", "\u5f15\u5bfc\u5df2\u6392\u961f")
-          } else {
-            t(language, "Queued", "\u5df2\u6392\u961f")
-          },
-          color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
-          style = MaterialTheme.typography.labelSmall,
+      inputs.forEachIndexed { index, input ->
+        QueuedMessageRow(
+          index = index,
+          input = input,
+          language = language,
+          onGuide = onGuide,
+          onRemove = onRemove,
         )
-        MarkdownMessageText(content = input.content, color = MaterialTheme.colorScheme.onSurface)
       }
+    }
+  }
+}
+
+@Composable
+private fun QueuedMessageRow(
+  index: Int,
+  input: QueuedAgentInput,
+  language: String,
+  onGuide: (Int) -> Unit,
+  onRemove: (Int) -> Unit,
+) {
+  Row(
+    modifier = Modifier.fillMaxWidth(),
+    horizontalArrangement = Arrangement.spacedBy(8.dp),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    Text(
+      text = if (input.mode == QUEUED_INPUT_GUIDANCE) "\u21b3" else "\u21b1",
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+      style = MaterialTheme.typography.bodyMedium,
+    )
+    Text(
+      text = input.content,
+      modifier = Modifier.weight(1f),
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+      maxLines = 1,
+      overflow = TextOverflow.Ellipsis,
+      style = MaterialTheme.typography.bodyMedium,
+    )
+    if (input.mode == QUEUED_INPUT_GUIDANCE) {
+      Text(
+        text = t(language, "Guidance", "\u5f15\u5bfc"),
+        color = MaterialTheme.colorScheme.primary,
+        style = MaterialTheme.typography.labelMedium,
+      )
+    } else {
+      TextButton(
+        onClick = { onGuide(index) },
+        modifier = Modifier.semantics { contentDescription = "Guide queued message" },
+      ) {
+        Text(t(language, "Guide", "\u5f15\u5bfc"))
+      }
+    }
+    IconButton(
+      onClick = { onRemove(index) },
+      modifier = Modifier.semantics { contentDescription = "Remove queued message" },
+    ) {
+      Icon(Icons.Filled.Close, contentDescription = null, modifier = Modifier.size(18.dp))
     }
   }
 }

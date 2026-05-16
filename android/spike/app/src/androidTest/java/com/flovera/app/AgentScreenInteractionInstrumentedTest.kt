@@ -277,9 +277,8 @@ class AgentScreenInteractionInstrumentedTest {
 
     composeRule.waitUntil(timeoutMillis = 5_000) { runtime.inputCount() == 1 && controller.state.value.isRunning }
     composeRule.onAllNodes(hasSetTextAction())[0].performTextInput("second task")
-    composeRule.onNodeWithContentDescription("Queue message").performClick()
+    composeRule.onNodeWithContentDescription("Send message").performClick()
 
-    composeRule.onNodeWithText("Queued").assertIsDisplayed()
     composeRule.onNodeWithText("second task").assertIsDisplayed()
     composeRule.runOnIdle {
       assertEquals(listOf("second task"), controller.state.value.queuedInputs.map { it.content })
@@ -324,9 +323,10 @@ class AgentScreenInteractionInstrumentedTest {
 
     composeRule.waitUntil(timeoutMillis = 5_000) { runtime.inputCount() == 1 && controller.state.value.isRunning }
     composeRule.onAllNodes(hasSetTextAction())[0].performTextInput("keep the UI compact")
-    composeRule.onNodeWithContentDescription("Guide agent").performClick()
+    composeRule.onNodeWithContentDescription("Send message").performClick()
+    composeRule.onNodeWithContentDescription("Guide queued message").performClick()
 
-    assertTrue(composeRule.onAllNodesWithText("Guidance queued").fetchSemanticsNodes().isNotEmpty())
+    assertTrue(composeRule.onAllNodesWithText("Guidance").fetchSemanticsNodes().isNotEmpty())
     composeRule.onNodeWithText("keep the UI compact").assertIsDisplayed()
     composeRule.runOnIdle {
       assertEquals(listOf(QUEUED_INPUT_GUIDANCE), controller.state.value.queuedInputs.map { it.mode })
