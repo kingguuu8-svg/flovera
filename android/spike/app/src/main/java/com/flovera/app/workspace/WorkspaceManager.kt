@@ -443,6 +443,10 @@ data class FloveraWorkspaceManifest(
 data class FloveraSettingsView(
   val provider: String = "",
   val providerApiMode: String = "",
+  val providerBaseUrl: String = "",
+  val providerModelsUrl: String = "",
+  val providerAuthType: String = "api_key",
+  val providerSupportsHealthCheck: Boolean = true,
   val model: String = "",
   val activeWorkspaceId: String = "",
   val activeSessionId: String? = null,

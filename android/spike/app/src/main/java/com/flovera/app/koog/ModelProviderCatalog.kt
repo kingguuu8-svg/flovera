@@ -23,6 +23,7 @@ data class ModelProviderSpec(
   val aliases: Set<String> = emptySet(),
   val baseUrl: String = "",
   val modelsUrl: String = "",
+  val chatCompletionsPath: String = "/v1/chat/completions",
   val authType: ProviderAuthType = ProviderAuthType.ApiKey,
   val supportsHealthCheck: Boolean = true,
   val defaultHeaders: Map<String, String> = emptyMap(),
@@ -45,6 +46,25 @@ data class ModelProviderSpec(
       contextLength = (context.contextWindowTokens ?: 200_000).toLong(),
       maxOutputTokens = 32_000,
     )
+  }
+}
+
+data class ProviderRuntimeProfile(
+  val providerId: String,
+  val label: String,
+  val apiMode: ProviderApiMode,
+  val llmProvider: LLMProvider,
+  val baseUrl: String,
+  val modelsUrl: String,
+  val chatCompletionsPath: String,
+  val authType: ProviderAuthType,
+  val supportsHealthCheck: Boolean,
+  val defaultHeaders: Map<String, String>,
+  val defaultMaxTokens: Int?,
+  val defaultAuxModel: String,
+) {
+  fun requireBaseUrl(): String {
+    return baseUrl.takeIf { it.isNotBlank() } ?: error("Provider profile $providerId has no base URL configured.")
   }
 }
 
@@ -159,7 +179,39 @@ object ModelProviderCatalog {
     return findProvider(providerId) ?: error("Unsupported model provider: $providerId")
   }
 
+  fun runtimeProfileFor(settings: AppSettings): ProviderRuntimeProfile {
+    val provider = findProvider(settings.provider) ?: defaultProvider
+    return runtimeProfileFor(provider, settings)
+  }
+
+  fun runtimeProfileFor(provider: ModelProviderSpec, settings: AppSettings): ProviderRuntimeProfile {
+    val customProfile = settings.customOpenAIProvider.takeIf { provider.id == "custom-openai" }
+    val baseUrl = customProfile?.baseUrl?.takeIf { it.isNotBlank() } ?: provider.baseUrl
+    val chatCompletionsPath = customProfile?.chatCompletionsPath?.takeIf { it.isNotBlank() }
+      ?: provider.chatCompletionsPath
+    val modelsUrl = provider.modelsUrl.ifBlank { defaultModelsUrl(baseUrl) }
+    return ProviderRuntimeProfile(
+      providerId = provider.id,
+      label = provider.label,
+      apiMode = provider.apiMode,
+      llmProvider = provider.llmProvider,
+      baseUrl = baseUrl,
+      modelsUrl = modelsUrl,
+      chatCompletionsPath = chatCompletionsPath,
+      authType = provider.authType,
+      supportsHealthCheck = provider.supportsHealthCheck,
+      defaultHeaders = provider.defaultHeaders,
+      defaultMaxTokens = provider.defaultMaxTokens,
+      defaultAuxModel = provider.defaultAuxModel,
+    )
+  }
+
+  private fun defaultModelsUrl(baseUrl: String): String {
+    return baseUrl.takeIf { it.isNotBlank() }?.trimEnd('/')?.plus("/models").orEmpty()
+  }
+
   fun createClient(provider: ModelProviderSpec, apiKey: String, settings: AppSettings): LLMClient {
+    val runtimeProfile = runtimeProfileFor(provider, settings)
     return when (provider.id) {
       "deepseek" -> FloveraDeepSeekLLMClient(
         apiKey = apiKey,
@@ -168,10 +220,8 @@ object ModelProviderCatalog {
       "custom-openai" -> OpenAILLMClient(
         apiKey = apiKey,
         settings = OpenAIClientSettings(
-          baseUrl = settings.customOpenAIProvider.baseUrl
-            .takeIf { it.isNotBlank() }
-            ?: error("Custom OpenAI-compatible base URL is not configured."),
-          chatCompletionsPath = settings.customOpenAIProvider.chatCompletionsPath,
+          baseUrl = runtimeProfile.requireBaseUrl(),
+          chatCompletionsPath = runtimeProfile.chatCompletionsPath,
         ),
       )
       else -> provider.createClient(apiKey)

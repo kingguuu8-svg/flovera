@@ -33,11 +33,16 @@ class WorkspaceController(context: Context, workspaceId: String) {
 
   fun syncFloveraSettings(settings: AppSettings) {
     val provider = ModelProviderCatalog.findProvider(settings.provider) ?: ModelProviderCatalog.defaultProvider
+    val providerProfile = ModelProviderCatalog.runtimeProfileFor(provider, settings)
     val modelContext = ModelProviderCatalog.contextFor(settings)
     workspace.ensureFloveraMetadata(
       FloveraSettingsView(
         provider = provider.id,
-        providerApiMode = provider.apiMode.id,
+        providerApiMode = providerProfile.apiMode.id,
+        providerBaseUrl = providerProfile.baseUrl,
+        providerModelsUrl = providerProfile.modelsUrl,
+        providerAuthType = providerProfile.authType.id,
+        providerSupportsHealthCheck = providerProfile.supportsHealthCheck,
         model = settings.model,
         activeWorkspaceId = settings.activeWorkspaceId,
         activeSessionId = settings.activeSessionId,

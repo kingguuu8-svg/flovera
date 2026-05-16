@@ -66,6 +66,32 @@ class ProviderConfigInstrumentedTest {
   }
 
   @Test
+  fun customOpenAISettingsResolveIntoRuntimeProviderProfile() {
+    val settings = AppSettings(
+      provider = "custom-openai",
+      customOpenAIProvider = CustomOpenAIProviderSettings(
+        baseUrl = "https://llm.example.com/v1",
+        chatCompletionsPath = "/chat/completions",
+      ),
+    )
+
+    val customProfile = ModelProviderCatalog.runtimeProfileFor(settings)
+    val openAiProfile = ModelProviderCatalog.runtimeProfileFor(
+      ModelProviderCatalog.requireProvider("openai"),
+      settings,
+    )
+
+    assertEquals("custom-openai", customProfile.providerId)
+    assertEquals("chat_completions", customProfile.apiMode.id)
+    assertEquals("https://llm.example.com/v1", customProfile.baseUrl)
+    assertEquals("https://llm.example.com/v1/models", customProfile.modelsUrl)
+    assertEquals("/chat/completions", customProfile.chatCompletionsPath)
+    assertFalse(customProfile.supportsHealthCheck)
+    assertEquals("https://api.openai.com/v1", openAiProfile.baseUrl)
+    assertEquals("/v1/chat/completions", openAiProfile.chatCompletionsPath)
+  }
+
+  @Test
   fun anthropicProviderDeclaresNativeApiMode() {
     val provider = ModelProviderCatalog.requireProvider("anthropic")
 
