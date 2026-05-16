@@ -2335,6 +2335,9 @@ private fun SettingsDialog(
   var customOpenAIChatPathDraft by remember(state.customOpenAIChatCompletionsPathDraft) {
     mutableStateOf(state.customOpenAIChatCompletionsPathDraft)
   }
+  var customOpenAICompatibilityModeDraft by remember(state.customOpenAICompatibilityModeDraft) {
+    mutableStateOf(state.customOpenAICompatibilityModeDraft)
+  }
   var languageDraft by remember(state.settings.language) { mutableStateOf(state.settings.language) }
   var themeModeDraft by remember(state.settings.themeMode) { mutableStateOf(state.settings.themeMode) }
   var themeColorDraft by remember(state.settings.themeColor) { mutableStateOf(state.settings.themeColor) }
@@ -2350,6 +2353,7 @@ private fun SettingsDialog(
   var languageMenuOpen by remember { mutableStateOf(false) }
   var authorityMenuOpen by remember { mutableStateOf(false) }
   var deepSeekThinkingMenuOpen by remember { mutableStateOf(false) }
+  var customOpenAICompatibilityMenuOpen by remember { mutableStateOf(false) }
   val themeColorPreview = remember(themeColorDraft) { parseUiColor(themeColorDraft) ?: Color(0xFF76C4D8) }
 
   AlertDialog(
@@ -2376,6 +2380,7 @@ private fun SettingsDialog(
                   apiKeyDraft = state.settings.apiKeyFor(provider.id)
                   customOpenAIBaseUrlDraft = state.settings.customOpenAIProvider.baseUrl
                   customOpenAIChatPathDraft = state.settings.customOpenAIProvider.chatCompletionsPath
+                  customOpenAICompatibilityModeDraft = state.settings.customOpenAIProvider.compatibilityMode
                 },
               )
             }
@@ -2429,11 +2434,33 @@ private fun SettingsDialog(
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
           )
+          Box {
+            OutlinedButton(
+              onClick = { customOpenAICompatibilityMenuOpen = true },
+              modifier = Modifier.fillMaxWidth(),
+            ) {
+              Text(customOpenAICompatibilityModeLabel(language, customOpenAICompatibilityModeDraft))
+            }
+            DropdownMenu(
+              expanded = customOpenAICompatibilityMenuOpen,
+              onDismissRequest = { customOpenAICompatibilityMenuOpen = false },
+            ) {
+              listOf("generic", "ollama").forEach { mode ->
+                DropdownMenuItem(
+                  text = { Text(customOpenAICompatibilityModeLabel(language, mode)) },
+                  onClick = {
+                    customOpenAICompatibilityMenuOpen = false
+                    customOpenAICompatibilityModeDraft = mode
+                  },
+                )
+              }
+            }
+          }
           Text(
             t(
               language,
-              "Only OpenAI-compatible chat completions are routed. Custom request bodies are not enabled.",
-              "\u4ec5\u8def\u7531 OpenAI-compatible chat completions\u3002\u5f53\u524d\u4e0d\u5f00\u653e\u81ea\u5b9a\u4e49\u8bf7\u6c42\u4f53\u3002",
+              "Ollama mode adds the profile-controlled num_ctx option from model context. Custom request bodies are not enabled.",
+              "Ollama \u6a21\u5f0f\u4f1a\u6839\u636e\u6a21\u578b\u4e0a\u4e0b\u6587\u6ce8\u5165 profile \u63a7\u5236\u7684 num_ctx\u3002\u5f53\u524d\u4e0d\u5f00\u653e\u81ea\u5b9a\u4e49\u8bf7\u6c42\u4f53\u3002",
             ),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodySmall,
@@ -2617,6 +2644,7 @@ private fun SettingsDialog(
             apiKey = apiKeyDraft,
             customOpenAIBaseUrl = customOpenAIBaseUrlDraft,
             customOpenAIChatCompletionsPath = customOpenAIChatPathDraft,
+            customOpenAICompatibilityMode = customOpenAICompatibilityModeDraft,
             language = languageDraft,
             themeMode = themeModeDraft,
             themeColor = themeColorDraft,
@@ -2774,6 +2802,7 @@ private fun settingsProposalSummary(proposal: WorkspaceSettingsProposal): String
     changes.deepSeekThinkingEffort?.let { "deepSeekThinking=$it" },
     changes.customOpenAIBaseUrl?.let { "customBaseUrl=$it" },
     changes.customOpenAIChatCompletionsPath?.let { "customChatPath=$it" },
+    changes.customOpenAICompatibilityMode?.let { "customCompatibility=$it" },
     changes.modelContextWindowTokens?.let { "context=$it" },
     changes.modelCompressionThresholdPercent?.let { "compression=$it%" },
   )
@@ -2804,6 +2833,13 @@ private fun deepSeekThinkingEffortLabel(language: String, effort: String): Strin
     "off" -> t(language, "Thinking: off", "\u601d\u8003\uff1a\u5173\u95ed")
     "max" -> t(language, "Thinking: max", "\u601d\u8003\uff1a\u6700\u9ad8")
     else -> t(language, "Thinking: high", "\u601d\u8003\uff1a\u9ad8")
+  }
+}
+
+private fun customOpenAICompatibilityModeLabel(language: String, mode: String): String {
+  return when (mode) {
+    "ollama" -> t(language, "Compatibility: Ollama", "\u517c\u5bb9\uff1aOllama")
+    else -> t(language, "Compatibility: generic OpenAI", "\u517c\u5bb9\uff1a\u901a\u7528 OpenAI")
   }
 }
 

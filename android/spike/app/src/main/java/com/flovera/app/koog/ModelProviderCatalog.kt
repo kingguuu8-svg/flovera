@@ -3,7 +3,6 @@ package com.flovera.app.koog
 import ai.koog.prompt.executor.clients.LLMClient
 import ai.koog.prompt.executor.clients.anthropic.AnthropicLLMClient
 import ai.koog.prompt.executor.clients.openai.OpenAIClientSettings
-import ai.koog.prompt.executor.clients.openai.OpenAILLMClient
 import ai.koog.prompt.executor.clients.openrouter.OpenRouterLLMClient
 import ai.koog.prompt.llm.LLMCapability
 import ai.koog.prompt.llm.LLMProvider
@@ -29,6 +28,7 @@ data class ModelProviderSpec(
   val defaultHeaders: Map<String, String> = emptyMap(),
   val defaultMaxTokens: Int? = null,
   val defaultAuxModel: String = "",
+  val requestProfile: ProviderRequestProfile = ProviderRequestProfile(),
   val modelContexts: Map<String, ModelContextSpec> = emptyMap(),
   val defaultContext: ModelContextSpec = ModelContextSpec(),
 ) {
@@ -62,11 +62,17 @@ data class ProviderRuntimeProfile(
   val defaultHeaders: Map<String, String>,
   val defaultMaxTokens: Int?,
   val defaultAuxModel: String,
+  val requestProfile: ProviderRequestProfile,
 ) {
   fun requireBaseUrl(): String {
     return baseUrl.takeIf { it.isNotBlank() } ?: error("Provider profile $providerId has no base URL configured.")
   }
 }
+
+data class ProviderRequestProfile(
+  val compatibilityMode: String = "generic",
+  val injectOllamaNumCtx: Boolean = false,
+)
 
 enum class ProviderApiMode(val id: String) {
   ChatCompletions("chat_completions"),
@@ -118,7 +124,7 @@ object ModelProviderCatalog {
       defaultModel = "gpt-4.1",
       suggestedModels = listOf("gpt-4.1", "gpt-4.1-mini", "gpt-4o-mini"),
       llmProvider = LLMProvider.OpenAI,
-      createClient = ::OpenAILLMClient,
+      createClient = { apiKey -> FloveraOpenAICompatibleLLMClient(apiKey) },
       aliases = setOf("gpt", "openai-compatible"),
       baseUrl = "https://api.openai.com/v1",
       modelsUrl = "https://api.openai.com/v1/models",
@@ -130,7 +136,7 @@ object ModelProviderCatalog {
       defaultModel = "custom-model",
       suggestedModels = listOf("custom-model", "gpt-oss-120b", "qwen3-coder", "deepseek-chat"),
       llmProvider = LLMProvider.OpenAI,
-      createClient = ::OpenAILLMClient,
+      createClient = { apiKey -> FloveraOpenAICompatibleLLMClient(apiKey) },
       aliases = setOf("custom", "ollama", "local", "vllm", "llamacpp", "openai-compatible-custom"),
       supportsHealthCheck = false,
     ),
@@ -190,6 +196,11 @@ object ModelProviderCatalog {
     val chatCompletionsPath = customProfile?.chatCompletionsPath?.takeIf { it.isNotBlank() }
       ?: provider.chatCompletionsPath
     val modelsUrl = provider.modelsUrl.ifBlank { defaultModelsUrl(baseUrl) }
+    val compatibilityMode = customProfile?.compatibilityMode ?: provider.requestProfile.compatibilityMode
+    val requestProfile = provider.requestProfile.copy(
+      compatibilityMode = compatibilityMode,
+      injectOllamaNumCtx = compatibilityMode == "ollama",
+    )
     return ProviderRuntimeProfile(
       providerId = provider.id,
       label = provider.label,
@@ -203,6 +214,7 @@ object ModelProviderCatalog {
       defaultHeaders = provider.defaultHeaders,
       defaultMaxTokens = provider.defaultMaxTokens,
       defaultAuxModel = provider.defaultAuxModel,
+      requestProfile = requestProfile,
     )
   }
 
@@ -217,12 +229,14 @@ object ModelProviderCatalog {
         apiKey = apiKey,
         requestSettings = FloveraDeepSeekRequestSettings.from(settings),
       )
-      "custom-openai" -> OpenAILLMClient(
+      "custom-openai" -> FloveraOpenAICompatibleLLMClient(
         apiKey = apiKey,
         settings = OpenAIClientSettings(
           baseUrl = runtimeProfile.requireBaseUrl(),
           chatCompletionsPath = runtimeProfile.chatCompletionsPath,
         ),
+        requestProfile = runtimeProfile.requestProfile,
+        modelContext = contextFor(settings),
       )
       else -> provider.createClient(apiKey)
     }

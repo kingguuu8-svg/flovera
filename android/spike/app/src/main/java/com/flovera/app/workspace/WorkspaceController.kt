@@ -59,6 +59,8 @@ class WorkspaceController(context: Context, workspaceId: String) {
         deepSeekThinkingEffort = settings.deepSeekThinkingEffort,
         customOpenAIBaseUrl = settings.customOpenAIProvider.baseUrl,
         customOpenAIChatCompletionsPath = settings.customOpenAIProvider.chatCompletionsPath,
+        customOpenAICompatibilityMode = settings.customOpenAIProvider.compatibilityMode,
+        providerInjectsOllamaNumCtx = providerProfile.requestProfile.injectOllamaNumCtx,
         modelContextWindowTokens = modelContext.contextWindowTokens,
         modelContextSource = modelContext.source,
         tokenUsageSource = modelContext.usageSource,

@@ -8,7 +8,10 @@ import com.flovera.app.config.ModelSettingsDraft
 import com.flovera.app.config.SettingsProposalChanges
 import com.flovera.app.config.SettingsController
 import com.flovera.app.config.SettingsStore
+import com.flovera.app.koog.ModelContextSpec
 import com.flovera.app.koog.ModelProviderCatalog
+import com.flovera.app.koog.ProviderRequestProfile
+import com.flovera.app.koog.applyFloveraOpenAIRequestProfileToJson
 import com.flovera.app.workspace.WorkspaceManager
 import java.io.File
 import org.junit.Assert.assertEquals
@@ -72,6 +75,7 @@ class ProviderConfigInstrumentedTest {
       customOpenAIProvider = CustomOpenAIProviderSettings(
         baseUrl = "https://llm.example.com/v1",
         chatCompletionsPath = "/chat/completions",
+        compatibilityMode = "ollama",
       ),
     )
 
@@ -86,9 +90,31 @@ class ProviderConfigInstrumentedTest {
     assertEquals("https://llm.example.com/v1", customProfile.baseUrl)
     assertEquals("https://llm.example.com/v1/models", customProfile.modelsUrl)
     assertEquals("/chat/completions", customProfile.chatCompletionsPath)
+    assertEquals("ollama", customProfile.requestProfile.compatibilityMode)
+    assertTrue(customProfile.requestProfile.injectOllamaNumCtx)
     assertFalse(customProfile.supportsHealthCheck)
     assertEquals("https://api.openai.com/v1", openAiProfile.baseUrl)
     assertEquals("/v1/chat/completions", openAiProfile.chatCompletionsPath)
+    assertFalse(openAiProfile.requestProfile.injectOllamaNumCtx)
+  }
+
+  @Test
+  fun ollamaRuntimeProfileInjectsContextWindowAsNumCtx() {
+    val request = """{"model":"qwen3","messages":[],"temperature":0.7}"""
+
+    val updated = applyFloveraOpenAIRequestProfileToJson(
+      requestJson = request,
+      requestProfile = ProviderRequestProfile(compatibilityMode = "ollama", injectOllamaNumCtx = true),
+      modelContext = ModelContextSpec(contextWindowTokens = 65_536),
+    )
+    val unchanged = applyFloveraOpenAIRequestProfileToJson(
+      requestJson = request,
+      requestProfile = ProviderRequestProfile(),
+      modelContext = ModelContextSpec(contextWindowTokens = 65_536),
+    )
+
+    assertTrue(updated.contains("\"options\":{\"num_ctx\":65536}"))
+    assertEquals(request, unchanged)
   }
 
   @Test
@@ -177,6 +203,7 @@ class ProviderConfigInstrumentedTest {
           deepSeekThinkingEffort = "max",
           customOpenAIBaseUrl = "https://llm.example.com/",
           customOpenAIChatCompletionsPath = "v1/chat/completions",
+          customOpenAICompatibilityMode = "ollama",
           modelContextWindowTokens = 512_000,
           modelCompressionThresholdPercent = 75,
         ),
@@ -192,6 +219,7 @@ class ProviderConfigInstrumentedTest {
       assertEquals("max", updated.deepSeekThinkingEffort)
       assertEquals("https://llm.example.com", updated.customOpenAIProvider.baseUrl)
       assertEquals("/v1/chat/completions", updated.customOpenAIProvider.chatCompletionsPath)
+      assertEquals("ollama", updated.customOpenAIProvider.compatibilityMode)
       val override = updated.modelContextOverrideFor("deepseek", "deepseek-v4-pro")
       assertEquals(512_000, override?.contextWindowTokens)
       assertEquals(75, override?.compressionThresholdPercent)
@@ -353,6 +381,7 @@ class ProviderConfigInstrumentedTest {
           apiKey = " custom-key ",
           customOpenAIBaseUrl = "https://llm.example.com/v1/",
           customOpenAIChatCompletionsPath = "chat/completions",
+          customOpenAICompatibilityMode = "OLLAMA",
         ),
       )
       assertEquals("custom-openai", customSaved.provider)
@@ -360,6 +389,7 @@ class ProviderConfigInstrumentedTest {
       assertEquals("custom-key", customSaved.apiKeyFor("custom-openai"))
       assertEquals("https://llm.example.com/v1", customSaved.customOpenAIProvider.baseUrl)
       assertEquals("/chat/completions", customSaved.customOpenAIProvider.chatCompletionsPath)
+      assertEquals("ollama", customSaved.customOpenAIProvider.compatibilityMode)
 
       val aliasSaved = controller.saveModelSettings(
         customSaved,

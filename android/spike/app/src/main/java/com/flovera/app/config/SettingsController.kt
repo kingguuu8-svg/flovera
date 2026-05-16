@@ -11,6 +11,7 @@ data class ModelSettingsDraft(
   val apiKey: String,
   val customOpenAIBaseUrl: String = "",
   val customOpenAIChatCompletionsPath: String = "/v1/chat/completions",
+  val customOpenAICompatibilityMode: String = "generic",
 )
 
 class SettingsController(private val store: SettingsStore) {
@@ -25,7 +26,7 @@ class SettingsController(private val store: SettingsStore) {
       normalizeAuthorityMode(
         normalizeAppearance(
           normalizeLanguage(
-            normalizeProviderAndModel(normalizeHtmlLists(loaded)),
+            normalizeCustomOpenAIProvider(normalizeProviderAndModel(normalizeHtmlLists(loaded))),
           ),
         ),
       ),
@@ -43,6 +44,7 @@ class SettingsController(private val store: SettingsStore) {
       apiKey = settings.apiKeyFor(provider.id),
       customOpenAIBaseUrl = settings.customOpenAIProvider.baseUrl,
       customOpenAIChatCompletionsPath = settings.customOpenAIProvider.chatCompletionsPath,
+      customOpenAICompatibilityMode = settings.customOpenAIProvider.compatibilityMode,
     )
   }
 
@@ -54,6 +56,7 @@ class SettingsController(private val store: SettingsStore) {
       apiKey = settings.apiKeyFor(provider.id),
       customOpenAIBaseUrl = settings.customOpenAIProvider.baseUrl,
       customOpenAIChatCompletionsPath = settings.customOpenAIProvider.chatCompletionsPath,
+      customOpenAICompatibilityMode = settings.customOpenAIProvider.compatibilityMode,
     )
   }
 
@@ -67,6 +70,7 @@ class SettingsController(private val store: SettingsStore) {
         customOpenAIProvider = CustomOpenAIProviderSettings(
           baseUrl = normalizeCustomOpenAIBaseUrl(draft.customOpenAIBaseUrl),
           chatCompletionsPath = normalizeCustomOpenAIPath(draft.customOpenAIChatCompletionsPath),
+          compatibilityMode = normalizeCustomOpenAICompatibilityMode(draft.customOpenAICompatibilityMode),
         ),
       )
       .withApiKey(provider.id, draft.apiKey)
@@ -141,6 +145,8 @@ class SettingsController(private val store: SettingsStore) {
           ?: settings.customOpenAIProvider.baseUrl,
         chatCompletionsPath = changes.customOpenAIChatCompletionsPath?.let { normalizeCustomOpenAIPath(it) }
           ?: settings.customOpenAIProvider.chatCompletionsPath,
+        compatibilityMode = changes.customOpenAICompatibilityMode?.let { normalizeCustomOpenAICompatibilityMode(it) }
+          ?: settings.customOpenAIProvider.compatibilityMode,
       ),
     ).withMergedModelContextOverride(provider.id, model, changes)
     store.save(updated)
@@ -189,6 +195,16 @@ class SettingsController(private val store: SettingsStore) {
     val provider = ModelProviderCatalog.findProvider(settings.provider) ?: ModelProviderCatalog.defaultProvider
     val model = settings.model.ifBlank { provider.defaultModel }
     return settings.copy(provider = provider.id, model = model)
+  }
+
+  private fun normalizeCustomOpenAIProvider(settings: AppSettings): AppSettings {
+    return settings.copy(
+      customOpenAIProvider = settings.customOpenAIProvider.copy(
+        baseUrl = normalizeCustomOpenAIBaseUrl(settings.customOpenAIProvider.baseUrl),
+        chatCompletionsPath = normalizeCustomOpenAIPath(settings.customOpenAIProvider.chatCompletionsPath),
+        compatibilityMode = normalizeCustomOpenAICompatibilityMode(settings.customOpenAIProvider.compatibilityMode),
+      ),
+    )
   }
 
   private fun normalizeLanguage(settings: AppSettings): AppSettings {
@@ -283,6 +299,13 @@ class SettingsController(private val store: SettingsStore) {
     return if (withSlash.contains(Regex("\\s"))) CustomOpenAIProviderSettings().chatCompletionsPath else withSlash
   }
 
+  private fun normalizeCustomOpenAICompatibilityMode(mode: String): String {
+    return when (mode.trim().lowercase()) {
+      "ollama" -> "ollama"
+      else -> "generic"
+    }
+  }
+
   private fun normalizeHtmlPathList(paths: List<String>): List<String> {
     return paths.map { it.trim() }
       .filter { it.isNotBlank() }
@@ -311,6 +334,7 @@ data class SettingsProposalChanges(
   val deepSeekThinkingEffort: String? = null,
   val customOpenAIBaseUrl: String? = null,
   val customOpenAIChatCompletionsPath: String? = null,
+  val customOpenAICompatibilityMode: String? = null,
   val modelContextWindowTokens: Int? = null,
   val modelCompressionThresholdPercent: Int? = null,
 )

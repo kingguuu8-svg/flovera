@@ -29,6 +29,7 @@ class AgentPromptBuilderInstrumentedTest {
     assertFalse(systemPrompt.contains(workspaceRule))
     assertTrue(systemPrompt.contains("\"provider\":\"custom-openai\""))
     assertTrue(systemPrompt.contains("\"model\":\"model-id\""))
+    assertTrue(systemPrompt.contains("\"customOpenAICompatibilityMode\":\"generic\""))
     assertTrue(userInput.contains("Workspace user rules from AGENT.md:"))
     assertTrue(userInput.contains(workspaceRule))
     assertTrue(userInput.contains("Recent session history:"))

@@ -13,6 +13,7 @@ data class CustomOpenAIProviderSettings(
   // User-editable profile override for the controlled OpenAI-compatible provider slot.
   val baseUrl: String = "",
   val chatCompletionsPath: String = "/v1/chat/completions",
+  val compatibilityMode: String = "generic",
 )
 
 @Serializable
