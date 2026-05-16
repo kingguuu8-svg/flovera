@@ -22,7 +22,7 @@ object AgentPromptBuilder {
       - Read .flovera/capabilities.json only when the user's request depends on available app capabilities.
       - Do not inspect .flovera by default for ordinary file edits or simple questions.
       - Do not edit app behavior directly. If you need an app setting changed, write a JSON proposal under .flovera/proposals/.
-      - Proposal schema: {"type":"settings","title":"Short title","reason":"Why this helps","changes":{"themeColor":"#76C4D8","networkEnabled":true,"selectedHtmlPath":"index.html","maxAgentIterations":30,"deepSeekThinkingEffort":"high","modelContextWindowTokens":1000000,"modelCompressionThresholdPercent":82}}
+      - Proposal schema: {"type":"settings","title":"Short title","reason":"Why this helps","changes":{"themeColor":"#76C4D8","networkEnabled":true,"selectedHtmlPath":"index.html","maxAgentIterations":30,"deepSeekThinkingEffort":"high","customOpenAIBaseUrl":"https://example.com","customOpenAIChatCompletionsPath":"/v1/chat/completions","modelContextWindowTokens":1000000,"modelCompressionThresholdPercent":82}}
       - Tool and MCP expansion is proposal-only in this build. Do not claim that a new tool is installed or executable.
       - Tool proposal schema: {"type":"tool","title":"Short title","reason":"Why this helps","name":"tool_name","description":"What it should do","requestedCapabilities":["filesystem"],"permissions":["read workspace"]}
       - MCP proposal schema: {"type":"mcp","title":"Short title","reason":"Why this helps","name":"server_name","description":"What it should provide","endpoint":"stdio or URL","command":"optional launch command","requestedCapabilities":["tools"],"permissions":["user approval required"]}

@@ -2,6 +2,7 @@ package com.flovera.app
 
 import androidx.test.platform.app.InstrumentationRegistry
 import com.flovera.app.config.AppSettings
+import com.flovera.app.config.CustomOpenAIProviderSettings
 import com.flovera.app.config.ModelContextOverride
 import com.flovera.app.config.ModelSettingsDraft
 import com.flovera.app.config.SettingsProposalChanges
@@ -34,6 +35,23 @@ class ProviderConfigInstrumentedTest {
       assertTrue(provider.defaultModel.isNotBlank())
       assertTrue(provider.suggestedModels.contains(provider.defaultModel))
     }
+  }
+
+  @Test
+  fun customOpenAIProviderIsAvailableAsControlledRoutingSlot() {
+    val provider = ModelProviderCatalog.requireProvider("custom-openai")
+    val settings = AppSettings(
+      provider = "custom-openai",
+      model = "my-model",
+      customOpenAIProvider = CustomOpenAIProviderSettings(
+        baseUrl = "https://llm.example.com",
+        chatCompletionsPath = "/v1/chat/completions",
+      ),
+    ).withApiKey("custom-openai", "custom-key")
+
+    assertEquals("Custom OpenAI-compatible", provider.label)
+    assertEquals("my-model", provider.createModel(settings.model).id)
+    assertEquals("custom-key", settings.apiKeyFor("custom-openai"))
   }
 
   @Test
@@ -111,6 +129,8 @@ class ProviderConfigInstrumentedTest {
           maxAgentIterations = 120,
           agentAuthorityMode = "assisted",
           deepSeekThinkingEffort = "max",
+          customOpenAIBaseUrl = "https://llm.example.com/",
+          customOpenAIChatCompletionsPath = "v1/chat/completions",
           modelContextWindowTokens = 512_000,
           modelCompressionThresholdPercent = 75,
         ),
@@ -124,6 +144,8 @@ class ProviderConfigInstrumentedTest {
       assertEquals(80, updated.maxAgentIterations)
       assertEquals("assisted", updated.agentAuthorityMode)
       assertEquals("max", updated.deepSeekThinkingEffort)
+      assertEquals("https://llm.example.com", updated.customOpenAIProvider.baseUrl)
+      assertEquals("/v1/chat/completions", updated.customOpenAIProvider.chatCompletionsPath)
       val override = updated.modelContextOverrideFor("deepseek", "deepseek-v4-pro")
       assertEquals(512_000, override?.contextWindowTokens)
       assertEquals(75, override?.compressionThresholdPercent)
@@ -256,6 +278,22 @@ class ProviderConfigInstrumentedTest {
       assertEquals("openai", saved.provider)
       assertEquals(ModelProviderCatalog.findProvider("openai")?.defaultModel, saved.model)
       assertEquals("openai-key", saved.apiKeyFor("openai"))
+
+      val customSaved = controller.saveModelSettings(
+        saved,
+        ModelSettingsDraft(
+          providerId = "custom-openai",
+          model = " custom-model ",
+          apiKey = " custom-key ",
+          customOpenAIBaseUrl = "https://llm.example.com/v1/",
+          customOpenAIChatCompletionsPath = "chat/completions",
+        ),
+      )
+      assertEquals("custom-openai", customSaved.provider)
+      assertEquals("custom-model", customSaved.model)
+      assertEquals("custom-key", customSaved.apiKeyFor("custom-openai"))
+      assertEquals("https://llm.example.com/v1", customSaved.customOpenAIProvider.baseUrl)
+      assertEquals("/chat/completions", customSaved.customOpenAIProvider.chatCompletionsPath)
     } finally {
       store.save(original)
     }

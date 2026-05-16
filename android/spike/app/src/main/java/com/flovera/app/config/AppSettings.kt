@@ -9,6 +9,12 @@ data class ModelContextOverride(
 )
 
 @Serializable
+data class CustomOpenAIProviderSettings(
+  val baseUrl: String = "",
+  val chatCompletionsPath: String = "/v1/chat/completions",
+)
+
+@Serializable
 data class AppSettings(
   val provider: String = "deepseek",
   val model: String = "deepseek-v4-pro",
@@ -29,6 +35,7 @@ data class AppSettings(
   val agentAuthorityMode: String = "safe",
   val deepSeekThinkingEffort: String = "high",
   val modelContextOverrides: Map<String, ModelContextOverride> = emptyMap(),
+  val customOpenAIProvider: CustomOpenAIProviderSettings = CustomOpenAIProviderSettings(),
 ) {
   fun apiKeyFor(providerId: String = provider): String {
     val keyed = providerApiKeys[providerId].orEmpty()

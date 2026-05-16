@@ -2214,6 +2214,12 @@ private fun SettingsDialog(
   var providerDraft by remember(state.providerDraft) { mutableStateOf(state.providerDraft) }
   var modelDraft by remember(state.modelDraft) { mutableStateOf(state.modelDraft) }
   var apiKeyDraft by remember(state.apiKeyDraft) { mutableStateOf(state.apiKeyDraft) }
+  var customOpenAIBaseUrlDraft by remember(state.customOpenAIBaseUrlDraft) {
+    mutableStateOf(state.customOpenAIBaseUrlDraft)
+  }
+  var customOpenAIChatPathDraft by remember(state.customOpenAIChatCompletionsPathDraft) {
+    mutableStateOf(state.customOpenAIChatCompletionsPathDraft)
+  }
   var languageDraft by remember(state.settings.language) { mutableStateOf(state.settings.language) }
   var themeModeDraft by remember(state.settings.themeMode) { mutableStateOf(state.settings.themeMode) }
   var themeColorDraft by remember(state.settings.themeColor) { mutableStateOf(state.settings.themeColor) }
@@ -2253,6 +2259,8 @@ private fun SettingsDialog(
                   providerDraft = provider.id
                   modelDraft = provider.defaultModel
                   apiKeyDraft = state.settings.apiKeyFor(provider.id)
+                  customOpenAIBaseUrlDraft = state.settings.customOpenAIProvider.baseUrl
+                  customOpenAIChatPathDraft = state.settings.customOpenAIProvider.chatCompletionsPath
                 },
               )
             }
@@ -2290,6 +2298,32 @@ private fun SettingsDialog(
           singleLine = true,
           modifier = Modifier.fillMaxWidth(),
         )
+        if (selectedProvider.id == "custom-openai") {
+          Text(t(language, "Custom endpoint", "\u81ea\u5b9a\u4e49\u7aef\u70b9"), style = MaterialTheme.typography.titleSmall)
+          OutlinedTextField(
+            value = customOpenAIBaseUrlDraft,
+            onValueChange = { customOpenAIBaseUrlDraft = it },
+            label = { Text(t(language, "Base URL", "Base URL")) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+          )
+          OutlinedTextField(
+            value = customOpenAIChatPathDraft,
+            onValueChange = { customOpenAIChatPathDraft = it },
+            label = { Text(t(language, "Chat completions path", "Chat completions path")) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+          )
+          Text(
+            t(
+              language,
+              "Only OpenAI-compatible chat completions are routed. Custom request bodies are not enabled.",
+              "\u4ec5\u8def\u7531 OpenAI-compatible chat completions\u3002\u5f53\u524d\u4e0d\u5f00\u653e\u81ea\u5b9a\u4e49\u8bf7\u6c42\u4f53\u3002",
+            ),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall,
+          )
+        }
         if (selectedProvider.id == "deepseek") {
           Text(t(language, "DeepSeek", "DeepSeek"), style = MaterialTheme.typography.titleSmall)
           Box {
@@ -2466,6 +2500,8 @@ private fun SettingsDialog(
             providerId = providerDraft,
             model = modelDraft,
             apiKey = apiKeyDraft,
+            customOpenAIBaseUrl = customOpenAIBaseUrlDraft,
+            customOpenAIChatCompletionsPath = customOpenAIChatPathDraft,
             language = languageDraft,
             themeMode = themeModeDraft,
             themeColor = themeColorDraft,
@@ -2621,6 +2657,8 @@ private fun settingsProposalSummary(proposal: WorkspaceSettingsProposal): String
     changes.themeColor?.let { "themeColor=$it" },
     changes.agentAuthorityMode?.let { "authority=$it" },
     changes.deepSeekThinkingEffort?.let { "deepSeekThinking=$it" },
+    changes.customOpenAIBaseUrl?.let { "customBaseUrl=$it" },
+    changes.customOpenAIChatCompletionsPath?.let { "customChatPath=$it" },
     changes.modelContextWindowTokens?.let { "context=$it" },
     changes.modelCompressionThresholdPercent?.let { "compression=$it%" },
   )

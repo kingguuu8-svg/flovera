@@ -34,6 +34,8 @@ data class AgentScreenState(
   val providerDraft: String = AppSettings().provider,
   val modelDraft: String = AppSettings().model,
   val apiKeyDraft: String = "",
+  val customOpenAIBaseUrlDraft: String = "",
+  val customOpenAIChatCompletionsPathDraft: String = "/v1/chat/completions",
   val agentRulesDraft: String = "",
   val workspaceFiles: String = "",
   val workspaceTree: WorkspaceFileNode? = null,
@@ -112,6 +114,8 @@ class AgentController(
       providerDraft = modelDraft.providerId,
       modelDraft = modelDraft.model,
       apiKeyDraft = modelDraft.apiKey,
+      customOpenAIBaseUrlDraft = modelDraft.customOpenAIBaseUrl,
+      customOpenAIChatCompletionsPathDraft = modelDraft.customOpenAIChatCompletionsPath,
       agentRulesDraft = workspaceController.readAgentRules(),
       workspaceFiles = workspaceSnapshot.files,
       workspaceTree = workspaceSnapshot.tree,
@@ -144,6 +148,8 @@ class AgentController(
         providerDraft = draft.providerId,
         modelDraft = draft.model,
         apiKeyDraft = draft.apiKey,
+        customOpenAIBaseUrlDraft = draft.customOpenAIBaseUrl,
+        customOpenAIChatCompletionsPathDraft = draft.customOpenAIChatCompletionsPath,
       )
     }
   }
@@ -170,6 +176,8 @@ class AgentController(
     providerId: String = _state.value.providerDraft,
     model: String = _state.value.modelDraft,
     apiKey: String = _state.value.apiKeyDraft,
+    customOpenAIBaseUrl: String = _state.value.customOpenAIBaseUrlDraft,
+    customOpenAIChatCompletionsPath: String = _state.value.customOpenAIChatCompletionsPathDraft,
     language: String = _state.value.settings.language,
     themeMode: String = _state.value.settings.themeMode,
     themeColor: String = _state.value.settings.themeColor,
@@ -185,6 +193,8 @@ class AgentController(
         providerId = providerId,
         model = model,
         apiKey = apiKey,
+        customOpenAIBaseUrl = customOpenAIBaseUrl,
+        customOpenAIChatCompletionsPath = customOpenAIChatCompletionsPath,
       ),
     )
     val settings = settingsController.setAppearance(
@@ -204,6 +214,8 @@ class AgentController(
         providerDraft = draft.providerId,
         modelDraft = draft.model,
         apiKeyDraft = draft.apiKey,
+        customOpenAIBaseUrlDraft = draft.customOpenAIBaseUrl,
+        customOpenAIChatCompletionsPathDraft = draft.customOpenAIChatCompletionsPath,
         workspaceFiles = workspaceSnapshot.files,
         workspaceTree = workspaceSnapshot.tree,
         htmlFiles = workspaceSnapshot.htmlFiles,

@@ -49,6 +49,8 @@ class WorkspaceController(context: Context, workspaceId: String) {
         themeColor = settings.themeColor,
         authorityMode = settings.agentAuthorityMode,
         deepSeekThinkingEffort = settings.deepSeekThinkingEffort,
+        customOpenAIBaseUrl = settings.customOpenAIProvider.baseUrl,
+        customOpenAIChatCompletionsPath = settings.customOpenAIProvider.chatCompletionsPath,
         modelContextWindowTokens = modelContext.contextWindowTokens,
         modelContextSource = modelContext.source,
         tokenUsageSource = modelContext.usageSource,

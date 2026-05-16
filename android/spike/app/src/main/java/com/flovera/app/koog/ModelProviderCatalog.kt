@@ -2,6 +2,7 @@ package com.flovera.app.koog
 
 import ai.koog.prompt.executor.clients.LLMClient
 import ai.koog.prompt.executor.clients.anthropic.AnthropicLLMClient
+import ai.koog.prompt.executor.clients.openai.OpenAIClientSettings
 import ai.koog.prompt.executor.clients.openai.OpenAILLMClient
 import ai.koog.prompt.executor.clients.openrouter.OpenRouterLLMClient
 import ai.koog.prompt.llm.LLMCapability
@@ -79,6 +80,15 @@ object ModelProviderCatalog {
       createClient = ::OpenAILLMClient,
     ),
     ModelProviderSpec(
+      id = "custom-openai",
+      label = "Custom OpenAI-compatible",
+      apiKeyLabel = "Custom provider API key",
+      defaultModel = "custom-model",
+      suggestedModels = listOf("custom-model", "gpt-oss-120b", "qwen3-coder", "deepseek-chat"),
+      llmProvider = LLMProvider.OpenAI,
+      createClient = ::OpenAILLMClient,
+    ),
+    ModelProviderSpec(
       id = "openrouter",
       label = "OpenRouter",
       apiKeyLabel = "OpenRouter API key",
@@ -111,6 +121,15 @@ object ModelProviderCatalog {
       "deepseek" -> FloveraDeepSeekLLMClient(
         apiKey = apiKey,
         requestSettings = FloveraDeepSeekRequestSettings.from(settings),
+      )
+      "custom-openai" -> OpenAILLMClient(
+        apiKey = apiKey,
+        settings = OpenAIClientSettings(
+          baseUrl = settings.customOpenAIProvider.baseUrl
+            .takeIf { it.isNotBlank() }
+            ?: error("Custom OpenAI-compatible base URL is not configured."),
+          chatCompletionsPath = settings.customOpenAIProvider.chatCompletionsPath,
+        ),
       )
       else -> provider.createClient(apiKey)
     }
