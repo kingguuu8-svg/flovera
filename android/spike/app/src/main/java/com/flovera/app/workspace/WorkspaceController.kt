@@ -3,6 +3,7 @@ package com.flovera.app.workspace
 import android.content.Context
 import android.net.Uri
 import com.flovera.app.config.AppSettings
+import com.flovera.app.koog.ModelContextSpec
 import com.flovera.app.koog.ModelProviderCatalog
 import java.io.File
 
@@ -78,6 +79,9 @@ class WorkspaceController(context: Context, workspaceId: String) {
           aliases = provider.aliases.sorted(),
           defaultModel = provider.defaultModel,
           suggestedModels = provider.suggestedModels,
+          modelContexts = provider.modelContexts
+            .toSortedMap()
+            .mapValues { (_, context) -> context.toWorkspaceView() },
           baseUrl = profile.baseUrl,
           modelsUrl = profile.modelsUrl,
           authType = profile.authType.id,
@@ -146,4 +150,13 @@ class WorkspaceController(context: Context, workspaceId: String) {
       else -> ""
     }
   }
+}
+
+private fun ModelContextSpec.toWorkspaceView(): FloveraModelContextView {
+  return FloveraModelContextView(
+    contextWindowTokens = contextWindowTokens,
+    source = source,
+    usageSource = usageSource,
+    compressionThresholdPercent = compressionThresholdPercent,
+  )
 }

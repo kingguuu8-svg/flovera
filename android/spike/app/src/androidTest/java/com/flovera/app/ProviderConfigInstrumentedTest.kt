@@ -102,6 +102,27 @@ class ProviderConfigInstrumentedTest {
   }
 
   @Test
+  fun openAICompatibleProviderProfilesCarryContextMetadata() {
+    val alibaba = ModelProviderCatalog.contextFor(AppSettings(provider = "alibaba", model = "qwen3-coder-plus"))
+    val moonshot = ModelProviderCatalog.contextFor(AppSettings(provider = "moonshot", model = "kimi-k2-turbo-preview"))
+    val gmiKimi = ModelProviderCatalog.contextFor(AppSettings(provider = "gmi", model = "moonshotai/Kimi-K2.5"))
+    val nvidia = ModelProviderCatalog.contextFor(
+      AppSettings(provider = "nvidia", model = "nvidia/llama-3.3-70b-instruct"),
+    )
+    val ollamaCloud = ModelProviderCatalog.contextFor(
+      AppSettings(provider = "ollama-cloud", model = "nemotron-3-nano:30b"),
+    )
+
+    assertEquals(1_000_000, alibaba.contextWindowTokens)
+    assertEquals("hermes_model_metadata", alibaba.source)
+    assertEquals(262_144, moonshot.contextWindowTokens)
+    assertEquals(262_144, gmiKimi.contextWindowTokens)
+    assertEquals(131_072, nvidia.contextWindowTokens)
+    assertEquals(131_072, ollamaCloud.contextWindowTokens)
+    assertEquals(82, moonshot.compressionThresholdPercent)
+  }
+
+  @Test
   fun customOpenAIProviderIsAvailableAsControlledRoutingSlot() {
     val provider = ModelProviderCatalog.requireProvider("custom-openai")
     val settings = AppSettings(

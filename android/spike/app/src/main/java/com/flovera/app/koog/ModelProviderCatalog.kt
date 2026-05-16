@@ -92,6 +92,19 @@ data class ModelContextSpec(
   val compressionThresholdPercent: Int? = null,
 )
 
+private fun hermesContext(tokens: Int): ModelContextSpec {
+  return ModelContextSpec(
+    contextWindowTokens = tokens,
+    source = "hermes_model_metadata",
+    usageSource = "estimate",
+    compressionThresholdPercent = 82,
+  )
+}
+
+private fun contextMap(vararg entries: Pair<String, Int>): Map<String, ModelContextSpec> {
+  return entries.associate { (model, tokens) -> model to hermesContext(tokens) }
+}
+
 private data class BuiltInProviderProfile(
   val id: String,
   val label: String,
@@ -105,6 +118,8 @@ private data class BuiltInProviderProfile(
   val defaultAuxModel: String = "",
   val supportsHealthCheck: Boolean = true,
   val requestProfile: ProviderRequestProfile = ProviderRequestProfile(),
+  val modelContexts: Map<String, ModelContextSpec> = emptyMap(),
+  val defaultContext: ModelContextSpec = ModelContextSpec(),
 ) {
   fun toSpec(): ModelProviderSpec {
     return ModelProviderSpec(
@@ -122,6 +137,8 @@ private data class BuiltInProviderProfile(
       defaultAuxModel = defaultAuxModel,
       supportsHealthCheck = supportsHealthCheck,
       requestProfile = requestProfile,
+      modelContexts = modelContexts,
+      defaultContext = defaultContext,
     )
   }
 }
@@ -137,6 +154,11 @@ object ModelProviderCatalog {
       aliases = setOf("gpt", "openai-compatible"),
       baseUrl = "https://api.openai.com/v1",
       modelsUrl = "https://api.openai.com/v1/models",
+      modelContexts = contextMap(
+        "gpt-4.1" to 1_047_576,
+        "gpt-4.1-mini" to 1_047_576,
+        "gpt-4o-mini" to 128_000,
+      ),
     ),
     BuiltInProviderProfile(
       id = "alibaba",
@@ -146,6 +168,12 @@ object ModelProviderCatalog {
       suggestedModels = listOf("qwen3-coder-plus", "qwen-plus", "qwen-max", "qwen-turbo"),
       aliases = setOf("dashscope", "alibaba-cloud", "qwen-dashscope"),
       baseUrl = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+      modelContexts = contextMap(
+        "qwen3-coder-plus" to 1_000_000,
+        "qwen-plus" to 131_072,
+        "qwen-max" to 131_072,
+        "qwen-turbo" to 131_072,
+      ),
     ),
     BuiltInProviderProfile(
       id = "moonshot",
@@ -158,6 +186,12 @@ object ModelProviderCatalog {
       defaultMaxTokens = 32_000,
       defaultAuxModel = "kimi-k2-turbo-preview",
       requestProfile = ProviderRequestProfile(omittedRequestFields = setOf("temperature")),
+      modelContexts = contextMap(
+        "kimi-k2-turbo-preview" to 262_144,
+        "kimi-k2.6" to 262_144,
+        "kimi-k2.5" to 262_144,
+        "kimi-k2-thinking" to 262_144,
+      ),
     ),
     BuiltInProviderProfile(
       id = "gmi",
@@ -175,6 +209,14 @@ object ModelProviderCatalog {
       aliases = setOf("gmi-cloud", "gmicloud"),
       baseUrl = "https://api.gmi-serving.com/v1",
       defaultAuxModel = "google/gemini-3.1-flash-lite-preview",
+      modelContexts = contextMap(
+        "deepseek-ai/DeepSeek-V3.2" to 65_536,
+        "zai-org/GLM-5.1-FP8" to 202_752,
+        "moonshotai/Kimi-K2.5" to 262_144,
+        "google/gemini-3.1-flash-lite-preview" to 1_048_576,
+        "anthropic/claude-sonnet-4.6" to 1_000_000,
+        "openai/gpt-5.4" to 1_050_000,
+      ),
     ),
     BuiltInProviderProfile(
       id = "nvidia",
@@ -188,6 +230,10 @@ object ModelProviderCatalog {
       aliases = setOf("nvidia-nim"),
       baseUrl = "https://integrate.api.nvidia.com/v1",
       defaultMaxTokens = 16_384,
+      modelContexts = contextMap(
+        "nvidia/llama-3.3-70b-instruct" to 131_072,
+        "nvidia/llama-3.1-nemotron-70b-instruct" to 131_072,
+      ),
     ),
     BuiltInProviderProfile(
       id = "novita",
@@ -205,6 +251,14 @@ object ModelProviderCatalog {
       aliases = setOf("novita-ai", "novitaai"),
       baseUrl = "https://api.novita.ai/openai/v1",
       defaultAuxModel = "deepseek/deepseek-v3-0324",
+      modelContexts = contextMap(
+        "deepseek/deepseek-v3-0324" to 128_000,
+        "moonshotai/kimi-k2.5" to 262_144,
+        "minimax/minimax-m2.7" to 204_800,
+        "zai-org/glm-5" to 202_752,
+        "deepseek/deepseek-r1-0528" to 128_000,
+        "qwen/qwen3-235b-a22b-fp8" to 262_144,
+      ),
     ),
     BuiltInProviderProfile(
       id = "zai",
@@ -215,6 +269,7 @@ object ModelProviderCatalog {
       aliases = setOf("glm", "z-ai", "z.ai", "zhipu"),
       baseUrl = "https://api.z.ai/api/paas/v4",
       defaultAuxModel = "glm-4.5-flash",
+      defaultContext = hermesContext(202_752),
     ),
     BuiltInProviderProfile(
       id = "stepfun",
@@ -234,6 +289,10 @@ object ModelProviderCatalog {
       suggestedModels = listOf("deepseek-ai/DeepSeek-V3.2", "Qwen/Qwen3.5-72B-Instruct"),
       aliases = setOf("hf", "hugging-face", "huggingface-hub"),
       baseUrl = "https://router.huggingface.co/v1",
+      modelContexts = contextMap(
+        "deepseek-ai/DeepSeek-V3.2" to 65_536,
+        "Qwen/Qwen3.5-72B-Instruct" to 131_072,
+      ),
     ),
     BuiltInProviderProfile(
       id = "ollama-cloud",
@@ -244,6 +303,7 @@ object ModelProviderCatalog {
       aliases = setOf("ollama_cloud"),
       baseUrl = "https://ollama.com/v1",
       defaultAuxModel = "nemotron-3-nano:30b",
+      defaultContext = hermesContext(131_072),
     ),
   )
 

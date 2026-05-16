@@ -485,6 +485,7 @@ data class FloveraProviderProfileView(
   val aliases: List<String> = emptyList(),
   val defaultModel: String,
   val suggestedModels: List<String> = emptyList(),
+  val modelContexts: Map<String, FloveraModelContextView> = emptyMap(),
   val baseUrl: String = "",
   val modelsUrl: String = "",
   val authType: String = "api_key",
@@ -494,6 +495,14 @@ data class FloveraProviderProfileView(
   val requestCompatibilityModes: List<String> = listOf("generic"),
   val omittedRequestFields: List<String> = emptyList(),
   val customRequestBody: Boolean = false,
+)
+
+@Serializable
+data class FloveraModelContextView(
+  val contextWindowTokens: Int? = null,
+  val source: String = "unknown",
+  val usageSource: String = "estimate",
+  val compressionThresholdPercent: Int? = null,
 )
 
 @Serializable
