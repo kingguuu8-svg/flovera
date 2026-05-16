@@ -25,6 +25,7 @@ data class AppSettings(
   val activeSessionId: String? = null,
   val selectedHtmlPath: String = "",
   val pinnedHtmlPaths: List<String> = emptyList(),
+  val recentHtmlPaths: List<String> = emptyList(),
   val maxAgentIterations: Int = 20,
   val networkEnabled: Boolean = false,
   val webSearchEnabled: Boolean = false,

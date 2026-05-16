@@ -41,6 +41,7 @@ class WorkspaceController(context: Context, workspaceId: String) {
         activeSessionId = settings.activeSessionId,
         selectedHtmlPath = settings.selectedHtmlPath,
         pinnedHtmlPaths = settings.pinnedHtmlPaths,
+        recentHtmlPaths = settings.recentHtmlPaths,
         maxAgentIterations = settings.maxAgentIterations,
         networkEnabled = settings.networkEnabled,
         webSearchEnabled = settings.webSearchEnabled,

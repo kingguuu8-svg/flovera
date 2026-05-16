@@ -1470,9 +1470,11 @@ private fun HtmlFilesDialog(
   language: String,
   onDismiss: () -> Unit,
 ) {
-  val sortedHtmlFiles = remember(state.htmlFiles, state.settings.pinnedHtmlPaths) {
+  val sortedHtmlFiles = remember(state.htmlFiles, state.settings.pinnedHtmlPaths, state.settings.recentHtmlPaths) {
+    val recentRank = state.settings.recentHtmlPaths.withIndex().associate { it.value to it.index }
     state.htmlFiles.sortedWith(
       compareByDescending<String> { it in state.settings.pinnedHtmlPaths }
+        .thenBy { recentRank[it] ?: Int.MAX_VALUE }
         .thenBy { it.lowercase() },
     )
   }

@@ -174,6 +174,26 @@ class ProviderConfigInstrumentedTest {
   }
 
   @Test
+  fun settingsControllerTracksRecentHtmlSelections() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val store = SettingsStore(context)
+    val original = store.load()
+    try {
+      val controller = SettingsController(store)
+
+      val first = controller.setSelectedHtml(AppSettings(), "index.html")
+      val second = controller.setSelectedHtml(first, "nested/page.html")
+      val repeated = controller.setSelectedHtml(second, "index.html")
+
+      assertEquals("index.html", repeated.selectedHtmlPath)
+      assertEquals(listOf("index.html", "nested/page.html"), repeated.recentHtmlPaths)
+      assertEquals(repeated.recentHtmlPaths, store.load().recentHtmlPaths)
+    } finally {
+      store.save(original)
+    }
+  }
+
+  @Test
   fun settingsControllerPersistsWebSearchSettings() {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val store = SettingsStore(context)

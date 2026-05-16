@@ -3,6 +3,8 @@ package com.flovera.app.config
 import com.flovera.app.koog.ModelProviderCatalog
 import kotlinx.serialization.Serializable
 
+private const val RECENT_HTML_LIMIT = 12
+
 data class ModelSettingsDraft(
   val providerId: String,
   val model: String,
@@ -20,7 +22,13 @@ class SettingsController(private val store: SettingsStore) {
     val result = store.loadResult()
     val loaded = result.settings
     val normalized = normalizeDeepSeekThinkingEffort(
-      normalizeAuthorityMode(normalizeAppearance(normalizeLanguage(normalizeProviderAndModel(loaded)))),
+      normalizeAuthorityMode(
+        normalizeAppearance(
+          normalizeLanguage(
+            normalizeProviderAndModel(normalizeHtmlLists(loaded)),
+          ),
+        ),
+      ),
     )
     if (normalized != loaded) store.save(normalized)
     return result.copy(settings = normalized)
@@ -146,14 +154,18 @@ class SettingsController(private val store: SettingsStore) {
   }
 
   fun setSelectedHtml(settings: AppSettings, path: String): AppSettings {
-    val updated = settings.copy(selectedHtmlPath = path)
+    val normalized = path.trim()
+    val updated = settings.copy(
+      selectedHtmlPath = normalized,
+      recentHtmlPaths = promoteRecentHtmlPath(settings.recentHtmlPaths, normalized),
+    )
     store.save(updated)
     return updated
   }
 
   fun setPinnedHtmlPath(settings: AppSettings, path: String, pinned: Boolean): AppSettings {
     val normalized = path.trim()
-    val current = settings.pinnedHtmlPaths.filter { it.isNotBlank() && it != normalized }
+    val current = normalizeHtmlPathList(settings.pinnedHtmlPaths).filterNot { it == normalized }
     val updatedPins = if (pinned && normalized.isNotBlank()) {
       listOf(normalized) + current
     } else {
@@ -165,7 +177,10 @@ class SettingsController(private val store: SettingsStore) {
   }
 
   fun normalizeSelectedHtml(settings: AppSettings, selectedHtmlPath: String): AppSettings {
-    val updated = settings.copy(selectedHtmlPath = selectedHtmlPath)
+    val updated = settings.copy(
+      selectedHtmlPath = selectedHtmlPath,
+      recentHtmlPaths = normalizeHtmlPathList(settings.recentHtmlPaths).take(RECENT_HTML_LIMIT),
+    )
     if (updated != settings) store.save(updated)
     return updated
   }
@@ -184,6 +199,13 @@ class SettingsController(private val store: SettingsStore) {
     return settings.copy(
       themeMode = normalizeThemeMode(settings.themeMode),
       themeColor = normalizeThemeColor(settings.themeColor),
+    )
+  }
+
+  private fun normalizeHtmlLists(settings: AppSettings): AppSettings {
+    return settings.copy(
+      pinnedHtmlPaths = normalizeHtmlPathList(settings.pinnedHtmlPaths),
+      recentHtmlPaths = normalizeHtmlPathList(settings.recentHtmlPaths).take(RECENT_HTML_LIMIT),
     )
   }
 
@@ -259,6 +281,18 @@ class SettingsController(private val store: SettingsStore) {
     if (trimmed.isBlank()) return CustomOpenAIProviderSettings().chatCompletionsPath
     val withSlash = if (trimmed.startsWith("/")) trimmed else "/$trimmed"
     return if (withSlash.contains(Regex("\\s"))) CustomOpenAIProviderSettings().chatCompletionsPath else withSlash
+  }
+
+  private fun normalizeHtmlPathList(paths: List<String>): List<String> {
+    return paths.map { it.trim() }
+      .filter { it.isNotBlank() }
+      .distinct()
+  }
+
+  private fun promoteRecentHtmlPath(current: List<String>, path: String): List<String> {
+    if (path.isBlank()) return normalizeHtmlPathList(current).take(RECENT_HTML_LIMIT)
+    return (listOf(path) + normalizeHtmlPathList(current).filterNot { it == path })
+      .take(RECENT_HTML_LIMIT)
   }
 }
 

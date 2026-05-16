@@ -185,6 +185,7 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(settingsView.contains("\"compressionThresholdPercent\""))
     assertTrue(settingsView.contains("\"customOpenAIBaseUrl\""))
     assertTrue(settingsView.contains("\"customOpenAIChatCompletionsPath\""))
+    assertTrue(settingsView.contains("\"recentHtmlPaths\""))
     assertEquals(1, proposals.size)
     assertEquals("Use softer theme", proposals.first().title)
     assertEquals("#C989B8", proposals.first().changes.themeColor)
