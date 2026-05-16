@@ -20,6 +20,7 @@ object AgentPromptBuilder {
       Flovera app metadata is exposed under .flovera/.
       - Read .flovera/settings-view.json only when the user's request depends on current non-secret app settings.
       - Read .flovera/capabilities.json only when the user's request depends on available app capabilities.
+      - Provider settings are profile based. You may propose provider/model/custom OpenAI-compatible endpoint changes, but do not invent unsupported API modes or claim a custom request body is supported.
       - Do not inspect .flovera by default for ordinary file edits or simple questions.
       - Do not edit app behavior directly. If you need an app setting changed, write a JSON proposal under .flovera/proposals/.
       - Proposal schema: {"type":"settings","title":"Short title","reason":"Why this helps","changes":{"themeColor":"#76C4D8","networkEnabled":true,"selectedHtmlPath":"index.html","maxAgentIterations":30,"deepSeekThinkingEffort":"high","customOpenAIBaseUrl":"https://example.com","customOpenAIChatCompletionsPath":"/v1/chat/completions","modelContextWindowTokens":1000000,"modelCompressionThresholdPercent":82}}

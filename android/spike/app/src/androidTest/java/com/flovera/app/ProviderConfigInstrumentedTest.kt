@@ -34,7 +34,17 @@ class ProviderConfigInstrumentedTest {
       assertTrue(provider.id.isNotBlank())
       assertTrue(provider.defaultModel.isNotBlank())
       assertTrue(provider.suggestedModels.contains(provider.defaultModel))
+      assertTrue(provider.apiMode.id.isNotBlank())
     }
+    assertTrue(ModelProviderCatalog.supportedApiModes.contains("chat_completions"))
+    assertTrue(ModelProviderCatalog.supportedApiModes.contains("anthropic_messages"))
+  }
+
+  @Test
+  fun providerCatalogNormalizesAliasesToCanonicalProfiles() {
+    assertEquals("anthropic", ModelProviderCatalog.findProvider("claude")?.id)
+    assertEquals("custom-openai", ModelProviderCatalog.findProvider("ollama")?.id)
+    assertEquals("openrouter", ModelProviderCatalog.findProvider("router")?.id)
   }
 
   @Test
@@ -50,8 +60,18 @@ class ProviderConfigInstrumentedTest {
     ).withApiKey("custom-openai", "custom-key")
 
     assertEquals("Custom OpenAI-compatible", provider.label)
+    assertEquals("chat_completions", provider.apiMode.id)
     assertEquals("my-model", provider.createModel(settings.model).id)
     assertEquals("custom-key", settings.apiKeyFor("custom-openai"))
+  }
+
+  @Test
+  fun anthropicProviderDeclaresNativeApiMode() {
+    val provider = ModelProviderCatalog.requireProvider("anthropic")
+
+    assertEquals("anthropic_messages", provider.apiMode.id)
+    assertTrue(provider.aliases.contains("claude-code"))
+    assertEquals("https://api.anthropic.com", provider.baseUrl)
   }
 
   @Test
@@ -314,6 +334,14 @@ class ProviderConfigInstrumentedTest {
       assertEquals("custom-key", customSaved.apiKeyFor("custom-openai"))
       assertEquals("https://llm.example.com/v1", customSaved.customOpenAIProvider.baseUrl)
       assertEquals("/chat/completions", customSaved.customOpenAIProvider.chatCompletionsPath)
+
+      val aliasSaved = controller.saveModelSettings(
+        customSaved,
+        ModelSettingsDraft(providerId = "claude", model = "", apiKey = " anthropic-key "),
+      )
+      assertEquals("anthropic", aliasSaved.provider)
+      assertEquals(ModelProviderCatalog.requireProvider("anthropic").defaultModel, aliasSaved.model)
+      assertEquals("anthropic-key", aliasSaved.apiKeyFor("anthropic"))
     } finally {
       store.save(original)
     }

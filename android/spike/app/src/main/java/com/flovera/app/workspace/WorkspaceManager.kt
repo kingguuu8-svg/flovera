@@ -442,6 +442,7 @@ data class FloveraWorkspaceManifest(
 @Serializable
 data class FloveraSettingsView(
   val provider: String = "",
+  val providerApiMode: String = "",
   val model: String = "",
   val activeWorkspaceId: String = "",
   val activeSessionId: String? = null,
@@ -484,6 +485,8 @@ data class FloveraCapabilities(
   val deepSeekThinkingEffort: Boolean = true,
   val customOpenAICompatibleProvider: Boolean = true,
   val customUrlRouting: Boolean = true,
+  val providerProfiles: Boolean = true,
+  val providerApiModes: List<String> = listOf("chat_completions", "anthropic_messages"),
   val customRequestBody: Boolean = false,
   val directSettingsWrite: Boolean = false,
   val directToolInstall: Boolean = false,

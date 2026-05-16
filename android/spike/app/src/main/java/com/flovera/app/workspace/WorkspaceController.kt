@@ -32,10 +32,12 @@ class WorkspaceController(context: Context, workspaceId: String) {
   fun writeAgentRules(content: String): String = workspace.writeFile("AGENT.md", content)
 
   fun syncFloveraSettings(settings: AppSettings) {
+    val provider = ModelProviderCatalog.findProvider(settings.provider) ?: ModelProviderCatalog.defaultProvider
     val modelContext = ModelProviderCatalog.contextFor(settings)
     workspace.ensureFloveraMetadata(
       FloveraSettingsView(
-        provider = settings.provider,
+        provider = provider.id,
+        providerApiMode = provider.apiMode.id,
         model = settings.model,
         activeWorkspaceId = settings.activeWorkspaceId,
         activeSessionId = settings.activeSessionId,
@@ -56,7 +58,7 @@ class WorkspaceController(context: Context, workspaceId: String) {
         modelContextSource = modelContext.source,
         tokenUsageSource = modelContext.usageSource,
         compressionThresholdPercent = modelContext.compressionThresholdPercent,
-        apiKeyRef = if (settings.apiKeyFor(settings.provider).isBlank()) "" else "${settings.provider}.default",
+        apiKeyRef = if (settings.apiKeyFor(provider.id).isBlank()) "" else "${provider.id}.default",
         braveSearchApiKeyRef = if (settings.braveSearchApiKey.isBlank()) "" else "brave.default",
       ),
     )

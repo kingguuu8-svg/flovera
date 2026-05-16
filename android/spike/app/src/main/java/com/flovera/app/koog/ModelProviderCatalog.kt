@@ -19,6 +19,15 @@ data class ModelProviderSpec(
   val suggestedModels: List<String>,
   val llmProvider: LLMProvider,
   val createClient: (String) -> LLMClient,
+  val apiMode: ProviderApiMode = ProviderApiMode.ChatCompletions,
+  val aliases: Set<String> = emptySet(),
+  val baseUrl: String = "",
+  val modelsUrl: String = "",
+  val authType: ProviderAuthType = ProviderAuthType.ApiKey,
+  val supportsHealthCheck: Boolean = true,
+  val defaultHeaders: Map<String, String> = emptyMap(),
+  val defaultMaxTokens: Int? = null,
+  val defaultAuxModel: String = "",
   val modelContexts: Map<String, ModelContextSpec> = emptyMap(),
   val defaultContext: ModelContextSpec = ModelContextSpec(),
 ) {
@@ -39,6 +48,16 @@ data class ModelProviderSpec(
   }
 }
 
+enum class ProviderApiMode(val id: String) {
+  ChatCompletions("chat_completions"),
+  AnthropicMessages("anthropic_messages"),
+}
+
+enum class ProviderAuthType(val id: String) {
+  ApiKey("api_key"),
+  OAuthExternal("oauth_external"),
+}
+
 data class ModelContextSpec(
   val contextWindowTokens: Int? = null,
   val source: String = "unknown",
@@ -56,6 +75,8 @@ object ModelProviderCatalog {
       suggestedModels = listOf("deepseek-v4-pro", "deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner"),
       llmProvider = LLMProvider.DeepSeek,
       createClient = ::FloveraDeepSeekLLMClient,
+      baseUrl = "https://api.deepseek.com",
+      defaultMaxTokens = 32_000,
       modelContexts = listOf(
         "deepseek-v4-pro",
         "deepseek-v4-flash",
@@ -78,6 +99,9 @@ object ModelProviderCatalog {
       suggestedModels = listOf("gpt-4.1", "gpt-4.1-mini", "gpt-4o-mini"),
       llmProvider = LLMProvider.OpenAI,
       createClient = ::OpenAILLMClient,
+      aliases = setOf("gpt", "openai-compatible"),
+      baseUrl = "https://api.openai.com/v1",
+      modelsUrl = "https://api.openai.com/v1/models",
     ),
     ModelProviderSpec(
       id = "custom-openai",
@@ -87,6 +111,8 @@ object ModelProviderCatalog {
       suggestedModels = listOf("custom-model", "gpt-oss-120b", "qwen3-coder", "deepseek-chat"),
       llmProvider = LLMProvider.OpenAI,
       createClient = ::OpenAILLMClient,
+      aliases = setOf("custom", "ollama", "local", "vllm", "llamacpp", "openai-compatible-custom"),
+      supportsHealthCheck = false,
     ),
     ModelProviderSpec(
       id = "openrouter",
@@ -96,6 +122,9 @@ object ModelProviderCatalog {
       suggestedModels = listOf("openai/gpt-4.1", "anthropic/claude-sonnet-4.5", "deepseek/deepseek-chat"),
       llmProvider = LLMProvider.OpenRouter,
       createClient = ::OpenRouterLLMClient,
+      aliases = setOf("router"),
+      baseUrl = "https://openrouter.ai/api/v1",
+      modelsUrl = "https://openrouter.ai/api/v1/models",
     ),
     ModelProviderSpec(
       id = "anthropic",
@@ -105,12 +134,26 @@ object ModelProviderCatalog {
       suggestedModels = listOf("claude-sonnet-4-5", "claude-3-5-haiku-latest"),
       llmProvider = LLMProvider.Anthropic,
       createClient = ::AnthropicLLMClient,
+      apiMode = ProviderApiMode.AnthropicMessages,
+      aliases = setOf("claude", "claude-code"),
+      baseUrl = "https://api.anthropic.com",
+      modelsUrl = "https://api.anthropic.com/v1/models",
     ),
   )
 
   val defaultProvider: ModelProviderSpec = providers.first()
 
-  fun findProvider(providerId: String): ModelProviderSpec? = providers.firstOrNull { it.id == providerId }
+  val supportedApiModes: List<String> = providers
+    .map { it.apiMode.id }
+    .distinct()
+
+  fun findProvider(providerId: String): ModelProviderSpec? {
+    val normalized = providerId.trim().lowercase()
+    if (normalized.isBlank()) return null
+    return providers.firstOrNull { provider ->
+      provider.id == normalized || normalized in provider.aliases
+    }
+  }
 
   fun requireProvider(providerId: String): ModelProviderSpec {
     return findProvider(providerId) ?: error("Unsupported model provider: $providerId")
