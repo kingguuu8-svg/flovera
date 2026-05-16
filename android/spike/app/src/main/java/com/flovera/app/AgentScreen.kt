@@ -6,6 +6,8 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.graphics.Bitmap
+import android.graphics.pdf.PdfRenderer
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -232,10 +234,12 @@ private fun WorkspacePreview(state: AgentScreenState) {
   val previewUri = state.selectedPreviewUri
   val htmlUrl = state.selectedHtmlUrl
   val isImagePreview = previewPath.isNotBlank() && mimeType.startsWith("image/")
+  val isPdfPreview = previewPath.isNotBlank() && isPdfPreview(previewPath, mimeType)
   val isTextPreview = previewPath.isNotBlank() &&
     !previewPath.endsWith(".html", ignoreCase = true) &&
     !previewPath.endsWith(".htm", ignoreCase = true) &&
-    !isImagePreview
+    !isImagePreview &&
+    !isPdfPreview
 
   if (isTextPreview) {
     WorkspaceTextPreview(
@@ -248,6 +252,15 @@ private fun WorkspacePreview(state: AgentScreenState) {
 
   if (isImagePreview) {
     WorkspaceImagePreview(
+      path = previewPath,
+      mimeType = mimeType,
+      uri = previewUri,
+    )
+    return
+  }
+
+  if (isPdfPreview) {
+    WorkspacePdfPreview(
       path = previewPath,
       mimeType = mimeType,
       uri = previewUri,
@@ -293,6 +306,62 @@ private fun WorkspaceImagePreview(path: String, mimeType: String, uri: String) {
               imageView.setImageURI(Uri.parse(uri))
             },
           )
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun WorkspacePdfPreview(path: String, mimeType: String, uri: String) {
+  val context = LocalContext.current
+  var pdfError by remember(uri) { mutableStateOf<String?>(null) }
+  Surface(
+    modifier = Modifier.fillMaxSize(),
+    color = MaterialTheme.colorScheme.background,
+  ) {
+    Column(
+      modifier = Modifier.fillMaxSize().padding(18.dp),
+      verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+      Text(path, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleMedium)
+      Text(mimeType.ifBlank { "application/pdf" }, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+      Surface(
+        modifier = Modifier.fillMaxWidth().weight(1f),
+        shape = FloveraSmallShape,
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+      ) {
+        if (uri.isBlank()) {
+          Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("PDF preview unavailable", color = MaterialTheme.colorScheme.onSurfaceVariant)
+          }
+        } else {
+          Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            AndroidView(
+              modifier = Modifier.fillMaxSize().semantics { contentDescription = "PDF preview for $path" },
+              factory = { viewContext ->
+                ImageView(viewContext).apply {
+                  scaleType = ImageView.ScaleType.FIT_CENTER
+                  adjustViewBounds = true
+                  setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                }
+              },
+              update = { imageView ->
+                val bitmap = renderPdfFirstPage(context, uri)
+                if (bitmap == null) {
+                  pdfError = "PDF preview unavailable"
+                  imageView.setImageDrawable(null)
+                } else {
+                  pdfError = null
+                  imageView.setImageBitmap(bitmap)
+                }
+              },
+            )
+            pdfError?.let {
+              Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+          }
         }
       }
     }
@@ -463,6 +532,40 @@ private fun isJsonPreview(path: String, mimeType: String): Boolean {
 
 private fun isCsvPreview(path: String, mimeType: String): Boolean {
   return mimeType == "text/csv" || path.endsWith(".csv", ignoreCase = true)
+}
+
+private fun isPdfPreview(path: String, mimeType: String): Boolean {
+  return mimeType == "application/pdf" || path.endsWith(".pdf", ignoreCase = true)
+}
+
+private fun renderPdfFirstPage(context: Context, uri: String): Bitmap? {
+  return runCatching {
+    val descriptor = context.contentResolver.openFileDescriptor(Uri.parse(uri), "r") ?: return null
+    descriptor.use { parcel ->
+      val renderer = PdfRenderer(parcel)
+      try {
+        if (renderer.pageCount <= 0) return null
+        val page = renderer.openPage(0)
+        try {
+          val width = page.width.coerceAtLeast(1)
+          val height = page.height.coerceAtLeast(1)
+          val scale = (1600f / width).coerceIn(1f, 3f)
+          val bitmap = Bitmap.createBitmap(
+            (width * scale).toInt().coerceAtLeast(1),
+            (height * scale).toInt().coerceAtLeast(1),
+            Bitmap.Config.ARGB_8888,
+          )
+          bitmap.eraseColor(android.graphics.Color.WHITE)
+          page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+          bitmap
+        } finally {
+          page.close()
+        }
+      } finally {
+        renderer.close()
+      }
+    }
+  }.getOrNull()
 }
 
 private fun prettyJsonPreview(content: String): String {

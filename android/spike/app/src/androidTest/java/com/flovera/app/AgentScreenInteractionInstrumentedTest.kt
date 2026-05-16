@@ -2,6 +2,7 @@ package com.flovera.app
 
 import androidx.activity.ComponentActivity
 import android.graphics.Bitmap
+import android.graphics.pdf.PdfDocument
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -489,6 +490,35 @@ class AgentScreenInteractionInstrumentedTest {
   }
 
   @Test
+  fun tappingPdfFileOpensNativePdfPreviewOverPreviousHtml() {
+    val context = composeRule.activity.applicationContext
+    val workspaceId = "pdf-preview-${System.currentTimeMillis()}"
+    SettingsStore(context).save(AppSettings(language = "en", activeWorkspaceId = workspaceId, selectedHtmlPath = "index.html"))
+    val workspace = WorkspaceManager(context, workspaceId).also { it.ensureSeedFiles() }
+    workspace.writeBytes("sample.pdf", testPdfBytes(), createAutoSnapshot = false)
+    val controller = AgentController(context)
+
+    composeRule.setContent {
+      AgentScreen(controller)
+    }
+
+    composeRule.onNodeWithText("Agent").performClick()
+    composeRule.onNodeWithContentDescription("More").performClick()
+    composeRule.onNodeWithText("Files").performClick()
+    composeRule.onNodeWithText("sample.pdf", substring = true).performClick()
+
+    composeRule.onNodeWithText("sample.pdf").assertIsDisplayed()
+    composeRule.onNodeWithContentDescription("PDF preview for sample.pdf").assertIsDisplayed()
+    composeRule.runOnIdle {
+      assertEquals("index.html", controller.state.value.selectedHtmlPath)
+      assertEquals("sample.pdf", controller.state.value.selectedPreviewPath)
+      assertEquals("application/pdf", controller.state.value.selectedPreviewMimeType)
+      assertTrue(controller.state.value.selectedPreviewUri.startsWith("content://"))
+      assertEquals("", controller.state.value.selectedPreviewContent)
+    }
+  }
+
+  @Test
   fun agentRulesCancelKeepsPersistedRules() {
     val context = composeRule.activity.applicationContext
     SettingsStore(context).save(AppSettings(language = "en"))
@@ -515,6 +545,19 @@ class AgentScreenInteractionInstrumentedTest {
     val bitmap = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
     return ByteArrayOutputStream().use { output ->
       bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)
+      output.toByteArray()
+    }
+  }
+
+  private fun testPdfBytes(): ByteArray {
+    val document = PdfDocument()
+    val pageInfo = PdfDocument.PageInfo.Builder(240, 240, 1).create()
+    val page = document.startPage(pageInfo)
+    page.canvas.drawColor(android.graphics.Color.WHITE)
+    document.finishPage(page)
+    return ByteArrayOutputStream().use { output ->
+      document.writeTo(output)
+      document.close()
       output.toByteArray()
     }
   }

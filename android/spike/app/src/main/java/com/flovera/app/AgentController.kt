@@ -253,9 +253,11 @@ class AgentController(
     }
     val mimeType = workspaceController.mimeType(path)
     val isImage = mimeType.startsWith("image/")
+    val isPdf = mimeType == "application/pdf" || path.endsWith(".pdf", ignoreCase = true)
     val canPreviewAsText = canPreviewAsText(path, mimeType)
     val content = when {
       isImage -> ""
+      isPdf -> ""
       canPreviewAsText -> workspaceController.previewTextFile(path)
       else -> "No built-in preview for $mimeType. Use Open with or Share from the file menu."
     }
@@ -264,7 +266,7 @@ class AgentController(
         selectedPreviewPath = path,
         selectedPreviewContent = content,
         selectedPreviewMimeType = mimeType,
-        selectedPreviewUri = if (isImage) workspaceFileUri(path)?.toString().orEmpty() else "",
+        selectedPreviewUri = if (isImage || isPdf) workspaceFileUri(path)?.toString().orEmpty() else "",
         status = "Previewing $path",
       )
     }

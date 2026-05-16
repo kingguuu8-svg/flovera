@@ -172,6 +172,7 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"previewFormats\""))
     assertTrue(capabilities.contains("\"json\""))
     assertTrue(capabilities.contains("\"csv\""))
+    assertTrue(capabilities.contains("\"pdf\""))
     assertTrue(capabilities.contains("\"modelContextOverrides\": true"))
     assertTrue(capabilities.contains("\"directSettingsWrite\": false"))
     assertTrue(capabilities.contains("\"customOpenAICompatibleProvider\": true"))
