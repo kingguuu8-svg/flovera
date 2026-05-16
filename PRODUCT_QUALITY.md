@@ -345,6 +345,23 @@ so future work can be planned without losing the product direction.
   programs inside the workspace using standard library features such as HTTP,
   JSON, SQLite, path handling, compression, and local modules.
 
+### Vector Search Runtime
+
+- This backlog item is gated at the same level as Controlled Python Runtime: do
+  not implement vector search until the user explicitly approves starting that
+  implementation.
+- Treat vector search as a workspace-scoped retrieval capability, not as a
+  general hidden memory layer.
+- The first design must define what can be indexed, where embeddings and indexes
+  are stored, how stale entries are refreshed, and how users can inspect or
+  delete indexed data.
+- Keep model/provider, embedding dimensions, index format, snapshot/restore
+  behavior, and privacy boundaries explicit before exposing retrieval to the
+  agent.
+- Prefer a small, auditable local implementation first. Any remote embedding or
+  hosted vector database path needs separate approval because it changes the
+  privacy and cost model.
+
 ### Rendering Coverage
 
 - Extend workspace rendering beyond HTML and Markdown.
