@@ -52,12 +52,17 @@ fun applyFloveraOpenAIRequestProfileToJson(
   requestProfile: ProviderRequestProfile,
   modelContext: ModelContextSpec,
 ): String {
-  if (!requestProfile.injectOllamaNumCtx) return requestJson
-  val numCtx = modelContext.contextWindowTokens?.takeIf { it > 0 } ?: return requestJson
+  if (!requestProfile.injectOllamaNumCtx && requestProfile.omittedRequestFields.isEmpty()) return requestJson
   val root = profileJson.parseToJsonElement(requestJson).jsonObject.toMutableMap()
-  val options = (root["options"] as? JsonObject)?.toMutableMap() ?: mutableMapOf<String, JsonElement>()
-  options["num_ctx"] = JsonPrimitive(numCtx)
-  root["options"] = JsonObject(options)
+  requestProfile.omittedRequestFields.forEach { field ->
+    root.remove(field)
+  }
+  val numCtx = modelContext.contextWindowTokens?.takeIf { it > 0 }
+  if (requestProfile.injectOllamaNumCtx && numCtx != null) {
+    val options = (root["options"] as? JsonObject)?.toMutableMap() ?: mutableMapOf<String, JsonElement>()
+    options["num_ctx"] = JsonPrimitive(numCtx)
+    root["options"] = JsonObject(options)
+  }
   return profileJson.encodeToString(JsonObject.serializer(), JsonObject(root))
 }
 

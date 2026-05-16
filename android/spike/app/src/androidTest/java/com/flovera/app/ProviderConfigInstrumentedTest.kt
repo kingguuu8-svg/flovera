@@ -33,7 +33,7 @@ class ProviderConfigInstrumentedTest {
 
   @Test
   fun providerCatalogHasDefaultModels() {
-    assertTrue(ModelProviderCatalog.providers.size >= 13)
+    assertTrue(ModelProviderCatalog.providers.size >= 14)
     ModelProviderCatalog.providers.forEach { provider ->
       assertTrue(provider.id.isNotBlank())
       assertTrue(provider.defaultModel.isNotBlank())
@@ -54,6 +54,7 @@ class ProviderConfigInstrumentedTest {
     assertEquals("huggingface", ModelProviderCatalog.findProvider("hf")?.id)
     assertEquals("nvidia", ModelProviderCatalog.findProvider("nvidia-nim")?.id)
     assertEquals("novita", ModelProviderCatalog.findProvider("novitaai")?.id)
+    assertEquals("moonshot", ModelProviderCatalog.findProvider("kimi")?.id)
   }
 
   @Test
@@ -78,6 +79,26 @@ class ProviderConfigInstrumentedTest {
       "https://openrouter.ai/api/v1",
       ModelProviderCatalog.runtimeProfileFor(openRouter, AppSettings()).baseUrl,
     )
+  }
+
+  @Test
+  fun providerRequestProfilesCanOmitUnsupportedFields() {
+    val request = """{"model":"kimi-k2","messages":[],"temperature":0.7,"top_p":0.9}"""
+    val moonshot = ModelProviderCatalog.requireProvider("moonshot")
+    val profile = ModelProviderCatalog.runtimeProfileFor(
+      moonshot,
+      AppSettings(provider = "moonshot", model = "kimi-k2-turbo-preview"),
+    )
+
+    val updated = applyFloveraOpenAIRequestProfileToJson(
+      requestJson = request,
+      requestProfile = profile.requestProfile,
+      modelContext = ModelContextSpec(),
+    )
+
+    assertTrue(profile.requestProfile.omittedRequestFields.contains("temperature"))
+    assertFalse(updated.contains("\"temperature\""))
+    assertTrue(updated.contains("\"top_p\":0.9"))
   }
 
   @Test

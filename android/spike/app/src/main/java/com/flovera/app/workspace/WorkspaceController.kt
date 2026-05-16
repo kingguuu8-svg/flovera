@@ -61,6 +61,7 @@ class WorkspaceController(context: Context, workspaceId: String) {
         customOpenAIChatCompletionsPath = settings.customOpenAIProvider.chatCompletionsPath,
         customOpenAICompatibilityMode = settings.customOpenAIProvider.compatibilityMode,
         providerInjectsOllamaNumCtx = providerProfile.requestProfile.injectOllamaNumCtx,
+        providerRequestOmittedFields = providerProfile.requestProfile.omittedRequestFields.sorted(),
         modelContextWindowTokens = modelContext.contextWindowTokens,
         modelContextSource = modelContext.source,
         tokenUsageSource = modelContext.usageSource,
@@ -88,6 +89,7 @@ class WorkspaceController(context: Context, workspaceId: String) {
           } else {
             listOf(profile.requestProfile.compatibilityMode)
           },
+          omittedRequestFields = profile.requestProfile.omittedRequestFields.sorted(),
           customRequestBody = false,
         )
       },

@@ -72,6 +72,7 @@ data class ProviderRuntimeProfile(
 data class ProviderRequestProfile(
   val compatibilityMode: String = "generic",
   val injectOllamaNumCtx: Boolean = false,
+  val omittedRequestFields: Set<String> = emptySet(),
 )
 
 enum class ProviderApiMode(val id: String) {
@@ -103,6 +104,7 @@ private data class BuiltInProviderProfile(
   val defaultMaxTokens: Int? = null,
   val defaultAuxModel: String = "",
   val supportsHealthCheck: Boolean = true,
+  val requestProfile: ProviderRequestProfile = ProviderRequestProfile(),
 ) {
   fun toSpec(): ModelProviderSpec {
     return ModelProviderSpec(
@@ -119,6 +121,7 @@ private data class BuiltInProviderProfile(
       defaultMaxTokens = defaultMaxTokens,
       defaultAuxModel = defaultAuxModel,
       supportsHealthCheck = supportsHealthCheck,
+      requestProfile = requestProfile,
     )
   }
 }
@@ -143,6 +146,18 @@ object ModelProviderCatalog {
       suggestedModels = listOf("qwen3-coder-plus", "qwen-plus", "qwen-max", "qwen-turbo"),
       aliases = setOf("dashscope", "alibaba-cloud", "qwen-dashscope"),
       baseUrl = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+    ),
+    BuiltInProviderProfile(
+      id = "moonshot",
+      label = "Moonshot (Kimi OpenAI-compatible)",
+      apiKeyLabel = "Moonshot API key",
+      defaultModel = "kimi-k2-turbo-preview",
+      suggestedModels = listOf("kimi-k2-turbo-preview", "kimi-k2.6", "kimi-k2.5", "kimi-k2-thinking"),
+      aliases = setOf("kimi", "moonshot-ai", "kimi-openai"),
+      baseUrl = "https://api.moonshot.ai/v1",
+      defaultMaxTokens = 32_000,
+      defaultAuxModel = "kimi-k2-turbo-preview",
+      requestProfile = ProviderRequestProfile(omittedRequestFields = setOf("temperature")),
     ),
     BuiltInProviderProfile(
       id = "gmi",
