@@ -1,5 +1,6 @@
 package com.flovera.app
 
+import ai.koog.prompt.llm.LLMProvider
 import androidx.test.platform.app.InstrumentationRegistry
 import com.flovera.app.config.AppSettings
 import com.flovera.app.config.CustomOpenAIProviderSettings
@@ -32,7 +33,7 @@ class ProviderConfigInstrumentedTest {
 
   @Test
   fun providerCatalogHasDefaultModels() {
-    assertTrue(ModelProviderCatalog.providers.size >= 2)
+    assertTrue(ModelProviderCatalog.providers.size >= 13)
     ModelProviderCatalog.providers.forEach { provider ->
       assertTrue(provider.id.isNotBlank())
       assertTrue(provider.defaultModel.isNotBlank())
@@ -48,6 +49,35 @@ class ProviderConfigInstrumentedTest {
     assertEquals("anthropic", ModelProviderCatalog.findProvider("claude")?.id)
     assertEquals("custom-openai", ModelProviderCatalog.findProvider("ollama")?.id)
     assertEquals("openrouter", ModelProviderCatalog.findProvider("router")?.id)
+    assertEquals("alibaba", ModelProviderCatalog.findProvider("dashscope")?.id)
+    assertEquals("zai", ModelProviderCatalog.findProvider("zhipu")?.id)
+    assertEquals("huggingface", ModelProviderCatalog.findProvider("hf")?.id)
+    assertEquals("nvidia", ModelProviderCatalog.findProvider("nvidia-nim")?.id)
+    assertEquals("novita", ModelProviderCatalog.findProvider("novitaai")?.id)
+  }
+
+  @Test
+  fun openAICompatibleProviderProfilesResolveFromCatalogData() {
+    val alibaba = ModelProviderCatalog.requireProvider("dashscope")
+    val profile = ModelProviderCatalog.runtimeProfileFor(
+      alibaba,
+      AppSettings(provider = "alibaba", model = "qwen3-coder-plus"),
+    )
+    val openRouter = ModelProviderCatalog.requireProvider("openrouter")
+
+    assertEquals("alibaba", alibaba.id)
+    assertEquals(LLMProvider.OpenAI, alibaba.llmProvider)
+    assertEquals("chat_completions", profile.apiMode.id)
+    assertEquals("https://dashscope-intl.aliyuncs.com/compatible-mode/v1", profile.baseUrl)
+    assertEquals("https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models", profile.modelsUrl)
+    assertEquals("/v1/chat/completions", profile.chatCompletionsPath)
+    assertEquals("generic", profile.requestProfile.compatibilityMode)
+    assertFalse(profile.requestProfile.injectOllamaNumCtx)
+    assertEquals(LLMProvider.OpenRouter, openRouter.llmProvider)
+    assertEquals(
+      "https://openrouter.ai/api/v1",
+      ModelProviderCatalog.runtimeProfileFor(openRouter, AppSettings()).baseUrl,
+    )
   }
 
   @Test

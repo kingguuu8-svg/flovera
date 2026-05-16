@@ -91,7 +91,147 @@ data class ModelContextSpec(
   val compressionThresholdPercent: Int? = null,
 )
 
+private data class BuiltInProviderProfile(
+  val id: String,
+  val label: String,
+  val apiKeyLabel: String,
+  val defaultModel: String,
+  val suggestedModels: List<String>,
+  val aliases: Set<String> = emptySet(),
+  val baseUrl: String,
+  val modelsUrl: String = "",
+  val defaultMaxTokens: Int? = null,
+  val defaultAuxModel: String = "",
+  val supportsHealthCheck: Boolean = true,
+) {
+  fun toSpec(): ModelProviderSpec {
+    return ModelProviderSpec(
+      id = id,
+      label = label,
+      apiKeyLabel = apiKeyLabel,
+      defaultModel = defaultModel,
+      suggestedModels = suggestedModels,
+      llmProvider = LLMProvider.OpenAI,
+      createClient = { apiKey -> FloveraOpenAICompatibleLLMClient(apiKey) },
+      aliases = aliases,
+      baseUrl = baseUrl,
+      modelsUrl = modelsUrl,
+      defaultMaxTokens = defaultMaxTokens,
+      defaultAuxModel = defaultAuxModel,
+      supportsHealthCheck = supportsHealthCheck,
+    )
+  }
+}
+
 object ModelProviderCatalog {
+  private val openAICompatibleProviderProfiles = listOf(
+    BuiltInProviderProfile(
+      id = "openai",
+      label = "OpenAI",
+      apiKeyLabel = "OpenAI API key",
+      defaultModel = "gpt-4.1",
+      suggestedModels = listOf("gpt-4.1", "gpt-4.1-mini", "gpt-4o-mini"),
+      aliases = setOf("gpt", "openai-compatible"),
+      baseUrl = "https://api.openai.com/v1",
+      modelsUrl = "https://api.openai.com/v1/models",
+    ),
+    BuiltInProviderProfile(
+      id = "alibaba",
+      label = "Alibaba DashScope",
+      apiKeyLabel = "DashScope API key",
+      defaultModel = "qwen3-coder-plus",
+      suggestedModels = listOf("qwen3-coder-plus", "qwen-plus", "qwen-max", "qwen-turbo"),
+      aliases = setOf("dashscope", "alibaba-cloud", "qwen-dashscope"),
+      baseUrl = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+    ),
+    BuiltInProviderProfile(
+      id = "gmi",
+      label = "GMI Cloud",
+      apiKeyLabel = "GMI API key",
+      defaultModel = "deepseek-ai/DeepSeek-V3.2",
+      suggestedModels = listOf(
+        "deepseek-ai/DeepSeek-V3.2",
+        "zai-org/GLM-5.1-FP8",
+        "moonshotai/Kimi-K2.5",
+        "google/gemini-3.1-flash-lite-preview",
+        "anthropic/claude-sonnet-4.6",
+        "openai/gpt-5.4",
+      ),
+      aliases = setOf("gmi-cloud", "gmicloud"),
+      baseUrl = "https://api.gmi-serving.com/v1",
+      defaultAuxModel = "google/gemini-3.1-flash-lite-preview",
+    ),
+    BuiltInProviderProfile(
+      id = "nvidia",
+      label = "NVIDIA NIM",
+      apiKeyLabel = "NVIDIA API key",
+      defaultModel = "nvidia/llama-3.3-70b-instruct",
+      suggestedModels = listOf(
+        "nvidia/llama-3.3-70b-instruct",
+        "nvidia/llama-3.1-nemotron-70b-instruct",
+      ),
+      aliases = setOf("nvidia-nim"),
+      baseUrl = "https://integrate.api.nvidia.com/v1",
+      defaultMaxTokens = 16_384,
+    ),
+    BuiltInProviderProfile(
+      id = "novita",
+      label = "NovitaAI",
+      apiKeyLabel = "Novita API key",
+      defaultModel = "deepseek/deepseek-v3-0324",
+      suggestedModels = listOf(
+        "deepseek/deepseek-v3-0324",
+        "moonshotai/kimi-k2.5",
+        "minimax/minimax-m2.7",
+        "zai-org/glm-5",
+        "deepseek/deepseek-r1-0528",
+        "qwen/qwen3-235b-a22b-fp8",
+      ),
+      aliases = setOf("novita-ai", "novitaai"),
+      baseUrl = "https://api.novita.ai/openai/v1",
+      defaultAuxModel = "deepseek/deepseek-v3-0324",
+    ),
+    BuiltInProviderProfile(
+      id = "zai",
+      label = "Z.AI (GLM)",
+      apiKeyLabel = "Z.AI API key",
+      defaultModel = "glm-5",
+      suggestedModels = listOf("glm-5", "glm-4-9b", "glm-4.5-flash"),
+      aliases = setOf("glm", "z-ai", "z.ai", "zhipu"),
+      baseUrl = "https://api.z.ai/api/paas/v4",
+      defaultAuxModel = "glm-4.5-flash",
+    ),
+    BuiltInProviderProfile(
+      id = "stepfun",
+      label = "StepFun",
+      apiKeyLabel = "StepFun API key",
+      defaultModel = "step-3.5-flash",
+      suggestedModels = listOf("step-3.5-flash"),
+      aliases = setOf("step", "stepfun-coding-plan"),
+      baseUrl = "https://api.stepfun.ai/step_plan/v1",
+      defaultAuxModel = "step-3.5-flash",
+    ),
+    BuiltInProviderProfile(
+      id = "huggingface",
+      label = "HuggingFace",
+      apiKeyLabel = "HuggingFace token",
+      defaultModel = "deepseek-ai/DeepSeek-V3.2",
+      suggestedModels = listOf("deepseek-ai/DeepSeek-V3.2", "Qwen/Qwen3.5-72B-Instruct"),
+      aliases = setOf("hf", "hugging-face", "huggingface-hub"),
+      baseUrl = "https://router.huggingface.co/v1",
+    ),
+    BuiltInProviderProfile(
+      id = "ollama-cloud",
+      label = "Ollama Cloud",
+      apiKeyLabel = "Ollama API key",
+      defaultModel = "nemotron-3-nano:30b",
+      suggestedModels = listOf("nemotron-3-nano:30b"),
+      aliases = setOf("ollama_cloud"),
+      baseUrl = "https://ollama.com/v1",
+      defaultAuxModel = "nemotron-3-nano:30b",
+    ),
+  )
+
   val providers = listOf(
     ModelProviderSpec(
       id = "deepseek",
@@ -117,18 +257,7 @@ object ModelProviderCatalog {
         )
       },
     ),
-    ModelProviderSpec(
-      id = "openai",
-      label = "OpenAI",
-      apiKeyLabel = "OpenAI API key",
-      defaultModel = "gpt-4.1",
-      suggestedModels = listOf("gpt-4.1", "gpt-4.1-mini", "gpt-4o-mini"),
-      llmProvider = LLMProvider.OpenAI,
-      createClient = { apiKey -> FloveraOpenAICompatibleLLMClient(apiKey) },
-      aliases = setOf("gpt", "openai-compatible"),
-      baseUrl = "https://api.openai.com/v1",
-      modelsUrl = "https://api.openai.com/v1/models",
-    ),
+  ) + openAICompatibleProviderProfiles.map { it.toSpec() } + listOf(
     ModelProviderSpec(
       id = "custom-openai",
       label = "Custom OpenAI-compatible",
@@ -229,17 +358,32 @@ object ModelProviderCatalog {
         apiKey = apiKey,
         requestSettings = FloveraDeepSeekRequestSettings.from(settings),
       )
-      "custom-openai" -> FloveraOpenAICompatibleLLMClient(
-        apiKey = apiKey,
-        settings = OpenAIClientSettings(
-          baseUrl = runtimeProfile.requireBaseUrl(),
-          chatCompletionsPath = runtimeProfile.chatCompletionsPath,
-        ),
-        requestProfile = runtimeProfile.requestProfile,
-        modelContext = contextFor(settings),
-      )
-      else -> provider.createClient(apiKey)
+      "custom-openai" -> createOpenAICompatibleClient(runtimeProfile, apiKey, contextFor(settings))
+      else -> when (provider.apiMode) {
+        ProviderApiMode.ChatCompletions -> if (provider.llmProvider == LLMProvider.OpenAI) {
+          createOpenAICompatibleClient(runtimeProfile, apiKey, contextFor(settings))
+        } else {
+          provider.createClient(apiKey)
+        }
+        ProviderApiMode.AnthropicMessages -> provider.createClient(apiKey)
+      }
     }
+  }
+
+  private fun createOpenAICompatibleClient(
+    runtimeProfile: ProviderRuntimeProfile,
+    apiKey: String,
+    modelContext: ModelContextSpec,
+  ): LLMClient {
+    return FloveraOpenAICompatibleLLMClient(
+      apiKey = apiKey,
+      settings = OpenAIClientSettings(
+        baseUrl = runtimeProfile.requireBaseUrl(),
+        chatCompletionsPath = runtimeProfile.chatCompletionsPath,
+      ),
+      requestProfile = runtimeProfile.requestProfile,
+      modelContext = modelContext,
+    )
   }
 
   fun contextFor(settings: AppSettings): ModelContextSpec {
