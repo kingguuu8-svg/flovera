@@ -108,7 +108,10 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     ensureFloveraMetadata()
   }
 
-  fun ensureFloveraMetadata(settingsView: FloveraSettingsView = FloveraSettingsView()) {
+  fun ensureFloveraMetadata(
+    settingsView: FloveraSettingsView = FloveraSettingsView(),
+    providerProfileCatalog: List<FloveraProviderProfileView> = emptyList(),
+  ) {
     writeFile(
       path = ".flovera/manifest.json",
       content = json.encodeToString(
@@ -130,7 +133,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     )
     writeFile(
       path = ".flovera/capabilities.json",
-      content = json.encodeToString(FloveraCapabilities.fromSettings(settingsView)),
+      content = json.encodeToString(FloveraCapabilities.fromSettings(settingsView, providerProfileCatalog)),
       overwrite = true,
       createAutoSnapshot = false,
     )
@@ -474,6 +477,24 @@ data class FloveraSettingsView(
 )
 
 @Serializable
+data class FloveraProviderProfileView(
+  val id: String,
+  val label: String,
+  val apiMode: String,
+  val aliases: List<String> = emptyList(),
+  val defaultModel: String,
+  val suggestedModels: List<String> = emptyList(),
+  val baseUrl: String = "",
+  val modelsUrl: String = "",
+  val authType: String = "api_key",
+  val supportsHealthCheck: Boolean = true,
+  val defaultMaxTokens: Int? = null,
+  val defaultAuxModel: String = "",
+  val requestCompatibilityModes: List<String> = listOf("generic"),
+  val customRequestBody: Boolean = false,
+)
+
+@Serializable
 data class FloveraCapabilities(
   val workspaceFiles: Boolean = true,
   val webPreview: Boolean = true,
@@ -493,6 +514,7 @@ data class FloveraCapabilities(
   val customUrlRouting: Boolean = true,
   val providerProfiles: Boolean = true,
   val providerApiModes: List<String> = listOf("chat_completions", "anthropic_messages"),
+  val providerProfileCatalog: List<FloveraProviderProfileView> = emptyList(),
   val providerRequestHooks: Boolean = true,
   val customRequestBody: Boolean = false,
   val directSettingsWrite: Boolean = false,
@@ -505,10 +527,14 @@ data class FloveraCapabilities(
   val pendingAuthorityModes: List<String> = listOf("full"),
 ) {
   companion object {
-    fun fromSettings(settingsView: FloveraSettingsView): FloveraCapabilities {
+    fun fromSettings(
+      settingsView: FloveraSettingsView,
+      providerProfileCatalog: List<FloveraProviderProfileView> = emptyList(),
+    ): FloveraCapabilities {
       return FloveraCapabilities(
         networkTools = settingsView.networkEnabled,
         webSearch = settingsView.webSearchEnabled,
+        providerProfileCatalog = providerProfileCatalog,
         authorityMode = settingsView.authorityMode,
       )
     }

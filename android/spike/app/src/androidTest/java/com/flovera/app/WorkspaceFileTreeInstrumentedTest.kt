@@ -3,6 +3,7 @@ package com.flovera.app
 import android.net.Uri
 import androidx.core.content.FileProvider
 import androidx.test.platform.app.InstrumentationRegistry
+import com.flovera.app.config.AppSettings
 import com.flovera.app.workspace.WorkspaceController
 import com.flovera.app.workspace.FloveraSettingsView
 import com.flovera.app.workspace.WorkspaceManager
@@ -126,10 +127,19 @@ class WorkspaceFileTreeInstrumentedTest {
   @Test
   fun workspaceFloveraMetadataExposesCapabilitiesAndSettingsProposals() {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
-    val workspace = WorkspaceManager(context, "metadata-${System.currentTimeMillis()}").also {
+    val workspaceId = "metadata-${System.currentTimeMillis()}"
+    val controller = WorkspaceController(context, workspaceId).also {
       it.ensureSeedFiles()
-      it.ensureFloveraMetadata(FloveraSettingsView(networkEnabled = true, webSearchEnabled = true, authorityMode = "assisted"))
+      it.syncFloveraSettings(
+        AppSettings(
+          activeWorkspaceId = workspaceId,
+          networkEnabled = true,
+          webSearchEnabled = true,
+          agentAuthorityMode = "assisted",
+        ),
+      )
     }
+    val workspace = controller.runtimeWorkspace()
 
     workspace.writeFile(
       ".flovera/proposals/theme.json",
@@ -178,6 +188,12 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"customOpenAICompatibleProvider\": true"))
     assertTrue(capabilities.contains("\"customUrlRouting\": true"))
     assertTrue(capabilities.contains("\"providerProfiles\": true"))
+    assertTrue(capabilities.contains("\"providerProfileCatalog\""))
+    assertTrue(capabilities.contains("\"id\": \"custom-openai\""))
+    assertTrue(capabilities.contains("\"aliases\""))
+    assertTrue(capabilities.contains("\"suggestedModels\""))
+    assertTrue(capabilities.contains("\"requestCompatibilityModes\""))
+    assertTrue(capabilities.contains("\"ollama\""))
     assertTrue(capabilities.contains("\"anthropic_messages\""))
     assertTrue(capabilities.contains("\"providerRequestHooks\": true"))
     assertTrue(capabilities.contains("\"customRequestBody\": false"))

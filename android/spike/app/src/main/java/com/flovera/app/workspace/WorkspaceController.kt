@@ -68,6 +68,29 @@ class WorkspaceController(context: Context, workspaceId: String) {
         apiKeyRef = if (settings.apiKeyFor(provider.id).isBlank()) "" else "${provider.id}.default",
         braveSearchApiKeyRef = if (settings.braveSearchApiKey.isBlank()) "" else "brave.default",
       ),
+      providerProfileCatalog = ModelProviderCatalog.providers.map { provider ->
+        val profile = ModelProviderCatalog.runtimeProfileFor(provider, settings)
+        FloveraProviderProfileView(
+          id = provider.id,
+          label = provider.label,
+          apiMode = profile.apiMode.id,
+          aliases = provider.aliases.sorted(),
+          defaultModel = provider.defaultModel,
+          suggestedModels = provider.suggestedModels,
+          baseUrl = profile.baseUrl,
+          modelsUrl = profile.modelsUrl,
+          authType = profile.authType.id,
+          supportsHealthCheck = profile.supportsHealthCheck,
+          defaultMaxTokens = profile.defaultMaxTokens,
+          defaultAuxModel = profile.defaultAuxModel,
+          requestCompatibilityModes = if (provider.id == "custom-openai") {
+            listOf("generic", "ollama")
+          } else {
+            listOf(profile.requestProfile.compatibilityMode)
+          },
+          customRequestBody = false,
+        )
+      },
     )
   }
 

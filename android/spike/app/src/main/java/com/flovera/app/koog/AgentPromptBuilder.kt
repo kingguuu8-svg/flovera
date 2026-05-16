@@ -19,7 +19,7 @@ object AgentPromptBuilder {
       Always guard these calls with if (window.Flovera) and make the behavior clear in the UI.
       Flovera app metadata is exposed under .flovera/.
       - Read .flovera/settings-view.json only when the user's request depends on current non-secret app settings.
-      - Read .flovera/capabilities.json only when the user's request depends on available app capabilities.
+      - Read .flovera/capabilities.json only when the user's request depends on available app capabilities or supported provider/model profiles.
       - Provider settings are profile based. You may propose provider/model/custom OpenAI-compatible endpoint changes and customOpenAICompatibilityMode = "generic" or "ollama", but do not invent unsupported API modes or claim a custom request body is supported.
       - Do not inspect .flovera by default for ordinary file edits or simple questions.
       - Do not edit app behavior directly. If you need an app setting changed, write a JSON proposal under .flovera/proposals/.
