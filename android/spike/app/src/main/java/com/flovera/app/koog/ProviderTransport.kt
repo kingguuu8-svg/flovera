@@ -4,6 +4,8 @@ import ai.koog.prompt.executor.clients.LLMClient
 import ai.koog.http.client.KoogHttpClient
 import ai.koog.prompt.executor.clients.anthropic.AnthropicLLMClient
 import ai.koog.prompt.executor.clients.anthropic.AnthropicClientSettings
+import ai.koog.prompt.executor.clients.google.GoogleClientSettings
+import ai.koog.prompt.executor.clients.google.GoogleLLMClient
 import ai.koog.prompt.executor.clients.openai.OpenAIClientSettings
 import ai.koog.http.client.ktor.fromKtorClient
 import com.flovera.app.config.AppSettings
@@ -16,6 +18,7 @@ import kotlinx.serialization.json.Json
 enum class ProviderTransport(val id: String) {
   FloveraDeepSeekChatCompletions("flovera_deepseek_chat_completions"),
   FloveraOpenAICompatibleChatCompletions("flovera_openai_compatible_chat_completions"),
+  KoogGoogleGeminiNative("koog_google_gemini_native"),
   FloveraAnthropicMessages("flovera_anthropic_messages"),
   KoogAnthropicMessages("koog_anthropic_messages"),
 }
@@ -59,6 +62,10 @@ object ProviderTransportFactory {
       ProviderTransport.FloveraAnthropicMessages -> createAnthropicMessagesClient(
         runtimeProfile = runtimeProfile,
         apiKey = apiKey,
+      )
+      ProviderTransport.KoogGoogleGeminiNative -> GoogleLLMClient(
+        apiKey = apiKey,
+        settings = GoogleClientSettings(baseUrl = runtimeProfile.requireBaseUrl()),
       )
       ProviderTransport.KoogAnthropicMessages -> AnthropicLLMClient(apiKey)
     }

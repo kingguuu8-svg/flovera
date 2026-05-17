@@ -43,7 +43,7 @@ class ProviderConfigInstrumentedTest {
 
   @Test
   fun providerCatalogHasDefaultModels() {
-    assertTrue(ModelProviderCatalog.providers.size >= 26)
+    assertTrue(ModelProviderCatalog.providers.size >= 27)
     ModelProviderCatalog.providers.forEach { provider ->
       assertTrue(provider.id.isNotBlank())
       assertTrue(provider.defaultModel.isNotBlank())
@@ -81,6 +81,9 @@ class ProviderConfigInstrumentedTest {
     assertEquals("minimax", ModelProviderCatalog.findProvider("minimax-global")?.id)
     assertEquals("minimax-cn", ModelProviderCatalog.findProvider("minimax-china")?.id)
     assertEquals("minimax-cn", ModelProviderCatalog.findProvider("minimax_cn")?.id)
+    assertEquals("gemini", ModelProviderCatalog.findProvider("google")?.id)
+    assertEquals("gemini", ModelProviderCatalog.findProvider("google-gemini")?.id)
+    assertEquals("gemini", ModelProviderCatalog.findProvider("google-ai-studio")?.id)
   }
 
   @Test
@@ -180,6 +183,29 @@ class ProviderConfigInstrumentedTest {
       ProviderTransport.FloveraOpenAICompatibleChatCompletions,
       ModelProviderCatalog.requireProvider("moonshot").transport,
     )
+    assertEquals(
+      ProviderTransport.KoogGoogleGeminiNative,
+      ModelProviderCatalog.requireProvider("gemini").transport,
+    )
+  }
+
+  @Test
+  fun geminiProfileMirrorsHermesNativeProviderMetadata() {
+    val provider = ModelProviderCatalog.requireProvider("gemini")
+    val profile = ModelProviderCatalog.runtimeProfileFor(
+      provider,
+      AppSettings(provider = "gemini", model = "gemini-3-flash-preview"),
+    )
+    val client = ModelProviderCatalog.createClient(provider, apiKey = "gemini-key", settings = AppSettings(provider = "gemini"))
+
+    assertEquals("chat_completions", profile.apiMode.id)
+    assertEquals(ProviderTransport.KoogGoogleGeminiNative, profile.transport)
+    assertEquals(LLMProvider.Google, provider.llmProvider)
+    assertEquals(LLMProvider.Google, client.llmProvider())
+    assertEquals("https://generativelanguage.googleapis.com/v1beta", profile.baseUrl)
+    assertEquals("api_key", profile.authType.id)
+    assertEquals("gemini-3-flash-preview", profile.defaultAuxModel)
+    assertEquals(1_048_576, ModelProviderCatalog.contextFor(AppSettings(provider = "gemini", model = "gemini-3-flash-preview")).contextWindowTokens)
   }
 
   @Test
