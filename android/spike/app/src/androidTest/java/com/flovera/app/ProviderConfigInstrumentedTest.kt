@@ -23,11 +23,13 @@ import com.flovera.app.koog.applyFloveraOpenAIRequestProfileToJson
 import com.flovera.app.koog.buildGoogleCloudCodeAssistRequest
 import com.flovera.app.koog.codexResponsesInclude
 import com.flovera.app.koog.codexResponsesReasoningConfig
+import com.flovera.app.koog.googleCloudCodeAssistErrorMessage
 import com.flovera.app.koog.grokSupportsReasoningEffort
 import com.flovera.app.koog.hookIds
 import com.flovera.app.koog.providerAnthropicRuntimeHeaders
 import com.flovera.app.koog.providerRuntimeHeaders
 import com.flovera.app.koog.providerReasoningConfigFromEffort
+import com.flovera.app.koog.translateGoogleCloudCodeAssistStreamEvent
 import com.flovera.app.koog.translateGoogleCloudCodeAssistResponseToOpenAIJson
 import com.flovera.app.workspace.WorkspaceManager
 import java.io.File
@@ -495,6 +497,96 @@ class ProviderConfigInstrumentedTest {
     assertEquals("reasoning", message["reasoning_content"]!!.jsonPrimitive.content)
     assertEquals("write_file", message["tool_calls"]!!.jsonArray[0].jsonObject["function"]!!.jsonObject["name"]!!.jsonPrimitive.content)
     assertEquals(3, root["usage"]!!.jsonObject["prompt_tokens_details"]!!.jsonObject["cached_tokens"]!!.jsonPrimitive.content.toInt())
+  }
+
+  @Test
+  fun googleCloudCodeAssistStreamTranslationMatchesHermesChunks() {
+    val first = translateGoogleCloudCodeAssistStreamEvent(
+      codeAssistEventJson = """
+        {
+          "response": {
+            "candidates": [
+              {
+                "content": {
+                  "parts": [
+                    {"thought": true, "text": "plan"},
+                    {"text": "hello"},
+                    {"functionCall": {"name": "read_file", "args": {"path": "README.md"}}}
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      """.trimIndent(),
+      toolCallStartIndex = 0,
+    )
+    val second = translateGoogleCloudCodeAssistStreamEvent(
+      codeAssistEventJson = """
+        {
+          "response": {
+            "candidates": [
+              {
+                "finishReason": "STOP",
+                "content": {
+                  "parts": [
+                    {"functionCall": {"name": "write_file", "args": {"path": "README.md"}}}
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      """.trimIndent(),
+      toolCallStartIndex = first.nextToolCallIndex,
+      anyPreviousToolCalls = first.hasToolCalls,
+    )
+
+    assertEquals("plan", first.chunks[0].reasoning)
+    assertEquals("hello", first.chunks[1].content)
+    assertEquals("read_file", first.chunks[2].toolCallName)
+    assertEquals(0, first.chunks[2].toolCallIndex)
+    assertEquals("{\"path\":\"README.md\"}", first.chunks[2].toolCallArguments)
+    assertEquals(1, first.nextToolCallIndex)
+    assertEquals("write_file", second.chunks[0].toolCallName)
+    assertEquals(1, second.chunks[0].toolCallIndex)
+    assertEquals("tool_calls", second.chunks[1].finishReason)
+  }
+
+  @Test
+  fun googleCloudCodeAssistErrorMappingMatchesHermesDiagnostics() {
+    val capacity = googleCloudCodeAssistErrorMessage(
+      status = 429,
+      bodyText = """
+        {
+          "error": {
+            "status": "RESOURCE_EXHAUSTED",
+            "message": "capacity",
+            "details": [
+              {
+                "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+                "reason": "MODEL_CAPACITY_EXHAUSTED",
+                "metadata": {"model": "gemini-3-flash-preview"}
+              },
+              {
+                "@type": "type.googleapis.com/google.rpc.RetryInfo",
+                "retryDelay": "30s"
+              }
+            ]
+          }
+        }
+      """.trimIndent(),
+    )
+    val notFound = googleCloudCodeAssistErrorMessage(
+      status = 404,
+      bodyText = """{"error":{"status":"NOT_FOUND","message":"retired model"}}""",
+    )
+
+    assertTrue(capacity.contains("Gemini capacity exhausted"))
+    assertTrue(capacity.contains("gemini-3-flash-preview"))
+    assertTrue(capacity.contains("30s"))
+    assertTrue(notFound.contains("Code Assist 404"))
+    assertTrue(notFound.contains("retired model"))
   }
 
   @Test

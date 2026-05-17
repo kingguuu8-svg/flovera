@@ -14,10 +14,13 @@ import ai.koog.prompt.llm.LLModel
 import ai.koog.prompt.llm.LLMProvider
 import ai.koog.prompt.params.LLMParams
 import ai.koog.prompt.streaming.StreamFrame
+import ai.koog.prompt.streaming.buildStreamFrameFlow
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.defaultRequest
 import io.ktor.client.request.header
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -94,7 +97,60 @@ open class FloveraGoogleCloudCodeAssistLLMClient(
     model: LLModel,
     tools: List<ToolDescriptor>,
   ): Flow<StreamFrame> {
-    throw UnsupportedOperationException("Google Cloud Code Assist streaming transport is not implemented yet.")
+    lastModelId = model.id
+    val openAiJson = super.serializeProviderChatRequest(
+      messages = convertPromptToMessages(prompt, model),
+      model = model,
+      tools = tools.map { it.toOpenAIChatTool() },
+      toolChoice = prompt.params.toolChoice?.toOpenAIToolChoice(),
+      params = prompt.params,
+      stream = false,
+    )
+    val wrapped = buildGoogleCloudCodeAssistRequest(
+      openAIRequestJson = openAiJson,
+      projectId = ensureProjectId(model.id),
+    )
+    return buildStreamFrameFlow {
+      var toolCallIndex = 0
+      var sawToolCall = false
+      var emittedEnd = false
+      streamGoogleCloudCodeAssistEvents(
+        accessToken = credentials.accessToken,
+        modelId = model.id,
+        wrappedRequestJson = wrapped,
+      ) { eventJson ->
+        val translation = translateGoogleCloudCodeAssistStreamEvent(
+          codeAssistEventJson = eventJson,
+          toolCallStartIndex = toolCallIndex,
+          anyPreviousToolCalls = sawToolCall,
+        )
+        toolCallIndex = translation.nextToolCallIndex
+        if (translation.hasToolCalls) sawToolCall = true
+        translation.chunks.forEach { chunk ->
+          if (chunk.reasoning.isNotBlank()) {
+            emitReasoningDelta(chunk.reasoning)
+          }
+          if (chunk.content.isNotBlank()) {
+            emitTextDelta(chunk.content)
+          }
+          if (chunk.toolCallName.isNotBlank()) {
+            emitToolCallDelta(
+              id = chunk.toolCallId,
+              name = chunk.toolCallName,
+              args = chunk.toolCallArguments,
+              index = chunk.toolCallIndex,
+            )
+          }
+          if (chunk.finishReason != null) {
+            emitEnd(chunk.finishReason)
+            emittedEnd = true
+          }
+        }
+      }
+      if (!emittedEnd) {
+        emitEnd(null)
+      }
+    }.flowOn(Dispatchers.IO)
   }
 
   private fun ensureProjectId(modelId: String): String {
@@ -270,6 +326,77 @@ internal fun translateGoogleCloudCodeAssistResponseToOpenAIJson(
         },
       )
     },
+  )
+}
+
+internal data class GoogleCloudCodeAssistStreamChunk(
+  val content: String = "",
+  val reasoning: String = "",
+  val toolCallId: String = "",
+  val toolCallName: String = "",
+  val toolCallArguments: String = "",
+  val toolCallIndex: Int? = null,
+  val finishReason: String? = null,
+)
+
+internal data class GoogleCloudCodeAssistStreamTranslation(
+  val chunks: List<GoogleCloudCodeAssistStreamChunk>,
+  val nextToolCallIndex: Int,
+  val hasToolCalls: Boolean,
+)
+
+internal fun translateGoogleCloudCodeAssistStreamEvent(
+  codeAssistEventJson: String,
+  toolCallStartIndex: Int = 0,
+  anyPreviousToolCalls: Boolean = false,
+): GoogleCloudCodeAssistStreamTranslation {
+  val event = cloudCodeJson.parseToJsonElement(codeAssistEventJson).jsonObject
+  val inner = event.obj("response") ?: event
+  val candidate = inner.array("candidates")?.firstOrNull()?.objOrNull()
+    ?: return GoogleCloudCodeAssistStreamTranslation(emptyList(), toolCallStartIndex, hasToolCalls = false)
+  val chunks = mutableListOf<GoogleCloudCodeAssistStreamChunk>()
+  var nextToolCallIndex = toolCallStartIndex
+  var hasToolCalls = false
+
+  candidate.obj("content")?.array("parts").orEmpty().forEach { partElement ->
+    val part = partElement.objOrNull() ?: return@forEach
+    when {
+      part.boolean("thought") && part.string("text").isNotBlank() -> {
+        chunks += GoogleCloudCodeAssistStreamChunk(reasoning = part.string("text"))
+      }
+      part.string("text").isNotBlank() -> {
+        chunks += GoogleCloudCodeAssistStreamChunk(content = part.string("text"))
+      }
+      part.obj("functionCall") != null -> {
+        val functionCall = part.obj("functionCall") ?: return@forEach
+        val index = nextToolCallIndex
+        nextToolCallIndex += 1
+        hasToolCalls = true
+        chunks += GoogleCloudCodeAssistStreamChunk(
+          toolCallId = "call_${UUID.randomUUID().toString().replace("-", "").take(12)}",
+          toolCallName = functionCall.string("name"),
+          toolCallArguments = cloudCodeJson.encodeToString(functionCall["args"] ?: buildJsonObject { }),
+          toolCallIndex = index,
+        )
+      }
+    }
+  }
+
+  val finishReason = candidate.string("finishReason")
+  if (finishReason.isNotBlank()) {
+    chunks += GoogleCloudCodeAssistStreamChunk(
+      finishReason = if (hasToolCalls || anyPreviousToolCalls) {
+        "tool_calls"
+      } else {
+        mapGeminiFinishReason(finishReason)
+      },
+    )
+  }
+
+  return GoogleCloudCodeAssistStreamTranslation(
+    chunks = chunks,
+    nextToolCallIndex = nextToolCallIndex,
+    hasToolCalls = hasToolCalls,
   )
 }
 
@@ -553,33 +680,101 @@ private fun googleCloudCodeAssistBaseClient(): HttpClient {
   }
 }
 
+private suspend fun streamGoogleCloudCodeAssistEvents(
+  accessToken: String,
+  modelId: String,
+  wrappedRequestJson: String,
+  onEvent: suspend (String) -> Unit,
+) {
+  val connection = openCodeAssistConnection(
+    accessToken = accessToken,
+    modelId = modelId,
+    path = "/v1internal:streamGenerateContent?alt=sse",
+    accept = "text/event-stream",
+  )
+  connection.outputStream.use { it.write(wrappedRequestJson.toByteArray(Charsets.UTF_8)) }
+  val status = connection.responseCode
+  if (status !in 200..299) {
+    val responseText = connection.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+    throw IllegalStateException(googleCloudCodeAssistErrorMessage(status, responseText))
+  }
+  connection.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
+    while (true) {
+      val line = reader.readLine() ?: break
+      val trimmed = line.trimEnd('\r')
+      if (!trimmed.startsWith("data: ")) continue
+      val data = trimmed.removePrefix("data: ")
+      if (data == "[DONE]") break
+      if (data.isBlank()) continue
+      onEvent(data)
+    }
+  }
+}
+
 private fun postCodeAssistJson(
   accessToken: String,
   modelId: String,
   path: String,
   body: JsonObject,
 ): JsonObject {
-  val connection = (URL(CODE_ASSIST_ENDPOINT + path).openConnection() as HttpURLConnection).apply {
-    requestMethod = "POST"
-    connectTimeout = 15_000
-    readTimeout = 30_000
-    doOutput = true
-    setRequestProperty("Content-Type", "application/json")
-    setRequestProperty("Accept", "application/json")
-    setRequestProperty("Authorization", "Bearer $accessToken")
-    setRequestProperty("User-Agent", "$GEMINI_CLI_USER_AGENT model/$modelId")
-    setRequestProperty("X-Goog-Api-Client", GEMINI_CLI_API_CLIENT)
-    setRequestProperty("x-activity-request-id", UUID.randomUUID().toString())
-  }
+  val connection = openCodeAssistConnection(accessToken, modelId, path, accept = "application/json")
   val payload = cloudCodeJson.encodeToString(body).toByteArray(Charsets.UTF_8)
   connection.outputStream.use { it.write(payload) }
   val status = connection.responseCode
   val stream = if (status in 200..299) connection.inputStream else connection.errorStream
   val responseText = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
   if (status !in 200..299) {
-    throw IllegalStateException("Code Assist HTTP $status: ${responseText.take(500)}")
+    throw IllegalStateException(googleCloudCodeAssistErrorMessage(status, responseText))
   }
   return if (responseText.isBlank()) buildJsonObject { } else cloudCodeJson.parseToJsonElement(responseText).jsonObject
+}
+
+private fun openCodeAssistConnection(
+  accessToken: String,
+  modelId: String,
+  path: String,
+  accept: String,
+): HttpURLConnection {
+  return (URL(CODE_ASSIST_ENDPOINT + path).openConnection() as HttpURLConnection).apply {
+    requestMethod = "POST"
+    connectTimeout = 15_000
+    readTimeout = 600_000
+    doOutput = true
+    setRequestProperty("Content-Type", "application/json")
+    setRequestProperty("Accept", accept)
+    setRequestProperty("Authorization", "Bearer $accessToken")
+    setRequestProperty("User-Agent", "$GEMINI_CLI_USER_AGENT model/$modelId")
+    setRequestProperty("X-Goog-Api-Client", GEMINI_CLI_API_CLIENT)
+    setRequestProperty("x-activity-request-id", UUID.randomUUID().toString())
+  }
+}
+
+internal fun googleCloudCodeAssistErrorMessage(status: Int, bodyText: String): String {
+  val error = runCatching { cloudCodeJson.parseToJsonElement(bodyText).jsonObject.obj("error") }.getOrNull()
+  val errStatus = error?.string("status").orEmpty()
+  val errMessage = error?.string("message").orEmpty()
+  val details = error?.array("details").orEmpty().mapNotNull { it.objOrNull() }
+  val errorInfo = details.firstOrNull { it.string("@type").endsWith("/google.rpc.ErrorInfo") }
+  val retryInfo = details.firstOrNull { it.string("@type").endsWith("/google.rpc.RetryInfo") }
+  val reason = errorInfo?.string("reason").orEmpty()
+  val modelHint = errorInfo?.obj("metadata")?.string("model").orEmpty()
+    .ifBlank { errorInfo?.obj("metadata")?.string("modelId").orEmpty() }
+  val retryDelay = retryInfo?.string("retryDelay").orEmpty()
+  val retrySuffix = retryDelay.takeIf { it.isNotBlank() }?.let { " Google suggests retrying in $it." }.orEmpty()
+  return when {
+    status == 429 && reason == "MODEL_CAPACITY_EXHAUSTED" -> {
+      "Gemini capacity exhausted for ${modelHint.ifBlank { "this Gemini model" }} (Google-side throttle, not a Flovera issue).$retrySuffix"
+    }
+    status == 429 && errStatus == "RESOURCE_EXHAUSTED" -> {
+      "Gemini quota exhausted (${errMessage.ifBlank { "RESOURCE_EXHAUSTED" }}).$retrySuffix"
+    }
+    status == 401 -> "Code Assist HTTP 401: Google OAuth token is unauthorized or expired."
+    status == 404 -> {
+      "Code Assist 404: ${modelHint.ifBlank { errMessage.ifBlank { "model" } }} is not available at cloudcode-pa.googleapis.com."
+    }
+    errMessage.isNotBlank() -> "Code Assist HTTP $status (${errStatus.ifBlank { "error" }}): $errMessage"
+    else -> "Code Assist returned HTTP $status: ${bodyText.take(500)}"
+  }
 }
 
 private fun codeAssistClientMetadata(duetProject: String = ""): JsonObject {
