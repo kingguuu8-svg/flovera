@@ -220,6 +220,16 @@ object ModelProviderCatalog {
       ),
     ),
     BuiltInProviderProfile(
+      id = "azure-foundry",
+      label = "Azure Foundry",
+      apiKeyLabel = "Azure Foundry API key",
+      defaultModel = "azure-model",
+      suggestedModels = listOf("azure-model"),
+      aliases = setOf("azure", "azure-ai-foundry", "azure-ai"),
+      baseUrl = "",
+      supportsHealthCheck = false,
+    ),
+    BuiltInProviderProfile(
       id = "ai-gateway",
       label = "Vercel AI Gateway",
       apiKeyLabel = "AI Gateway API key",
@@ -843,7 +853,9 @@ object ModelProviderCatalog {
   }
 
   fun runtimeProfileFor(provider: ModelProviderSpec, settings: AppSettings): ProviderRuntimeProfile {
-    val customProfile = settings.customOpenAIProvider.takeIf { provider.id == "custom-openai" }
+    val customProfile = settings.customOpenAIProvider.takeIf {
+      provider.id == "custom-openai" || provider.id == "azure-foundry"
+    }
     val baseUrl = customProfile?.baseUrl?.takeIf { it.isNotBlank() } ?: provider.baseUrl
     val chatCompletionsPath = customProfile?.chatCompletionsPath?.takeIf { it.isNotBlank() }
       ?: provider.chatCompletionsPath

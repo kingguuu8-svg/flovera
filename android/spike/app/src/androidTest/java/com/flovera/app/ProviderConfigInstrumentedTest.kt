@@ -48,7 +48,7 @@ class ProviderConfigInstrumentedTest {
 
   @Test
   fun providerCatalogHasDefaultModels() {
-    assertTrue(ModelProviderCatalog.providers.size >= 33)
+    assertTrue(ModelProviderCatalog.providers.size >= 34)
     ModelProviderCatalog.providers.forEach { provider ->
       assertTrue(provider.id.isNotBlank())
       assertTrue(provider.defaultModel.isNotBlank())
@@ -98,6 +98,9 @@ class ProviderConfigInstrumentedTest {
     assertEquals("xai", ModelProviderCatalog.findProvider("grok")?.id)
     assertEquals("xai", ModelProviderCatalog.findProvider("x-ai")?.id)
     assertEquals("xai", ModelProviderCatalog.findProvider("x.ai")?.id)
+    assertEquals("azure-foundry", ModelProviderCatalog.findProvider("azure")?.id)
+    assertEquals("azure-foundry", ModelProviderCatalog.findProvider("azure-ai-foundry")?.id)
+    assertEquals("azure-foundry", ModelProviderCatalog.findProvider("azure-ai")?.id)
     assertEquals("nous", ModelProviderCatalog.findProvider("nous-portal")?.id)
     assertEquals("nous", ModelProviderCatalog.findProvider("nousresearch")?.id)
     assertEquals("qwen-oauth", ModelProviderCatalog.findProvider("qwen")?.id)
@@ -156,6 +159,17 @@ class ProviderConfigInstrumentedTest {
       ModelProviderCatalog.requireProvider("tencent-tokenhub"),
       AppSettings(provider = "tencent-tokenhub", model = "hy3-preview"),
     )
+    val azureFoundry = ModelProviderCatalog.runtimeProfileFor(
+      ModelProviderCatalog.requireProvider("azure-foundry"),
+      AppSettings(
+        provider = "azure-foundry",
+        model = "azure-model",
+        customOpenAIProvider = CustomOpenAIProviderSettings(
+          baseUrl = "https://example-resource.services.ai.azure.com",
+          chatCompletionsPath = "/models/chat/completions",
+        ),
+      ),
+    )
 
     assertEquals("https://ai-gateway.vercel.sh/v1", aiGateway.baseUrl)
     assertEquals("google/gemini-3-flash", aiGateway.defaultAuxModel)
@@ -173,6 +187,11 @@ class ProviderConfigInstrumentedTest {
     assertEquals("https://tokenhub.tencentmaas.com/v1", tokenHub.baseUrl)
     assertEquals("hy3-preview", tokenHub.defaultAuxModel)
     assertEquals(listOf("inject_tencent_tokenhub_reasoning"), tokenHub.requestProfile.hookIds())
+    assertEquals("https://example-resource.services.ai.azure.com", azureFoundry.baseUrl)
+    assertEquals("https://example-resource.services.ai.azure.com/models", azureFoundry.modelsUrl)
+    assertEquals("/models/chat/completions", azureFoundry.chatCompletionsPath)
+    assertEquals("api_key", azureFoundry.authType.id)
+    assertFalse(azureFoundry.supportsHealthCheck)
   }
 
   @Test

@@ -203,6 +203,7 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"id\": \"tencent-tokenhub\""))
     assertTrue(capabilities.contains("\"id\": \"bedrock\""))
     assertTrue(capabilities.contains("\"id\": \"gemini\""))
+    assertTrue(capabilities.contains("\"id\": \"azure-foundry\""))
     assertTrue(capabilities.contains("\"id\": \"xai\""))
     assertTrue(capabilities.contains("\"id\": \"openai-codex\""))
     assertTrue(capabilities.contains("\"id\": \"nous\""))
