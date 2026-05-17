@@ -51,6 +51,7 @@ class ProviderConfigInstrumentedTest {
     assertEquals("anthropic", ModelProviderCatalog.findProvider("claude")?.id)
     assertEquals("custom-openai", ModelProviderCatalog.findProvider("ollama")?.id)
     assertEquals("openrouter", ModelProviderCatalog.findProvider("router")?.id)
+    assertEquals("openrouter", ModelProviderCatalog.findProvider("or")?.id)
     assertEquals("alibaba", ModelProviderCatalog.findProvider("dashscope")?.id)
     assertEquals("zai", ModelProviderCatalog.findProvider("zhipu")?.id)
     assertEquals("huggingface", ModelProviderCatalog.findProvider("hf")?.id)
@@ -111,12 +112,30 @@ class ProviderConfigInstrumentedTest {
     assertEquals("google/gemini-3-flash", aiGateway.defaultAuxModel)
     assertEquals("https://hermes-agent.nousresearch.com", aiGateway.defaultHeaders["HTTP-Referer"])
     assertEquals("Hermes Agent", aiGateway.defaultHeaders["X-Title"])
+    assertEquals(listOf("add_request_fields"), aiGateway.requestProfile.hookIds())
     assertEquals("https://api.xiaomimimo.com/v1", xiaomi.baseUrl)
     assertFalse(xiaomi.supportsHealthCheck)
     assertEquals(1_048_576, xiaomi.contextFor("mimo-v2.5-pro").contextWindowTokens)
     assertEquals("glm-5", opencodeGo.defaultAuxModel)
     assertEquals("https://api.moonshot.cn/v1", kimiCn.baseUrl)
     assertEquals(listOf("omit_request_fields", "add_request_fields"), kimiCn.requestProfile.hookIds())
+  }
+
+  @Test
+  fun aiGatewayProfileAddsHermesDefaultReasoningBody() {
+    val request = """{"model":"moonshotai/kimi-k2.6","messages":[]}"""
+    val profile = ModelProviderCatalog.runtimeProfileFor(
+      ModelProviderCatalog.requireProvider("ai-gateway"),
+      AppSettings(provider = "ai-gateway", model = "moonshotai/kimi-k2.6"),
+    )
+
+    val updated = applyFloveraOpenAIRequestProfileToJson(
+      requestJson = request,
+      requestProfile = profile.requestProfile,
+      modelContext = ModelContextSpec(),
+    )
+
+    assertTrue(updated.contains("\"reasoning\":{\"enabled\":true,\"effort\":\"medium\"}"))
   }
 
   @Test

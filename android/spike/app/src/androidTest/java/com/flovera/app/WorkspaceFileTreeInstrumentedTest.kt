@@ -218,6 +218,7 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"koog_anthropic_messages\""))
     assertTrue(capabilities.contains("\"omittedRequestFields\""))
     assertTrue(capabilities.contains("\"addedRequestFields\""))
+    assertTrue(capabilities.contains("\"reasoning\""))
     assertTrue(capabilities.contains("\"reasoning_effort\""))
     assertTrue(capabilities.contains("\"thinking\""))
     assertTrue(capabilities.contains("\"temperature\""))

@@ -24,6 +24,10 @@ fun providerRequestString(value: String): JsonElement {
   return JsonPrimitive(value)
 }
 
+fun providerRequestBoolean(value: Boolean): JsonElement {
+  return JsonPrimitive(value)
+}
+
 fun providerRequestObject(vararg fields: Pair<String, JsonElement>): JsonElement {
   return JsonObject(mapOf(*fields))
 }
