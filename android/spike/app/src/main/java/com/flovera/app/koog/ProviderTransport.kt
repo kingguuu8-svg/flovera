@@ -5,6 +5,9 @@ import ai.koog.prompt.executor.clients.anthropic.AnthropicLLMClient
 import ai.koog.prompt.executor.clients.openai.OpenAIClientSettings
 import ai.koog.prompt.executor.clients.openrouter.OpenRouterLLMClient
 import com.flovera.app.config.AppSettings
+import io.ktor.client.HttpClient
+import io.ktor.client.plugins.defaultRequest
+import io.ktor.client.request.header
 
 enum class ProviderTransport(val id: String) {
   FloveraDeepSeekChatCompletions("flovera_deepseek_chat_completions"),
@@ -49,6 +52,18 @@ object ProviderTransportFactory {
       ),
       requestProfile = runtimeProfile.requestProfile,
       modelContext = modelContext,
+      baseClient = openAICompatibleBaseClient(runtimeProfile.defaultHeaders),
     )
+  }
+
+  private fun openAICompatibleBaseClient(defaultHeaders: Map<String, String>): HttpClient {
+    if (defaultHeaders.isEmpty()) return HttpClient()
+    return HttpClient {
+      defaultRequest {
+        defaultHeaders.forEach { (name, value) ->
+          header(name, value)
+        }
+      }
+    }
   }
 }

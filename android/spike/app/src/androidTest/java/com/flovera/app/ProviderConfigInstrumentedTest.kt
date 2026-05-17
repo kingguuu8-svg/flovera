@@ -35,7 +35,7 @@ class ProviderConfigInstrumentedTest {
 
   @Test
   fun providerCatalogHasDefaultModels() {
-    assertTrue(ModelProviderCatalog.providers.size >= 14)
+    assertTrue(ModelProviderCatalog.providers.size >= 22)
     ModelProviderCatalog.providers.forEach { provider ->
       assertTrue(provider.id.isNotBlank())
       assertTrue(provider.defaultModel.isNotBlank())
@@ -57,6 +57,14 @@ class ProviderConfigInstrumentedTest {
     assertEquals("nvidia", ModelProviderCatalog.findProvider("nvidia-nim")?.id)
     assertEquals("novita", ModelProviderCatalog.findProvider("novitaai")?.id)
     assertEquals("moonshot", ModelProviderCatalog.findProvider("kimi")?.id)
+    assertEquals("ai-gateway", ModelProviderCatalog.findProvider("vercel")?.id)
+    assertEquals("alibaba-coding-plan", ModelProviderCatalog.findProvider("alibaba_coding")?.id)
+    assertEquals("arcee", ModelProviderCatalog.findProvider("arceeai")?.id)
+    assertEquals("kilocode", ModelProviderCatalog.findProvider("kilo")?.id)
+    assertEquals("opencode-zen", ModelProviderCatalog.findProvider("opencode")?.id)
+    assertEquals("opencode-go", ModelProviderCatalog.findProvider("go")?.id)
+    assertEquals("xiaomi", ModelProviderCatalog.findProvider("mimo")?.id)
+    assertEquals("kimi-coding-cn", ModelProviderCatalog.findProvider("moonshot-cn")?.id)
   }
 
   @Test
@@ -84,6 +92,31 @@ class ProviderConfigInstrumentedTest {
       "https://openrouter.ai/api/v1",
       ModelProviderCatalog.runtimeProfileFor(openRouter, AppSettings()).baseUrl,
     )
+  }
+
+  @Test
+  fun hermesOpenAICompatibleProfilesCarryEquivalentMetadata() {
+    val aiGateway = ModelProviderCatalog.runtimeProfileFor(
+      ModelProviderCatalog.requireProvider("ai-gateway"),
+      AppSettings(provider = "ai-gateway", model = "moonshotai/kimi-k2.6"),
+    )
+    val xiaomi = ModelProviderCatalog.requireProvider("xiaomi")
+    val opencodeGo = ModelProviderCatalog.requireProvider("opencode-go")
+    val kimiCn = ModelProviderCatalog.runtimeProfileFor(
+      ModelProviderCatalog.requireProvider("kimi-coding-cn"),
+      AppSettings(provider = "kimi-coding-cn", model = "kimi-k2.6"),
+    )
+
+    assertEquals("https://ai-gateway.vercel.sh/v1", aiGateway.baseUrl)
+    assertEquals("google/gemini-3-flash", aiGateway.defaultAuxModel)
+    assertEquals("https://hermes-agent.nousresearch.com", aiGateway.defaultHeaders["HTTP-Referer"])
+    assertEquals("Hermes Agent", aiGateway.defaultHeaders["X-Title"])
+    assertEquals("https://api.xiaomimimo.com/v1", xiaomi.baseUrl)
+    assertFalse(xiaomi.supportsHealthCheck)
+    assertEquals(1_048_576, xiaomi.contextFor("mimo-v2.5-pro").contextWindowTokens)
+    assertEquals("glm-5", opencodeGo.defaultAuxModel)
+    assertEquals("https://api.moonshot.cn/v1", kimiCn.baseUrl)
+    assertEquals(listOf("omit_request_fields", "add_request_fields"), kimiCn.requestProfile.hookIds())
   }
 
   @Test
@@ -118,9 +151,11 @@ class ProviderConfigInstrumentedTest {
     )
 
     assertTrue(profile.requestProfile.omittedRequestFields.contains("temperature"))
-    assertEquals(listOf("omit_request_fields"), profile.requestProfile.hookIds())
+    assertEquals(listOf("omit_request_fields", "add_request_fields"), profile.requestProfile.hookIds())
     assertFalse(updated.contains("\"temperature\""))
     assertTrue(updated.contains("\"top_p\":0.9"))
+    assertTrue(updated.contains("\"thinking\":{\"type\":\"enabled\"}"))
+    assertTrue(updated.contains("\"reasoning_effort\":\"medium\""))
   }
 
   @Test

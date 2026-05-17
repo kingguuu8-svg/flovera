@@ -8,14 +8,24 @@ import kotlinx.serialization.json.jsonObject
 
 enum class ProviderRequestHook(val id: String) {
   OmitRequestFields("omit_request_fields"),
+  AddRequestFields("add_request_fields"),
   InjectOllamaNumCtx("inject_ollama_num_ctx"),
 }
 
 fun ProviderRequestProfile.hookIds(): List<String> {
   return buildList {
     if (omittedRequestFields.isNotEmpty()) add(ProviderRequestHook.OmitRequestFields.id)
+    if (addedRequestFields.isNotEmpty()) add(ProviderRequestHook.AddRequestFields.id)
     if (injectOllamaNumCtx) add(ProviderRequestHook.InjectOllamaNumCtx.id)
   }
+}
+
+fun providerRequestString(value: String): JsonElement {
+  return JsonPrimitive(value)
+}
+
+fun providerRequestObject(vararg fields: Pair<String, JsonElement>): JsonElement {
+  return JsonObject(mapOf(*fields))
 }
 
 object ProviderRequestHooks {
@@ -27,6 +37,7 @@ object ProviderRequestHooks {
     if (requestProfile.hookIds().isEmpty()) return requestJson
     val root = requestHookJson.parseToJsonElement(requestJson).jsonObject.toMutableMap()
     applyOmitRequestFields(root, requestProfile.omittedRequestFields)
+    applyAddRequestFields(root, requestProfile.addedRequestFields)
     applyOllamaNumCtx(root, requestProfile, modelContext)
     return requestHookJson.encodeToString(JsonObject.serializer(), JsonObject(root))
   }
@@ -37,6 +48,15 @@ object ProviderRequestHooks {
   ) {
     omittedRequestFields.forEach { field ->
       root.remove(field)
+    }
+  }
+
+  private fun applyAddRequestFields(
+    root: MutableMap<String, JsonElement>,
+    addedRequestFields: Map<String, JsonElement>,
+  ) {
+    addedRequestFields.forEach { (field, value) ->
+      root[field] = value
     }
   }
 
