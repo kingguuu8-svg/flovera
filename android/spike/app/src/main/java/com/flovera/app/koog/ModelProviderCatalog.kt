@@ -86,11 +86,13 @@ data class ProviderRequestProfile(
 enum class ProviderApiMode(val id: String) {
   ChatCompletions("chat_completions"),
   AnthropicMessages("anthropic_messages"),
+  BedrockConverse("bedrock_converse"),
 }
 
 enum class ProviderAuthType(val id: String) {
   ApiKey("api_key"),
   BearerToken("bearer_token"),
+  AwsSdk("aws_sdk"),
   OAuthExternal("oauth_external"),
 }
 
@@ -563,6 +565,45 @@ object ModelProviderCatalog {
       transport = ProviderTransport.FloveraOpenAICompatibleChatCompletions,
       aliases = setOf("custom", "ollama", "local", "vllm", "llamacpp", "llama.cpp", "llama-cpp", "openai-compatible-custom"),
       supportsHealthCheck = false,
+    ),
+    ModelProviderSpec(
+      id = "bedrock",
+      label = "AWS Bedrock",
+      apiKeyLabel = "AWS SDK credentials",
+      defaultModel = "us.anthropic.claude-sonnet-4-6",
+      suggestedModels = listOf(
+        "us.anthropic.claude-sonnet-4-6",
+        "us.anthropic.claude-opus-4-6-v1",
+        "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "us.amazon.nova-pro-v1:0",
+        "us.amazon.nova-lite-v1:0",
+        "us.amazon.nova-micro-v1:0",
+        "deepseek.v3.2",
+        "us.meta.llama4-maverick-17b-instruct-v1:0",
+        "us.meta.llama4-scout-17b-instruct-v1:0",
+      ),
+      llmProvider = LLMProvider.Bedrock,
+      transport = ProviderTransport.KoogBedrockConverse,
+      apiMode = ProviderApiMode.BedrockConverse,
+      aliases = setOf("aws", "aws-bedrock", "amazon-bedrock", "amazon"),
+      baseUrl = "https://bedrock-runtime.us-east-1.amazonaws.com",
+      authType = ProviderAuthType.AwsSdk,
+      supportsHealthCheck = false,
+      defaultAuxModel = "us.anthropic.claude-sonnet-4-6",
+      modelContexts = mapOf(
+        "us.anthropic.claude-sonnet-4-6" to hermesContext(200_000),
+        "us.anthropic.claude-opus-4-6-v1" to hermesContext(200_000),
+        "us.anthropic.claude-haiku-4-5-20251001-v1:0" to hermesContext(200_000),
+        "us.anthropic.claude-sonnet-4-5-20250929-v1:0" to hermesContext(200_000),
+        "us.amazon.nova-pro-v1:0" to hermesContext(300_000),
+        "us.amazon.nova-lite-v1:0" to hermesContext(300_000),
+        "us.amazon.nova-micro-v1:0" to hermesContext(128_000),
+        "deepseek.v3.2" to hermesContext(128_000),
+        "us.meta.llama4-maverick-17b-instruct-v1:0" to hermesContext(128_000),
+        "us.meta.llama4-scout-17b-instruct-v1:0" to hermesContext(128_000),
+      ),
+      defaultContext = hermesContext(128_000),
     ),
     ModelProviderSpec(
       id = "gemini",

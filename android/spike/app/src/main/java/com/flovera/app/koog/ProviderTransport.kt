@@ -4,10 +4,15 @@ import ai.koog.prompt.executor.clients.LLMClient
 import ai.koog.http.client.KoogHttpClient
 import ai.koog.prompt.executor.clients.anthropic.AnthropicLLMClient
 import ai.koog.prompt.executor.clients.anthropic.AnthropicClientSettings
+import ai.koog.prompt.executor.clients.bedrock.BedrockAPIMethod
+import ai.koog.prompt.executor.clients.bedrock.BedrockClientSettings
+import ai.koog.prompt.executor.clients.bedrock.BedrockLLMClient
+import ai.koog.prompt.executor.clients.bedrock.BedrockModelFamilies
 import ai.koog.prompt.executor.clients.google.GoogleClientSettings
 import ai.koog.prompt.executor.clients.google.GoogleLLMClient
 import ai.koog.prompt.executor.clients.openai.OpenAIClientSettings
 import ai.koog.http.client.ktor.fromKtorClient
+import aws.sdk.kotlin.runtime.auth.credentials.DefaultChainCredentialsProvider
 import com.flovera.app.config.AppSettings
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.ktor.client.HttpClient
@@ -19,6 +24,7 @@ enum class ProviderTransport(val id: String) {
   FloveraDeepSeekChatCompletions("flovera_deepseek_chat_completions"),
   FloveraOpenAICompatibleChatCompletions("flovera_openai_compatible_chat_completions"),
   KoogGoogleGeminiNative("koog_google_gemini_native"),
+  KoogBedrockConverse("koog_bedrock_converse"),
   FloveraAnthropicMessages("flovera_anthropic_messages"),
   KoogAnthropicMessages("koog_anthropic_messages"),
 }
@@ -66,6 +72,15 @@ object ProviderTransportFactory {
       ProviderTransport.KoogGoogleGeminiNative -> GoogleLLMClient(
         apiKey = apiKey,
         settings = GoogleClientSettings(baseUrl = runtimeProfile.requireBaseUrl()),
+      )
+      ProviderTransport.KoogBedrockConverse -> BedrockLLMClient(
+        identityProvider = DefaultChainCredentialsProvider(),
+        settings = BedrockClientSettings(
+          region = "us-east-1",
+          endpointUrl = runtimeProfile.requireBaseUrl(),
+          apiMethod = BedrockAPIMethod.Converse,
+          fallbackModelFamily = BedrockModelFamilies.AnthropicClaude,
+        ),
       )
       ProviderTransport.KoogAnthropicMessages -> AnthropicLLMClient(apiKey)
     }

@@ -43,7 +43,7 @@ class ProviderConfigInstrumentedTest {
 
   @Test
   fun providerCatalogHasDefaultModels() {
-    assertTrue(ModelProviderCatalog.providers.size >= 27)
+    assertTrue(ModelProviderCatalog.providers.size >= 28)
     ModelProviderCatalog.providers.forEach { provider ->
       assertTrue(provider.id.isNotBlank())
       assertTrue(provider.defaultModel.isNotBlank())
@@ -52,6 +52,7 @@ class ProviderConfigInstrumentedTest {
     }
     assertTrue(ModelProviderCatalog.supportedApiModes.contains("chat_completions"))
     assertTrue(ModelProviderCatalog.supportedApiModes.contains("anthropic_messages"))
+    assertTrue(ModelProviderCatalog.supportedApiModes.contains("bedrock_converse"))
   }
 
   @Test
@@ -84,6 +85,10 @@ class ProviderConfigInstrumentedTest {
     assertEquals("gemini", ModelProviderCatalog.findProvider("google")?.id)
     assertEquals("gemini", ModelProviderCatalog.findProvider("google-gemini")?.id)
     assertEquals("gemini", ModelProviderCatalog.findProvider("google-ai-studio")?.id)
+    assertEquals("bedrock", ModelProviderCatalog.findProvider("aws")?.id)
+    assertEquals("bedrock", ModelProviderCatalog.findProvider("aws-bedrock")?.id)
+    assertEquals("bedrock", ModelProviderCatalog.findProvider("amazon-bedrock")?.id)
+    assertEquals("bedrock", ModelProviderCatalog.findProvider("amazon")?.id)
   }
 
   @Test
@@ -187,6 +192,10 @@ class ProviderConfigInstrumentedTest {
       ProviderTransport.KoogGoogleGeminiNative,
       ModelProviderCatalog.requireProvider("gemini").transport,
     )
+    assertEquals(
+      ProviderTransport.KoogBedrockConverse,
+      ModelProviderCatalog.requireProvider("bedrock").transport,
+    )
   }
 
   @Test
@@ -206,6 +215,37 @@ class ProviderConfigInstrumentedTest {
     assertEquals("api_key", profile.authType.id)
     assertEquals("gemini-3-flash-preview", profile.defaultAuxModel)
     assertEquals(1_048_576, ModelProviderCatalog.contextFor(AppSettings(provider = "gemini", model = "gemini-3-flash-preview")).contextWindowTokens)
+  }
+
+  @Test
+  fun bedrockProfileMirrorsHermesConverseProviderMetadata() {
+    val provider = ModelProviderCatalog.requireProvider("bedrock")
+    val profile = ModelProviderCatalog.runtimeProfileFor(
+      provider,
+      AppSettings(provider = "bedrock", model = "us.anthropic.claude-sonnet-4-6"),
+    )
+    val client = ModelProviderCatalog.createClient(provider, apiKey = "", settings = AppSettings(provider = "bedrock"))
+
+    assertEquals("bedrock_converse", profile.apiMode.id)
+    assertEquals(ProviderTransport.KoogBedrockConverse, profile.transport)
+    assertEquals(LLMProvider.Bedrock, provider.llmProvider)
+    assertEquals(LLMProvider.Bedrock, client.llmProvider())
+    assertEquals("https://bedrock-runtime.us-east-1.amazonaws.com", profile.baseUrl)
+    assertEquals("aws_sdk", profile.authType.id)
+    assertFalse(profile.supportsHealthCheck)
+    assertEquals("us.anthropic.claude-sonnet-4-6", profile.defaultAuxModel)
+    assertEquals(
+      200_000,
+      ModelProviderCatalog.contextFor(AppSettings(provider = "bedrock", model = "us.anthropic.claude-sonnet-4-6")).contextWindowTokens,
+    )
+    assertEquals(
+      300_000,
+      ModelProviderCatalog.contextFor(AppSettings(provider = "bedrock", model = "us.amazon.nova-pro-v1:0")).contextWindowTokens,
+    )
+    assertEquals(
+      128_000,
+      ModelProviderCatalog.contextFor(AppSettings(provider = "bedrock", model = "us.meta.llama4-maverick-17b-instruct-v1:0")).contextWindowTokens,
+    )
   }
 
   @Test
