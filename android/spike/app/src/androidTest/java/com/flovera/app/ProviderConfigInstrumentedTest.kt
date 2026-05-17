@@ -168,7 +168,18 @@ class ProviderConfigInstrumentedTest {
       ModelProviderCatalog.requireProvider("azure-foundry"),
       AppSettings(
         provider = "azure-foundry",
-        model = "azure-model",
+        model = "gpt-4o",
+        customOpenAIProvider = CustomOpenAIProviderSettings(
+          baseUrl = "https://example-resource.services.ai.azure.com",
+          chatCompletionsPath = "/models/chat/completions",
+        ),
+      ),
+    )
+    val azureFoundryResponses = ModelProviderCatalog.runtimeProfileFor(
+      ModelProviderCatalog.requireProvider("azure-foundry"),
+      AppSettings(
+        provider = "azure-foundry",
+        model = "gpt-5.3-codex",
         customOpenAIProvider = CustomOpenAIProviderSettings(
           baseUrl = "https://example-resource.services.ai.azure.com",
           chatCompletionsPath = "/models/chat/completions",
@@ -194,9 +205,14 @@ class ProviderConfigInstrumentedTest {
     assertEquals(listOf("inject_tencent_tokenhub_reasoning"), tokenHub.requestProfile.hookIds())
     assertEquals("https://example-resource.services.ai.azure.com", azureFoundry.baseUrl)
     assertEquals("https://example-resource.services.ai.azure.com/models", azureFoundry.modelsUrl)
+    assertEquals("chat_completions", azureFoundry.apiMode.id)
+    assertEquals(ProviderTransport.FloveraOpenAICompatibleChatCompletions, azureFoundry.transport)
     assertEquals("/models/chat/completions", azureFoundry.chatCompletionsPath)
     assertEquals("api_key", azureFoundry.authType.id)
     assertFalse(azureFoundry.supportsHealthCheck)
+    assertEquals("codex_responses", azureFoundryResponses.apiMode.id)
+    assertEquals(ProviderTransport.FloveraCodexResponses, azureFoundryResponses.transport)
+    assertEquals("models/responses", azureFoundryResponses.responsesPath)
   }
 
   @Test

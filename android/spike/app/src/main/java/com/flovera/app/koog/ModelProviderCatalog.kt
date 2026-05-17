@@ -856,9 +856,16 @@ object ModelProviderCatalog {
     val customProfile = settings.customOpenAIProvider.takeIf {
       provider.id == "custom-openai" || provider.id == "azure-foundry"
     }
+    val apiMode = runtimeApiModeFor(provider, settings)
+    val transport = runtimeTransportFor(provider, apiMode)
     val baseUrl = customProfile?.baseUrl?.takeIf { it.isNotBlank() } ?: provider.baseUrl
     val chatCompletionsPath = customProfile?.chatCompletionsPath?.takeIf { it.isNotBlank() }
       ?: provider.chatCompletionsPath
+    val responsesPath = if (provider.id == "azure-foundry" && apiMode == ProviderApiMode.CodexResponses) {
+      azureFoundryResponsesPath(chatCompletionsPath, provider.responsesPath)
+    } else {
+      provider.responsesPath
+    }
     val modelsUrl = provider.modelsUrl.ifBlank { defaultModelsUrl(baseUrl) }
     val compatibilityMode = customProfile?.compatibilityMode ?: provider.requestProfile.compatibilityMode
     val requestProfile = provider.requestProfile.copy(
@@ -868,13 +875,13 @@ object ModelProviderCatalog {
     return ProviderRuntimeProfile(
       providerId = provider.id,
       label = provider.label,
-      apiMode = provider.apiMode,
-      transport = provider.transport,
+      apiMode = apiMode,
+      transport = transport,
       llmProvider = provider.llmProvider,
       baseUrl = baseUrl,
       modelsUrl = modelsUrl,
       chatCompletionsPath = chatCompletionsPath,
-      responsesPath = provider.responsesPath,
+      responsesPath = responsesPath,
       messagesPath = provider.messagesPath,
       modelsPath = provider.modelsPath,
       authType = provider.authType,
@@ -890,10 +897,42 @@ object ModelProviderCatalog {
     return baseUrl.takeIf { it.isNotBlank() }?.trimEnd('/')?.plus("/models").orEmpty()
   }
 
+  private fun runtimeApiModeFor(provider: ModelProviderSpec, settings: AppSettings): ProviderApiMode {
+    if (provider.id == "azure-foundry" && azureFoundryUsesResponses(settings.model)) {
+      return ProviderApiMode.CodexResponses
+    }
+    return provider.apiMode
+  }
+
+  private fun runtimeTransportFor(provider: ModelProviderSpec, apiMode: ProviderApiMode): ProviderTransport {
+    if (provider.id == "azure-foundry" && apiMode == ProviderApiMode.CodexResponses) {
+      return ProviderTransport.FloveraCodexResponses
+    }
+    return provider.transport
+  }
+
+  private fun azureFoundryUsesResponses(modelId: String): Boolean {
+    val normalized = modelId
+      .trim()
+      .lowercase()
+      .substringAfterLast("/")
+    return listOf("codex", "gpt-5", "o1", "o3", "o4").any { normalized.startsWith(it) }
+  }
+
+  private fun azureFoundryResponsesPath(chatCompletionsPath: String, fallback: String): String {
+    val normalized = chatCompletionsPath.trim().trim('/')
+    if (normalized.endsWith("chat/completions")) {
+      return normalized.removeSuffix("chat/completions").trimEnd('/').let { prefix ->
+        if (prefix.isBlank()) "responses" else "$prefix/responses"
+      }
+    }
+    return fallback
+  }
+
   fun createClient(provider: ModelProviderSpec, apiKey: String, settings: AppSettings): LLMClient {
     val runtimeProfile = runtimeProfileFor(provider, settings)
     return ProviderTransportFactory.createClient(
-      transport = provider.transport,
+      transport = runtimeProfile.transport,
       runtimeProfile = runtimeProfile,
       apiKey = apiKey,
       settings = settings,
