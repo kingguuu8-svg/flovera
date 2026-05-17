@@ -20,6 +20,7 @@ enum class ProviderRequestHook(val id: String) {
   InjectLmStudioReasoning("inject_lmstudio_reasoning"),
   InjectNousPortalReasoning("inject_nous_portal_reasoning"),
   InjectQwenPortalRequestShape("inject_qwen_portal_request_shape"),
+  InjectCopilotReasoning("inject_copilot_reasoning"),
 }
 
 data class ProviderRequestContext(
@@ -46,6 +47,7 @@ fun ProviderRequestProfile.hookIds(): List<String> {
     if (injectLmStudioReasoning) add(ProviderRequestHook.InjectLmStudioReasoning.id)
     if (injectNousPortalReasoning) add(ProviderRequestHook.InjectNousPortalReasoning.id)
     if (injectQwenPortalRequestShape) add(ProviderRequestHook.InjectQwenPortalRequestShape.id)
+    if (injectCopilotReasoning) add(ProviderRequestHook.InjectCopilotReasoning.id)
   }
 }
 
@@ -91,6 +93,7 @@ object ProviderRequestHooks {
     applyLmStudioReasoning(root, requestProfile, requestContext)
     applyNousPortalReasoning(root, requestProfile, requestContext)
     applyQwenPortalRequestShape(root, requestProfile)
+    applyCopilotReasoning(root, requestProfile, requestContext)
     return requestHookJson.encodeToString(JsonObject.serializer(), JsonObject(root))
   }
 
@@ -290,6 +293,42 @@ object ProviderRequestHooks {
       mutable["cache_control"] = providerRequestObject("type" to providerRequestString("ephemeral"))
       JsonObject(mutable)
     })
+  }
+
+  private fun applyCopilotReasoning(
+    root: MutableMap<String, JsonElement>,
+    requestProfile: ProviderRequestProfile,
+    requestContext: ProviderRequestContext,
+  ) {
+    if (!requestProfile.injectCopilotReasoning || requestContext.providerId != "copilot") return
+    if (!requestContext.supportsReasoning) return
+    val supportedEfforts = copilotReasoningEfforts(requestContext.modelId)
+    if (supportedEfforts.isEmpty()) return
+    val reasoningConfig = requestContext.reasoningConfig
+    val disabled = reasoningConfig?.get("enabled")?.jsonPrimitive?.booleanOrNull == false ||
+      reasoningConfig?.get("enabled")?.jsonPrimitive?.contentOrNull == "false"
+    if (disabled) {
+      root.remove("reasoning")
+      return
+    }
+    val requested = reasoningConfig?.get("effort")?.jsonPrimitive?.contentOrNull
+      ?.trim()
+      ?.lowercase()
+      ?.let { if (it == "xhigh") "high" else it }
+      ?: "medium"
+    val effort = requested.takeIf { it in supportedEfforts } ?: "medium".takeIf { it in supportedEfforts } ?: supportedEfforts.first()
+    root["reasoning"] = providerRequestObject("effort" to providerRequestString(effort))
+  }
+
+  private fun copilotReasoningEfforts(modelId: String): List<String> {
+    val normalized = ModelProviderCatalog.normalizeCopilotModelId(modelId).lowercase()
+    if (normalized.startsWith("o1") || normalized.startsWith("o3") || normalized.startsWith("o4")) {
+      return listOf("low", "medium", "high")
+    }
+    if (normalized.startsWith("gpt-5")) {
+      return listOf("minimal", "low", "medium", "high")
+    }
+    return emptyList()
   }
 }
 

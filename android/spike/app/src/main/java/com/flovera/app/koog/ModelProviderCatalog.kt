@@ -83,6 +83,7 @@ data class ProviderRequestProfile(
   val injectLmStudioReasoning: Boolean = false,
   val injectNousPortalReasoning: Boolean = false,
   val injectQwenPortalRequestShape: Boolean = false,
+  val injectCopilotReasoning: Boolean = false,
   val omittedRequestFields: Set<String> = emptySet(),
   val addedRequestFields: Map<String, JsonElement> = emptyMap(),
 )
@@ -128,6 +129,15 @@ private fun reasoningContext(tokens: Int): ModelContextSpec {
 
 private fun contextMap(vararg entries: Pair<String, Int>): Map<String, ModelContextSpec> {
   return entries.associate { (model, tokens) -> model to hermesContext(tokens) }
+}
+
+private fun copilotDefaultHeaders(): Map<String, String> {
+  return mapOf(
+    "Editor-Version" to "vscode/1.104.1",
+    "User-Agent" to "HermesAgent/1.0",
+    "Openai-Intent" to "conversation-edits",
+    "x-initiator" to "agent",
+  )
 }
 
 private data class BuiltInProviderProfile(
@@ -635,6 +645,33 @@ object ModelProviderCatalog {
       defaultContext = reasoningContext(1_050_000),
     ),
     ModelProviderSpec(
+      id = "copilot",
+      label = "GitHub Copilot",
+      apiKeyLabel = "GitHub Copilot token",
+      defaultModel = "gpt-5",
+      suggestedModels = listOf("gpt-5", "gpt-5-mini", "gpt-5.3-codex", "claude-sonnet-4.6", "o3-mini"),
+      llmProvider = LLMProvider.OpenAI,
+      transport = ProviderTransport.FloveraOpenAICompatibleChatCompletions,
+      aliases = setOf("github-copilot", "github-models", "github-model", "github"),
+      baseUrl = "https://api.githubcopilot.com",
+      modelsUrl = "https://api.githubcopilot.com/models",
+      chatCompletionsPath = "/chat/completions",
+      responsesPath = "responses",
+      messagesPath = "/v1/messages",
+      modelsPath = "models",
+      authType = ProviderAuthType.Copilot,
+      defaultHeaders = copilotDefaultHeaders(),
+      requestProfile = ProviderRequestProfile(injectCopilotReasoning = true),
+      modelContexts = mapOf(
+        "gpt-5" to reasoningContext(1_050_000),
+        "gpt-5-mini" to reasoningContext(1_050_000),
+        "gpt-5.3-codex" to reasoningContext(1_050_000),
+        "o3-mini" to reasoningContext(200_000),
+        "claude-sonnet-4.6" to hermesContext(200_000),
+      ),
+      defaultContext = hermesContext(200_000),
+    ),
+    ModelProviderSpec(
       id = "bedrock",
       label = "AWS Bedrock",
       apiKeyLabel = "AWS SDK credentials",
@@ -901,12 +938,22 @@ object ModelProviderCatalog {
     if (provider.id == "azure-foundry" && azureFoundryUsesResponses(settings.model)) {
       return ProviderApiMode.CodexResponses
     }
+    if (provider.id == "copilot") {
+      return copilotApiModeFor(settings.model)
+    }
     return provider.apiMode
   }
 
   private fun runtimeTransportFor(provider: ModelProviderSpec, apiMode: ProviderApiMode): ProviderTransport {
     if (provider.id == "azure-foundry" && apiMode == ProviderApiMode.CodexResponses) {
       return ProviderTransport.FloveraCodexResponses
+    }
+    if (provider.id == "copilot") {
+      return when (apiMode) {
+        ProviderApiMode.CodexResponses -> ProviderTransport.FloveraCodexResponses
+        ProviderApiMode.AnthropicMessages -> ProviderTransport.FloveraAnthropicMessages
+        else -> ProviderTransport.FloveraOpenAICompatibleChatCompletions
+      }
     }
     return provider.transport
   }
@@ -927,6 +974,29 @@ object ModelProviderCatalog {
       }
     }
     return fallback
+  }
+
+  private fun copilotApiModeFor(modelId: String): ProviderApiMode {
+    val normalized = normalizeCopilotModelId(modelId).lowercase()
+    if (normalized.startsWith("claude-") || normalized.startsWith("anthropic/claude-")) {
+      return ProviderApiMode.AnthropicMessages
+    }
+    if (copilotUsesResponses(normalized)) {
+      return ProviderApiMode.CodexResponses
+    }
+    return ProviderApiMode.ChatCompletions
+  }
+
+  private fun copilotUsesResponses(modelId: String): Boolean {
+    val match = Regex("^gpt-(\\d+)").find(modelId) ?: return false
+    val major = match.groupValues[1].toIntOrNull() ?: return false
+    return major >= 5 && !modelId.startsWith("gpt-5-mini")
+  }
+
+  internal fun normalizeCopilotModelId(modelId: String): String {
+    val raw = modelId.trim()
+    if (raw.isBlank()) return ""
+    return raw.substringAfter("/")
   }
 
   fun createClient(provider: ModelProviderSpec, apiKey: String, settings: AppSettings): LLMClient {

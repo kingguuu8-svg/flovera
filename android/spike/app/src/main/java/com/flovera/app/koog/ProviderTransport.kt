@@ -199,6 +199,7 @@ fun providerAnthropicRuntimeHeaders(
     ProviderAuthType.BearerToken,
     ProviderAuthType.OAuthExternal,
     ProviderAuthType.OAuthDeviceCode,
+    ProviderAuthType.Copilot,
     -> headers["Authorization"] = "Bearer $apiKey"
     else -> headers["x-api-key"] = apiKey
   }

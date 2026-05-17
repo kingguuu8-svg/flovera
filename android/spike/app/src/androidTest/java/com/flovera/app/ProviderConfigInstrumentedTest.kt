@@ -48,7 +48,7 @@ class ProviderConfigInstrumentedTest {
 
   @Test
   fun providerCatalogHasDefaultModels() {
-    assertTrue(ModelProviderCatalog.providers.size >= 34)
+    assertTrue(ModelProviderCatalog.providers.size >= 35)
     ModelProviderCatalog.providers.forEach { provider ->
       assertTrue(provider.id.isNotBlank())
       assertTrue(provider.defaultModel.isNotBlank())
@@ -101,6 +101,10 @@ class ProviderConfigInstrumentedTest {
     assertEquals("xai", ModelProviderCatalog.findProvider("grok")?.id)
     assertEquals("xai", ModelProviderCatalog.findProvider("x-ai")?.id)
     assertEquals("xai", ModelProviderCatalog.findProvider("x.ai")?.id)
+    assertEquals("copilot", ModelProviderCatalog.findProvider("github-copilot")?.id)
+    assertEquals("copilot", ModelProviderCatalog.findProvider("github-models")?.id)
+    assertEquals("copilot", ModelProviderCatalog.findProvider("github-model")?.id)
+    assertEquals("copilot", ModelProviderCatalog.findProvider("github")?.id)
     assertEquals("azure-foundry", ModelProviderCatalog.findProvider("azure")?.id)
     assertEquals("azure-foundry", ModelProviderCatalog.findProvider("azure-ai-foundry")?.id)
     assertEquals("azure-foundry", ModelProviderCatalog.findProvider("azure-ai")?.id)
@@ -261,6 +265,103 @@ class ProviderConfigInstrumentedTest {
       "Bearer minimax-token",
       providerAnthropicRuntimeHeaders(minimax, "minimax-token")["Authorization"],
     )
+  }
+
+  @Test
+  fun copilotProfileMirrorsHermesRoutingHeadersAndAuth() {
+    val provider = ModelProviderCatalog.requireProvider("copilot")
+    val chat = ModelProviderCatalog.runtimeProfileFor(
+      provider,
+      AppSettings(provider = "copilot", model = "gpt-5-mini"),
+    )
+    val responses = ModelProviderCatalog.runtimeProfileFor(
+      provider,
+      AppSettings(provider = "copilot", model = "gpt-5"),
+    )
+    val anthropic = ModelProviderCatalog.runtimeProfileFor(
+      provider,
+      AppSettings(provider = "copilot", model = "claude-sonnet-4.6"),
+    )
+    val chatHeaders = providerRuntimeHeaders(chat, AppSettings(provider = "copilot", model = "gpt-5-mini"))
+    val anthropicHeaders = providerAnthropicRuntimeHeaders(anthropic, "copilot-token")
+
+    assertEquals("copilot", chat.authType.id)
+    assertEquals("https://api.githubcopilot.com", chat.baseUrl)
+    assertEquals("https://api.githubcopilot.com/models", chat.modelsUrl)
+    assertEquals("chat_completions", chat.apiMode.id)
+    assertEquals(ProviderTransport.FloveraOpenAICompatibleChatCompletions, chat.transport)
+    assertEquals("/chat/completions", chat.chatCompletionsPath)
+    assertEquals("vscode/1.104.1", chatHeaders["Editor-Version"])
+    assertEquals("HermesAgent/1.0", chatHeaders["User-Agent"])
+    assertEquals("conversation-edits", chatHeaders["Openai-Intent"])
+    assertEquals("agent", chatHeaders["x-initiator"])
+    assertEquals("codex_responses", responses.apiMode.id)
+    assertEquals(ProviderTransport.FloveraCodexResponses, responses.transport)
+    assertEquals("responses", responses.responsesPath)
+    assertEquals("models", responses.modelsPath)
+    assertEquals("anthropic_messages", anthropic.apiMode.id)
+    assertEquals(ProviderTransport.FloveraAnthropicMessages, anthropic.transport)
+    assertEquals("/v1/messages", anthropic.messagesPath)
+    assertEquals("Bearer copilot-token", anthropicHeaders["Authorization"])
+    assertEquals("vscode/1.104.1", anthropicHeaders["Editor-Version"])
+    assertFalse("x-api-key" in anthropicHeaders)
+  }
+
+  @Test
+  fun copilotReasoningHookMatchesHermesEffortMapping() {
+    val profile = ModelProviderCatalog.runtimeProfileFor(
+      ModelProviderCatalog.requireProvider("copilot"),
+      AppSettings(provider = "copilot", model = "gpt-5-mini"),
+    )
+    val request = """{"model":"gpt-5-mini","messages":[]}"""
+
+    val defaultReasoning = applyFloveraOpenAIRequestProfileToJson(
+      requestJson = request,
+      requestProfile = profile.requestProfile,
+      modelContext = ModelContextSpec(),
+      requestContext = ProviderRequestContext(
+        providerId = "copilot",
+        modelId = "gpt-5-mini",
+        supportsReasoning = true,
+      ),
+    )
+    val xhigh = applyFloveraOpenAIRequestProfileToJson(
+      requestJson = request,
+      requestProfile = profile.requestProfile,
+      modelContext = ModelContextSpec(),
+      requestContext = ProviderRequestContext(
+        providerId = "copilot",
+        modelId = "gpt-5-mini",
+        supportsReasoning = true,
+        reasoningConfig = providerReasoningConfigFromEffort("xhigh"),
+      ),
+    )
+    val unsupported = applyFloveraOpenAIRequestProfileToJson(
+      requestJson = """{"model":"claude-sonnet-4.6","messages":[]}""",
+      requestProfile = profile.requestProfile,
+      modelContext = ModelContextSpec(),
+      requestContext = ProviderRequestContext(
+        providerId = "copilot",
+        modelId = "claude-sonnet-4.6",
+        supportsReasoning = true,
+      ),
+    )
+    val disabled = applyFloveraOpenAIRequestProfileToJson(
+      requestJson = request,
+      requestProfile = profile.requestProfile,
+      modelContext = ModelContextSpec(),
+      requestContext = ProviderRequestContext(
+        providerId = "copilot",
+        modelId = "gpt-5-mini",
+        supportsReasoning = true,
+        reasoningConfig = providerReasoningConfigFromEffort("none"),
+      ),
+    )
+
+    assertTrue(defaultReasoning.contains("\"reasoning\":{\"effort\":\"medium\"}"))
+    assertTrue(xhigh.contains("\"reasoning\":{\"effort\":\"high\"}"))
+    assertFalse(unsupported.contains("\"reasoning\""))
+    assertFalse(disabled.contains("\"reasoning\""))
   }
 
   @Test
