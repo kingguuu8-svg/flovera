@@ -12,6 +12,7 @@ import ai.koog.prompt.executor.clients.openai.models.OpenAIChatCompletionRespons
 import ai.koog.prompt.executor.clients.openai.models.OpenAIChatCompletionStreamResponse
 import ai.koog.prompt.llm.LLModel
 import ai.koog.prompt.llm.LLMProvider
+import ai.koog.prompt.message.Message
 import ai.koog.prompt.params.LLMParams
 import ai.koog.prompt.streaming.StreamFrame
 import ai.koog.prompt.streaming.buildStreamFrameFlow
@@ -37,9 +38,11 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 import java.util.UUID
 import kotlin.time.Clock
 
@@ -54,7 +57,7 @@ open class FloveraGoogleCloudCodeAssistLLMClient(
   clock: Clock = Clock.System,
   toolsConverter: OpenAICompatibleToolDescriptorSchemaGenerator = OpenAICompatibleToolDescriptorSchemaGenerator(),
 ) : OpenAILLMClient(
-  apiKey = GoogleCloudCodeAssistCredentials.from(rawApiKey).accessToken,
+  apiKey = GoogleCloudCodeAssistCredentials.from(rawApiKey).initialOpenAIClientToken,
   settings = settings,
   baseClient = baseClient,
   clock = clock,
@@ -75,10 +78,11 @@ open class FloveraGoogleCloudCodeAssistLLMClient(
     stream: Boolean,
   ): String {
     lastModelId = model.id
+    val accessToken = credentials.currentAccessToken()
     val openAiJson = super.serializeProviderChatRequest(messages, model, tools, toolChoice, params, stream = false)
     return buildGoogleCloudCodeAssistRequest(
       openAIRequestJson = openAiJson,
-      projectId = ensureProjectId(model.id),
+      projectId = ensureProjectId(model.id, accessToken),
     )
   }
 
@@ -98,26 +102,15 @@ open class FloveraGoogleCloudCodeAssistLLMClient(
     tools: List<ToolDescriptor>,
   ): Flow<StreamFrame> {
     lastModelId = model.id
-    val openAiJson = super.serializeProviderChatRequest(
-      messages = convertPromptToMessages(prompt, model),
-      model = model,
-      tools = tools.map { it.toOpenAIChatTool() },
-      toolChoice = prompt.params.toolChoice?.toOpenAIToolChoice(),
-      params = prompt.params,
-      stream = false,
-    )
-    val wrapped = buildGoogleCloudCodeAssistRequest(
-      openAIRequestJson = openAiJson,
-      projectId = ensureProjectId(model.id),
-    )
+    val request = buildRequestForPrompt(prompt, model, tools)
     return buildStreamFrameFlow {
       var toolCallIndex = 0
       var sawToolCall = false
       var emittedEnd = false
       streamGoogleCloudCodeAssistEvents(
-        accessToken = credentials.accessToken,
+        accessToken = request.accessToken,
         modelId = model.id,
-        wrappedRequestJson = wrapped,
+        wrappedRequestJson = request.wrappedJson,
       ) { eventJson ->
         val translation = translateGoogleCloudCodeAssistStreamEvent(
           codeAssistEventJson = eventJson,
@@ -153,9 +146,56 @@ open class FloveraGoogleCloudCodeAssistLLMClient(
     }.flowOn(Dispatchers.IO)
   }
 
-  private fun ensureProjectId(modelId: String): String {
+  override suspend fun execute(
+    prompt: Prompt,
+    model: LLModel,
+    tools: List<ToolDescriptor>,
+  ): List<Message.Response> {
+    lastModelId = model.id
+    val request = buildRequestForPrompt(prompt, model, tools)
+    val responseJson = postGoogleCloudCodeAssistGenerateContent(
+      accessToken = request.accessToken,
+      modelId = model.id,
+      wrappedRequestJson = request.wrappedJson,
+    )
+    val decoded = decodeResponse(responseJson)
+    return processProviderChatResponse(decoded).firstOrNull().orEmpty()
+  }
+
+  override suspend fun executeMultipleChoices(
+    prompt: Prompt,
+    model: LLModel,
+    tools: List<ToolDescriptor>,
+  ): List<List<Message.Response>> {
+    return listOf(execute(prompt, model, tools))
+  }
+
+  private fun buildRequestForPrompt(
+    prompt: Prompt,
+    model: LLModel,
+    tools: List<ToolDescriptor>,
+  ): GoogleCloudCodeAssistPreparedRequest {
+    val accessToken = credentials.currentAccessToken()
+    val openAiJson = super.serializeProviderChatRequest(
+      messages = convertPromptToMessages(prompt, model),
+      model = model,
+      tools = tools.map { it.toOpenAIChatTool() },
+      toolChoice = prompt.params.toolChoice?.toOpenAIToolChoice(),
+      params = prompt.params,
+      stream = false,
+    )
+    return GoogleCloudCodeAssistPreparedRequest(
+      accessToken = accessToken,
+      wrappedJson = buildGoogleCloudCodeAssistRequest(
+        openAIRequestJson = openAiJson,
+        projectId = ensureProjectId(model.id, accessToken),
+      ),
+    )
+  }
+
+  private fun ensureProjectId(modelId: String, accessToken: String): String {
     cachedProjectId?.let { return it }
-    val discovered = discoverProjectId(credentials.accessToken, modelId)
+    val discovered = discoverProjectId(accessToken, modelId)
     cachedProjectId = discovered
     return discovered
   }
@@ -199,22 +239,80 @@ open class FloveraGoogleCloudCodeAssistLLMClient(
   }
 }
 
-internal data class GoogleCloudCodeAssistCredentials(
+private data class GoogleCloudCodeAssistPreparedRequest(
   val accessToken: String,
+  val wrappedJson: String,
+)
+
+internal class GoogleCloudCodeAssistCredentials(
+  val token: String,
   val projectId: String = "",
   val managedProjectId: String = "",
+  val mode: GoogleCloudCodeAssistCredentialMode = GoogleCloudCodeAssistCredentialMode.AccessToken,
 ) {
+  @Volatile
+  private var cachedAccessToken: String = if (mode == GoogleCloudCodeAssistCredentialMode.AccessToken) token else ""
+
+  @Volatile
+  private var expiresAtMillis: Long = 0L
+
+  val accessToken: String
+    get() = currentAccessToken()
+
+  val refreshToken: String
+    get() = if (mode == GoogleCloudCodeAssistCredentialMode.RefreshToken) token else ""
+
+  val initialOpenAIClientToken: String
+    get() = if (mode == GoogleCloudCodeAssistCredentialMode.AccessToken) token else "google-oauth-refresh"
+
+  val usesRefreshToken: Boolean
+    get() = mode == GoogleCloudCodeAssistCredentialMode.RefreshToken
+
+  @Synchronized
+  fun currentAccessToken(): String {
+    if (mode == GoogleCloudCodeAssistCredentialMode.AccessToken) return token
+    val now = System.currentTimeMillis()
+    if (cachedAccessToken.isNotBlank() && now + GOOGLE_OAUTH_REFRESH_SKEW_MILLIS < expiresAtMillis) {
+      return cachedAccessToken
+    }
+    val refreshed = refreshGoogleOAuthAccessToken(token)
+    cachedAccessToken = refreshed.accessToken
+    expiresAtMillis = now + refreshed.expiresInSeconds.coerceAtLeast(60) * 1000L
+    return cachedAccessToken
+  }
+
   companion object {
     fun from(rawApiKey: String): GoogleCloudCodeAssistCredentials {
       val parts = rawApiKey.split("|")
+      val rawToken = parts.getOrNull(0).orEmpty().trim()
+      val mode = when {
+        rawToken.startsWith("refresh:") -> GoogleCloudCodeAssistCredentialMode.RefreshToken
+        rawToken.startsWith("access:") -> GoogleCloudCodeAssistCredentialMode.AccessToken
+        rawToken.startsWith("1//") -> GoogleCloudCodeAssistCredentialMode.RefreshToken
+        else -> GoogleCloudCodeAssistCredentialMode.AccessToken
+      }
+      val token = rawToken
+        .removePrefix("refresh:")
+        .removePrefix("access:")
       return GoogleCloudCodeAssistCredentials(
-        accessToken = parts.getOrNull(0).orEmpty().trim(),
+        token = token,
         projectId = parts.getOrNull(1).orEmpty().trim(),
         managedProjectId = parts.getOrNull(2).orEmpty().trim(),
+        mode = mode,
       )
     }
   }
 }
+
+internal enum class GoogleCloudCodeAssistCredentialMode {
+  AccessToken,
+  RefreshToken,
+}
+
+private data class GoogleOAuthRefreshResult(
+  val accessToken: String,
+  val expiresInSeconds: Long,
+)
 
 internal fun buildGoogleCloudCodeAssistRequest(
   openAIRequestJson: String,
@@ -711,6 +809,27 @@ private suspend fun streamGoogleCloudCodeAssistEvents(
   }
 }
 
+private fun postGoogleCloudCodeAssistGenerateContent(
+  accessToken: String,
+  modelId: String,
+  wrappedRequestJson: String,
+): String {
+  val connection = openCodeAssistConnection(
+    accessToken = accessToken,
+    modelId = modelId,
+    path = "/v1internal:generateContent",
+    accept = "application/json",
+  )
+  connection.outputStream.use { it.write(wrappedRequestJson.toByteArray(Charsets.UTF_8)) }
+  val status = connection.responseCode
+  val stream = if (status in 200..299) connection.inputStream else connection.errorStream
+  val responseText = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+  if (status !in 200..299) {
+    throw IllegalStateException(googleCloudCodeAssistErrorMessage(status, responseText))
+  }
+  return responseText
+}
+
 private fun postCodeAssistJson(
   accessToken: String,
   modelId: String,
@@ -777,6 +896,62 @@ internal fun googleCloudCodeAssistErrorMessage(status: Int, bodyText: String): S
   }
 }
 
+internal fun googleOAuthRefreshFormBody(
+  refreshToken: String,
+  clientId: String = GOOGLE_GEMINI_CLI_OAUTH_CLIENT_ID,
+  clientSecret: String = GOOGLE_GEMINI_CLI_OAUTH_CLIENT_SECRET,
+): String {
+  val fields = linkedMapOf(
+    "grant_type" to "refresh_token",
+    "refresh_token" to refreshToken,
+    "client_id" to clientId,
+  )
+  if (clientSecret.isNotBlank()) fields["client_secret"] = clientSecret
+  return fields.entries.joinToString("&") { (key, value) ->
+    "${urlEncode(key)}=${urlEncode(value)}"
+  }
+}
+
+private fun refreshGoogleOAuthAccessToken(refreshToken: String): GoogleOAuthRefreshResult {
+  if (refreshToken.isBlank()) {
+    throw IllegalStateException("Cannot refresh Google OAuth token: refresh token is empty.")
+  }
+  val connection = (URL(GOOGLE_OAUTH_TOKEN_ENDPOINT).openConnection() as HttpURLConnection).apply {
+    requestMethod = "POST"
+    connectTimeout = 15_000
+    readTimeout = 30_000
+    doOutput = true
+    setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+    setRequestProperty("Accept", "application/json")
+  }
+  val body = googleOAuthRefreshFormBody(refreshToken).toByteArray(Charsets.UTF_8)
+  connection.outputStream.use { it.write(body) }
+  val status = connection.responseCode
+  val stream = if (status in 200..299) connection.inputStream else connection.errorStream
+  val responseText = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+  if (status !in 200..299) {
+    val error = runCatching { cloudCodeJson.parseToJsonElement(responseText).jsonObject }.getOrNull()
+    val errorCode = error?.string("error").orEmpty()
+    val description = error?.string("error_description").orEmpty()
+    throw IllegalStateException(
+      "Google OAuth token endpoint returned HTTP $status: ${description.ifBlank { errorCode.ifBlank { responseText.take(500) } }}",
+    )
+  }
+  val payload = cloudCodeJson.parseToJsonElement(responseText).jsonObject
+  val accessToken = payload.string("access_token")
+  if (accessToken.isBlank()) {
+    throw IllegalStateException("Google OAuth refresh response did not include an access_token.")
+  }
+  return GoogleOAuthRefreshResult(
+    accessToken = accessToken,
+    expiresInSeconds = payload["expires_in"]?.jsonPrimitive?.longOrNull ?: 3600L,
+  )
+}
+
+private fun urlEncode(value: String): String {
+  return URLEncoder.encode(value, Charsets.UTF_8.name())
+}
+
 private fun codeAssistClientMetadata(duetProject: String = ""): JsonObject {
   return buildJsonObject {
     put("duetProject", duetProject)
@@ -813,6 +988,11 @@ private fun JsonObject.booleanOrNull(key: String): Boolean? {
 }
 
 private const val CODE_ASSIST_ENDPOINT = "https://cloudcode-pa.googleapis.com"
+private const val GOOGLE_OAUTH_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
+private const val GOOGLE_GEMINI_CLI_OAUTH_CLIENT_ID =
+  "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com"
+private const val GOOGLE_GEMINI_CLI_OAUTH_CLIENT_SECRET = "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"
+private const val GOOGLE_OAUTH_REFRESH_SKEW_MILLIS = 60_000L
 private const val FREE_TIER_ID = "free-tier"
 private const val GEMINI_CLI_USER_AGENT = "google-api-nodejs-client/9.15.1 (gzip)"
 private const val GEMINI_CLI_API_CLIENT = "gl-node/24.0.0"

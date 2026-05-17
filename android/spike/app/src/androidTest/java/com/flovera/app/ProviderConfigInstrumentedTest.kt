@@ -24,6 +24,7 @@ import com.flovera.app.koog.buildGoogleCloudCodeAssistRequest
 import com.flovera.app.koog.codexResponsesInclude
 import com.flovera.app.koog.codexResponsesReasoningConfig
 import com.flovera.app.koog.googleCloudCodeAssistErrorMessage
+import com.flovera.app.koog.googleOAuthRefreshFormBody
 import com.flovera.app.koog.grokSupportsReasoningEffort
 import com.flovera.app.koog.hookIds
 import com.flovera.app.koog.providerAnthropicRuntimeHeaders
@@ -587,6 +588,28 @@ class ProviderConfigInstrumentedTest {
     assertTrue(capacity.contains("30s"))
     assertTrue(notFound.contains("Code Assist 404"))
     assertTrue(notFound.contains("retired model"))
+  }
+
+  @Test
+  fun googleCloudCodeAssistCredentialsSupportHermesRefreshPacking() {
+    val access = GoogleCloudCodeAssistCredentials.from("access:ya29.access-token|project-a|managed-a")
+    val refresh = GoogleCloudCodeAssistCredentials.from("refresh:1//refresh-token|project-b|managed-b")
+    val inferredRefresh = GoogleCloudCodeAssistCredentials.from("1//refresh-token|project-c|managed-c")
+    val refreshBody = googleOAuthRefreshFormBody("1//refresh-token")
+
+    assertFalse(access.usesRefreshToken)
+    assertEquals("ya29.access-token", access.accessToken)
+    assertEquals("project-a", access.projectId)
+    assertEquals("managed-a", access.managedProjectId)
+    assertTrue(refresh.usesRefreshToken)
+    assertEquals("1//refresh-token", refresh.refreshToken)
+    assertEquals("project-b", refresh.projectId)
+    assertEquals("managed-b", refresh.managedProjectId)
+    assertTrue(inferredRefresh.usesRefreshToken)
+    assertTrue(refreshBody.contains("grant_type=refresh_token"))
+    assertTrue(refreshBody.contains("refresh_token=1%2F%2Frefresh-token"))
+    assertTrue(refreshBody.contains("client_id=681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com"))
+    assertTrue(refreshBody.contains("client_secret=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"))
   }
 
   @Test
