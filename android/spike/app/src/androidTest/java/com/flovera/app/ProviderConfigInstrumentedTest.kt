@@ -15,6 +15,7 @@ import com.flovera.app.koog.ProviderRequestProfile
 import com.flovera.app.koog.ProviderTransport
 import com.flovera.app.koog.applyFloveraOpenAIRequestProfileToJson
 import com.flovera.app.koog.hookIds
+import com.flovera.app.koog.providerRuntimeHeaders
 import com.flovera.app.workspace.WorkspaceManager
 import java.io.File
 import org.junit.Assert.assertEquals
@@ -164,6 +165,35 @@ class ProviderConfigInstrumentedTest {
     assertEquals(ProviderTransport.FloveraOpenAICompatibleChatCompletions, provider.transport)
     assertEquals(LLMProvider.OpenRouter, provider.llmProvider)
     assertEquals(LLMProvider.OpenRouter, client.llmProvider())
+  }
+
+  @Test
+  fun openRouterGrokSessionHeaderMatchesHermesHook() {
+    val provider = ModelProviderCatalog.requireProvider("openrouter")
+    val grokSettings = AppSettings(
+      provider = "openrouter",
+      model = "x-ai/grok-4.20-reasoning",
+      activeSessionId = "session-123",
+    )
+    val xaiSettings = grokSettings.copy(model = "xai/grok-4.20-reasoning")
+    val nonGrokSettings = grokSettings.copy(model = "anthropic/claude-sonnet-4.6")
+
+    assertEquals(
+      "session-123",
+      providerRuntimeHeaders(ModelProviderCatalog.runtimeProfileFor(provider, grokSettings), grokSettings)
+        ["x-grok-conv-id"],
+    )
+    assertEquals(
+      "session-123",
+      providerRuntimeHeaders(ModelProviderCatalog.runtimeProfileFor(provider, xaiSettings), xaiSettings)
+        ["x-grok-conv-id"],
+    )
+    assertFalse(
+      "x-grok-conv-id" in providerRuntimeHeaders(
+        ModelProviderCatalog.runtimeProfileFor(provider, nonGrokSettings),
+        nonGrokSettings,
+      ),
+    )
   }
 
   @Test

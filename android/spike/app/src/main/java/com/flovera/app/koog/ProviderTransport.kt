@@ -14,6 +14,23 @@ enum class ProviderTransport(val id: String) {
   KoogAnthropicMessages("koog_anthropic_messages"),
 }
 
+fun providerRuntimeHeaders(
+  runtimeProfile: ProviderRuntimeProfile,
+  settings: AppSettings,
+): Map<String, String> {
+  val headers = runtimeProfile.defaultHeaders.toMutableMap()
+  val sessionId = settings.activeSessionId?.takeIf { it.isNotBlank() }
+  if (runtimeProfile.providerId == "openrouter" && sessionId != null && isOpenRouterGrokModel(settings.model)) {
+    headers["x-grok-conv-id"] = sessionId
+  }
+  return headers
+}
+
+private fun isOpenRouterGrokModel(modelId: String): Boolean {
+  val normalized = modelId.trim().lowercase()
+  return normalized.startsWith("x-ai/grok-") || normalized.startsWith("xai/grok-")
+}
+
 object ProviderTransportFactory {
   fun createClient(
     transport: ProviderTransport,
@@ -30,6 +47,7 @@ object ProviderTransportFactory {
       ProviderTransport.FloveraOpenAICompatibleChatCompletions -> createOpenAICompatibleClient(
         runtimeProfile = runtimeProfile,
         apiKey = apiKey,
+        settings = settings,
         modelContext = modelContext,
       )
       ProviderTransport.KoogAnthropicMessages -> AnthropicLLMClient(apiKey)
@@ -39,6 +57,7 @@ object ProviderTransportFactory {
   private fun createOpenAICompatibleClient(
     runtimeProfile: ProviderRuntimeProfile,
     apiKey: String,
+    settings: AppSettings,
     modelContext: ModelContextSpec,
   ): LLMClient {
     return FloveraOpenAICompatibleLLMClient(
@@ -50,7 +69,7 @@ object ProviderTransportFactory {
       providerIdentity = runtimeProfile.llmProvider,
       requestProfile = runtimeProfile.requestProfile,
       modelContext = modelContext,
-      baseClient = openAICompatibleBaseClient(runtimeProfile.defaultHeaders),
+      baseClient = openAICompatibleBaseClient(providerRuntimeHeaders(runtimeProfile, settings)),
     )
   }
 
