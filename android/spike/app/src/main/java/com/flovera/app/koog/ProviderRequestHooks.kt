@@ -15,6 +15,8 @@ enum class ProviderRequestHook(val id: String) {
   InjectOllamaNumCtx("inject_ollama_num_ctx"),
   InjectOpenRouterRouting("inject_openrouter_routing"),
   InjectKimiThinking("inject_kimi_thinking"),
+  InjectTencentTokenHubReasoning("inject_tencent_tokenhub_reasoning"),
+  InjectLmStudioReasoning("inject_lmstudio_reasoning"),
 }
 
 data class ProviderRequestContext(
@@ -37,6 +39,8 @@ fun ProviderRequestProfile.hookIds(): List<String> {
     if (injectOllamaNumCtx) add(ProviderRequestHook.InjectOllamaNumCtx.id)
     if (injectOpenRouterRouting) add(ProviderRequestHook.InjectOpenRouterRouting.id)
     if (injectKimiThinking) add(ProviderRequestHook.InjectKimiThinking.id)
+    if (injectTencentTokenHubReasoning) add(ProviderRequestHook.InjectTencentTokenHubReasoning.id)
+    if (injectLmStudioReasoning) add(ProviderRequestHook.InjectLmStudioReasoning.id)
   }
 }
 
@@ -78,6 +82,8 @@ object ProviderRequestHooks {
     applyOllamaNumCtx(root, requestProfile, modelContext)
     applyOpenRouterRouting(root, requestProfile, requestContext)
     applyKimiThinking(root, requestProfile, requestContext)
+    applyTencentTokenHubReasoning(root, requestProfile, requestContext)
+    applyLmStudioReasoning(root, requestProfile, requestContext)
     return requestHookJson.encodeToString(JsonObject.serializer(), JsonObject(root))
   }
 
@@ -162,6 +168,46 @@ object ProviderRequestHooks {
       ?.lowercase()
       ?.takeIf { it in setOf("low", "medium", "high") }
       ?: "medium"
+    root["reasoning_effort"] = providerRequestString(effort)
+  }
+
+  private fun applyTencentTokenHubReasoning(
+    root: MutableMap<String, JsonElement>,
+    requestProfile: ProviderRequestProfile,
+    requestContext: ProviderRequestContext,
+  ) {
+    if (!requestProfile.injectTencentTokenHubReasoning) return
+    val reasoningConfig = requestContext.reasoningConfig
+    val disabled = reasoningConfig?.get("enabled")?.jsonPrimitive?.contentOrNull == "false"
+    if (disabled) {
+      root.remove("reasoning_effort")
+      return
+    }
+    val effort = reasoningConfig?.get("effort")?.jsonPrimitive?.contentOrNull
+      ?.trim()
+      ?.lowercase()
+      ?.takeIf { it in setOf("low", "medium", "high") }
+      ?: "high"
+    root["reasoning_effort"] = providerRequestString(effort)
+  }
+
+  private fun applyLmStudioReasoning(
+    root: MutableMap<String, JsonElement>,
+    requestProfile: ProviderRequestProfile,
+    requestContext: ProviderRequestContext,
+  ) {
+    if (!requestProfile.injectLmStudioReasoning || !requestContext.supportsReasoning) return
+    val reasoningConfig = requestContext.reasoningConfig
+    val disabled = reasoningConfig?.get("enabled")?.jsonPrimitive?.contentOrNull == "false"
+    val effort = if (disabled) {
+      "none"
+    } else {
+      reasoningConfig?.get("effort")?.jsonPrimitive?.contentOrNull
+        ?.trim()
+        ?.lowercase()
+        ?.takeIf { it in setOf("minimal", "low", "medium", "high", "xhigh") }
+        ?: "medium"
+    }
     root["reasoning_effort"] = providerRequestString(effort)
   }
 }

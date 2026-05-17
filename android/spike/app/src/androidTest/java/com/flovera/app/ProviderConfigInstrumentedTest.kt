@@ -37,11 +37,12 @@ class ProviderConfigInstrumentedTest {
     assertEquals("legacy-key", settings.apiKeyFor("deepseek"))
     assertEquals("openai-key", settings.apiKeyFor("openai"))
     assertEquals("", settings.apiKeyFor("anthropic"))
+    assertEquals(AppSettings.LMSTUDIO_NOAUTH_PLACEHOLDER, settings.apiKeyFor("lmstudio"))
   }
 
   @Test
   fun providerCatalogHasDefaultModels() {
-    assertTrue(ModelProviderCatalog.providers.size >= 22)
+    assertTrue(ModelProviderCatalog.providers.size >= 24)
     ModelProviderCatalog.providers.forEach { provider ->
       assertTrue(provider.id.isNotBlank())
       assertTrue(provider.defaultModel.isNotBlank())
@@ -72,6 +73,10 @@ class ProviderConfigInstrumentedTest {
     assertEquals("opencode-go", ModelProviderCatalog.findProvider("go")?.id)
     assertEquals("xiaomi", ModelProviderCatalog.findProvider("mimo")?.id)
     assertEquals("kimi-coding-cn", ModelProviderCatalog.findProvider("moonshot-cn")?.id)
+    assertEquals("lmstudio", ModelProviderCatalog.findProvider("lm-studio")?.id)
+    assertEquals("lmstudio", ModelProviderCatalog.findProvider("lm_studio")?.id)
+    assertEquals("tencent-tokenhub", ModelProviderCatalog.findProvider("tencent")?.id)
+    assertEquals("tencent-tokenhub", ModelProviderCatalog.findProvider("tokenhub")?.id)
   }
 
   @Test
@@ -113,6 +118,14 @@ class ProviderConfigInstrumentedTest {
       ModelProviderCatalog.requireProvider("kimi-coding-cn"),
       AppSettings(provider = "kimi-coding-cn", model = "kimi-k2.6"),
     )
+    val lmStudio = ModelProviderCatalog.runtimeProfileFor(
+      ModelProviderCatalog.requireProvider("lmstudio"),
+      AppSettings(provider = "lmstudio", model = "local-model"),
+    )
+    val tokenHub = ModelProviderCatalog.runtimeProfileFor(
+      ModelProviderCatalog.requireProvider("tencent-tokenhub"),
+      AppSettings(provider = "tencent-tokenhub", model = "hy3-preview"),
+    )
 
     assertEquals("https://ai-gateway.vercel.sh/v1", aiGateway.baseUrl)
     assertEquals("google/gemini-3-flash", aiGateway.defaultAuxModel)
@@ -125,6 +138,11 @@ class ProviderConfigInstrumentedTest {
     assertEquals("glm-5", opencodeGo.defaultAuxModel)
     assertEquals("https://api.moonshot.cn/v1", kimiCn.baseUrl)
     assertEquals(listOf("omit_request_fields", "inject_kimi_thinking"), kimiCn.requestProfile.hookIds())
+    assertEquals("http://127.0.0.1:1234/v1", lmStudio.baseUrl)
+    assertEquals(listOf("inject_lmstudio_reasoning"), lmStudio.requestProfile.hookIds())
+    assertEquals("https://tokenhub.tencentmaas.com/v1", tokenHub.baseUrl)
+    assertEquals("hy3-preview", tokenHub.defaultAuxModel)
+    assertEquals(listOf("inject_tencent_tokenhub_reasoning"), tokenHub.requestProfile.hookIds())
   }
 
   @Test
@@ -359,6 +377,82 @@ class ProviderConfigInstrumentedTest {
   }
 
   @Test
+  fun tencentTokenHubReasoningHookMatchesHermesMapping() {
+    val request = """{"model":"hy3-preview","messages":[]}"""
+    val profile = ModelProviderCatalog.runtimeProfileFor(
+      ModelProviderCatalog.requireProvider("tencent-tokenhub"),
+      AppSettings(provider = "tencent-tokenhub", model = "hy3-preview"),
+    )
+
+    val defaultEffort = applyFloveraOpenAIRequestProfileToJson(
+      requestJson = request,
+      requestProfile = profile.requestProfile,
+      modelContext = ModelContextSpec(),
+    )
+    val low = applyFloveraOpenAIRequestProfileToJson(
+      requestJson = request,
+      requestProfile = profile.requestProfile,
+      modelContext = ModelContextSpec(),
+      requestContext = ProviderRequestContext(reasoningConfig = providerReasoningConfigFromEffort("low")),
+    )
+    val unsupportedEffort = applyFloveraOpenAIRequestProfileToJson(
+      requestJson = request,
+      requestProfile = profile.requestProfile,
+      modelContext = ModelContextSpec(),
+      requestContext = ProviderRequestContext(reasoningConfig = providerReasoningConfigFromEffort("xhigh")),
+    )
+    val off = applyFloveraOpenAIRequestProfileToJson(
+      requestJson = request,
+      requestProfile = profile.requestProfile,
+      modelContext = ModelContextSpec(),
+      requestContext = ProviderRequestContext(reasoningConfig = providerReasoningConfigFromEffort("none")),
+    )
+
+    assertTrue(defaultEffort.contains("\"reasoning_effort\":\"high\""))
+    assertTrue(low.contains("\"reasoning_effort\":\"low\""))
+    assertTrue(unsupportedEffort.contains("\"reasoning_effort\":\"high\""))
+    assertFalse(off.contains("\"reasoning_effort\""))
+  }
+
+  @Test
+  fun lmStudioReasoningHookMatchesHermesNoOptionsFallback() {
+    val request = """{"model":"local-model","messages":[]}"""
+    val profile = ModelProviderCatalog.runtimeProfileFor(
+      ModelProviderCatalog.requireProvider("lmstudio"),
+      AppSettings(provider = "lmstudio", model = "local-model"),
+    )
+
+    val unsupportedModel = applyFloveraOpenAIRequestProfileToJson(
+      requestJson = request,
+      requestProfile = profile.requestProfile,
+      modelContext = ModelContextSpec(),
+      requestContext = ProviderRequestContext(supportsReasoning = false),
+    )
+    val xhigh = applyFloveraOpenAIRequestProfileToJson(
+      requestJson = request,
+      requestProfile = profile.requestProfile,
+      modelContext = ModelContextSpec(),
+      requestContext = ProviderRequestContext(
+        supportsReasoning = true,
+        reasoningConfig = providerReasoningConfigFromEffort("xhigh"),
+      ),
+    )
+    val off = applyFloveraOpenAIRequestProfileToJson(
+      requestJson = request,
+      requestProfile = profile.requestProfile,
+      modelContext = ModelContextSpec(),
+      requestContext = ProviderRequestContext(
+        supportsReasoning = true,
+        reasoningConfig = providerReasoningConfigFromEffort("none"),
+      ),
+    )
+
+    assertFalse(unsupportedModel.contains("\"reasoning_effort\""))
+    assertTrue(xhigh.contains("\"reasoning_effort\":\"xhigh\""))
+    assertTrue(off.contains("\"reasoning_effort\":\"none\""))
+  }
+
+  @Test
   fun openAICompatibleProviderProfilesCarryContextMetadata() {
     val alibaba = ModelProviderCatalog.contextFor(AppSettings(provider = "alibaba", model = "qwen3-coder-plus"))
     val moonshot = ModelProviderCatalog.contextFor(AppSettings(provider = "moonshot", model = "kimi-k2-turbo-preview"))
@@ -369,6 +463,9 @@ class ProviderConfigInstrumentedTest {
     val ollamaCloud = ModelProviderCatalog.contextFor(
       AppSettings(provider = "ollama-cloud", model = "nemotron-3-nano:30b"),
     )
+    val tokenHub = ModelProviderCatalog.contextFor(
+      AppSettings(provider = "tencent-tokenhub", model = "hy3-preview"),
+    )
 
     assertEquals(1_000_000, alibaba.contextWindowTokens)
     assertEquals("hermes_model_metadata", alibaba.source)
@@ -376,6 +473,8 @@ class ProviderConfigInstrumentedTest {
     assertEquals(262_144, gmiKimi.contextWindowTokens)
     assertEquals(131_072, nvidia.contextWindowTokens)
     assertEquals(131_072, ollamaCloud.contextWindowTokens)
+    assertEquals(262_144, tokenHub.contextWindowTokens)
+    assertTrue(tokenHub.supportsReasoning)
     assertEquals(82, moonshot.compressionThresholdPercent)
   }
 

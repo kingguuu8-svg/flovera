@@ -52,6 +52,7 @@ data class AppSettings(
   fun apiKeyFor(providerId: String = provider): String {
     val keyed = providerApiKeys[providerId].orEmpty()
     if (keyed.isNotBlank()) return keyed
+    if (providerId == "lmstudio") return LMSTUDIO_NOAUTH_PLACEHOLDER
     return if (providerId == "deepseek") apiKey else ""
   }
 
@@ -87,6 +88,8 @@ data class AppSettings(
   }
 
   companion object {
+    const val LMSTUDIO_NOAUTH_PLACEHOLDER = "dummy-lm-api-key"
+
     fun modelContextOverrideKey(providerId: String, modelId: String): String {
       return "${providerId.trim()}:${modelId.trim()}"
     }

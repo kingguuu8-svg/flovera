@@ -73,6 +73,8 @@ data class ProviderRequestProfile(
   val injectOllamaNumCtx: Boolean = false,
   val injectOpenRouterRouting: Boolean = false,
   val injectKimiThinking: Boolean = false,
+  val injectTencentTokenHubReasoning: Boolean = false,
+  val injectLmStudioReasoning: Boolean = false,
   val omittedRequestFields: Set<String> = emptySet(),
   val addedRequestFields: Map<String, JsonElement> = emptyMap(),
 )
@@ -480,6 +482,16 @@ object ModelProviderCatalog {
       defaultContext = hermesContext(131_072),
     ),
     BuiltInProviderProfile(
+      id = "lmstudio",
+      label = "LM Studio",
+      apiKeyLabel = "LM Studio API key (optional)",
+      defaultModel = "local-model",
+      suggestedModels = listOf("local-model"),
+      aliases = setOf("lm-studio", "lm_studio"),
+      baseUrl = "http://127.0.0.1:1234/v1",
+      requestProfile = ProviderRequestProfile(injectLmStudioReasoning = true),
+    ),
+    BuiltInProviderProfile(
       id = "xiaomi",
       label = "Xiaomi MiMo",
       apiKeyLabel = "Xiaomi API key",
@@ -495,6 +507,18 @@ object ModelProviderCatalog {
         "mimo-v2-omni" to 262_144,
         "mimo-v2-flash" to 262_144,
       ),
+    ),
+    BuiltInProviderProfile(
+      id = "tencent-tokenhub",
+      label = "Tencent TokenHub",
+      apiKeyLabel = "Tencent TokenHub API key",
+      defaultModel = "hy3-preview",
+      suggestedModels = listOf("hy3-preview"),
+      aliases = setOf("tencent", "tokenhub", "tencent-cloud", "tencentmaas"),
+      baseUrl = "https://tokenhub.tencentmaas.com/v1",
+      defaultAuxModel = "hy3-preview",
+      requestProfile = ProviderRequestProfile(injectTencentTokenHubReasoning = true),
+      modelContexts = mapOf("hy3-preview" to reasoningContext(262_144)),
     ),
   )
 
