@@ -278,6 +278,7 @@ class ProviderConfigInstrumentedTest {
     assertEquals("https://api.x.ai/v1", profile.baseUrl)
     assertEquals("https://api.x.ai/v1/models", profile.modelsUrl)
     assertEquals("responses", profile.responsesPath)
+    assertEquals("models", profile.modelsPath)
     assertEquals("api_key", profile.authType.id)
     assertEquals("grok-4.3", profile.defaultAuxModel)
     assertEquals(1_000_000, ModelProviderCatalog.contextFor(settings).contextWindowTokens)

@@ -652,6 +652,7 @@ object ModelProviderCatalog {
       baseUrl = "https://api.x.ai/v1",
       modelsUrl = "https://api.x.ai/v1/models",
       responsesPath = "responses",
+      modelsPath = "models",
       defaultAuxModel = "grok-4.3",
       modelContexts = mapOf(
         "grok-4.3" to reasoningContext(1_000_000),
