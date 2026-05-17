@@ -1,8 +1,14 @@
 package com.flovera.app
 
 import ai.koog.prompt.llm.LLMProvider
+import ai.koog.prompt.executor.clients.openai.base.models.Content
+import ai.koog.prompt.executor.clients.openai.base.models.OpenAIMessage
+import ai.koog.prompt.executor.clients.openai.base.models.OpenAITool
+import ai.koog.prompt.executor.clients.openai.base.models.OpenAIToolChoice
 import ai.koog.prompt.executor.clients.openai.base.models.ReasoningEffort
 import ai.koog.prompt.executor.clients.openai.models.OpenAIInclude
+import ai.koog.prompt.llm.LLModel
+import ai.koog.prompt.params.LLMParams
 import androidx.test.platform.app.InstrumentationRegistry
 import com.flovera.app.config.AppSettings
 import com.flovera.app.config.CustomOpenAIProviderSettings
@@ -17,6 +23,7 @@ import com.flovera.app.koog.ModelProviderCatalog
 import com.flovera.app.koog.ProviderRequestContext
 import com.flovera.app.koog.ProviderRequestProfile
 import com.flovera.app.koog.ProviderTransport
+import com.flovera.app.koog.FloveraOpenAICompatibleLLMClient
 import com.flovera.app.koog.FloveraGoogleCloudCodeAssistLLMClient
 import com.flovera.app.koog.GoogleCloudCodeAssistCredentials
 import com.flovera.app.koog.applyFloveraOpenAIRequestProfileToJson
@@ -135,6 +142,168 @@ class ProviderConfigInstrumentedTest {
     assertEquals("openai-codex", ModelProviderCatalog.findProvider("openai_codex")?.id)
     assertEquals("minimax-oauth", ModelProviderCatalog.findProvider("minimax_oauth")?.id)
     assertEquals("minimax-oauth", ModelProviderCatalog.findProvider("minimax-oauth-io")?.id)
+  }
+
+  @Test
+  fun hermesProviderEquivalenceMatrixCoversCurrentCatalog() {
+    val fixtures = listOf(
+      ProviderEquivalenceFixture("deepseek", "ordinary-api", "api_key", "chat_completions", "flovera_deepseek_chat_completions", "https://api.deepseek.com"),
+      ProviderEquivalenceFixture("nous", "oauth-api", "oauth_device_code", "chat_completions", "flovera_openai_compatible_chat_completions", "https://inference-api.nousresearch.com/v1", listOf("inject_nous_portal_reasoning")),
+      ProviderEquivalenceFixture("qwen-oauth", "oauth-api", "oauth_external", "chat_completions", "flovera_openai_compatible_chat_completions", "https://portal.qwen.ai/v1", listOf("inject_qwen_portal_request_shape")),
+      ProviderEquivalenceFixture("openai", "ordinary-api", "api_key", "chat_completions", "flovera_openai_compatible_chat_completions", "https://api.openai.com/v1"),
+      ProviderEquivalenceFixture("azure-foundry", "ordinary-api-user-endpoint", "api_key", "chat_completions", "flovera_openai_compatible_chat_completions", ""),
+      ProviderEquivalenceFixture("ai-gateway", "ordinary-api", "api_key", "chat_completions", "flovera_openai_compatible_chat_completions", "https://ai-gateway.vercel.sh/v1", listOf("add_request_fields")),
+      ProviderEquivalenceFixture("alibaba", "ordinary-api", "api_key", "chat_completions", "flovera_openai_compatible_chat_completions", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"),
+      ProviderEquivalenceFixture("alibaba-coding-plan", "ordinary-api", "api_key", "chat_completions", "flovera_openai_compatible_chat_completions", "https://coding-intl.dashscope.aliyuncs.com/v1"),
+      ProviderEquivalenceFixture("moonshot", "ordinary-api", "api_key", "chat_completions", "flovera_openai_compatible_chat_completions", "https://api.moonshot.ai/v1", listOf("omit_request_fields", "inject_kimi_thinking")),
+      ProviderEquivalenceFixture("kimi-coding-cn", "ordinary-api", "api_key", "chat_completions", "flovera_openai_compatible_chat_completions", "https://api.moonshot.cn/v1", listOf("omit_request_fields", "inject_kimi_thinking")),
+      ProviderEquivalenceFixture("arcee", "ordinary-api", "api_key", "chat_completions", "flovera_openai_compatible_chat_completions", "https://api.arcee.ai/api/v1"),
+      ProviderEquivalenceFixture("gmi", "ordinary-api", "api_key", "chat_completions", "flovera_openai_compatible_chat_completions", "https://api.gmi-serving.com/v1"),
+      ProviderEquivalenceFixture("nvidia", "ordinary-api", "api_key", "chat_completions", "flovera_openai_compatible_chat_completions", "https://integrate.api.nvidia.com/v1"),
+      ProviderEquivalenceFixture("novita", "ordinary-api", "api_key", "chat_completions", "flovera_openai_compatible_chat_completions", "https://api.novita.ai/openai/v1"),
+      ProviderEquivalenceFixture("kilocode", "ordinary-api", "api_key", "chat_completions", "flovera_openai_compatible_chat_completions", "https://api.kilo.ai/api/gateway"),
+      ProviderEquivalenceFixture("opencode-zen", "ordinary-api", "api_key", "chat_completions", "flovera_openai_compatible_chat_completions", "https://opencode.ai/zen/v1"),
+      ProviderEquivalenceFixture("opencode-go", "ordinary-api", "api_key", "chat_completions", "flovera_openai_compatible_chat_completions", "https://opencode.ai/zen/go/v1"),
+      ProviderEquivalenceFixture("zai", "ordinary-api", "api_key", "chat_completions", "flovera_openai_compatible_chat_completions", "https://api.z.ai/api/paas/v4"),
+      ProviderEquivalenceFixture("stepfun", "ordinary-api", "api_key", "chat_completions", "flovera_openai_compatible_chat_completions", "https://api.stepfun.ai/step_plan/v1"),
+      ProviderEquivalenceFixture("huggingface", "ordinary-api", "api_key", "chat_completions", "flovera_openai_compatible_chat_completions", "https://router.huggingface.co/v1"),
+      ProviderEquivalenceFixture("ollama-cloud", "ordinary-api", "api_key", "chat_completions", "flovera_openai_compatible_chat_completions", "https://ollama.com/v1"),
+      ProviderEquivalenceFixture("lmstudio", "ordinary-api-local", "api_key", "chat_completions", "flovera_openai_compatible_chat_completions", "http://127.0.0.1:1234/v1", listOf("inject_lmstudio_reasoning")),
+      ProviderEquivalenceFixture("xiaomi", "ordinary-api", "api_key", "chat_completions", "flovera_openai_compatible_chat_completions", "https://api.xiaomimimo.com/v1"),
+      ProviderEquivalenceFixture("tencent-tokenhub", "ordinary-api", "api_key", "chat_completions", "flovera_openai_compatible_chat_completions", "https://tokenhub.tencentmaas.com/v1", listOf("inject_tencent_tokenhub_reasoning")),
+      ProviderEquivalenceFixture("custom-openai", "ordinary-api-user-endpoint", "api_key", "chat_completions", "flovera_openai_compatible_chat_completions", ""),
+      ProviderEquivalenceFixture("openai-codex", "oauth-api", "oauth_external", "codex_responses", "flovera_codex_responses", "https://chatgpt.com/backend-api/codex"),
+      ProviderEquivalenceFixture("copilot", "optional-api", "copilot", "codex_responses", "flovera_codex_responses", "https://api.githubcopilot.com", listOf("inject_copilot_reasoning")),
+      ProviderEquivalenceFixture("copilot-acp", "unsupported-boundary", "external_process", "chat_completions", "flovera_external_process", "acp://copilot"),
+      ProviderEquivalenceFixture("bedrock", "native-sdk-api", "aws_sdk", "bedrock_converse", "koog_bedrock_converse", "https://bedrock-runtime.us-east-1.amazonaws.com"),
+      ProviderEquivalenceFixture("gemini", "native-api", "api_key", "chat_completions", "koog_google_gemini_native", "https://generativelanguage.googleapis.com/v1beta"),
+      ProviderEquivalenceFixture("google-gemini-cli", "optional-oauth-api", "oauth_external", "chat_completions", "flovera_google_cloud_code_assist", "cloudcode-pa://google"),
+      ProviderEquivalenceFixture("xai", "ordinary-api", "api_key", "codex_responses", "flovera_codex_responses", "https://api.x.ai/v1"),
+      ProviderEquivalenceFixture("openrouter", "ordinary-api", "api_key", "chat_completions", "flovera_openai_compatible_chat_completions", "https://openrouter.ai/api/v1", listOf("inject_openrouter_routing")),
+      ProviderEquivalenceFixture("minimax", "ordinary-anthropic-api", "bearer_token", "anthropic_messages", "flovera_anthropic_messages", "https://api.minimax.io/anthropic"),
+      ProviderEquivalenceFixture("minimax-cn", "ordinary-anthropic-api", "bearer_token", "anthropic_messages", "flovera_anthropic_messages", "https://api.minimaxi.com/anthropic"),
+      ProviderEquivalenceFixture("minimax-oauth", "oauth-api", "oauth_external", "anthropic_messages", "flovera_anthropic_messages", "https://api.minimax.io/anthropic"),
+      ProviderEquivalenceFixture("anthropic", "ordinary-anthropic-api", "api_key", "anthropic_messages", "flovera_anthropic_messages", "https://api.anthropic.com"),
+    )
+
+    assertEquals(
+      fixtures.map { it.providerId }.toSet(),
+      ModelProviderCatalog.providers.map { it.id }.toSet(),
+    )
+
+    fixtures.forEach { fixture ->
+      val provider = ModelProviderCatalog.requireProvider(fixture.providerId)
+      val profile = ModelProviderCatalog.runtimeProfileFor(
+        provider,
+        AppSettings(provider = fixture.providerId, model = provider.defaultModel),
+      )
+
+      assertTrue(fixture.tier in providerEquivalenceTiers)
+      assertEquals(fixture.authType, profile.authType.id)
+      assertEquals(fixture.apiMode, profile.apiMode.id)
+      assertEquals(fixture.transport, profile.transport.id)
+      assertEquals(fixture.baseUrl, profile.baseUrl)
+      assertEquals(fixture.requestHookIds, profile.requestProfile.hookIds())
+      if (fixture.tier == "unsupported-boundary") {
+        assertFalse(profile.supportsHealthCheck)
+      }
+    }
+  }
+
+  @Test
+  fun dynamicProviderRoutesMatchHermesFixtures() {
+    val routeFixtures = listOf(
+      RouteFixture("copilot", "gpt-5", "codex_responses", "flovera_codex_responses", "responses"),
+      RouteFixture("copilot", "gpt-5-mini", "chat_completions", "flovera_openai_compatible_chat_completions", "/chat/completions"),
+      RouteFixture("copilot", "claude-sonnet-4.6", "anthropic_messages", "flovera_anthropic_messages", "/v1/messages"),
+      RouteFixture("azure-foundry", "gpt-5.3-codex", "codex_responses", "flovera_codex_responses", "models/responses"),
+      RouteFixture("azure-foundry", "gpt-4o", "chat_completions", "flovera_openai_compatible_chat_completions", "/models/chat/completions"),
+    )
+
+    routeFixtures.forEach { fixture ->
+      val settings = AppSettings(
+        provider = fixture.providerId,
+        model = fixture.model,
+        customOpenAIProvider = CustomOpenAIProviderSettings(
+          baseUrl = "https://example-resource.services.ai.azure.com",
+          chatCompletionsPath = "/models/chat/completions",
+        ),
+      )
+      val profile = ModelProviderCatalog.runtimeProfileFor(
+        ModelProviderCatalog.requireProvider(fixture.providerId),
+        settings,
+      )
+
+      assertEquals(fixture.apiMode, profile.apiMode.id)
+      assertEquals(fixture.transport, profile.transport.id)
+      assertEquals(
+        fixture.requestPath,
+        when (profile.apiMode.id) {
+          "codex_responses" -> profile.responsesPath
+          "anthropic_messages" -> profile.messagesPath
+          else -> profile.chatCompletionsPath
+        },
+      )
+    }
+  }
+
+  @Test
+  fun representativeOpenAICompatibleRequestsEmitHermesEquivalentGoldenBodies() {
+    val openRouter = openAICompatibleRequestProbe(
+      AppSettings(
+        provider = "openrouter",
+        model = "openrouter/pareto-code",
+        openRouterProvider = OpenRouterProviderSettings(
+          providerPreferences = JsonObject(mapOf("sort" to JsonPrimitive("latency"))),
+          minCodingScore = 0.7,
+        ),
+      ),
+    )
+    val copilot = openAICompatibleRequestProbe(
+      AppSettings(provider = "copilot", model = "gpt-5-mini", reasoningEffort = "xhigh"),
+    )
+    val kimi = openAICompatibleRequestProbe(
+      AppSettings(provider = "moonshot", model = "kimi-k2-turbo-preview", reasoningEffort = "high"),
+    )
+    val customOllama = openAICompatibleRequestProbe(
+      AppSettings(
+        provider = "custom-openai",
+        model = "local-model",
+        customOpenAIProvider = CustomOpenAIProviderSettings(
+          baseUrl = "https://local.example/v1",
+          chatCompletionsPath = "/chat/completions",
+          compatibilityMode = "ollama",
+        ),
+      ).withModelContextOverride(
+        providerId = "custom-openai",
+        modelId = "local-model",
+        override = ModelContextOverride(contextWindowTokens = 65_536),
+      ),
+    )
+
+    assertEquals("https://openrouter.ai/api/v1", openRouter.baseUrl)
+    assertEquals("/v1/chat/completions", openRouter.requestPath)
+    assertEquals("latency", openRouter.body["provider"]?.jsonObject?.get("sort")?.jsonPrimitive?.contentOrNull)
+    assertEquals(
+      "pareto-router",
+      openRouter.body["plugins"]?.jsonArray?.firstOrNull()?.jsonObject?.get("id")?.jsonPrimitive?.contentOrNull,
+    )
+    assertEquals("0.7", openRouter.body["plugins"]?.jsonArray?.firstOrNull()?.jsonObject?.get("min_coding_score")?.jsonPrimitive?.contentOrNull)
+
+    assertEquals("https://api.githubcopilot.com", copilot.baseUrl)
+    assertEquals("/chat/completions", copilot.requestPath)
+    assertEquals("vscode/1.104.1", copilot.headers["Editor-Version"])
+    assertEquals("conversation-edits", copilot.headers["Openai-Intent"])
+    assertEquals("high", copilot.body["reasoning"]?.jsonObject?.get("effort")?.jsonPrimitive?.contentOrNull)
+
+    assertEquals("https://api.moonshot.ai/v1", kimi.baseUrl)
+    assertEquals("hermes-agent/1.0", kimi.headers["User-Agent"])
+    assertEquals("enabled", kimi.body["thinking"]?.jsonObject?.get("type")?.jsonPrimitive?.contentOrNull)
+    assertEquals("high", kimi.body["reasoning_effort"]?.jsonPrimitive?.contentOrNull)
+
+    assertEquals("https://local.example/v1", customOllama.baseUrl)
+    assertEquals("/chat/completions", customOllama.requestPath)
+    assertEquals("65536", customOllama.body["options"]?.jsonObject?.get("num_ctx")?.jsonPrimitive?.contentOrNull)
   }
 
   @Test
@@ -1680,5 +1849,101 @@ class ProviderConfigInstrumentedTest {
       store.save(original)
       workspace.root.deleteRecursively()
     }
+  }
+
+  private data class ProviderEquivalenceFixture(
+    val providerId: String,
+    val tier: String,
+    val authType: String,
+    val apiMode: String,
+    val transport: String,
+    val baseUrl: String,
+    val requestHookIds: List<String> = emptyList(),
+  )
+
+  private data class RouteFixture(
+    val providerId: String,
+    val model: String,
+    val apiMode: String,
+    val transport: String,
+    val requestPath: String,
+  )
+
+  private data class OpenAICompatibleRequestProbe(
+    val baseUrl: String,
+    val requestPath: String,
+    val headers: Map<String, String>,
+    val body: JsonObject,
+  )
+
+  private fun openAICompatibleRequestProbe(settings: AppSettings): OpenAICompatibleRequestProbe {
+    val provider = ModelProviderCatalog.requireProvider(settings.provider)
+    val profile = ModelProviderCatalog.runtimeProfileFor(provider, settings)
+    val modelContext = ModelProviderCatalog.contextFor(settings)
+    val model = provider.createModel(settings.model, modelContext)
+    val requestContext = ProviderRequestContext(
+      providerId = profile.providerId,
+      supportsReasoning = modelContext.supportsReasoning,
+      reasoningConfig = providerReasoningConfigFromEffort(settings.reasoningEffort),
+      openRouterProviderPreferences = settings.openRouterProvider.providerPreferences,
+      openRouterMinCodingScore = settings.openRouterProvider.minCodingScore,
+    )
+    val client = TestOpenAICompatibleClient(
+      requestProfile = profile.requestProfile,
+      modelContext = modelContext,
+      requestContext = requestContext,
+    )
+    val body = client.serializeProviderChatRequest(
+      messages = listOf(OpenAIMessage.User(Content.Text("hello"))),
+      model = model,
+      tools = null,
+      toolChoice = null,
+      params = LLMParams(),
+      stream = false,
+    )
+
+    return OpenAICompatibleRequestProbe(
+      baseUrl = profile.baseUrl,
+      requestPath = profile.chatCompletionsPath,
+      headers = providerRuntimeHeaders(profile, settings),
+      body = Json.parseToJsonElement(body).jsonObject,
+    )
+  }
+
+  private class TestOpenAICompatibleClient(
+    requestProfile: ProviderRequestProfile,
+    modelContext: ModelContextSpec,
+    requestContext: ProviderRequestContext,
+  ) : FloveraOpenAICompatibleLLMClient(
+    apiKey = "test-key",
+    requestProfile = requestProfile,
+    modelContext = modelContext,
+    requestContext = requestContext,
+  ) {
+    public override fun serializeProviderChatRequest(
+      messages: List<OpenAIMessage>,
+      model: LLModel,
+      tools: List<OpenAITool>?,
+      toolChoice: OpenAIToolChoice?,
+      params: LLMParams,
+      stream: Boolean,
+    ): String {
+      return super.serializeProviderChatRequest(messages, model, tools, toolChoice, params, stream)
+    }
+  }
+
+  private companion object {
+    val providerEquivalenceTiers = setOf(
+      "ordinary-api",
+      "ordinary-api-local",
+      "ordinary-api-user-endpoint",
+      "ordinary-anthropic-api",
+      "oauth-api",
+      "optional-api",
+      "optional-oauth-api",
+      "native-api",
+      "native-sdk-api",
+      "unsupported-boundary",
+    )
   }
 }
