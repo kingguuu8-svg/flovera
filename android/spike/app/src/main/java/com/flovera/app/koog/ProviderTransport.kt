@@ -98,9 +98,9 @@ object ProviderTransportFactory {
         ),
       )
       ProviderTransport.KoogAnthropicMessages -> AnthropicLLMClient(apiKey)
-      ProviderTransport.FloveraGoogleCloudCodeAssist -> unsupportedProviderTransport(
+      ProviderTransport.FloveraGoogleCloudCodeAssist -> FloveraGoogleCloudCodeAssistLLMClient(
+        rawApiKey = apiKey,
         runtimeProfile = runtimeProfile,
-        detail = "Google Gemini CLI requires a Cloud Code Assist OAuth transport with project discovery and request translation.",
       )
       ProviderTransport.FloveraExternalProcess -> unsupportedProviderTransport(
         runtimeProfile = runtimeProfile,

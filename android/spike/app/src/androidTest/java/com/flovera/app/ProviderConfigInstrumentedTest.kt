@@ -17,7 +17,10 @@ import com.flovera.app.koog.ModelProviderCatalog
 import com.flovera.app.koog.ProviderRequestContext
 import com.flovera.app.koog.ProviderRequestProfile
 import com.flovera.app.koog.ProviderTransport
+import com.flovera.app.koog.FloveraGoogleCloudCodeAssistLLMClient
+import com.flovera.app.koog.GoogleCloudCodeAssistCredentials
 import com.flovera.app.koog.applyFloveraOpenAIRequestProfileToJson
+import com.flovera.app.koog.buildGoogleCloudCodeAssistRequest
 import com.flovera.app.koog.codexResponsesInclude
 import com.flovera.app.koog.codexResponsesReasoningConfig
 import com.flovera.app.koog.grokSupportsReasoningEffort
@@ -25,10 +28,16 @@ import com.flovera.app.koog.hookIds
 import com.flovera.app.koog.providerAnthropicRuntimeHeaders
 import com.flovera.app.koog.providerRuntimeHeaders
 import com.flovera.app.koog.providerReasoningConfigFromEffort
+import com.flovera.app.koog.translateGoogleCloudCodeAssistResponseToOpenAIJson
 import com.flovera.app.workspace.WorkspaceManager
 import java.io.File
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -341,20 +350,15 @@ class ProviderConfigInstrumentedTest {
   }
 
   @Test
-  fun externalHermesProfilesFailExplicitlyUntilTransportsAreImplemented() {
+  fun externalHermesProfilesCreateConcreteClientsOrFailExplicitly() {
     val geminiCli = ModelProviderCatalog.requireProvider("google-gemini-cli")
     val copilotAcp = ModelProviderCatalog.requireProvider("copilot-acp")
 
-    val geminiError = try {
-      ModelProviderCatalog.createClient(
-        geminiCli,
-        apiKey = "oauth-token",
-        settings = AppSettings(provider = "google-gemini-cli", model = "gemini-3-flash-preview"),
-      )
-      null
-    } catch (error: UnsupportedOperationException) {
-      error
-    }
+    val geminiClient = ModelProviderCatalog.createClient(
+      geminiCli,
+      apiKey = "oauth-token|flovera-project|managed-project",
+      settings = AppSettings(provider = "google-gemini-cli", model = "gemini-3-flash-preview"),
+    )
     val acpError = try {
       ModelProviderCatalog.createClient(
         copilotAcp,
@@ -366,10 +370,131 @@ class ProviderConfigInstrumentedTest {
       error
     }
 
-    assertTrue(geminiError?.message.orEmpty().contains("flovera_google_cloud_code_assist"))
-    assertTrue(geminiError?.message.orEmpty().contains("Cloud Code Assist OAuth transport"))
+    assertTrue(geminiClient is FloveraGoogleCloudCodeAssistLLMClient)
     assertTrue(acpError?.message.orEmpty().contains("flovera_external_process"))
     assertTrue(acpError?.message.orEmpty().contains("external process transport"))
+  }
+
+  @Test
+  fun googleCloudCodeAssistRequestTranslationMatchesHermesEnvelope() {
+    val credentials = GoogleCloudCodeAssistCredentials.from("oauth-token|flovera-project|managed-project")
+    val wrapped = buildGoogleCloudCodeAssistRequest(
+      openAIRequestJson = """
+        {
+          "model": "gemini-3-flash-preview",
+          "messages": [
+            {"role": "system", "content": "You are Flovera."},
+            {"role": "user", "content": "hello"},
+            {
+              "role": "assistant",
+              "content": "",
+              "tool_calls": [
+                {
+                  "id": "call_1",
+                  "type": "function",
+                  "function": {"name": "read_file", "arguments": "{\"path\":\"README.md\"}"}
+                }
+              ]
+            },
+            {"role": "tool", "tool_call_id": "read_file", "content": "{\"output\":\"ok\"}"}
+          ],
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "read_file",
+                "description": "Read a file",
+                "parameters": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {"type": "string"},
+                    "mode": {"type": "integer", "enum": [1, 2]}
+                  },
+                  "required": ["path"]
+                }
+              }
+            }
+          ],
+          "tool_choice": {"type": "function", "function": {"name": "read_file"}},
+          "temperature": 0.2,
+          "max_tokens": 64,
+          "top_p": 0.9,
+          "stop": ["END"],
+          "extra_body": {"thinking_config": {"thinking_budget": 256, "thinking_level": "HIGH", "include_thoughts": true}}
+        }
+      """.trimIndent(),
+      projectId = credentials.projectId,
+      userPromptId = "prompt-1",
+    )
+    val root = Json.parseToJsonElement(wrapped).jsonObject
+    val request = root["request"]!!.jsonObject
+    val contents = request["contents"]!!.jsonArray
+    val firstToolParameters = request["tools"]!!
+      .jsonArray[0]
+      .jsonObject["functionDeclarations"]!!
+      .jsonArray[0]
+      .jsonObject["parameters"]!!
+      .jsonObject
+
+    assertEquals("oauth-token", credentials.accessToken)
+    assertEquals("flovera-project", credentials.projectId)
+    assertEquals("managed-project", credentials.managedProjectId)
+    assertEquals("flovera-project", root["project"]!!.jsonPrimitive.content)
+    assertEquals("gemini-3-flash-preview", root["model"]!!.jsonPrimitive.content)
+    assertEquals("prompt-1", root["user_prompt_id"]!!.jsonPrimitive.content)
+    assertEquals("You are Flovera.", request["systemInstruction"]!!.jsonObject["parts"]!!.jsonArray[0].jsonObject["text"]!!.jsonPrimitive.content)
+    assertEquals("user", contents[0].jsonObject["role"]!!.jsonPrimitive.content)
+    assertEquals("model", contents[1].jsonObject["role"]!!.jsonPrimitive.content)
+    assertEquals("skip_thought_signature_validator", contents[1].jsonObject["parts"]!!.jsonArray[0].jsonObject["thoughtSignature"]!!.jsonPrimitive.content)
+    assertEquals("read_file", contents[2].jsonObject["parts"]!!.jsonArray[0].jsonObject["functionResponse"]!!.jsonObject["name"]!!.jsonPrimitive.content)
+    assertFalse(firstToolParameters.containsKey("additionalProperties"))
+    assertFalse(firstToolParameters["properties"]!!.jsonObject["mode"]!!.jsonObject.containsKey("enum"))
+    assertEquals("ANY", request["toolConfig"]!!.jsonObject["functionCallingConfig"]!!.jsonObject["mode"]!!.jsonPrimitive.content)
+    assertEquals(64, request["generationConfig"]!!.jsonObject["maxOutputTokens"]!!.jsonPrimitive.content.toInt())
+    assertEquals("high", request["generationConfig"]!!.jsonObject["thinkingConfig"]!!.jsonObject["thinkingLevel"]!!.jsonPrimitive.content)
+  }
+
+  @Test
+  fun googleCloudCodeAssistResponseTranslationMatchesOpenAIShape() {
+    val translated = translateGoogleCloudCodeAssistResponseToOpenAIJson(
+      codeAssistResponseJson = """
+        {
+          "response": {
+            "candidates": [
+              {
+                "finishReason": "STOP",
+                "content": {
+                  "parts": [
+                    {"thought": true, "text": "reasoning"},
+                    {"text": "hello"},
+                    {"functionCall": {"name": "write_file", "args": {"path": "README.md"}}}
+                  ]
+                }
+              }
+            ],
+            "usageMetadata": {
+              "promptTokenCount": 10,
+              "candidatesTokenCount": 5,
+              "totalTokenCount": 15,
+              "cachedContentTokenCount": 3
+            }
+          }
+        }
+      """.trimIndent(),
+      model = "gemini-3-flash-preview",
+    )
+    val root = Json.parseToJsonElement(translated).jsonObject
+    val choice = root["choices"]!!.jsonArray[0].jsonObject
+    val message = choice["message"]!!.jsonObject
+
+    assertEquals("chat.completion", root["object"]!!.jsonPrimitive.content)
+    assertEquals("gemini-3-flash-preview", root["model"]!!.jsonPrimitive.content)
+    assertEquals("tool_calls", choice["finish_reason"]!!.jsonPrimitive.content)
+    assertEquals("hello", message["content"]!!.jsonPrimitive.content)
+    assertEquals("reasoning", message["reasoning_content"]!!.jsonPrimitive.content)
+    assertEquals("write_file", message["tool_calls"]!!.jsonArray[0].jsonObject["function"]!!.jsonObject["name"]!!.jsonPrimitive.content)
+    assertEquals(3, root["usage"]!!.jsonObject["prompt_tokens_details"]!!.jsonObject["cached_tokens"]!!.jsonPrimitive.content.toInt())
   }
 
   @Test
