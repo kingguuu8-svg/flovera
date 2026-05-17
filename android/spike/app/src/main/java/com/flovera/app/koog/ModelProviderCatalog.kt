@@ -71,6 +71,7 @@ data class ProviderRuntimeProfile(
 data class ProviderRequestProfile(
   val compatibilityMode: String = "generic",
   val injectOllamaNumCtx: Boolean = false,
+  val injectOpenRouterRouting: Boolean = false,
   val omittedRequestFields: Set<String> = emptySet(),
   val addedRequestFields: Map<String, JsonElement> = emptyMap(),
 )
@@ -550,6 +551,7 @@ object ModelProviderCatalog {
       aliases = setOf("router", "or"),
       baseUrl = "https://openrouter.ai/api/v1",
       modelsUrl = "https://openrouter.ai/api/v1/models",
+      requestProfile = ProviderRequestProfile(injectOpenRouterRouting = true),
     ),
     ModelProviderSpec(
       id = "anthropic",

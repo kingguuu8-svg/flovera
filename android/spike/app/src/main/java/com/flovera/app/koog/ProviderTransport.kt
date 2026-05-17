@@ -69,6 +69,11 @@ object ProviderTransportFactory {
       providerIdentity = runtimeProfile.llmProvider,
       requestProfile = runtimeProfile.requestProfile,
       modelContext = modelContext,
+      requestContext = ProviderRequestContext(
+        providerId = runtimeProfile.providerId,
+        openRouterProviderPreferences = settings.openRouterProvider.providerPreferences,
+        openRouterMinCodingScore = settings.openRouterProvider.minCodingScore,
+      ),
       baseClient = openAICompatibleBaseClient(providerRuntimeHeaders(runtimeProfile, settings)),
     )
   }

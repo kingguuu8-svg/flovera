@@ -1,15 +1,30 @@
 package com.flovera.app.koog
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 enum class ProviderRequestHook(val id: String) {
   OmitRequestFields("omit_request_fields"),
   AddRequestFields("add_request_fields"),
   InjectOllamaNumCtx("inject_ollama_num_ctx"),
+  InjectOpenRouterRouting("inject_openrouter_routing"),
+}
+
+data class ProviderRequestContext(
+  val providerId: String = "",
+  val modelId: String = "",
+  val openRouterProviderPreferences: JsonObject = JsonObject(emptyMap()),
+  val openRouterMinCodingScore: Double? = null,
+)
+
+fun ProviderRequestContext.withModelId(modelId: String): ProviderRequestContext {
+  return copy(modelId = modelId)
 }
 
 fun ProviderRequestProfile.hookIds(): List<String> {
@@ -17,6 +32,7 @@ fun ProviderRequestProfile.hookIds(): List<String> {
     if (omittedRequestFields.isNotEmpty()) add(ProviderRequestHook.OmitRequestFields.id)
     if (addedRequestFields.isNotEmpty()) add(ProviderRequestHook.AddRequestFields.id)
     if (injectOllamaNumCtx) add(ProviderRequestHook.InjectOllamaNumCtx.id)
+    if (injectOpenRouterRouting) add(ProviderRequestHook.InjectOpenRouterRouting.id)
   }
 }
 
@@ -37,12 +53,14 @@ object ProviderRequestHooks {
     requestJson: String,
     requestProfile: ProviderRequestProfile,
     modelContext: ModelContextSpec,
+    requestContext: ProviderRequestContext = ProviderRequestContext(),
   ): String {
     if (requestProfile.hookIds().isEmpty()) return requestJson
     val root = requestHookJson.parseToJsonElement(requestJson).jsonObject.toMutableMap()
     applyOmitRequestFields(root, requestProfile.omittedRequestFields)
     applyAddRequestFields(root, requestProfile.addedRequestFields)
     applyOllamaNumCtx(root, requestProfile, modelContext)
+    applyOpenRouterRouting(root, requestProfile, requestContext)
     return requestHookJson.encodeToString(JsonObject.serializer(), JsonObject(root))
   }
 
@@ -74,6 +92,31 @@ object ProviderRequestHooks {
     val options = (root["options"] as? JsonObject)?.toMutableMap() ?: mutableMapOf<String, JsonElement>()
     options["num_ctx"] = JsonPrimitive(numCtx)
     root["options"] = JsonObject(options)
+  }
+
+  private fun applyOpenRouterRouting(
+    root: MutableMap<String, JsonElement>,
+    requestProfile: ProviderRequestProfile,
+    requestContext: ProviderRequestContext,
+  ) {
+    if (!requestProfile.injectOpenRouterRouting || requestContext.providerId != "openrouter") return
+    if (requestContext.openRouterProviderPreferences.isNotEmpty()) {
+      root["provider"] = requestContext.openRouterProviderPreferences
+    }
+    val modelId = requestContext.modelId.ifBlank {
+      root["model"]?.jsonPrimitive?.contentOrNull.orEmpty()
+    }
+    val score = requestContext.openRouterMinCodingScore?.takeIf { it in 0.0..1.0 }
+    if (modelId == "openrouter/pareto-code" && score != null) {
+      root["plugins"] = JsonArray(
+        listOf(
+          providerRequestObject(
+            "id" to providerRequestString("pareto-router"),
+            "min_coding_score" to JsonPrimitive(score),
+          ),
+        ),
+      )
+    }
   }
 }
 

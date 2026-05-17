@@ -6,11 +6,13 @@ import com.flovera.app.config.AppSettings
 import com.flovera.app.config.CustomOpenAIProviderSettings
 import com.flovera.app.config.ModelContextOverride
 import com.flovera.app.config.ModelSettingsDraft
+import com.flovera.app.config.OpenRouterProviderSettings
 import com.flovera.app.config.SettingsProposalChanges
 import com.flovera.app.config.SettingsController
 import com.flovera.app.config.SettingsStore
 import com.flovera.app.koog.ModelContextSpec
 import com.flovera.app.koog.ModelProviderCatalog
+import com.flovera.app.koog.ProviderRequestContext
 import com.flovera.app.koog.ProviderRequestProfile
 import com.flovera.app.koog.ProviderTransport
 import com.flovera.app.koog.applyFloveraOpenAIRequestProfileToJson
@@ -18,6 +20,8 @@ import com.flovera.app.koog.hookIds
 import com.flovera.app.koog.providerRuntimeHeaders
 import com.flovera.app.workspace.WorkspaceManager
 import java.io.File
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -194,6 +198,54 @@ class ProviderConfigInstrumentedTest {
         nonGrokSettings,
       ),
     )
+  }
+
+  @Test
+  fun openRouterRoutingRequestHookMatchesHermesBodyExtras() {
+    val preferences = JsonObject(
+      mapOf(
+        "sort" to JsonPrimitive("latency"),
+        "allow_fallbacks" to JsonPrimitive(false),
+      ),
+    )
+    val settings = AppSettings(
+      provider = "openrouter",
+      model = "openrouter/pareto-code",
+      openRouterProvider = OpenRouterProviderSettings(
+        providerPreferences = preferences,
+        minCodingScore = 0.7,
+      ),
+    )
+    val profile = ModelProviderCatalog.runtimeProfileFor(ModelProviderCatalog.requireProvider("openrouter"), settings)
+
+    val updated = applyFloveraOpenAIRequestProfileToJson(
+      requestJson = """{"model":"openrouter/pareto-code","messages":[]}""",
+      requestProfile = profile.requestProfile,
+      modelContext = ModelContextSpec(),
+      requestContext = ProviderRequestContext(
+        providerId = "openrouter",
+        modelId = "openrouter/pareto-code",
+        openRouterProviderPreferences = preferences,
+        openRouterMinCodingScore = 0.7,
+      ),
+    )
+    val nonPareto = applyFloveraOpenAIRequestProfileToJson(
+      requestJson = """{"model":"anthropic/claude-sonnet-4.6","messages":[]}""",
+      requestProfile = profile.requestProfile,
+      modelContext = ModelContextSpec(),
+      requestContext = ProviderRequestContext(
+        providerId = "openrouter",
+        modelId = "anthropic/claude-sonnet-4.6",
+        openRouterProviderPreferences = preferences,
+        openRouterMinCodingScore = 0.7,
+      ),
+    )
+
+    assertEquals(listOf("inject_openrouter_routing"), profile.requestProfile.hookIds())
+    assertTrue(updated.contains("\"provider\":{\"sort\":\"latency\",\"allow_fallbacks\":false}"))
+    assertTrue(updated.contains("\"plugins\":[{\"id\":\"pareto-router\",\"min_coding_score\":0.7}]"))
+    assertTrue(nonPareto.contains("\"provider\":{\"sort\":\"latency\",\"allow_fallbacks\":false}"))
+    assertFalse(nonPareto.contains("\"plugins\""))
   }
 
   @Test
@@ -401,6 +453,8 @@ class ProviderConfigInstrumentedTest {
           customOpenAIBaseUrl = "https://llm.example.com/",
           customOpenAIChatCompletionsPath = "v1/chat/completions",
           customOpenAICompatibilityMode = "ollama",
+          openRouterProviderPreferences = JsonObject(mapOf("sort" to JsonPrimitive("throughput"))),
+          openRouterMinCodingScore = 1.2,
           modelContextWindowTokens = 512_000,
           modelCompressionThresholdPercent = 75,
         ),
@@ -417,6 +471,8 @@ class ProviderConfigInstrumentedTest {
       assertEquals("https://llm.example.com", updated.customOpenAIProvider.baseUrl)
       assertEquals("/v1/chat/completions", updated.customOpenAIProvider.chatCompletionsPath)
       assertEquals("ollama", updated.customOpenAIProvider.compatibilityMode)
+      assertEquals("throughput", updated.openRouterProvider.providerPreferences["sort"]?.toString()?.trim('"'))
+      assertEquals(null, updated.openRouterProvider.minCodingScore)
       val override = updated.modelContextOverrideFor("deepseek", "deepseek-v4-pro")
       assertEquals(512_000, override?.contextWindowTokens)
       assertEquals(75, override?.compressionThresholdPercent)

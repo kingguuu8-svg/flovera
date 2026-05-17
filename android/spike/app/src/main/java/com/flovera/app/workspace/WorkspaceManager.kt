@@ -13,6 +13,7 @@ import java.io.File
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 
 data class WorkspaceFileNode(
   val name: String,
@@ -469,7 +470,10 @@ data class FloveraSettingsView(
   val customOpenAIBaseUrl: String = "",
   val customOpenAIChatCompletionsPath: String = "/v1/chat/completions",
   val customOpenAICompatibilityMode: String = "generic",
+  val openRouterProviderPreferences: JsonObject = JsonObject(emptyMap()),
+  val openRouterMinCodingScore: Double? = null,
   val providerInjectsOllamaNumCtx: Boolean = false,
+  val providerInjectsOpenRouterRouting: Boolean = false,
   val providerRequestHookIds: List<String> = emptyList(),
   val providerRequestOmittedFields: List<String> = emptyList(),
   val providerRequestAddedFields: List<String> = emptyList(),
@@ -530,6 +534,7 @@ data class FloveraCapabilities(
   val modelContextOverrides: Boolean = true,
   val deepSeekThinkingEffort: Boolean = true,
   val customOpenAICompatibleProvider: Boolean = true,
+  val openRouterRouting: Boolean = true,
   val customUrlRouting: Boolean = true,
   val providerProfiles: Boolean = true,
   val providerApiModes: List<String> = listOf("chat_completions", "anthropic_messages"),

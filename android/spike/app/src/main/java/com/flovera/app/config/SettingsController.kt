@@ -2,6 +2,7 @@ package com.flovera.app.config
 
 import com.flovera.app.koog.ModelProviderCatalog
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonObject
 
 private const val RECENT_HTML_LIMIT = 12
 
@@ -30,7 +31,7 @@ class SettingsController(private val store: SettingsStore) {
           ),
         ),
       ),
-    )
+    ).let { normalizeOpenRouterProvider(it) }
     if (normalized != loaded) store.save(normalized)
     return result.copy(settings = normalized)
   }
@@ -148,6 +149,11 @@ class SettingsController(private val store: SettingsStore) {
         compatibilityMode = changes.customOpenAICompatibilityMode?.let { normalizeCustomOpenAICompatibilityMode(it) }
           ?: settings.customOpenAIProvider.compatibilityMode,
       ),
+      openRouterProvider = settings.openRouterProvider.copy(
+        providerPreferences = changes.openRouterProviderPreferences ?: settings.openRouterProvider.providerPreferences,
+        minCodingScore = changes.openRouterMinCodingScore?.let { normalizeOpenRouterMinCodingScore(it) }
+          ?: settings.openRouterProvider.minCodingScore,
+      ),
     ).withMergedModelContextOverride(provider.id, model, changes)
     store.save(updated)
     return updated
@@ -233,6 +239,14 @@ class SettingsController(private val store: SettingsStore) {
     return settings.copy(deepSeekThinkingEffort = normalizeDeepSeekThinkingEffortId(settings.deepSeekThinkingEffort))
   }
 
+  private fun normalizeOpenRouterProvider(settings: AppSettings): AppSettings {
+    return settings.copy(
+      openRouterProvider = settings.openRouterProvider.copy(
+        minCodingScore = settings.openRouterProvider.minCodingScore?.let { normalizeOpenRouterMinCodingScore(it) },
+      ),
+    )
+  }
+
   private fun AppSettings.withMergedModelContextOverride(
     providerId: String,
     modelId: String,
@@ -306,6 +320,10 @@ class SettingsController(private val store: SettingsStore) {
     }
   }
 
+  private fun normalizeOpenRouterMinCodingScore(score: Double): Double? {
+    return score.takeIf { it in 0.0..1.0 }
+  }
+
   private fun normalizeHtmlPathList(paths: List<String>): List<String> {
     return paths.map { it.trim() }
       .filter { it.isNotBlank() }
@@ -335,6 +353,8 @@ data class SettingsProposalChanges(
   val customOpenAIBaseUrl: String? = null,
   val customOpenAIChatCompletionsPath: String? = null,
   val customOpenAICompatibilityMode: String? = null,
+  val openRouterProviderPreferences: JsonObject? = null,
+  val openRouterMinCodingScore: Double? = null,
   val modelContextWindowTokens: Int? = null,
   val modelCompressionThresholdPercent: Int? = null,
 )

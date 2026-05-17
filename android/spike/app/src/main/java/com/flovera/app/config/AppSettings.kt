@@ -1,6 +1,7 @@
 package com.flovera.app.config
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonObject
 
 @Serializable
 data class ModelContextOverride(
@@ -14,6 +15,12 @@ data class CustomOpenAIProviderSettings(
   val baseUrl: String = "",
   val chatCompletionsPath: String = "/v1/chat/completions",
   val compatibilityMode: String = "generic",
+)
+
+@Serializable
+data class OpenRouterProviderSettings(
+  val providerPreferences: JsonObject = JsonObject(emptyMap()),
+  val minCodingScore: Double? = null,
 )
 
 @Serializable
@@ -39,6 +46,7 @@ data class AppSettings(
   val deepSeekThinkingEffort: String = "high",
   val modelContextOverrides: Map<String, ModelContextOverride> = emptyMap(),
   val customOpenAIProvider: CustomOpenAIProviderSettings = CustomOpenAIProviderSettings(),
+  val openRouterProvider: OpenRouterProviderSettings = OpenRouterProviderSettings(),
 ) {
   fun apiKeyFor(providerId: String = provider): String {
     val keyed = providerApiKeys[providerId].orEmpty()

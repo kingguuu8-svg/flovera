@@ -18,6 +18,7 @@ open class FloveraOpenAICompatibleLLMClient(
   private val providerIdentity: LLMProvider = LLMProvider.OpenAI,
   private val requestProfile: ProviderRequestProfile = ProviderRequestProfile(),
   private val modelContext: ModelContextSpec = ModelContextSpec(),
+  private val requestContext: ProviderRequestContext = ProviderRequestContext(),
   baseClient: HttpClient = HttpClient(),
   clock: Clock = Clock.System,
   toolsConverter: OpenAICompatibleToolDescriptorSchemaGenerator = OpenAICompatibleToolDescriptorSchemaGenerator(),
@@ -42,6 +43,7 @@ open class FloveraOpenAICompatibleLLMClient(
       requestJson = super.serializeProviderChatRequest(messages, model, tools, toolChoice, params, stream),
       requestProfile = requestProfile,
       modelContext = modelContext,
+      requestContext = requestContext.withModelId(model.id),
     )
   }
 }
@@ -50,10 +52,12 @@ fun applyFloveraOpenAIRequestProfileToJson(
   requestJson: String,
   requestProfile: ProviderRequestProfile,
   modelContext: ModelContextSpec,
+  requestContext: ProviderRequestContext = ProviderRequestContext(),
 ): String {
   return ProviderRequestHooks.apply(
     requestJson = requestJson,
     requestProfile = requestProfile,
     modelContext = modelContext,
+    requestContext = requestContext,
   )
 }
