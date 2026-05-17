@@ -124,7 +124,7 @@ class ProviderConfigInstrumentedTest {
     assertEquals(1_048_576, xiaomi.contextFor("mimo-v2.5-pro").contextWindowTokens)
     assertEquals("glm-5", opencodeGo.defaultAuxModel)
     assertEquals("https://api.moonshot.cn/v1", kimiCn.baseUrl)
-    assertEquals(listOf("omit_request_fields", "add_request_fields"), kimiCn.requestProfile.hookIds())
+    assertEquals(listOf("omit_request_fields", "inject_kimi_thinking"), kimiCn.requestProfile.hookIds())
   }
 
   @Test
@@ -317,11 +317,45 @@ class ProviderConfigInstrumentedTest {
     )
 
     assertTrue(profile.requestProfile.omittedRequestFields.contains("temperature"))
-    assertEquals(listOf("omit_request_fields", "add_request_fields"), profile.requestProfile.hookIds())
+    assertEquals(listOf("omit_request_fields", "inject_kimi_thinking"), profile.requestProfile.hookIds())
     assertFalse(updated.contains("\"temperature\""))
     assertTrue(updated.contains("\"top_p\":0.9"))
     assertTrue(updated.contains("\"thinking\":{\"type\":\"enabled\"}"))
     assertTrue(updated.contains("\"reasoning_effort\":\"medium\""))
+  }
+
+  @Test
+  fun kimiThinkingHookMatchesHermesReasoningEffortMapping() {
+    val request = """{"model":"kimi-k2","messages":[],"temperature":0.7}"""
+    val profile = ModelProviderCatalog.runtimeProfileFor(
+      ModelProviderCatalog.requireProvider("moonshot"),
+      AppSettings(provider = "moonshot", model = "kimi-k2-turbo-preview"),
+    )
+
+    val high = applyFloveraOpenAIRequestProfileToJson(
+      requestJson = request,
+      requestProfile = profile.requestProfile,
+      modelContext = ModelContextSpec(),
+      requestContext = ProviderRequestContext(reasoningConfig = providerReasoningConfigFromEffort("high")),
+    )
+    val unsupportedEffort = applyFloveraOpenAIRequestProfileToJson(
+      requestJson = request,
+      requestProfile = profile.requestProfile,
+      modelContext = ModelContextSpec(),
+      requestContext = ProviderRequestContext(reasoningConfig = providerReasoningConfigFromEffort("xhigh")),
+    )
+    val off = applyFloveraOpenAIRequestProfileToJson(
+      requestJson = request,
+      requestProfile = profile.requestProfile,
+      modelContext = ModelContextSpec(),
+      requestContext = ProviderRequestContext(reasoningConfig = providerReasoningConfigFromEffort("none")),
+    )
+
+    assertTrue(high.contains("\"thinking\":{\"type\":\"enabled\"}"))
+    assertTrue(high.contains("\"reasoning_effort\":\"high\""))
+    assertTrue(unsupportedEffort.contains("\"reasoning_effort\":\"medium\""))
+    assertTrue(off.contains("\"thinking\":{\"type\":\"disabled\"}"))
+    assertFalse(off.contains("\"reasoning_effort\""))
   }
 
   @Test

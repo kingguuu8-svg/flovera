@@ -72,6 +72,7 @@ data class ProviderRequestProfile(
   val compatibilityMode: String = "generic",
   val injectOllamaNumCtx: Boolean = false,
   val injectOpenRouterRouting: Boolean = false,
+  val injectKimiThinking: Boolean = false,
   val omittedRequestFields: Set<String> = emptySet(),
   val addedRequestFields: Map<String, JsonElement> = emptyMap(),
 )
@@ -245,11 +246,8 @@ object ModelProviderCatalog {
       defaultHeaders = mapOf("User-Agent" to "hermes-agent/1.0"),
       defaultAuxModel = "kimi-k2-turbo-preview",
       requestProfile = ProviderRequestProfile(
+        injectKimiThinking = true,
         omittedRequestFields = setOf("temperature"),
-        addedRequestFields = mapOf(
-          "thinking" to providerRequestObject("type" to providerRequestString("enabled")),
-          "reasoning_effort" to providerRequestString("medium"),
-        ),
       ),
       modelContexts = contextMap(
         "kimi-k2-turbo-preview" to 262_144,
@@ -270,11 +268,8 @@ object ModelProviderCatalog {
       defaultHeaders = mapOf("User-Agent" to "hermes-agent/1.0"),
       defaultAuxModel = "kimi-k2-turbo-preview",
       requestProfile = ProviderRequestProfile(
+        injectKimiThinking = true,
         omittedRequestFields = setOf("temperature"),
-        addedRequestFields = mapOf(
-          "thinking" to providerRequestObject("type" to providerRequestString("enabled")),
-          "reasoning_effort" to providerRequestString("medium"),
-        ),
       ),
       modelContexts = contextMap(
         "kimi-k2-turbo-preview" to 262_144,

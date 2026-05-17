@@ -14,6 +14,7 @@ enum class ProviderRequestHook(val id: String) {
   AddRequestFields("add_request_fields"),
   InjectOllamaNumCtx("inject_ollama_num_ctx"),
   InjectOpenRouterRouting("inject_openrouter_routing"),
+  InjectKimiThinking("inject_kimi_thinking"),
 }
 
 data class ProviderRequestContext(
@@ -35,6 +36,7 @@ fun ProviderRequestProfile.hookIds(): List<String> {
     if (addedRequestFields.isNotEmpty()) add(ProviderRequestHook.AddRequestFields.id)
     if (injectOllamaNumCtx) add(ProviderRequestHook.InjectOllamaNumCtx.id)
     if (injectOpenRouterRouting) add(ProviderRequestHook.InjectOpenRouterRouting.id)
+    if (injectKimiThinking) add(ProviderRequestHook.InjectKimiThinking.id)
   }
 }
 
@@ -75,6 +77,7 @@ object ProviderRequestHooks {
     applyAddRequestFields(root, requestProfile.addedRequestFields)
     applyOllamaNumCtx(root, requestProfile, modelContext)
     applyOpenRouterRouting(root, requestProfile, requestContext)
+    applyKimiThinking(root, requestProfile, requestContext)
     return requestHookJson.encodeToString(JsonObject.serializer(), JsonObject(root))
   }
 
@@ -137,6 +140,29 @@ object ProviderRequestHooks {
         ),
       )
     }
+  }
+
+  private fun applyKimiThinking(
+    root: MutableMap<String, JsonElement>,
+    requestProfile: ProviderRequestProfile,
+    requestContext: ProviderRequestContext,
+  ) {
+    if (!requestProfile.injectKimiThinking) return
+    val reasoningConfig = requestContext.reasoningConfig
+    val disabled = reasoningConfig?.get("enabled")?.jsonPrimitive?.contentOrNull == "false"
+    root["thinking"] = providerRequestObject(
+      "type" to providerRequestString(if (disabled) "disabled" else "enabled"),
+    )
+    if (disabled) {
+      root.remove("reasoning_effort")
+      return
+    }
+    val effort = reasoningConfig?.get("effort")?.jsonPrimitive?.contentOrNull
+      ?.trim()
+      ?.lowercase()
+      ?.takeIf { it in setOf("low", "medium", "high") }
+      ?: "medium"
+    root["reasoning_effort"] = providerRequestString(effort)
   }
 }
 
