@@ -763,7 +763,7 @@ object ModelProviderCatalog {
       llmProvider = LLMProvider.Anthropic,
       transport = ProviderTransport.FloveraAnthropicMessages,
       apiMode = ProviderApiMode.AnthropicMessages,
-      aliases = setOf("minimax-global"),
+      aliases = setOf("mini-max", "minimax-global"),
       baseUrl = "https://api.minimax.io/anthropic",
       modelsUrl = "https://api.minimax.io/anthropic/v1/models",
       authType = ProviderAuthType.BearerToken,

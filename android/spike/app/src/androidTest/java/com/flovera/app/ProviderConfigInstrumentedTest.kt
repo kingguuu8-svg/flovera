@@ -64,6 +64,7 @@ class ProviderConfigInstrumentedTest {
   @Test
   fun providerCatalogNormalizesAliasesToCanonicalProfiles() {
     assertEquals("anthropic", ModelProviderCatalog.findProvider("claude")?.id)
+    assertEquals("custom-openai", ModelProviderCatalog.findProvider("custom")?.id)
     assertEquals("custom-openai", ModelProviderCatalog.findProvider("ollama")?.id)
     assertEquals("openrouter", ModelProviderCatalog.findProvider("router")?.id)
     assertEquals("openrouter", ModelProviderCatalog.findProvider("or")?.id)
@@ -72,6 +73,7 @@ class ProviderConfigInstrumentedTest {
     assertEquals("huggingface", ModelProviderCatalog.findProvider("hf")?.id)
     assertEquals("nvidia", ModelProviderCatalog.findProvider("nvidia-nim")?.id)
     assertEquals("novita", ModelProviderCatalog.findProvider("novitaai")?.id)
+    assertEquals("moonshot", ModelProviderCatalog.findProvider("kimi-coding")?.id)
     assertEquals("moonshot", ModelProviderCatalog.findProvider("kimi")?.id)
     assertEquals("ai-gateway", ModelProviderCatalog.findProvider("vercel")?.id)
     assertEquals("alibaba-coding-plan", ModelProviderCatalog.findProvider("alibaba_coding")?.id)
@@ -85,6 +87,7 @@ class ProviderConfigInstrumentedTest {
     assertEquals("lmstudio", ModelProviderCatalog.findProvider("lm_studio")?.id)
     assertEquals("tencent-tokenhub", ModelProviderCatalog.findProvider("tencent")?.id)
     assertEquals("tencent-tokenhub", ModelProviderCatalog.findProvider("tokenhub")?.id)
+    assertEquals("minimax", ModelProviderCatalog.findProvider("mini-max")?.id)
     assertEquals("minimax", ModelProviderCatalog.findProvider("minimax-global")?.id)
     assertEquals("minimax-cn", ModelProviderCatalog.findProvider("minimax-china")?.id)
     assertEquals("minimax-cn", ModelProviderCatalog.findProvider("minimax_cn")?.id)
@@ -101,6 +104,8 @@ class ProviderConfigInstrumentedTest {
     assertEquals("azure-foundry", ModelProviderCatalog.findProvider("azure")?.id)
     assertEquals("azure-foundry", ModelProviderCatalog.findProvider("azure-ai-foundry")?.id)
     assertEquals("azure-foundry", ModelProviderCatalog.findProvider("azure-ai")?.id)
+    assertEquals("stepfun", ModelProviderCatalog.findProvider("step")?.id)
+    assertEquals("stepfun", ModelProviderCatalog.findProvider("stepfun-coding-plan")?.id)
     assertEquals("nous", ModelProviderCatalog.findProvider("nous-portal")?.id)
     assertEquals("nous", ModelProviderCatalog.findProvider("nousresearch")?.id)
     assertEquals("qwen-oauth", ModelProviderCatalog.findProvider("qwen")?.id)
