@@ -17,6 +17,7 @@ import com.flovera.app.koog.ProviderRequestProfile
 import com.flovera.app.koog.ProviderTransport
 import com.flovera.app.koog.applyFloveraOpenAIRequestProfileToJson
 import com.flovera.app.koog.hookIds
+import com.flovera.app.koog.providerAnthropicRuntimeHeaders
 import com.flovera.app.koog.providerRuntimeHeaders
 import com.flovera.app.koog.providerReasoningConfigFromEffort
 import com.flovera.app.workspace.WorkspaceManager
@@ -42,7 +43,7 @@ class ProviderConfigInstrumentedTest {
 
   @Test
   fun providerCatalogHasDefaultModels() {
-    assertTrue(ModelProviderCatalog.providers.size >= 24)
+    assertTrue(ModelProviderCatalog.providers.size >= 26)
     ModelProviderCatalog.providers.forEach { provider ->
       assertTrue(provider.id.isNotBlank())
       assertTrue(provider.defaultModel.isNotBlank())
@@ -77,6 +78,9 @@ class ProviderConfigInstrumentedTest {
     assertEquals("lmstudio", ModelProviderCatalog.findProvider("lm_studio")?.id)
     assertEquals("tencent-tokenhub", ModelProviderCatalog.findProvider("tencent")?.id)
     assertEquals("tencent-tokenhub", ModelProviderCatalog.findProvider("tokenhub")?.id)
+    assertEquals("minimax", ModelProviderCatalog.findProvider("minimax-global")?.id)
+    assertEquals("minimax-cn", ModelProviderCatalog.findProvider("minimax-china")?.id)
+    assertEquals("minimax-cn", ModelProviderCatalog.findProvider("minimax_cn")?.id)
   }
 
   @Test
@@ -169,7 +173,7 @@ class ProviderConfigInstrumentedTest {
       ModelProviderCatalog.requireProvider("deepseek").transport,
     )
     assertEquals(
-      ProviderTransport.KoogAnthropicMessages,
+      ProviderTransport.FloveraAnthropicMessages,
       ModelProviderCatalog.requireProvider("anthropic").transport,
     )
     assertEquals(
@@ -559,6 +563,40 @@ class ProviderConfigInstrumentedTest {
     assertEquals("anthropic_messages", provider.apiMode.id)
     assertTrue(provider.aliases.contains("claude-code"))
     assertEquals("https://api.anthropic.com", provider.baseUrl)
+    assertEquals(ProviderTransport.FloveraAnthropicMessages, provider.transport)
+    assertEquals("/v1/messages", provider.messagesPath)
+    assertEquals("interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14", provider.defaultHeaders["anthropic-beta"])
+    val headers = providerAnthropicRuntimeHeaders(ModelProviderCatalog.runtimeProfileFor(provider, AppSettings()), "anthropic-key")
+    assertEquals("anthropic-key", headers["x-api-key"])
+    assertEquals("2023-06-01", headers["anthropic-version"])
+    assertFalse("Authorization" in headers)
+  }
+
+  @Test
+  fun minimaxAnthropicProfilesMirrorHermesEndpointAndAuthMetadata() {
+    val minimax = ModelProviderCatalog.runtimeProfileFor(
+      ModelProviderCatalog.requireProvider("minimax"),
+      AppSettings(provider = "minimax", model = "MiniMax-M2.7"),
+    )
+    val minimaxCn = ModelProviderCatalog.runtimeProfileFor(
+      ModelProviderCatalog.requireProvider("minimax-cn"),
+      AppSettings(provider = "minimax-cn", model = "MiniMax-M2.7"),
+    )
+
+    assertEquals("anthropic_messages", minimax.apiMode.id)
+    assertEquals(ProviderTransport.FloveraAnthropicMessages, minimax.transport)
+    assertEquals("https://api.minimax.io/anthropic", minimax.baseUrl)
+    assertEquals("/v1/messages", minimax.messagesPath)
+    assertEquals("/v1/models", minimax.modelsPath)
+    assertEquals("bearer_token", minimax.authType.id)
+    assertEquals("interleaved-thinking-2025-05-14", minimax.defaultHeaders["anthropic-beta"])
+    assertEquals(131_072, ModelProviderCatalog.contextFor(AppSettings(provider = "minimax", model = "MiniMax-M2.7")).contextWindowTokens)
+    assertEquals("https://api.minimaxi.com/anthropic", minimaxCn.baseUrl)
+    assertEquals("bearer_token", minimaxCn.authType.id)
+    val headers = providerAnthropicRuntimeHeaders(minimax, "minimax-key")
+    assertEquals("Bearer minimax-key", headers["Authorization"])
+    assertEquals("2023-06-01", headers["anthropic-version"])
+    assertFalse("x-api-key" in headers)
   }
 
   @Test

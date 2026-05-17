@@ -1,16 +1,22 @@
 package com.flovera.app.koog
 
 import ai.koog.prompt.executor.clients.LLMClient
+import ai.koog.http.client.KoogHttpClient
 import ai.koog.prompt.executor.clients.anthropic.AnthropicLLMClient
+import ai.koog.prompt.executor.clients.anthropic.AnthropicClientSettings
 import ai.koog.prompt.executor.clients.openai.OpenAIClientSettings
+import ai.koog.http.client.ktor.fromKtorClient
 import com.flovera.app.config.AppSettings
+import io.github.oshai.kotlinlogging.KotlinLogging
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.defaultRequest
 import io.ktor.client.request.header
+import kotlinx.serialization.json.Json
 
 enum class ProviderTransport(val id: String) {
   FloveraDeepSeekChatCompletions("flovera_deepseek_chat_completions"),
   FloveraOpenAICompatibleChatCompletions("flovera_openai_compatible_chat_completions"),
+  FloveraAnthropicMessages("flovera_anthropic_messages"),
   KoogAnthropicMessages("koog_anthropic_messages"),
 }
 
@@ -49,6 +55,10 @@ object ProviderTransportFactory {
         apiKey = apiKey,
         settings = settings,
         modelContext = modelContext,
+      )
+      ProviderTransport.FloveraAnthropicMessages -> createAnthropicMessagesClient(
+        runtimeProfile = runtimeProfile,
+        apiKey = apiKey,
       )
       ProviderTransport.KoogAnthropicMessages -> AnthropicLLMClient(apiKey)
     }
@@ -90,4 +100,48 @@ object ProviderTransportFactory {
       }
     }
   }
+
+  private fun createAnthropicMessagesClient(
+    runtimeProfile: ProviderRuntimeProfile,
+    apiKey: String,
+  ): LLMClient {
+    val settings = AnthropicClientSettings(
+      baseUrl = runtimeProfile.requireBaseUrl(),
+      messagesPath = runtimeProfile.messagesPath,
+      modelsPath = runtimeProfile.modelsPath,
+    )
+    return AnthropicLLMClient(
+      settings = settings,
+      httpClient = KoogHttpClient.fromKtorClient(
+        clientName = "FloveraAnthropicMessagesClient",
+        logger = logger,
+        baseClient = HttpClient(),
+        baseUrl = runtimeProfile.requireBaseUrl(),
+        requestTimeoutMillis = 900_000,
+        connectTimeoutMillis = 10_000,
+        socketTimeoutMillis = 900_000,
+        json = anthropicJson,
+        headers = providerAnthropicRuntimeHeaders(runtimeProfile, apiKey),
+      ),
+    )
+  }
+
+  private val logger = KotlinLogging.logger { }
+  private val anthropicJson = Json {
+    ignoreUnknownKeys = true
+    encodeDefaults = false
+  }
+}
+
+fun providerAnthropicRuntimeHeaders(
+  runtimeProfile: ProviderRuntimeProfile,
+  apiKey: String,
+): Map<String, String> {
+  val headers = runtimeProfile.defaultHeaders.toMutableMap()
+  when (runtimeProfile.authType) {
+    ProviderAuthType.BearerToken -> headers["Authorization"] = "Bearer $apiKey"
+    else -> headers["x-api-key"] = apiKey
+  }
+  headers["anthropic-version"] = "2023-06-01"
+  return headers
 }
