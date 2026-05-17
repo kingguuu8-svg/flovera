@@ -9,6 +9,7 @@ import ai.koog.prompt.executor.clients.openai.OpenAIResponsesParams
 import ai.koog.prompt.executor.clients.openai.base.models.ReasoningEffort
 import ai.koog.prompt.executor.clients.openai.models.OpenAIInclude
 import ai.koog.prompt.executor.clients.openai.models.ReasoningConfig
+import ai.koog.prompt.executor.clients.openai.models.ReasoningSummary
 import ai.koog.prompt.llm.LLMProvider
 import ai.koog.prompt.llm.LLModel
 import ai.koog.prompt.message.Message
@@ -84,14 +85,14 @@ fun FloveraCodexResponsesRequestSettings.toResponsesParams(
   )
   return OpenAIResponsesParams(
     temperature = params.temperature,
-    maxTokens = params.maxTokens,
+    maxTokens = params.maxTokens.takeUnless { providerId == "openai-codex" },
     numberOfChoices = params.numberOfChoices,
     speculation = params.speculation,
     schema = params.schema,
     toolChoice = params.toolChoice,
     user = params.user,
     additionalProperties = params.additionalProperties,
-    include = emptyList<OpenAIInclude>(),
+    include = codexResponsesInclude(providerId, reasoning),
     parallelToolCalls = true,
     reasoning = reasoning,
     promptCacheKey = normalizedSessionId,
@@ -107,7 +108,19 @@ fun codexResponsesReasoningConfig(
 ): ReasoningConfig? {
   val effort = normalizedCodexResponsesReasoningEffort(requestedEffort) ?: return null
   if (providerId == "xai" && !grokSupportsReasoningEffort(modelId)) return null
-  return ReasoningConfig(effort = effort, summary = null)
+  val summary = if (providerId == "xai") null else ReasoningSummary.AUTO
+  return ReasoningConfig(effort = effort, summary = summary)
+}
+
+fun codexResponsesInclude(
+  providerId: String,
+  reasoning: ReasoningConfig?,
+): List<OpenAIInclude> {
+  return when {
+    providerId == "xai" -> emptyList()
+    reasoning != null -> listOf(OpenAIInclude.REASONING_ENCRYPTED_CONTENT)
+    else -> emptyList()
+  }
 }
 
 fun normalizedCodexResponsesReasoningEffort(requestedEffort: String): ReasoningEffort? {

@@ -5,6 +5,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -17,6 +18,8 @@ enum class ProviderRequestHook(val id: String) {
   InjectKimiThinking("inject_kimi_thinking"),
   InjectTencentTokenHubReasoning("inject_tencent_tokenhub_reasoning"),
   InjectLmStudioReasoning("inject_lmstudio_reasoning"),
+  InjectNousPortalReasoning("inject_nous_portal_reasoning"),
+  InjectQwenPortalRequestShape("inject_qwen_portal_request_shape"),
 }
 
 data class ProviderRequestContext(
@@ -41,6 +44,8 @@ fun ProviderRequestProfile.hookIds(): List<String> {
     if (injectKimiThinking) add(ProviderRequestHook.InjectKimiThinking.id)
     if (injectTencentTokenHubReasoning) add(ProviderRequestHook.InjectTencentTokenHubReasoning.id)
     if (injectLmStudioReasoning) add(ProviderRequestHook.InjectLmStudioReasoning.id)
+    if (injectNousPortalReasoning) add(ProviderRequestHook.InjectNousPortalReasoning.id)
+    if (injectQwenPortalRequestShape) add(ProviderRequestHook.InjectQwenPortalRequestShape.id)
   }
 }
 
@@ -84,6 +89,8 @@ object ProviderRequestHooks {
     applyKimiThinking(root, requestProfile, requestContext)
     applyTencentTokenHubReasoning(root, requestProfile, requestContext)
     applyLmStudioReasoning(root, requestProfile, requestContext)
+    applyNousPortalReasoning(root, requestProfile, requestContext)
+    applyQwenPortalRequestShape(root, requestProfile)
     return requestHookJson.encodeToString(JsonObject.serializer(), JsonObject(root))
   }
 
@@ -209,6 +216,80 @@ object ProviderRequestHooks {
         ?: "medium"
     }
     root["reasoning_effort"] = providerRequestString(effort)
+  }
+
+  private fun applyNousPortalReasoning(
+    root: MutableMap<String, JsonElement>,
+    requestProfile: ProviderRequestProfile,
+    requestContext: ProviderRequestContext,
+  ) {
+    if (!requestProfile.injectNousPortalReasoning) return
+    root["tags"] = JsonArray(
+      listOf(
+        providerRequestString("product=hermes-agent"),
+        providerRequestString("client=hermes-client-vunknown"),
+      ),
+    )
+    if (!requestContext.supportsReasoning) return
+    val reasoningConfig = requestContext.reasoningConfig
+    val disabled = reasoningConfig?.get("enabled")?.jsonPrimitive?.booleanOrNull == false ||
+      reasoningConfig?.get("enabled")?.jsonPrimitive?.contentOrNull == "false"
+    if (disabled) {
+      root.remove("reasoning")
+      return
+    }
+    root["reasoning"] = reasoningConfig ?: providerRequestObject(
+      "enabled" to providerRequestBoolean(true),
+      "effort" to providerRequestString("medium"),
+    )
+  }
+
+  private fun applyQwenPortalRequestShape(
+    root: MutableMap<String, JsonElement>,
+    requestProfile: ProviderRequestProfile,
+  ) {
+    if (!requestProfile.injectQwenPortalRequestShape) return
+    root["vl_high_resolution_images"] = providerRequestBoolean(true)
+    val messages = root["messages"] as? JsonArray ?: return
+    root["messages"] = JsonArray(messages.map { normalizeQwenMessage(it) })
+  }
+
+  private fun normalizeQwenMessage(message: JsonElement): JsonElement {
+    val obj = message as? JsonObject ?: return message
+    val mutable = obj.toMutableMap()
+    val content = mutable["content"]
+    val normalizedContent = when (content) {
+      is JsonPrimitive -> JsonArray(listOf(providerRequestObject("type" to providerRequestString("text"), "text" to content)))
+      is JsonArray -> JsonArray(
+        content.mapNotNull { part ->
+          when (part) {
+            is JsonPrimitive -> providerRequestObject("type" to providerRequestString("text"), "text" to part)
+            is JsonObject -> part
+            else -> null
+          }
+        },
+      )
+      else -> null
+    }
+    if (normalizedContent != null) {
+      mutable["content"] = if (obj["role"]?.jsonPrimitive?.contentOrNull == "system") {
+        normalizedContent.withQwenSystemCacheControl()
+      } else {
+        normalizedContent
+      }
+    }
+    return JsonObject(mutable)
+  }
+
+  private fun JsonArray.withQwenSystemCacheControl(): JsonArray {
+    if (isEmpty()) return this
+    return JsonArray(mapIndexed { index, part ->
+      if (index != lastIndex) return@mapIndexed part
+      val obj = part as? JsonObject ?: return@mapIndexed part
+      val mutable = obj.toMutableMap()
+      mutable["cache_control"] = providerRequestObject("type" to providerRequestString("ephemeral"))
+      JsonObject(mutable)
+    })
   }
 }
 

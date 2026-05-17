@@ -2,6 +2,7 @@ package com.flovera.app
 
 import ai.koog.prompt.llm.LLMProvider
 import ai.koog.prompt.executor.clients.openai.base.models.ReasoningEffort
+import ai.koog.prompt.executor.clients.openai.models.OpenAIInclude
 import androidx.test.platform.app.InstrumentationRegistry
 import com.flovera.app.config.AppSettings
 import com.flovera.app.config.CustomOpenAIProviderSettings
@@ -17,6 +18,7 @@ import com.flovera.app.koog.ProviderRequestContext
 import com.flovera.app.koog.ProviderRequestProfile
 import com.flovera.app.koog.ProviderTransport
 import com.flovera.app.koog.applyFloveraOpenAIRequestProfileToJson
+import com.flovera.app.koog.codexResponsesInclude
 import com.flovera.app.koog.codexResponsesReasoningConfig
 import com.flovera.app.koog.grokSupportsReasoningEffort
 import com.flovera.app.koog.hookIds
@@ -46,7 +48,7 @@ class ProviderConfigInstrumentedTest {
 
   @Test
   fun providerCatalogHasDefaultModels() {
-    assertTrue(ModelProviderCatalog.providers.size >= 29)
+    assertTrue(ModelProviderCatalog.providers.size >= 33)
     ModelProviderCatalog.providers.forEach { provider ->
       assertTrue(provider.id.isNotBlank())
       assertTrue(provider.defaultModel.isNotBlank())
@@ -96,6 +98,15 @@ class ProviderConfigInstrumentedTest {
     assertEquals("xai", ModelProviderCatalog.findProvider("grok")?.id)
     assertEquals("xai", ModelProviderCatalog.findProvider("x-ai")?.id)
     assertEquals("xai", ModelProviderCatalog.findProvider("x.ai")?.id)
+    assertEquals("nous", ModelProviderCatalog.findProvider("nous-portal")?.id)
+    assertEquals("nous", ModelProviderCatalog.findProvider("nousresearch")?.id)
+    assertEquals("qwen-oauth", ModelProviderCatalog.findProvider("qwen")?.id)
+    assertEquals("qwen-oauth", ModelProviderCatalog.findProvider("qwen-portal")?.id)
+    assertEquals("qwen-oauth", ModelProviderCatalog.findProvider("qwen-cli")?.id)
+    assertEquals("openai-codex", ModelProviderCatalog.findProvider("codex")?.id)
+    assertEquals("openai-codex", ModelProviderCatalog.findProvider("openai_codex")?.id)
+    assertEquals("minimax-oauth", ModelProviderCatalog.findProvider("minimax_oauth")?.id)
+    assertEquals("minimax-oauth", ModelProviderCatalog.findProvider("minimax-oauth-io")?.id)
   }
 
   @Test
@@ -162,6 +173,54 @@ class ProviderConfigInstrumentedTest {
     assertEquals("https://tokenhub.tencentmaas.com/v1", tokenHub.baseUrl)
     assertEquals("hy3-preview", tokenHub.defaultAuxModel)
     assertEquals(listOf("inject_tencent_tokenhub_reasoning"), tokenHub.requestProfile.hookIds())
+  }
+
+  @Test
+  fun hermesOAuthProfilesCarryEquivalentMetadata() {
+    val nous = ModelProviderCatalog.runtimeProfileFor(
+      ModelProviderCatalog.requireProvider("nous"),
+      AppSettings(provider = "nous", model = "hermes-3-405b"),
+    )
+    val qwen = ModelProviderCatalog.runtimeProfileFor(
+      ModelProviderCatalog.requireProvider("qwen-oauth"),
+      AppSettings(provider = "qwen-oauth", model = "qwen3-coder-plus"),
+    )
+    val codex = ModelProviderCatalog.runtimeProfileFor(
+      ModelProviderCatalog.requireProvider("openai-codex"),
+      AppSettings(provider = "openai-codex", model = "gpt-5.3-codex", activeSessionId = "codex-session-123"),
+    )
+    val minimax = ModelProviderCatalog.runtimeProfileFor(
+      ModelProviderCatalog.requireProvider("minimax-oauth"),
+      AppSettings(provider = "minimax-oauth", model = "MiniMax-M2.7-highspeed"),
+    )
+    val codexHeaders = providerRuntimeHeaders(codex, AppSettings(activeSessionId = "codex-session-123"))
+
+    assertEquals("oauth_device_code", nous.authType.id)
+    assertEquals("https://inference-api.nousresearch.com/v1", nous.baseUrl)
+    assertEquals(listOf("inject_nous_portal_reasoning"), nous.requestProfile.hookIds())
+    assertEquals("hermes-3-405b", ModelProviderCatalog.requireProvider("nous").defaultAuxModel.ifBlank { ModelProviderCatalog.requireProvider("nous").defaultModel })
+    assertEquals("oauth_external", qwen.authType.id)
+    assertEquals("https://portal.qwen.ai/v1", qwen.baseUrl)
+    assertEquals(65_536, qwen.defaultMaxTokens)
+    assertEquals(listOf("inject_qwen_portal_request_shape"), qwen.requestProfile.hookIds())
+    assertEquals("codex_responses", codex.apiMode.id)
+    assertEquals(ProviderTransport.FloveraCodexResponses, codex.transport)
+    assertEquals("oauth_external", codex.authType.id)
+    assertEquals("https://chatgpt.com/backend-api/codex", codex.baseUrl)
+    assertEquals("responses", codex.responsesPath)
+    assertEquals("models", codex.modelsPath)
+    assertFalse(codex.supportsHealthCheck)
+    assertEquals("codex-session-123", codexHeaders["session_id"])
+    assertEquals("codex-session-123", codexHeaders["x-client-request-id"])
+    assertFalse("x-grok-conv-id" in codexHeaders)
+    assertEquals("anthropic_messages", minimax.apiMode.id)
+    assertEquals(ProviderTransport.FloveraAnthropicMessages, minimax.transport)
+    assertEquals("oauth_external", minimax.authType.id)
+    assertEquals("MiniMax-M2.7-highspeed", minimax.defaultAuxModel)
+    assertEquals(
+      "Bearer minimax-token",
+      providerAnthropicRuntimeHeaders(minimax, "minimax-token")["Authorization"],
+    )
   }
 
   @Test
@@ -302,6 +361,63 @@ class ProviderConfigInstrumentedTest {
     )
     assertEquals(null, codexResponsesReasoningConfig("xai", "grok-4.20-0309-reasoning", "high"))
     assertEquals(null, codexResponsesReasoningConfig("xai", "grok-4.3", "none"))
+    assertEquals(
+      listOf(OpenAIInclude.REASONING_ENCRYPTED_CONTENT),
+      codexResponsesInclude("openai-codex", codexResponsesReasoningConfig("openai-codex", "gpt-5.3-codex", "high")),
+    )
+    assertEquals(
+      emptyList<OpenAIInclude>(),
+      codexResponsesInclude("xai", codexResponsesReasoningConfig("xai", "grok-4.3", "high")),
+    )
+  }
+
+  @Test
+  fun nousPortalHookMatchesHermesTagsAndReasoningBody() {
+    val profile = ModelProviderCatalog.runtimeProfileFor(
+      ModelProviderCatalog.requireProvider("nous"),
+      AppSettings(provider = "nous", model = "hermes-3-405b"),
+    )
+    val request = """{"model":"hermes-3-405b","messages":[]}"""
+
+    val defaultReasoning = applyFloveraOpenAIRequestProfileToJson(
+      requestJson = request,
+      requestProfile = profile.requestProfile,
+      modelContext = ModelContextSpec(),
+      requestContext = ProviderRequestContext(providerId = "nous", supportsReasoning = true),
+    )
+    val disabledReasoning = applyFloveraOpenAIRequestProfileToJson(
+      requestJson = request,
+      requestProfile = profile.requestProfile,
+      modelContext = ModelContextSpec(),
+      requestContext = ProviderRequestContext(
+        providerId = "nous",
+        supportsReasoning = true,
+        reasoningConfig = providerReasoningConfigFromEffort("none"),
+      ),
+    )
+
+    assertTrue(defaultReasoning.contains("\"tags\":[\"product=hermes-agent\",\"client=hermes-client-vunknown\"]"))
+    assertTrue(defaultReasoning.contains("\"reasoning\":{\"enabled\":true,\"effort\":\"medium\"}"))
+    assertTrue(disabledReasoning.contains("\"tags\":[\"product=hermes-agent\",\"client=hermes-client-vunknown\"]"))
+    assertFalse(disabledReasoning.contains("\"reasoning\""))
+  }
+
+  @Test
+  fun qwenPortalHookMatchesHermesMessageShapeExtras() {
+    val profile = ModelProviderCatalog.runtimeProfileFor(
+      ModelProviderCatalog.requireProvider("qwen-oauth"),
+      AppSettings(provider = "qwen-oauth", model = "qwen3-coder-plus"),
+    )
+
+    val updated = applyFloveraOpenAIRequestProfileToJson(
+      requestJson = """{"model":"qwen3-coder-plus","messages":[{"role":"system","content":"sys"},{"role":"user","content":"hello"}]}""",
+      requestProfile = profile.requestProfile,
+      modelContext = ModelContextSpec(),
+    )
+
+    assertTrue(updated.contains("\"vl_high_resolution_images\":true"))
+    assertTrue(updated.contains("\"role\":\"system\",\"content\":[{\"type\":\"text\",\"text\":\"sys\",\"cache_control\":{\"type\":\"ephemeral\"}}]"))
+    assertTrue(updated.contains("\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"hello\"}]"))
   }
 
   @Test

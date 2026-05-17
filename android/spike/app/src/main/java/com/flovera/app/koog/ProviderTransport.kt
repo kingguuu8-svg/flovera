@@ -36,8 +36,12 @@ fun providerRuntimeHeaders(
 ): Map<String, String> {
   val headers = runtimeProfile.defaultHeaders.toMutableMap()
   val sessionId = settings.activeSessionId?.takeIf { it.isNotBlank() }
-  if (sessionId != null && runtimeProfile.apiMode == ProviderApiMode.CodexResponses) {
+  if (sessionId != null && runtimeProfile.providerId == "xai") {
     headers["x-grok-conv-id"] = sessionId
+  }
+  if (sessionId != null && runtimeProfile.providerId == "openai-codex") {
+    headers["session_id"] = sessionId
+    headers["x-client-request-id"] = sessionId
   }
   if (runtimeProfile.providerId == "openrouter" && sessionId != null && isOpenRouterGrokModel(settings.model)) {
     headers["x-grok-conv-id"] = sessionId
@@ -192,7 +196,10 @@ fun providerAnthropicRuntimeHeaders(
 ): Map<String, String> {
   val headers = runtimeProfile.defaultHeaders.toMutableMap()
   when (runtimeProfile.authType) {
-    ProviderAuthType.BearerToken -> headers["Authorization"] = "Bearer $apiKey"
+    ProviderAuthType.BearerToken,
+    ProviderAuthType.OAuthExternal,
+    ProviderAuthType.OAuthDeviceCode,
+    -> headers["Authorization"] = "Bearer $apiKey"
     else -> headers["x-api-key"] = apiKey
   }
   headers["anthropic-version"] = "2023-06-01"
