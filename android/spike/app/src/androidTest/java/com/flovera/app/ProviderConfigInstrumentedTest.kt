@@ -18,6 +18,7 @@ import com.flovera.app.koog.ProviderTransport
 import com.flovera.app.koog.applyFloveraOpenAIRequestProfileToJson
 import com.flovera.app.koog.hookIds
 import com.flovera.app.koog.providerRuntimeHeaders
+import com.flovera.app.koog.providerReasoningConfigFromEffort
 import com.flovera.app.workspace.WorkspaceManager
 import java.io.File
 import kotlinx.serialization.json.JsonObject
@@ -225,6 +226,7 @@ class ProviderConfigInstrumentedTest {
       requestContext = ProviderRequestContext(
         providerId = "openrouter",
         modelId = "openrouter/pareto-code",
+        supportsReasoning = false,
         openRouterProviderPreferences = preferences,
         openRouterMinCodingScore = 0.7,
       ),
@@ -236,6 +238,7 @@ class ProviderConfigInstrumentedTest {
       requestContext = ProviderRequestContext(
         providerId = "openrouter",
         modelId = "anthropic/claude-sonnet-4.6",
+        supportsReasoning = false,
         openRouterProviderPreferences = preferences,
         openRouterMinCodingScore = 0.7,
       ),
@@ -246,6 +249,56 @@ class ProviderConfigInstrumentedTest {
     assertTrue(updated.contains("\"plugins\":[{\"id\":\"pareto-router\",\"min_coding_score\":0.7}]"))
     assertTrue(nonPareto.contains("\"provider\":{\"sort\":\"latency\",\"allow_fallbacks\":false}"))
     assertFalse(nonPareto.contains("\"plugins\""))
+  }
+
+  @Test
+  fun openRouterReasoningRequestHookIsModelCapabilityGated() {
+    val profile = ModelProviderCatalog.runtimeProfileFor(
+      ModelProviderCatalog.requireProvider("openrouter"),
+      AppSettings(provider = "openrouter", model = "anthropic/claude-sonnet-4.6"),
+    )
+
+    val defaultReasoning = applyFloveraOpenAIRequestProfileToJson(
+      requestJson = """{"model":"anthropic/claude-sonnet-4.6","messages":[]}""",
+      requestProfile = profile.requestProfile,
+      modelContext = ModelContextSpec(),
+      requestContext = ProviderRequestContext(
+        providerId = "openrouter",
+        modelId = "anthropic/claude-sonnet-4.6",
+        supportsReasoning = true,
+      ),
+    )
+    val disabledReasoning = applyFloveraOpenAIRequestProfileToJson(
+      requestJson = """{"model":"anthropic/claude-sonnet-4.6","messages":[]}""",
+      requestProfile = profile.requestProfile,
+      modelContext = ModelContextSpec(),
+      requestContext = ProviderRequestContext(
+        providerId = "openrouter",
+        modelId = "anthropic/claude-sonnet-4.6",
+        supportsReasoning = true,
+        reasoningConfig = providerReasoningConfigFromEffort("none"),
+      ),
+    )
+    val unsupportedModel = applyFloveraOpenAIRequestProfileToJson(
+      requestJson = """{"model":"deepseek/deepseek-chat","messages":[]}""",
+      requestProfile = profile.requestProfile,
+      modelContext = ModelContextSpec(),
+      requestContext = ProviderRequestContext(
+        providerId = "openrouter",
+        modelId = "deepseek/deepseek-chat",
+        supportsReasoning = false,
+        reasoningConfig = providerReasoningConfigFromEffort("high"),
+      ),
+    )
+
+    assertTrue(ModelProviderCatalog.contextFor(AppSettings(provider = "openrouter", model = "openai/gpt-5.4")).supportsReasoning)
+    assertFalse(
+      ModelProviderCatalog.contextFor(AppSettings(provider = "openrouter", model = "deepseek/deepseek-chat"))
+        .supportsReasoning,
+    )
+    assertTrue(defaultReasoning.contains("\"reasoning\":{\"enabled\":true,\"effort\":\"medium\"}"))
+    assertTrue(disabledReasoning.contains("\"reasoning\":{\"enabled\":false}"))
+    assertFalse(unsupportedModel.contains("\"reasoning\""))
   }
 
   @Test
@@ -450,6 +503,7 @@ class ProviderConfigInstrumentedTest {
           maxAgentIterations = 120,
           agentAuthorityMode = "assisted",
           deepSeekThinkingEffort = "max",
+          reasoningEffort = "XHIGH",
           customOpenAIBaseUrl = "https://llm.example.com/",
           customOpenAIChatCompletionsPath = "v1/chat/completions",
           customOpenAICompatibilityMode = "ollama",
@@ -468,6 +522,7 @@ class ProviderConfigInstrumentedTest {
       assertEquals(80, updated.maxAgentIterations)
       assertEquals("assisted", updated.agentAuthorityMode)
       assertEquals("max", updated.deepSeekThinkingEffort)
+      assertEquals("xhigh", updated.reasoningEffort)
       assertEquals("https://llm.example.com", updated.customOpenAIProvider.baseUrl)
       assertEquals("/v1/chat/completions", updated.customOpenAIProvider.chatCompletionsPath)
       assertEquals("ollama", updated.customOpenAIProvider.compatibilityMode)

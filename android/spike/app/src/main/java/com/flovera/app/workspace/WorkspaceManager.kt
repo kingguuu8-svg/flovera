@@ -467,6 +467,7 @@ data class FloveraSettingsView(
   val themeColor: String = "",
   val authorityMode: String = "safe",
   val deepSeekThinkingEffort: String = "high",
+  val reasoningEffort: String = "",
   val customOpenAIBaseUrl: String = "",
   val customOpenAIChatCompletionsPath: String = "/v1/chat/completions",
   val customOpenAICompatibilityMode: String = "generic",
@@ -479,6 +480,7 @@ data class FloveraSettingsView(
   val providerRequestAddedFields: List<String> = emptyList(),
   val modelContextWindowTokens: Int? = null,
   val modelContextSource: String = "unknown",
+  val modelSupportsReasoning: Boolean = false,
   val tokenUsageSource: String = "estimate",
   val compressionThresholdPercent: Int? = null,
   val apiKeyRef: String = "",
@@ -515,6 +517,7 @@ data class FloveraModelContextView(
   val source: String = "unknown",
   val usageSource: String = "estimate",
   val compressionThresholdPercent: Int? = null,
+  val supportsReasoning: Boolean = false,
 )
 
 @Serializable
@@ -533,6 +536,7 @@ data class FloveraCapabilities(
   val controlledMcpProposals: Boolean = true,
   val modelContextOverrides: Boolean = true,
   val deepSeekThinkingEffort: Boolean = true,
+  val reasoningEffort: Boolean = true,
   val customOpenAICompatibleProvider: Boolean = true,
   val openRouterRouting: Boolean = true,
   val customUrlRouting: Boolean = true,

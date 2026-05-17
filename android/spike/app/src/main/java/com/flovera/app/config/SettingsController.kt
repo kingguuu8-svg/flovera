@@ -23,11 +23,13 @@ class SettingsController(private val store: SettingsStore) {
   fun loadResult(): SettingsLoadResult {
     val result = store.loadResult()
     val loaded = result.settings
-    val normalized = normalizeDeepSeekThinkingEffort(
-      normalizeAuthorityMode(
-        normalizeAppearance(
-          normalizeLanguage(
-            normalizeCustomOpenAIProvider(normalizeProviderAndModel(normalizeHtmlLists(loaded))),
+    val normalized = normalizeReasoningEffort(
+      normalizeDeepSeekThinkingEffort(
+        normalizeAuthorityMode(
+          normalizeAppearance(
+            normalizeLanguage(
+              normalizeCustomOpenAIProvider(normalizeProviderAndModel(normalizeHtmlLists(loaded))),
+            ),
           ),
         ),
       ),
@@ -141,6 +143,7 @@ class SettingsController(private val store: SettingsStore) {
       agentAuthorityMode = changes.agentAuthorityMode?.let { normalizeAuthorityModeId(it) } ?: settings.agentAuthorityMode,
       deepSeekThinkingEffort = changes.deepSeekThinkingEffort?.let { normalizeDeepSeekThinkingEffortId(it) }
         ?: settings.deepSeekThinkingEffort,
+      reasoningEffort = changes.reasoningEffort?.let { normalizeReasoningEffortId(it) } ?: settings.reasoningEffort,
       customOpenAIProvider = settings.customOpenAIProvider.copy(
         baseUrl = changes.customOpenAIBaseUrl?.let { normalizeCustomOpenAIBaseUrl(it) }
           ?: settings.customOpenAIProvider.baseUrl,
@@ -239,6 +242,10 @@ class SettingsController(private val store: SettingsStore) {
     return settings.copy(deepSeekThinkingEffort = normalizeDeepSeekThinkingEffortId(settings.deepSeekThinkingEffort))
   }
 
+  private fun normalizeReasoningEffort(settings: AppSettings): AppSettings {
+    return settings.copy(reasoningEffort = normalizeReasoningEffortId(settings.reasoningEffort))
+  }
+
   private fun normalizeOpenRouterProvider(settings: AppSettings): AppSettings {
     return settings.copy(
       openRouterProvider = settings.openRouterProvider.copy(
@@ -299,6 +306,19 @@ class SettingsController(private val store: SettingsStore) {
     }
   }
 
+  private fun normalizeReasoningEffortId(effort: String): String {
+    return when (effort.trim().lowercase()) {
+      "" -> ""
+      "none" -> "none"
+      "minimal" -> "minimal"
+      "low" -> "low"
+      "medium" -> "medium"
+      "high" -> "high"
+      "xhigh" -> "xhigh"
+      else -> ""
+    }
+  }
+
   private fun normalizeCustomOpenAIBaseUrl(baseUrl: String): String {
     val trimmed = baseUrl.trim().trimEnd('/')
     if (trimmed.isBlank()) return ""
@@ -350,6 +370,7 @@ data class SettingsProposalChanges(
   val themeColor: String? = null,
   val agentAuthorityMode: String? = null,
   val deepSeekThinkingEffort: String? = null,
+  val reasoningEffort: String? = null,
   val customOpenAIBaseUrl: String? = null,
   val customOpenAIChatCompletionsPath: String? = null,
   val customOpenAICompatibilityMode: String? = null,

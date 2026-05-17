@@ -71,6 +71,8 @@ object ProviderTransportFactory {
       modelContext = modelContext,
       requestContext = ProviderRequestContext(
         providerId = runtimeProfile.providerId,
+        supportsReasoning = modelContext.supportsReasoning,
+        reasoningConfig = providerReasoningConfigFromEffort(settings.reasoningEffort),
         openRouterProviderPreferences = settings.openRouterProvider.providerPreferences,
         openRouterMinCodingScore = settings.openRouterProvider.minCodingScore,
       ),

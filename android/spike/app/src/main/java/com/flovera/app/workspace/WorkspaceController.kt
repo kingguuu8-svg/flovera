@@ -61,6 +61,7 @@ class WorkspaceController(context: Context, workspaceId: String) {
         themeColor = settings.themeColor,
         authorityMode = settings.agentAuthorityMode,
         deepSeekThinkingEffort = settings.deepSeekThinkingEffort,
+        reasoningEffort = settings.reasoningEffort,
         customOpenAIBaseUrl = settings.customOpenAIProvider.baseUrl,
         customOpenAIChatCompletionsPath = settings.customOpenAIProvider.chatCompletionsPath,
         customOpenAICompatibilityMode = settings.customOpenAIProvider.compatibilityMode,
@@ -73,6 +74,7 @@ class WorkspaceController(context: Context, workspaceId: String) {
         providerRequestAddedFields = providerProfile.requestProfile.addedRequestFields.keys.sorted(),
         modelContextWindowTokens = modelContext.contextWindowTokens,
         modelContextSource = modelContext.source,
+        modelSupportsReasoning = modelContext.supportsReasoning,
         tokenUsageSource = modelContext.usageSource,
         compressionThresholdPercent = modelContext.compressionThresholdPercent,
         apiKeyRef = if (settings.apiKeyFor(provider.id).isBlank()) "" else "${provider.id}.default",
@@ -170,5 +172,6 @@ private fun ModelContextSpec.toWorkspaceView(): FloveraModelContextView {
     source = source,
     usageSource = usageSource,
     compressionThresholdPercent = compressionThresholdPercent,
+    supportsReasoning = supportsReasoning,
   )
 }

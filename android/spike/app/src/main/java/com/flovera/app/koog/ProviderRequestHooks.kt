@@ -19,6 +19,8 @@ enum class ProviderRequestHook(val id: String) {
 data class ProviderRequestContext(
   val providerId: String = "",
   val modelId: String = "",
+  val supportsReasoning: Boolean = false,
+  val reasoningConfig: JsonObject? = null,
   val openRouterProviderPreferences: JsonObject = JsonObject(emptyMap()),
   val openRouterMinCodingScore: Double? = null,
 )
@@ -46,6 +48,18 @@ fun providerRequestBoolean(value: Boolean): JsonElement {
 
 fun providerRequestObject(vararg fields: Pair<String, JsonElement>): JsonElement {
   return JsonObject(mapOf(*fields))
+}
+
+fun providerReasoningConfigFromEffort(effort: String): JsonObject? {
+  return when (effort.trim().lowercase()) {
+    "" -> null
+    "none" -> providerRequestObject("enabled" to providerRequestBoolean(false)).jsonObject
+    "minimal", "low", "medium", "high", "xhigh" -> providerRequestObject(
+      "enabled" to providerRequestBoolean(true),
+      "effort" to providerRequestString(effort.trim().lowercase()),
+    ).jsonObject
+    else -> null
+  }
 }
 
 object ProviderRequestHooks {
@@ -100,6 +114,12 @@ object ProviderRequestHooks {
     requestContext: ProviderRequestContext,
   ) {
     if (!requestProfile.injectOpenRouterRouting || requestContext.providerId != "openrouter") return
+    if (requestContext.supportsReasoning) {
+      root["reasoning"] = requestContext.reasoningConfig ?: providerRequestObject(
+        "enabled" to providerRequestBoolean(true),
+        "effort" to providerRequestString("medium"),
+      )
+    }
     if (requestContext.openRouterProviderPreferences.isNotEmpty()) {
       root["provider"] = requestContext.openRouterProviderPreferences
     }

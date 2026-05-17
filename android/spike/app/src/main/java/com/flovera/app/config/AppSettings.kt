@@ -44,6 +44,7 @@ data class AppSettings(
   val themeColor: String = "#76C4D8",
   val agentAuthorityMode: String = "safe",
   val deepSeekThinkingEffort: String = "high",
+  val reasoningEffort: String = "",
   val modelContextOverrides: Map<String, ModelContextOverride> = emptyMap(),
   val customOpenAIProvider: CustomOpenAIProviderSettings = CustomOpenAIProviderSettings(),
   val openRouterProvider: OpenRouterProviderSettings = OpenRouterProviderSettings(),

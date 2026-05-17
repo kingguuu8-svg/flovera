@@ -30,6 +30,7 @@ class AgentPromptBuilderInstrumentedTest {
     assertFalse(systemPrompt.contains(workspaceRule))
     assertTrue(systemPrompt.contains("\"provider\":\"custom-openai\""))
     assertTrue(systemPrompt.contains("\"model\":\"model-id\""))
+    assertTrue(systemPrompt.contains("\"reasoningEffort\":\"medium\""))
     assertTrue(systemPrompt.contains("\"customOpenAICompatibilityMode\":\"generic\""))
     assertTrue(systemPrompt.contains("\"openRouterProviderPreferences\":{\"sort\":\"latency\"}"))
     assertTrue(systemPrompt.contains("\"openRouterMinCodingScore\":0.7"))

@@ -91,15 +91,21 @@ data class ModelContextSpec(
   val source: String = "unknown",
   val usageSource: String = "estimate",
   val compressionThresholdPercent: Int? = null,
+  val supportsReasoning: Boolean = false,
 )
 
-private fun hermesContext(tokens: Int): ModelContextSpec {
+private fun hermesContext(tokens: Int, supportsReasoning: Boolean = false): ModelContextSpec {
   return ModelContextSpec(
     contextWindowTokens = tokens,
     source = "hermes_model_metadata",
     usageSource = "estimate",
     compressionThresholdPercent = 82,
+    supportsReasoning = supportsReasoning,
   )
+}
+
+private fun reasoningContext(tokens: Int): ModelContextSpec {
+  return hermesContext(tokens, supportsReasoning = true)
 }
 
 private fun contextMap(vararg entries: Pair<String, Int>): Map<String, ModelContextSpec> {
@@ -552,6 +558,13 @@ object ModelProviderCatalog {
       baseUrl = "https://openrouter.ai/api/v1",
       modelsUrl = "https://openrouter.ai/api/v1/models",
       requestProfile = ProviderRequestProfile(injectOpenRouterRouting = true),
+      modelContexts = mapOf(
+        "anthropic/claude-sonnet-4.6" to reasoningContext(1_000_000),
+        "openai/gpt-5.4" to reasoningContext(1_050_000),
+        "deepseek/deepseek-chat" to hermesContext(163_840),
+        "google/gemini-3-flash-preview" to reasoningContext(1_048_576),
+        "openrouter/pareto-code" to hermesContext(2_000_000),
+      ),
     ),
     ModelProviderSpec(
       id = "anthropic",
