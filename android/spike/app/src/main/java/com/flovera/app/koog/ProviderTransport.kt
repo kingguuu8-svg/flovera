@@ -28,6 +28,8 @@ enum class ProviderTransport(val id: String) {
   KoogBedrockConverse("koog_bedrock_converse"),
   FloveraAnthropicMessages("flovera_anthropic_messages"),
   KoogAnthropicMessages("koog_anthropic_messages"),
+  FloveraGoogleCloudCodeAssist("flovera_google_cloud_code_assist"),
+  FloveraExternalProcess("flovera_external_process"),
 }
 
 fun providerRuntimeHeaders(
@@ -96,7 +98,24 @@ object ProviderTransportFactory {
         ),
       )
       ProviderTransport.KoogAnthropicMessages -> AnthropicLLMClient(apiKey)
+      ProviderTransport.FloveraGoogleCloudCodeAssist -> unsupportedProviderTransport(
+        runtimeProfile = runtimeProfile,
+        detail = "Google Gemini CLI requires a Cloud Code Assist OAuth transport with project discovery and request translation.",
+      )
+      ProviderTransport.FloveraExternalProcess -> unsupportedProviderTransport(
+        runtimeProfile = runtimeProfile,
+        detail = "This Hermes provider is backed by an external process transport that is not yet available in Flovera Android.",
+      )
     }
+  }
+
+  private fun unsupportedProviderTransport(
+    runtimeProfile: ProviderRuntimeProfile,
+    detail: String,
+  ): LLMClient {
+    throw UnsupportedOperationException(
+      "Provider ${runtimeProfile.providerId} uses transport ${runtimeProfile.transport.id}. $detail",
+    )
   }
 
   private fun createOpenAICompatibleClient(

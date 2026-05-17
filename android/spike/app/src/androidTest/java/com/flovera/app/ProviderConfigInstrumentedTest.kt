@@ -48,7 +48,7 @@ class ProviderConfigInstrumentedTest {
 
   @Test
   fun providerCatalogHasDefaultModels() {
-    assertTrue(ModelProviderCatalog.providers.size >= 35)
+    assertTrue(ModelProviderCatalog.providers.size >= 37)
     ModelProviderCatalog.providers.forEach { provider ->
       assertTrue(provider.id.isNotBlank())
       assertTrue(provider.defaultModel.isNotBlank())
@@ -94,6 +94,8 @@ class ProviderConfigInstrumentedTest {
     assertEquals("gemini", ModelProviderCatalog.findProvider("google")?.id)
     assertEquals("gemini", ModelProviderCatalog.findProvider("google-gemini")?.id)
     assertEquals("gemini", ModelProviderCatalog.findProvider("google-ai-studio")?.id)
+    assertEquals("google-gemini-cli", ModelProviderCatalog.findProvider("gemini-cli")?.id)
+    assertEquals("google-gemini-cli", ModelProviderCatalog.findProvider("gemini-oauth")?.id)
     assertEquals("bedrock", ModelProviderCatalog.findProvider("aws")?.id)
     assertEquals("bedrock", ModelProviderCatalog.findProvider("aws-bedrock")?.id)
     assertEquals("bedrock", ModelProviderCatalog.findProvider("amazon-bedrock")?.id)
@@ -105,6 +107,8 @@ class ProviderConfigInstrumentedTest {
     assertEquals("copilot", ModelProviderCatalog.findProvider("github-models")?.id)
     assertEquals("copilot", ModelProviderCatalog.findProvider("github-model")?.id)
     assertEquals("copilot", ModelProviderCatalog.findProvider("github")?.id)
+    assertEquals("copilot-acp", ModelProviderCatalog.findProvider("github-copilot-acp")?.id)
+    assertEquals("copilot-acp", ModelProviderCatalog.findProvider("copilot-acp-agent")?.id)
     assertEquals("azure-foundry", ModelProviderCatalog.findProvider("azure")?.id)
     assertEquals("azure-foundry", ModelProviderCatalog.findProvider("azure-ai-foundry")?.id)
     assertEquals("azure-foundry", ModelProviderCatalog.findProvider("azure-ai")?.id)
@@ -305,6 +309,67 @@ class ProviderConfigInstrumentedTest {
     assertEquals("Bearer copilot-token", anthropicHeaders["Authorization"])
     assertEquals("vscode/1.104.1", anthropicHeaders["Editor-Version"])
     assertFalse("x-api-key" in anthropicHeaders)
+  }
+
+  @Test
+  fun externalHermesProfilesDeclareTransportBoundary() {
+    val geminiCli = ModelProviderCatalog.runtimeProfileFor(
+      ModelProviderCatalog.requireProvider("google-gemini-cli"),
+      AppSettings(provider = "google-gemini-cli", model = "gemini-3-flash-preview"),
+    )
+    val copilotAcp = ModelProviderCatalog.runtimeProfileFor(
+      ModelProviderCatalog.requireProvider("copilot-acp"),
+      AppSettings(provider = "copilot-acp", model = "copilot-acp"),
+    )
+
+    assertEquals("chat_completions", geminiCli.apiMode.id)
+    assertEquals(ProviderTransport.FloveraGoogleCloudCodeAssist, geminiCli.transport)
+    assertEquals("cloudcode-pa://google", geminiCli.baseUrl)
+    assertEquals("oauth_external", geminiCli.authType.id)
+    assertFalse(geminiCli.supportsHealthCheck)
+    assertEquals(
+      1_048_576,
+      ModelProviderCatalog.contextFor(
+        AppSettings(provider = "google-gemini-cli", model = "gemini-3-flash-preview"),
+      ).contextWindowTokens,
+    )
+    assertEquals("chat_completions", copilotAcp.apiMode.id)
+    assertEquals(ProviderTransport.FloveraExternalProcess, copilotAcp.transport)
+    assertEquals("acp://copilot", copilotAcp.baseUrl)
+    assertEquals("external_process", copilotAcp.authType.id)
+    assertFalse(copilotAcp.supportsHealthCheck)
+  }
+
+  @Test
+  fun externalHermesProfilesFailExplicitlyUntilTransportsAreImplemented() {
+    val geminiCli = ModelProviderCatalog.requireProvider("google-gemini-cli")
+    val copilotAcp = ModelProviderCatalog.requireProvider("copilot-acp")
+
+    val geminiError = try {
+      ModelProviderCatalog.createClient(
+        geminiCli,
+        apiKey = "oauth-token",
+        settings = AppSettings(provider = "google-gemini-cli", model = "gemini-3-flash-preview"),
+      )
+      null
+    } catch (error: UnsupportedOperationException) {
+      error
+    }
+    val acpError = try {
+      ModelProviderCatalog.createClient(
+        copilotAcp,
+        apiKey = "",
+        settings = AppSettings(provider = "copilot-acp", model = "copilot-acp"),
+      )
+      null
+    } catch (error: UnsupportedOperationException) {
+      error
+    }
+
+    assertTrue(geminiError?.message.orEmpty().contains("flovera_google_cloud_code_assist"))
+    assertTrue(geminiError?.message.orEmpty().contains("Cloud Code Assist OAuth transport"))
+    assertTrue(acpError?.message.orEmpty().contains("flovera_external_process"))
+    assertTrue(acpError?.message.orEmpty().contains("external process transport"))
   }
 
   @Test
