@@ -21,6 +21,7 @@ data class ModelProviderSpec(
   val baseUrl: String = "",
   val modelsUrl: String = "",
   val chatCompletionsPath: String = "/v1/chat/completions",
+  val responsesPath: String = "v1/responses",
   val messagesPath: String = "/v1/messages",
   val modelsPath: String = "/v1/models",
   val authType: ProviderAuthType = ProviderAuthType.ApiKey,
@@ -42,7 +43,7 @@ data class ModelProviderSpec(
     return LLModel(
       provider = llmProvider,
       id = model,
-      capabilities = agentModelCapabilities,
+      capabilities = agentModelCapabilitiesFor(apiMode),
       contextLength = (context.contextWindowTokens ?: 200_000).toLong(),
       maxOutputTokens = 32_000,
     )
@@ -58,6 +59,7 @@ data class ProviderRuntimeProfile(
   val baseUrl: String,
   val modelsUrl: String,
   val chatCompletionsPath: String,
+  val responsesPath: String,
   val messagesPath: String,
   val modelsPath: String,
   val authType: ProviderAuthType,
@@ -87,6 +89,7 @@ enum class ProviderApiMode(val id: String) {
   ChatCompletions("chat_completions"),
   AnthropicMessages("anthropic_messages"),
   BedrockConverse("bedrock_converse"),
+  CodexResponses("codex_responses"),
 }
 
 enum class ProviderAuthType(val id: String) {
@@ -631,6 +634,35 @@ object ModelProviderCatalog {
       ),
     ),
     ModelProviderSpec(
+      id = "xai",
+      label = "xAI",
+      apiKeyLabel = "xAI API key",
+      defaultModel = "grok-4.3",
+      suggestedModels = listOf(
+        "grok-4.3",
+        "grok-4.20-0309-reasoning",
+        "grok-4.20-0309-non-reasoning",
+        "grok-4.20-multi-agent-0309",
+        "grok-3-mini",
+      ),
+      llmProvider = LLMProvider.OpenAI,
+      transport = ProviderTransport.FloveraCodexResponses,
+      apiMode = ProviderApiMode.CodexResponses,
+      aliases = setOf("grok", "x-ai", "x.ai"),
+      baseUrl = "https://api.x.ai/v1",
+      modelsUrl = "https://api.x.ai/v1/models",
+      responsesPath = "responses",
+      defaultAuxModel = "grok-4.3",
+      modelContexts = mapOf(
+        "grok-4.3" to reasoningContext(1_000_000),
+        "grok-4.20-0309-reasoning" to reasoningContext(2_000_000),
+        "grok-4.20-0309-non-reasoning" to reasoningContext(2_000_000),
+        "grok-4.20-multi-agent-0309" to reasoningContext(2_000_000),
+        "grok-3-mini" to reasoningContext(131_072),
+      ),
+      defaultContext = reasoningContext(128_000),
+    ),
+    ModelProviderSpec(
       id = "openrouter",
       label = "OpenRouter",
       apiKeyLabel = "OpenRouter API key",
@@ -757,6 +789,7 @@ object ModelProviderCatalog {
       baseUrl = baseUrl,
       modelsUrl = modelsUrl,
       chatCompletionsPath = chatCompletionsPath,
+      responsesPath = provider.responsesPath,
       messagesPath = provider.messagesPath,
       modelsPath = provider.modelsPath,
       authType = provider.authType,
@@ -806,9 +839,27 @@ object ModelProviderCatalog {
 
 private val agentModelCapabilities = listOf(
   LLMCapability.Completion,
+  LLMCapability.OpenAIEndpoint.Completions,
   LLMCapability.Temperature,
   LLMCapability.Tools,
   LLMCapability.ToolChoice,
   LLMCapability.Schema.JSON.Basic,
   LLMCapability.Schema.JSON.Standard,
 )
+
+private val codexResponsesModelCapabilities = listOf(
+  LLMCapability.Completion,
+  LLMCapability.OpenAIEndpoint.Responses,
+  LLMCapability.Temperature,
+  LLMCapability.Tools,
+  LLMCapability.ToolChoice,
+  LLMCapability.Schema.JSON.Basic,
+  LLMCapability.Schema.JSON.Standard,
+)
+
+private fun agentModelCapabilitiesFor(apiMode: ProviderApiMode): List<LLMCapability> {
+  return when (apiMode) {
+    ProviderApiMode.CodexResponses -> codexResponsesModelCapabilities
+    else -> agentModelCapabilities
+  }
+}

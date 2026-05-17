@@ -112,6 +112,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
   fun ensureFloveraMetadata(
     settingsView: FloveraSettingsView = FloveraSettingsView(),
     providerProfileCatalog: List<FloveraProviderProfileView> = emptyList(),
+    providerApiModes: List<String> = listOf("chat_completions", "anthropic_messages"),
   ) {
     writeFile(
       path = ".flovera/manifest.json",
@@ -134,7 +135,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     )
     writeFile(
       path = ".flovera/capabilities.json",
-      content = json.encodeToString(FloveraCapabilities.fromSettings(settingsView, providerProfileCatalog)),
+      content = json.encodeToString(FloveraCapabilities.fromSettings(settingsView, providerProfileCatalog, providerApiModes)),
       overwrite = true,
       createAutoSnapshot = false,
     )
@@ -450,6 +451,7 @@ data class FloveraSettingsView(
   val providerTransport: String = "",
   val providerBaseUrl: String = "",
   val providerModelsUrl: String = "",
+  val providerResponsesPath: String = "",
   val providerMessagesPath: String = "",
   val providerModelsPath: String = "",
   val providerAuthType: String = "api_key",
@@ -501,6 +503,7 @@ data class FloveraProviderProfileView(
   val modelContexts: Map<String, FloveraModelContextView> = emptyMap(),
   val baseUrl: String = "",
   val modelsUrl: String = "",
+  val responsesPath: String = "",
   val messagesPath: String = "",
   val modelsPath: String = "",
   val authType: String = "api_key",
@@ -562,10 +565,12 @@ data class FloveraCapabilities(
     fun fromSettings(
       settingsView: FloveraSettingsView,
       providerProfileCatalog: List<FloveraProviderProfileView> = emptyList(),
+      providerApiModes: List<String> = listOf("chat_completions", "anthropic_messages"),
     ): FloveraCapabilities {
       return FloveraCapabilities(
         networkTools = settingsView.networkEnabled,
         webSearch = settingsView.webSearchEnabled,
+        providerApiModes = providerApiModes,
         providerProfileCatalog = providerProfileCatalog,
         authorityMode = settingsView.authorityMode,
       )

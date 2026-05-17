@@ -23,6 +23,7 @@ import kotlinx.serialization.json.Json
 enum class ProviderTransport(val id: String) {
   FloveraDeepSeekChatCompletions("flovera_deepseek_chat_completions"),
   FloveraOpenAICompatibleChatCompletions("flovera_openai_compatible_chat_completions"),
+  FloveraCodexResponses("flovera_codex_responses"),
   KoogGoogleGeminiNative("koog_google_gemini_native"),
   KoogBedrockConverse("koog_bedrock_converse"),
   FloveraAnthropicMessages("flovera_anthropic_messages"),
@@ -35,6 +36,9 @@ fun providerRuntimeHeaders(
 ): Map<String, String> {
   val headers = runtimeProfile.defaultHeaders.toMutableMap()
   val sessionId = settings.activeSessionId?.takeIf { it.isNotBlank() }
+  if (sessionId != null && runtimeProfile.apiMode == ProviderApiMode.CodexResponses) {
+    headers["x-grok-conv-id"] = sessionId
+  }
   if (runtimeProfile.providerId == "openrouter" && sessionId != null && isOpenRouterGrokModel(settings.model)) {
     headers["x-grok-conv-id"] = sessionId
   }
@@ -64,6 +68,11 @@ object ProviderTransportFactory {
         apiKey = apiKey,
         settings = settings,
         modelContext = modelContext,
+      )
+      ProviderTransport.FloveraCodexResponses -> createCodexResponsesClient(
+        runtimeProfile = runtimeProfile,
+        apiKey = apiKey,
+        settings = settings,
       )
       ProviderTransport.FloveraAnthropicMessages -> createAnthropicMessagesClient(
         runtimeProfile = runtimeProfile,
@@ -121,6 +130,28 @@ object ProviderTransportFactory {
         }
       }
     }
+  }
+
+  private fun createCodexResponsesClient(
+    runtimeProfile: ProviderRuntimeProfile,
+    apiKey: String,
+    settings: AppSettings,
+  ): LLMClient {
+    return FloveraCodexResponsesLLMClient(
+      apiKey = apiKey,
+      settings = OpenAIClientSettings(
+        baseUrl = runtimeProfile.requireBaseUrl(),
+        responsesAPIPath = runtimeProfile.responsesPath,
+        modelsPath = runtimeProfile.modelsPath.trimStart('/'),
+      ),
+      providerIdentity = runtimeProfile.llmProvider,
+      requestSettings = FloveraCodexResponsesRequestSettings(
+        providerId = runtimeProfile.providerId,
+        sessionId = settings.activeSessionId,
+        reasoningEffort = settings.reasoningEffort,
+      ),
+      baseClient = openAICompatibleBaseClient(providerRuntimeHeaders(runtimeProfile, settings)),
+    )
   }
 
   private fun createAnthropicMessagesClient(

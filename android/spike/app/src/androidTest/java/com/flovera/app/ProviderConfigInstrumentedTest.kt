@@ -1,6 +1,7 @@
 package com.flovera.app
 
 import ai.koog.prompt.llm.LLMProvider
+import ai.koog.prompt.executor.clients.openai.base.models.ReasoningEffort
 import androidx.test.platform.app.InstrumentationRegistry
 import com.flovera.app.config.AppSettings
 import com.flovera.app.config.CustomOpenAIProviderSettings
@@ -16,6 +17,8 @@ import com.flovera.app.koog.ProviderRequestContext
 import com.flovera.app.koog.ProviderRequestProfile
 import com.flovera.app.koog.ProviderTransport
 import com.flovera.app.koog.applyFloveraOpenAIRequestProfileToJson
+import com.flovera.app.koog.codexResponsesReasoningConfig
+import com.flovera.app.koog.grokSupportsReasoningEffort
 import com.flovera.app.koog.hookIds
 import com.flovera.app.koog.providerAnthropicRuntimeHeaders
 import com.flovera.app.koog.providerRuntimeHeaders
@@ -43,7 +46,7 @@ class ProviderConfigInstrumentedTest {
 
   @Test
   fun providerCatalogHasDefaultModels() {
-    assertTrue(ModelProviderCatalog.providers.size >= 28)
+    assertTrue(ModelProviderCatalog.providers.size >= 29)
     ModelProviderCatalog.providers.forEach { provider ->
       assertTrue(provider.id.isNotBlank())
       assertTrue(provider.defaultModel.isNotBlank())
@@ -53,6 +56,7 @@ class ProviderConfigInstrumentedTest {
     assertTrue(ModelProviderCatalog.supportedApiModes.contains("chat_completions"))
     assertTrue(ModelProviderCatalog.supportedApiModes.contains("anthropic_messages"))
     assertTrue(ModelProviderCatalog.supportedApiModes.contains("bedrock_converse"))
+    assertTrue(ModelProviderCatalog.supportedApiModes.contains("codex_responses"))
   }
 
   @Test
@@ -89,6 +93,9 @@ class ProviderConfigInstrumentedTest {
     assertEquals("bedrock", ModelProviderCatalog.findProvider("aws-bedrock")?.id)
     assertEquals("bedrock", ModelProviderCatalog.findProvider("amazon-bedrock")?.id)
     assertEquals("bedrock", ModelProviderCatalog.findProvider("amazon")?.id)
+    assertEquals("xai", ModelProviderCatalog.findProvider("grok")?.id)
+    assertEquals("xai", ModelProviderCatalog.findProvider("x-ai")?.id)
+    assertEquals("xai", ModelProviderCatalog.findProvider("x.ai")?.id)
   }
 
   @Test
@@ -196,6 +203,10 @@ class ProviderConfigInstrumentedTest {
       ProviderTransport.KoogBedrockConverse,
       ModelProviderCatalog.requireProvider("bedrock").transport,
     )
+    assertEquals(
+      ProviderTransport.FloveraCodexResponses,
+      ModelProviderCatalog.requireProvider("xai").transport,
+    )
   }
 
   @Test
@@ -246,6 +257,50 @@ class ProviderConfigInstrumentedTest {
       128_000,
       ModelProviderCatalog.contextFor(AppSettings(provider = "bedrock", model = "us.meta.llama4-maverick-17b-instruct-v1:0")).contextWindowTokens,
     )
+  }
+
+  @Test
+  fun xaiProfileMirrorsHermesCodexResponsesProviderMetadata() {
+    val provider = ModelProviderCatalog.requireProvider("xai")
+    val settings = AppSettings(
+      provider = "xai",
+      model = "grok-4.3",
+      activeSessionId = "xai-session-123",
+      reasoningEffort = "minimal",
+    )
+    val profile = ModelProviderCatalog.runtimeProfileFor(provider, settings)
+    val client = ModelProviderCatalog.createClient(provider, apiKey = "xai-key", settings = settings)
+
+    assertEquals("codex_responses", profile.apiMode.id)
+    assertEquals(ProviderTransport.FloveraCodexResponses, profile.transport)
+    assertEquals(LLMProvider.OpenAI, provider.llmProvider)
+    assertEquals(LLMProvider.OpenAI, client.llmProvider())
+    assertEquals("https://api.x.ai/v1", profile.baseUrl)
+    assertEquals("https://api.x.ai/v1/models", profile.modelsUrl)
+    assertEquals("responses", profile.responsesPath)
+    assertEquals("api_key", profile.authType.id)
+    assertEquals("grok-4.3", profile.defaultAuxModel)
+    assertEquals(1_000_000, ModelProviderCatalog.contextFor(settings).contextWindowTokens)
+    assertEquals(
+      "xai-session-123",
+      providerRuntimeHeaders(profile, settings)["x-grok-conv-id"],
+    )
+  }
+
+  @Test
+  fun xaiCodexResponsesReasoningGateMatchesHermesAllowlist() {
+    assertTrue(grokSupportsReasoningEffort("grok-3-mini"))
+    assertTrue(grokSupportsReasoningEffort("x-ai/grok-4.3"))
+    assertTrue(grokSupportsReasoningEffort("grok-4.20-multi-agent-0309"))
+    assertFalse(grokSupportsReasoningEffort("grok-4.20-0309-reasoning"))
+    assertFalse(grokSupportsReasoningEffort("grok-4"))
+
+    assertEquals(
+      ReasoningEffort.LOW,
+      codexResponsesReasoningConfig("xai", "grok-4.3", "minimal")?.effort,
+    )
+    assertEquals(null, codexResponsesReasoningConfig("xai", "grok-4.20-0309-reasoning", "high"))
+    assertEquals(null, codexResponsesReasoningConfig("xai", "grok-4.3", "none"))
   }
 
   @Test

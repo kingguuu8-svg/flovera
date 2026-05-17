@@ -44,6 +44,7 @@ class WorkspaceController(context: Context, workspaceId: String) {
         providerTransport = providerProfile.transport.id,
         providerBaseUrl = providerProfile.baseUrl,
         providerModelsUrl = providerProfile.modelsUrl,
+        providerResponsesPath = providerProfile.responsesPath,
         providerMessagesPath = providerProfile.messagesPath,
         providerModelsPath = providerProfile.modelsPath,
         providerAuthType = providerProfile.authType.id,
@@ -97,6 +98,7 @@ class WorkspaceController(context: Context, workspaceId: String) {
             .mapValues { (_, context) -> context.toWorkspaceView() },
           baseUrl = profile.baseUrl,
           modelsUrl = profile.modelsUrl,
+          responsesPath = profile.responsesPath,
           messagesPath = profile.messagesPath,
           modelsPath = profile.modelsPath,
           authType = profile.authType.id,
@@ -115,6 +117,7 @@ class WorkspaceController(context: Context, workspaceId: String) {
           customRequestBody = false,
         )
       },
+      providerApiModes = ModelProviderCatalog.supportedApiModes,
     )
   }
 
