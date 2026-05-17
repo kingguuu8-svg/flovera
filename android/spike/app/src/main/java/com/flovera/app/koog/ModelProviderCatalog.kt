@@ -546,7 +546,7 @@ object ModelProviderCatalog {
         "qwen/qwen3-plus",
       ),
       llmProvider = LLMProvider.OpenRouter,
-      transport = ProviderTransport.KoogOpenRouterChatCompletions,
+      transport = ProviderTransport.FloveraOpenAICompatibleChatCompletions,
       aliases = setOf("router", "or"),
       baseUrl = "https://openrouter.ai/api/v1",
       modelsUrl = "https://openrouter.ai/api/v1/models",

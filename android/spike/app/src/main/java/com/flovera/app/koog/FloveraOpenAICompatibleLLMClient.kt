@@ -7,6 +7,7 @@ import ai.koog.prompt.executor.clients.openai.base.models.OpenAIMessage
 import ai.koog.prompt.executor.clients.openai.base.models.OpenAITool
 import ai.koog.prompt.executor.clients.openai.base.models.OpenAIToolChoice
 import ai.koog.prompt.llm.LLModel
+import ai.koog.prompt.llm.LLMProvider
 import ai.koog.prompt.params.LLMParams
 import io.ktor.client.HttpClient
 import kotlin.time.Clock
@@ -14,6 +15,7 @@ import kotlin.time.Clock
 open class FloveraOpenAICompatibleLLMClient(
   apiKey: String,
   settings: OpenAIClientSettings = OpenAIClientSettings(),
+  private val providerIdentity: LLMProvider = LLMProvider.OpenAI,
   private val requestProfile: ProviderRequestProfile = ProviderRequestProfile(),
   private val modelContext: ModelContextSpec = ModelContextSpec(),
   baseClient: HttpClient = HttpClient(),
@@ -26,6 +28,8 @@ open class FloveraOpenAICompatibleLLMClient(
   clock = clock,
   toolsConverter = toolsConverter,
 ) {
+  override fun llmProvider(): LLMProvider = providerIdentity
+
   override fun serializeProviderChatRequest(
     messages: List<OpenAIMessage>,
     model: LLModel,

@@ -88,7 +88,7 @@ class ProviderConfigInstrumentedTest {
     assertEquals("generic", profile.requestProfile.compatibilityMode)
     assertFalse(profile.requestProfile.injectOllamaNumCtx)
     assertEquals(LLMProvider.OpenRouter, openRouter.llmProvider)
-    assertEquals(ProviderTransport.KoogOpenRouterChatCompletions, openRouter.transport)
+    assertEquals(ProviderTransport.FloveraOpenAICompatibleChatCompletions, openRouter.transport)
     assertEquals(
       "https://openrouter.ai/api/v1",
       ModelProviderCatalog.runtimeProfileFor(openRouter, AppSettings()).baseUrl,
@@ -152,6 +152,18 @@ class ProviderConfigInstrumentedTest {
       ProviderTransport.FloveraOpenAICompatibleChatCompletions,
       ModelProviderCatalog.requireProvider("moonshot").transport,
     )
+  }
+
+  @Test
+  fun openRouterUsesFloveraOpenAICompatibleTransportWithProviderIdentity() {
+    val provider = ModelProviderCatalog.requireProvider("openrouter")
+    val settings = AppSettings(provider = "openrouter", model = "anthropic/claude-sonnet-4.6")
+
+    val client = ModelProviderCatalog.createClient(provider, apiKey = "openrouter-key", settings = settings)
+
+    assertEquals(ProviderTransport.FloveraOpenAICompatibleChatCompletions, provider.transport)
+    assertEquals(LLMProvider.OpenRouter, provider.llmProvider)
+    assertEquals(LLMProvider.OpenRouter, client.llmProvider())
   }
 
   @Test
