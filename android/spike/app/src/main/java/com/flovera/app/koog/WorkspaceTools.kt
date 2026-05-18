@@ -36,7 +36,7 @@ class WorkspaceSearchTool(
 ) : SimpleTool<WorkspaceSearchTool.Args>(
   argsType = typeToken<Args>(),
   name = "workspace_search",
-  description = "Search current Android workspace text files using local grep-like matching. Use path/includeGlob/excludeGlob to narrow the search, output=files or count for quick routing, and scope=workspace_app_metadata only when .flovera app metadata is relevant.",
+  description = "Search current Android workspace text files using local grep-like matching. Use path/includeGlob/excludeGlob to narrow the search, contextLines for local understanding, output=files or count for quick routing, and scope=workspace_app_metadata only when .flovera app metadata is relevant.",
 ) {
   @Serializable
   data class Args(
@@ -64,6 +64,10 @@ class WorkspaceSearchTool(
     val respectIgnoreFiles: Boolean = true,
     @property:LLMDescription("Maximum searchable text files to scan before stopping. Values are clamped to 1..10000.")
     val maxFiles: Int = 2000,
+    @property:LLMDescription("Maximum characters per returned snippet line. Values are clamped to 80..500.")
+    val maxSnippetChars: Int = 200,
+    @property:LLMDescription("Whether to include diagnostic scores and scan counters.")
+    val debug: Boolean = false,
   )
 
   override suspend fun execute(args: Args): String {
@@ -81,6 +85,8 @@ class WorkspaceSearchTool(
         output = args.output,
         respectIgnoreFiles = args.respectIgnoreFiles,
         maxFiles = args.maxFiles,
+        maxSnippetChars = args.maxSnippetChars,
+        debug = args.debug,
       )
     }.getOrElse { it.message ?: it.toString() }
     recorder.record(

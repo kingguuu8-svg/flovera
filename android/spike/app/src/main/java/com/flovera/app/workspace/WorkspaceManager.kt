@@ -28,6 +28,13 @@ data class WorkspaceSearchHit(
   val lineNumber: Int,
   val score: Int,
   val snippet: String,
+  val context: List<WorkspaceSearchContextLine> = emptyList(),
+)
+
+data class WorkspaceSearchContextLine(
+  val lineNumber: Int,
+  val text: String,
+  val isMatch: Boolean,
 )
 
 data class WorkspaceSearchOptions(
@@ -43,6 +50,8 @@ data class WorkspaceSearchOptions(
   val output: String = "matches",
   val respectIgnoreFiles: Boolean = true,
   val maxFiles: Int = 2000,
+  val maxSnippetChars: Int = 200,
+  val debug: Boolean = false,
 )
 
 private data class WorkspaceIgnoreRule(
@@ -316,6 +325,8 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     output: String = WORKSPACE_SEARCH_OUTPUT_MATCHES,
     respectIgnoreFiles: Boolean = true,
     maxFiles: Int = DEFAULT_WORKSPACE_SEARCH_MAX_FILES,
+    maxSnippetChars: Int = DEFAULT_WORKSPACE_SEARCH_SNIPPET_CHARS,
+    debug: Boolean = false,
   ): String {
     return searchFiles(
       WorkspaceSearchOptions(
@@ -331,6 +342,8 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
         output = output,
         respectIgnoreFiles = respectIgnoreFiles,
         maxFiles = maxFiles,
+        maxSnippetChars = maxSnippetChars,
+        debug = debug,
       ),
     )
   }
@@ -358,6 +371,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     val includeRegex = workspaceGlobRegex(options.includeGlob)
     val excludeRegex = workspaceGlobRegex(options.excludeGlob)
     val context = options.contextLines.coerceIn(0, MAX_WORKSPACE_SEARCH_CONTEXT_LINES)
+    val maxSnippetChars = options.maxSnippetChars.coerceIn(MIN_WORKSPACE_SEARCH_SNIPPET_CHARS, MAX_WORKSPACE_SEARCH_SNIPPET_CHARS)
     val ignoreRules = if (options.respectIgnoreFiles) loadWorkspaceIgnoreRules() else emptyList()
     val hits = mutableListOf<WorkspaceSearchHit>()
     if (!root.exists()) return "No matches for \"$normalizedQuery\"."
@@ -389,6 +403,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
           mode = searchMode,
           regex = regex,
           contextLines = context,
+          maxSnippetChars = maxSnippetChars,
         )
       }.getOrDefault(emptyList())
     }
@@ -398,9 +413,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
       .take(limit)
 
     if (topHits.isEmpty()) {
-      return "No matches for \"$normalizedQuery\" " +
-        workspaceSearchSummary(scannedFiles, skippedFiles, stoppedEarly, maxFiles) +
-        "."
+      return "No matches for \"$normalizedQuery\"${workspaceSearchHeaderSuffix(options.debug, scannedFiles, skippedFiles, stoppedEarly, maxFiles)}."
     }
     if (output == WORKSPACE_SEARCH_OUTPUT_FILES) {
       return workspaceSearchFilesOutput(
@@ -414,6 +427,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
         skippedFiles = skippedFiles,
         stoppedEarly = stoppedEarly,
         maxFiles = maxFiles,
+        debug = options.debug,
       )
     }
     if (output == WORKSPACE_SEARCH_OUTPUT_COUNT) {
@@ -428,20 +442,22 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
         skippedFiles = skippedFiles,
         stoppedEarly = stoppedEarly,
         maxFiles = maxFiles,
+        debug = options.debug,
       )
     }
-    return buildString {
-      appendLine(
-        "Found ${topHits.size} matches for \"$normalizedQuery\" " +
-          "(path=${relativeToRoot(requested)}, scope=$normalizedScope, mode=$searchMode, " +
-          workspaceSearchSummary(scannedFiles, skippedFiles, stoppedEarly, maxFiles) +
-          "):",
-      )
-      topHits.forEachIndexed { index, hit ->
-        appendLine("${index + 1}. ${hit.path}:${hit.lineNumber} score=${hit.score}")
-        appendLine("   ${hit.snippet}")
-      }
-    }.trimEnd()
+    return workspaceSearchMatchesOutput(
+      query = normalizedQuery,
+      requestedPath = relativeToRoot(requested),
+      scope = normalizedScope,
+      mode = searchMode,
+      hits = topHits,
+      totalMatches = hits.size,
+      scannedFiles = scannedFiles,
+      skippedFiles = skippedFiles,
+      stoppedEarly = stoppedEarly,
+      maxFiles = maxFiles,
+      debug = options.debug,
+    )
   }
 
   fun readFile(path: String): String {
@@ -562,6 +578,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     mode: String,
     regex: Regex?,
     contextLines: Int,
+    maxSnippetChars: Int,
   ): List<WorkspaceSearchHit> {
     val path = relativeToRoot(file)
     val pathScore = workspaceSearchPathScore(path, query, tokens, caseSensitive, mode, regex)
@@ -578,7 +595,8 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
           path = path,
           lineNumber = index + 1,
           score = score,
-          snippet = workspaceSearchSnippet(lines, index, contextLines),
+          snippet = workspaceSearchSnippet(lines, index, contextLines, maxSnippetChars),
+          context = workspaceSearchContext(lines, index, contextLines, maxSnippetChars),
         )
       }
     }
@@ -588,7 +606,8 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
         path = path,
         lineNumber = preview.first,
         score = pathScore,
-        snippet = workspaceSearchSnippet(preview.second),
+        snippet = workspaceSearchSnippet(preview.second, maxSnippetChars),
+        context = listOf(WorkspaceSearchContextLine(preview.first, workspaceSearchSnippet(preview.second, maxSnippetChars), isMatch = true)),
       )
     }
     return hits
@@ -753,6 +772,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     skippedFiles: Int,
     stoppedEarly: Boolean,
     maxFiles: Int,
+    debug: Boolean,
   ): String {
     val allFiles = hits
       .sortedWith(compareByDescending<WorkspaceSearchHit> { it.score }.thenBy { it.path })
@@ -762,11 +782,11 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     return buildString {
       appendLine(
         "Found ${allFiles.size} files for \"$query\" " +
-          "(path=${relativeToRoot(requested)}, scope=$scope, mode=$mode, " +
-          workspaceSearchSummary(scannedFiles, skippedFiles, stoppedEarly, maxFiles) +
-          "):",
+          "(path=${relativeToRoot(requested)}, scope=$scope, mode=$mode)" +
+          workspaceSearchHeaderSuffix(debug, scannedFiles, skippedFiles, stoppedEarly, maxFiles) +
+          ":",
       )
-      files.forEachIndexed { index, path -> appendLine("${index + 1}. $path") }
+      files.forEach { path -> appendLine(path) }
     }.trimEnd()
   }
 
@@ -781,6 +801,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     skippedFiles: Int,
     stoppedEarly: Boolean,
     maxFiles: Int,
+    debug: Boolean,
   ): String {
     val allCounts = hits
       .groupingBy { it.path }
@@ -791,11 +812,11 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     return buildString {
       appendLine(
         "Found ${hits.size} matches in ${allCounts.size} files for \"$query\" " +
-          "(path=${relativeToRoot(requested)}, scope=$scope, mode=$mode, " +
-          workspaceSearchSummary(scannedFiles, skippedFiles, stoppedEarly, maxFiles) +
-          "):",
+          "(path=${relativeToRoot(requested)}, scope=$scope, mode=$mode)" +
+          workspaceSearchHeaderSuffix(debug, scannedFiles, skippedFiles, stoppedEarly, maxFiles) +
+          ":",
       )
-      counts.forEachIndexed { index, entry -> appendLine("${index + 1}. ${entry.key} count=${entry.value}") }
+      counts.forEach { entry -> appendLine("${entry.key} count=${entry.value}") }
     }.trimEnd()
   }
 
@@ -862,6 +883,9 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     const val MAX_WORKSPACE_SEARCH_FILE_BYTES = 512 * 1024L
     const val DEFAULT_WORKSPACE_SEARCH_MAX_FILES = 2000
     const val MAX_WORKSPACE_SEARCH_FILES = 10000
+    const val DEFAULT_WORKSPACE_SEARCH_SNIPPET_CHARS = 200
+    const val MIN_WORKSPACE_SEARCH_SNIPPET_CHARS = 80
+    const val MAX_WORKSPACE_SEARCH_SNIPPET_CHARS = 500
   }
 }
 
@@ -996,20 +1020,98 @@ private fun workspaceSearchSummary(scannedFiles: Int, skippedFiles: Int, stopped
   return "scannedFiles=$scannedFiles, skippedFiles=$skippedFiles$stopped"
 }
 
-private fun workspaceSearchSnippet(lines: List<String>, index: Int, contextLines: Int): String {
-  if (contextLines <= 0) return workspaceSearchSnippet(lines[index])
+private fun workspaceSearchHeaderSuffix(
+  debug: Boolean,
+  scannedFiles: Int,
+  skippedFiles: Int,
+  stoppedEarly: Boolean,
+  maxFiles: Int,
+): String {
+  if (debug) return " (${workspaceSearchSummary(scannedFiles, skippedFiles, stoppedEarly, maxFiles)})"
+  return if (stoppedEarly) " (stoppedAfterMaxFiles=$maxFiles)" else ""
+}
+
+private fun workspaceSearchSnippet(lines: List<String>, index: Int, contextLines: Int, maxChars: Int): String {
+  if (contextLines <= 0) return workspaceSearchSnippet(lines[index], maxChars)
   val start = (index - contextLines).coerceAtLeast(0)
   val end = (index + contextLines).coerceAtMost(lines.lastIndex)
   return (start..end).joinToString(" | ") { lineIndex ->
     val marker = if (lineIndex == index) ">" else " "
-    "$marker${lineIndex + 1}: ${workspaceSearchSnippet(lines[lineIndex])}"
+    "$marker${lineIndex + 1}: ${workspaceSearchSnippet(lines[lineIndex], maxChars)}"
   }
 }
 
-private fun workspaceSearchSnippet(line: String): String {
+private fun workspaceSearchContext(
+  lines: List<String>,
+  index: Int,
+  contextLines: Int,
+  maxChars: Int,
+): List<WorkspaceSearchContextLine> {
+  val start = (index - contextLines).coerceAtLeast(0)
+  val end = (index + contextLines).coerceAtMost(lines.lastIndex)
+  return (start..end).map { lineIndex ->
+    WorkspaceSearchContextLine(
+      lineNumber = lineIndex + 1,
+      text = workspaceSearchSnippet(lines[lineIndex], maxChars),
+      isMatch = lineIndex == index,
+    )
+  }
+}
+
+private fun workspaceSearchSnippet(line: String, maxChars: Int): String {
   val normalized = line.trim().replace(Regex("\\s+"), " ")
-  if (normalized.length <= 240) return normalized
-  return normalized.take(237) + "..."
+  if (normalized.length <= maxChars) return normalized
+  return normalized.take((maxChars - 3).coerceAtLeast(1)) + "..."
+}
+
+private fun workspaceSearchMatchesOutput(
+  query: String,
+  requestedPath: String,
+  scope: String,
+  mode: String,
+  hits: List<WorkspaceSearchHit>,
+  totalMatches: Int,
+  scannedFiles: Int,
+  skippedFiles: Int,
+  stoppedEarly: Boolean,
+  maxFiles: Int,
+  debug: Boolean,
+): String {
+  return buildString {
+    appendLine(
+      "Found $totalMatches matches for \"$query\" " +
+        "(path=$requestedPath, scope=$scope, mode=$mode)" +
+        workspaceSearchHeaderSuffix(debug, scannedFiles, skippedFiles, stoppedEarly, maxFiles) +
+        ":",
+    )
+    hits.groupBy { it.path }.forEach { (path, fileHits) ->
+      val lineNumbers = fileHits.map { it.lineNumber }.distinct().sorted().joinToString(",")
+      val debugSuffix = if (debug) " maxScore=${fileHits.maxOf { it.score }}" else ""
+      appendLine("$path:$lineNumbers$debugSuffix")
+      workspaceSearchMergedContext(fileHits).forEach { line ->
+        val marker = if (line.isMatch) ">" else " "
+        appendLine("$marker${line.lineNumber}: ${line.text}")
+      }
+    }
+  }.trimEnd()
+}
+
+private fun workspaceSearchMergedContext(hits: List<WorkspaceSearchHit>): List<WorkspaceSearchContextLine> {
+  return hits
+    .flatMap { hit ->
+      hit.context.ifEmpty {
+        listOf(WorkspaceSearchContextLine(hit.lineNumber, hit.snippet, isMatch = true))
+      }
+    }
+    .groupBy { it.lineNumber }
+    .map { (lineNumber, lines) ->
+      WorkspaceSearchContextLine(
+        lineNumber = lineNumber,
+        text = lines.first().text,
+        isMatch = lines.any { it.isMatch },
+      )
+    }
+    .sortedBy { it.lineNumber }
 }
 
 @Serializable

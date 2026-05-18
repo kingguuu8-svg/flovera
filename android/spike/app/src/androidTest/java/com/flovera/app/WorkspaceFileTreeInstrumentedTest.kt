@@ -282,6 +282,40 @@ class WorkspaceFileTreeInstrumentedTest {
   }
 
   @Test
+  fun workspaceSearchL35GroupsContextAndKeepsDebugOptIn() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "search-l35-output-${System.currentTimeMillis()}")
+    val tool = WorkspaceSearchTool(workspace, ToolEventRecorder())
+    workspace.writeFile(
+      "src/Merged.kt",
+      """
+      fun before() = Unit
+      val firstNeedle = "alpha"
+      val secondNeedle = "beta"
+      fun after() = Unit
+      """.trimIndent(),
+      createAutoSnapshot = false,
+    )
+
+    val compact = tool.execute(
+      WorkspaceSearchTool.Args(query = "Needle", path = "src/Merged.kt", contextLines = 1, topK = 10),
+    )
+    val debug = tool.execute(
+      WorkspaceSearchTool.Args(query = "Needle", path = "src/Merged.kt", contextLines = 1, topK = 10, debug = true),
+    )
+
+    assertTrue(compact.contains("src/Merged.kt:2,3"))
+    assertEquals(compact.indexOf(">2: val firstNeedle"), compact.lastIndexOf(">2: val firstNeedle"))
+    assertEquals(compact.indexOf(">3: val secondNeedle"), compact.lastIndexOf(">3: val secondNeedle"))
+    assertTrue(compact.contains(" 1: fun before()"))
+    assertTrue(compact.contains(" 4: fun after()"))
+    assertFalse(compact.contains("score="))
+    assertFalse(compact.contains("scannedFiles="))
+    assertTrue(debug.contains("maxScore="))
+    assertTrue(debug.contains("scannedFiles="))
+  }
+
+  @Test
   fun workspaceImportsSharedFilesToRootWithUniqueNames() {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val workspace = WorkspaceManager(context, "shared-import-${System.currentTimeMillis()}")
