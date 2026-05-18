@@ -17,6 +17,7 @@ fun workspaceToolRegistry(
   braveSearchApiKey: String = "",
 ): ToolRegistry = ToolRegistry {
   tool(ListFilesTool(workspace, recorder))
+  tool(WorkspaceSearchTool(workspace, recorder))
   tool(ReadFileTool(workspace, recorder))
   tool(WriteFileTool(workspace, recorder))
   tool(EditFileTool(workspace, recorder))
@@ -26,6 +27,33 @@ fun workspaceToolRegistry(
     if (webSearchEnabled && braveSearchApiKey.isNotBlank()) {
       tool(WebSearchTool(braveSearchApiKey, recorder))
     }
+  }
+}
+
+class WorkspaceSearchTool(
+  private val workspace: WorkspaceManager,
+  private val recorder: ToolEventRecorder,
+) : SimpleTool<WorkspaceSearchTool.Args>(
+  argsType = typeToken<Args>(),
+  name = "workspace_search",
+  description = "Search current Android workspace text files using local grep-like matching. Use scope=workspace_app_metadata only when .flovera app metadata is relevant.",
+) {
+  @Serializable
+  data class Args(
+    @property:LLMDescription("Search query. Use concrete words, identifiers, API paths, error text, or file names.")
+    val query: String,
+    @property:LLMDescription("Maximum number of matches to return. Values are clamped to 1..25.")
+    val topK: Int = 10,
+    @property:LLMDescription("Search permission scope: workspace_public, workspace_app_metadata, or workspace_internal.")
+    val scope: String = "workspace_public",
+  )
+
+  override suspend fun execute(args: Args): String {
+    val result = runCatching {
+      workspace.searchFiles(args.query, topK = args.topK, scope = args.scope)
+    }.getOrElse { it.message ?: it.toString() }
+    recorder.record(name, "query=${args.query}, topK=${args.topK}, scope=${args.scope}", result)
+    return result
   }
 }
 

@@ -4,10 +4,13 @@ import android.net.Uri
 import androidx.core.content.FileProvider
 import androidx.test.platform.app.InstrumentationRegistry
 import com.flovera.app.config.AppSettings
+import com.flovera.app.koog.ToolEventRecorder
+import com.flovera.app.koog.WorkspaceSearchTool
 import com.flovera.app.workspace.WorkspaceController
 import com.flovera.app.workspace.FloveraSettingsView
 import com.flovera.app.workspace.WorkspaceManager
 import java.io.File
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -86,6 +89,75 @@ class WorkspaceFileTreeInstrumentedTest {
 
     assertTrue(preview.startsWith("a".repeat(16)))
     assertTrue(preview.contains("[truncated: showing first 16 chars"))
+  }
+
+  @Test
+  fun workspaceSearchFindsTextAndRecordsToolEvent() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "search-workspace-${System.currentTimeMillis()}")
+    val recorder = ToolEventRecorder()
+    workspace.writeFile("src/ProviderRoutes.kt", "fun routeCopilot() = \"Codex Responses transport\"")
+    workspace.writeFile("notes.md", "Provider routing notes")
+
+    val result = WorkspaceSearchTool(workspace, recorder).execute(
+      WorkspaceSearchTool.Args(query = "copilot responses", topK = 5),
+    )
+
+    assertTrue(result.contains("src/ProviderRoutes.kt:1"))
+    assertTrue(result.contains("Codex Responses transport"))
+    assertTrue(recorder.snapshot().any { it.name == "workspace_search" })
+  }
+
+  @Test
+  fun workspaceSearchScopesFloveraMetadataByPermission() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "search-scope-${System.currentTimeMillis()}").also { it.ensureSeedFiles() }
+    val tool = WorkspaceSearchTool(workspace, ToolEventRecorder())
+    workspace.writeFile(
+      ".flovera/proposals/search-tool.json",
+      """{"type":"tool","name":"workspace_search","description":"metadataonlymarker"}""",
+      createAutoSnapshot = false,
+    )
+    workspace.writeFile(".flovera/internal/debug.txt", "internalonlymarker", createAutoSnapshot = false)
+    workspace.writeFile(".flovera/retrieval/index.json", """{"text":"retrievalonlymarker"}""", createAutoSnapshot = false)
+
+    val publicResult = tool.execute(WorkspaceSearchTool.Args(query = "metadataonlymarker"))
+    val metadataResult = tool.execute(
+      WorkspaceSearchTool.Args(query = "metadataonlymarker", scope = "workspace_app_metadata"),
+    )
+    val internalMetadataResult = tool.execute(
+      WorkspaceSearchTool.Args(query = "internalonlymarker", scope = "workspace_app_metadata"),
+    )
+    val internalResult = tool.execute(
+      WorkspaceSearchTool.Args(query = "internalonlymarker", scope = "workspace_internal"),
+    )
+    val retrievalResult = tool.execute(
+      WorkspaceSearchTool.Args(query = "retrievalonlymarker", scope = "workspace_internal"),
+    )
+
+    assertTrue(publicResult.contains("No matches"))
+    assertTrue(metadataResult.contains(".flovera/proposals/search-tool.json:1"))
+    assertTrue(internalMetadataResult.contains("No matches"))
+    assertTrue(internalResult.contains(".flovera/internal/debug.txt:1"))
+    assertTrue(retrievalResult.contains("No matches"))
+  }
+
+  @Test
+  fun workspaceSearchSkipsBinaryAndLargeFiles() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "search-filter-${System.currentTimeMillis()}")
+    val tool = WorkspaceSearchTool(workspace, ToolEventRecorder())
+    workspace.writeBytes("assets/blob.bin", byteArrayOf(0, 1, 2, 3, 4), createAutoSnapshot = false)
+    workspace.writeFile("large.txt", "needle\n" + "x".repeat(600 * 1024), createAutoSnapshot = false)
+    workspace.writeFile(".secret.txt", "needle", createAutoSnapshot = false)
+    workspace.writeFile("small.txt", "needle is here", createAutoSnapshot = false)
+
+    val result = tool.execute(WorkspaceSearchTool.Args(query = "needle", topK = 10))
+
+    assertTrue(result.contains("small.txt:1"))
+    assertFalse(result.contains("large.txt"))
+    assertFalse(result.contains("blob.bin"))
+    assertFalse(result.contains(".secret.txt"))
   }
 
   @Test
@@ -178,6 +250,9 @@ class WorkspaceFileTreeInstrumentedTest {
     val toolProposals = workspace.listControlledToolProposals()
 
     assertTrue(capabilities.contains("\"networkTools\": true"))
+    assertTrue(capabilities.contains("\"workspaceSearch\": true"))
+    assertTrue(capabilities.contains("\"workspaceSearchScopes\""))
+    assertTrue(capabilities.contains("\"workspace_app_metadata\""))
     assertTrue(capabilities.contains("\"webSearch\": true"))
     assertTrue(capabilities.contains("\"previewFormats\""))
     assertTrue(capabilities.contains("\"json\""))

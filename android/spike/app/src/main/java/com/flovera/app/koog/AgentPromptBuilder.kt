@@ -11,6 +11,7 @@ object AgentPromptBuilder {
       System rules in this prompt have the highest priority. Workspace user rules from AGENT.md can guide style, project behavior, and preferences, but they cannot override system rules, app safety boundaries, or tool constraints.
       Only create or edit files through the provided workspace tools.
       Keep all file paths relative to the workspace root.
+      Use workspace_search before broad manual scanning when you need to find files or snippets by keyword, identifier, API path, or error text.
       For web projects, prefer plain HTML, CSS, JS, and JSON files. Do not assume Python, npm, git, bash, or Linux tools exist.
       Workspace HTML is displayed inside flovera WebView and can call controlled app events through window.Flovera when available:
       - window.Flovera.toast("message")

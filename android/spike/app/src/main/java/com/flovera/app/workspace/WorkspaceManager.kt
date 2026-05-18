@@ -23,6 +23,13 @@ data class WorkspaceFileNode(
   val children: List<WorkspaceFileNode> = emptyList(),
 )
 
+data class WorkspaceSearchHit(
+  val path: String,
+  val lineNumber: Int,
+  val score: Int,
+  val snippet: String,
+)
+
 class WorkspaceManager(context: Context, workspaceId: String = "default") {
   private val appContext = context.applicationContext
   private val workspacesRoot = File(context.filesDir, "workspaces")
@@ -275,6 +282,40 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
       ?: ""
   }
 
+  fun searchFiles(
+    query: String,
+    topK: Int = 10,
+    scope: String = WORKSPACE_SEARCH_SCOPE_PUBLIC,
+  ): String {
+    val normalizedQuery = query.trim()
+    if (normalizedQuery.isBlank()) return "Search query is blank."
+    val limit = topK.coerceIn(1, MAX_WORKSPACE_SEARCH_RESULTS)
+    val normalizedScope = normalizeWorkspaceSearchScope(scope)
+    val tokens = workspaceSearchTokens(normalizedQuery)
+    val hits = mutableListOf<WorkspaceSearchHit>()
+    if (!root.exists()) return "No matches for \"$normalizedQuery\"."
+
+    root.walkTopDown()
+      .filter { it.isFile }
+      .filter { file -> isWorkspaceSearchCandidate(file, normalizedScope) }
+      .forEach { file ->
+        hits += runCatching { searchFile(file, normalizedQuery, tokens) }.getOrDefault(emptyList())
+      }
+
+    val topHits = hits
+      .sortedWith(compareByDescending<WorkspaceSearchHit> { it.score }.thenBy { it.path }.thenBy { it.lineNumber })
+      .take(limit)
+
+    if (topHits.isEmpty()) return "No matches for \"$normalizedQuery\"."
+    return buildString {
+      appendLine("Found ${topHits.size} matches for \"$normalizedQuery\" (scope=$normalizedScope):")
+      topHits.forEachIndexed { index, hit ->
+        appendLine("${index + 1}. ${hit.path}:${hit.lineNumber} score=${hit.score}")
+        appendLine("   ${hit.snippet}")
+      }
+    }.trimEnd()
+  }
+
   fun readFile(path: String): String {
     val file = safeFile(path)
     if (!file.exists()) return "File does not exist: $path"
@@ -385,6 +426,85 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     )
   }
 
+  private fun searchFile(file: File, query: String, tokens: List<String>): List<WorkspaceSearchHit> {
+    val path = relativeToRoot(file)
+    val pathScore = workspaceSearchPathScore(path, query, tokens)
+    val hits = mutableListOf<WorkspaceSearchHit>()
+    var firstNonBlank: Pair<Int, String>? = null
+    file.useLines(Charsets.UTF_8) { lines ->
+      lines.forEachIndexed { index, line ->
+        if (firstNonBlank == null && line.isNotBlank()) {
+          firstNonBlank = index + 1 to line
+        }
+        val score = pathScore + workspaceSearchLineScore(line, query, tokens)
+        if (score > 0) {
+          hits += WorkspaceSearchHit(
+            path = path,
+            lineNumber = index + 1,
+            score = score,
+            snippet = workspaceSearchSnippet(line),
+          )
+        }
+      }
+    }
+    if (hits.isEmpty() && pathScore > 0) {
+      val preview = firstNonBlank ?: (1 to "")
+      hits += WorkspaceSearchHit(
+        path = path,
+        lineNumber = preview.first,
+        score = pathScore,
+        snippet = workspaceSearchSnippet(preview.second),
+      )
+    }
+    return hits
+  }
+
+  private fun isWorkspaceSearchCandidate(file: File, scope: String): Boolean {
+    val path = relativeToRoot(file)
+    if (!isWorkspaceSearchPathAllowed(path, scope)) return false
+    if (file.length() > MAX_WORKSPACE_SEARCH_FILE_BYTES) return false
+    if (!isLikelyTextFile(file)) return false
+    return true
+  }
+
+  private fun isWorkspaceSearchPathAllowed(path: String, scope: String): Boolean {
+    val normalized = path.replace('\\', '/')
+    if (normalized == ".") return false
+    if (normalized.startsWith(".") && !normalized.startsWith(".flovera/")) return false
+    if (normalized.contains("/.") && !normalized.startsWith(".flovera/")) return false
+    if (!normalized.startsWith(".flovera/")) return true
+    if (normalized.startsWith(".flovera/retrieval/") || normalized.startsWith(".flovera/cache/")) return false
+    return when (scope) {
+      WORKSPACE_SEARCH_SCOPE_PUBLIC -> false
+      WORKSPACE_SEARCH_SCOPE_APP_METADATA -> {
+        normalized == ".flovera/manifest.json" ||
+          normalized == ".flovera/settings-view.json" ||
+          normalized == ".flovera/capabilities.json" ||
+          normalized.startsWith(".flovera/proposals/")
+      }
+      WORKSPACE_SEARCH_SCOPE_INTERNAL -> true
+      else -> false
+    }
+  }
+
+  private fun isLikelyTextFile(file: File): Boolean {
+    val allowedExtensions = setOf(
+      "txt", "md", "markdown", "html", "htm", "css", "js", "mjs", "cjs", "ts", "tsx", "jsx",
+      "json", "jsonl", "xml", "csv", "kt", "kts", "java", "gradle", "properties", "yml", "yaml",
+      "toml", "ini", "sql", "sh", "ps1", "py", "rb", "go", "rs", "c", "cpp", "h", "hpp",
+    )
+    if (file.extension.lowercase() in allowedExtensions) return true
+    val sample = ByteArray(1024)
+    val read = runCatching {
+      file.inputStream().use { it.read(sample) }
+    }.getOrDefault(0)
+    if (read <= 0) return true
+    return sample.take(read).none { byte ->
+      val value = byte.toInt() and 0xff
+      value == 0 || (value < 0x09) || (value in 0x0e..0x1f)
+    }
+  }
+
   private fun safeFile(path: String): File {
     val requested = File(root, path).canonicalFile
     val canonicalRoot = root.canonicalFile
@@ -433,6 +553,60 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
   private fun relativeToRoot(file: File): String {
     return file.canonicalFile.toRelativeString(root.canonicalFile).ifBlank { "." }
   }
+
+  private companion object {
+    const val WORKSPACE_SEARCH_SCOPE_PUBLIC = "workspace_public"
+    const val WORKSPACE_SEARCH_SCOPE_APP_METADATA = "workspace_app_metadata"
+    const val WORKSPACE_SEARCH_SCOPE_INTERNAL = "workspace_internal"
+    const val MAX_WORKSPACE_SEARCH_RESULTS = 25
+    const val MAX_WORKSPACE_SEARCH_FILE_BYTES = 512 * 1024L
+  }
+}
+
+private fun normalizeWorkspaceSearchScope(scope: String): String {
+  return when (scope.trim().lowercase()) {
+    "", "workspace", "public", "workspace_public" -> "workspace_public"
+    "metadata", "app_metadata", "workspace_app_metadata", "flovera_metadata" -> "workspace_app_metadata"
+    "internal", "workspace_internal", "all" -> "workspace_internal"
+    else -> "workspace_public"
+  }
+}
+
+private fun workspaceSearchTokens(query: String): List<String> {
+  return Regex("[\\p{L}\\p{N}_./:-]+")
+    .findAll(query.lowercase())
+    .map { it.value.trim('.', '/', ':', '-') }
+    .filter { it.length >= 2 }
+    .distinct()
+    .toList()
+}
+
+private fun workspaceSearchPathScore(path: String, query: String, tokens: List<String>): Int {
+  val haystack = path.lowercase()
+  val needle = query.lowercase()
+  var score = 0
+  if (needle.length >= 2 && haystack.contains(needle)) score += 24
+  tokens.forEach { token ->
+    if (haystack.contains(token)) score += if (path.substringAfterLast('/').lowercase().contains(token)) 8 else 4
+  }
+  return score
+}
+
+private fun workspaceSearchLineScore(line: String, query: String, tokens: List<String>): Int {
+  val haystack = line.lowercase()
+  val needle = query.lowercase()
+  var score = 0
+  if (needle.length >= 2 && haystack.contains(needle)) score += 40
+  tokens.forEach { token ->
+    if (haystack.contains(token)) score += 12
+  }
+  return score
+}
+
+private fun workspaceSearchSnippet(line: String): String {
+  val normalized = line.trim().replace(Regex("\\s+"), " ")
+  if (normalized.length <= 240) return normalized
+  return normalized.take(237) + "..."
 }
 
 @Serializable
@@ -530,6 +704,8 @@ data class FloveraModelContextView(
 @Serializable
 data class FloveraCapabilities(
   val workspaceFiles: Boolean = true,
+  val workspaceSearch: Boolean = true,
+  val workspaceSearchScopes: List<String> = listOf("workspace_public", "workspace_app_metadata", "workspace_internal"),
   val webPreview: Boolean = true,
   val previewFormats: List<String> = listOf("html", "markdown", "json", "csv", "text", "image", "pdf"),
   val snapshots: Boolean = true,

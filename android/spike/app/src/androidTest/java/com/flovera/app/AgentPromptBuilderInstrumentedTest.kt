@@ -26,6 +26,7 @@ class AgentPromptBuilderInstrumentedTest {
 
     assertTrue(systemPrompt.contains("System rules in this prompt have the highest priority"))
     assertTrue(systemPrompt.contains("Workspace user rules from AGENT.md"))
+    assertTrue(systemPrompt.contains("Use workspace_search before broad manual scanning"))
     assertTrue(systemPrompt.contains("supported provider/model profiles"))
     assertFalse(systemPrompt.contains(workspaceRule))
     assertTrue(systemPrompt.contains("\"provider\":\"custom-openai\""))
