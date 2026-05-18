@@ -229,6 +229,59 @@ class WorkspaceFileTreeInstrumentedTest {
   }
 
   @Test
+  fun workspaceSearchL3RespectsIgnoreFilesAndCanDisableThem() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "search-l3-ignore-${System.currentTimeMillis()}")
+    val tool = WorkspaceSearchTool(workspace, ToolEventRecorder())
+    workspace.writeFile(
+      ".gitignore",
+      """
+      build/
+      *.log
+      !important.log
+      """.trimIndent(),
+      createAutoSnapshot = false,
+    )
+    workspace.writeFile("src/App.kt", "needle in source", createAutoSnapshot = false)
+    workspace.writeFile("build/generated.txt", "needle in build", createAutoSnapshot = false)
+    workspace.writeFile("debug.log", "needle in log", createAutoSnapshot = false)
+    workspace.writeFile("important.log", "needle in important log", createAutoSnapshot = false)
+
+    val respected = tool.execute(WorkspaceSearchTool.Args(query = "needle", topK = 10))
+    val disabled = tool.execute(WorkspaceSearchTool.Args(query = "needle", respectIgnoreFiles = false, topK = 10))
+
+    assertTrue(respected.contains("src/App.kt:1"))
+    assertTrue(respected.contains("important.log:1"))
+    assertFalse(respected.contains("build/generated.txt"))
+    assertFalse(respected.contains("debug.log"))
+    assertTrue(disabled.contains("build/generated.txt:1"))
+    assertTrue(disabled.contains("debug.log:1"))
+  }
+
+  @Test
+  fun workspaceSearchL3SupportsFilesCountAndScanBudget() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "search-l3-output-${System.currentTimeMillis()}")
+    val tool = WorkspaceSearchTool(workspace, ToolEventRecorder())
+    workspace.writeFile("src/A.kt", "needle one\nneedle two", createAutoSnapshot = false)
+    workspace.writeFile("src/B.kt", "needle one", createAutoSnapshot = false)
+    workspace.writeFile("src/C.kt", "needle one", createAutoSnapshot = false)
+
+    val files = tool.execute(WorkspaceSearchTool.Args(query = "needle", path = "src", output = "files", topK = 10))
+    val count = tool.execute(WorkspaceSearchTool.Args(query = "needle", path = "src", output = "count", topK = 10))
+    val budget = tool.execute(WorkspaceSearchTool.Args(query = "needle", path = "src", maxFiles = 1, topK = 10))
+
+    assertTrue(files.contains("Found 3 files"))
+    assertTrue(files.contains("src/A.kt"))
+    assertFalse(files.contains("score="))
+    assertTrue(count.contains("Found 4 matches in 3 files"))
+    assertTrue(count.contains("src/A.kt count=2"))
+    assertTrue(budget.contains("stoppedAfterMaxFiles=1"))
+    assertFalse(budget.contains("src/B.kt"))
+    assertFalse(budget.contains("src/C.kt"))
+  }
+
+  @Test
   fun workspaceImportsSharedFilesToRootWithUniqueNames() {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val workspace = WorkspaceManager(context, "shared-import-${System.currentTimeMillis()}")

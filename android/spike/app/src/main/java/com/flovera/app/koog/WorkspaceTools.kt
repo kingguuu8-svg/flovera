@@ -36,7 +36,7 @@ class WorkspaceSearchTool(
 ) : SimpleTool<WorkspaceSearchTool.Args>(
   argsType = typeToken<Args>(),
   name = "workspace_search",
-  description = "Search current Android workspace text files using local grep-like matching. Use path/includeGlob/excludeGlob to narrow the search, and scope=workspace_app_metadata only when .flovera app metadata is relevant.",
+  description = "Search current Android workspace text files using local grep-like matching. Use path/includeGlob/excludeGlob to narrow the search, output=files or count for quick routing, and scope=workspace_app_metadata only when .flovera app metadata is relevant.",
 ) {
   @Serializable
   data class Args(
@@ -58,6 +58,12 @@ class WorkspaceSearchTool(
     val includeGlob: String = "",
     @property:LLMDescription("Optional glob for paths to exclude, for example build/** or *.min.js.")
     val excludeGlob: String = "",
+    @property:LLMDescription("Output shape: matches, files, or count.")
+    val output: String = "matches",
+    @property:LLMDescription("Whether to respect workspace .gitignore and .ignore files.")
+    val respectIgnoreFiles: Boolean = true,
+    @property:LLMDescription("Maximum searchable text files to scan before stopping. Values are clamped to 1..10000.")
+    val maxFiles: Int = 2000,
   )
 
   override suspend fun execute(args: Args): String {
@@ -72,11 +78,14 @@ class WorkspaceSearchTool(
         mode = args.mode,
         includeGlob = args.includeGlob,
         excludeGlob = args.excludeGlob,
+        output = args.output,
+        respectIgnoreFiles = args.respectIgnoreFiles,
+        maxFiles = args.maxFiles,
       )
     }.getOrElse { it.message ?: it.toString() }
     recorder.record(
       name,
-      "query=${args.query}, path=${args.path}, topK=${args.topK}, scope=${args.scope}, mode=${args.mode}",
+      "query=${args.query}, path=${args.path}, topK=${args.topK}, scope=${args.scope}, mode=${args.mode}, output=${args.output}",
       result,
     )
     return result

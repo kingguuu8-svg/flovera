@@ -40,6 +40,15 @@ data class WorkspaceSearchOptions(
   val mode: String = "literal",
   val includeGlob: String = "",
   val excludeGlob: String = "",
+  val output: String = "matches",
+  val respectIgnoreFiles: Boolean = true,
+  val maxFiles: Int = 2000,
+)
+
+private data class WorkspaceIgnoreRule(
+  val regex: Regex,
+  val descendantRegex: Regex?,
+  val negated: Boolean,
 )
 
 class WorkspaceManager(context: Context, workspaceId: String = "default") {
@@ -304,6 +313,9 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     mode: String = WORKSPACE_SEARCH_MODE_LITERAL,
     includeGlob: String = "",
     excludeGlob: String = "",
+    output: String = WORKSPACE_SEARCH_OUTPUT_MATCHES,
+    respectIgnoreFiles: Boolean = true,
+    maxFiles: Int = DEFAULT_WORKSPACE_SEARCH_MAX_FILES,
   ): String {
     return searchFiles(
       WorkspaceSearchOptions(
@@ -316,6 +328,9 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
         mode = mode,
         includeGlob = includeGlob,
         excludeGlob = excludeGlob,
+        output = output,
+        respectIgnoreFiles = respectIgnoreFiles,
+        maxFiles = maxFiles,
       ),
     )
   }
@@ -328,8 +343,10 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     }
     if (!requested.exists()) return "Path does not exist: ${options.path}"
     val limit = options.topK.coerceIn(1, MAX_WORKSPACE_SEARCH_RESULTS)
+    val maxFiles = options.maxFiles.coerceIn(1, MAX_WORKSPACE_SEARCH_FILES)
     val normalizedScope = normalizeWorkspaceSearchScope(options.scope)
     val searchMode = normalizeWorkspaceSearchMode(options.mode)
+    val output = normalizeWorkspaceSearchOutput(options.output)
     val regex = if (searchMode == WORKSPACE_SEARCH_MODE_REGEX) {
       runCatching {
         Regex(normalizedQuery, if (options.caseSensitive) emptySet() else setOf(RegexOption.IGNORE_CASE))
@@ -341,36 +358,84 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     val includeRegex = workspaceGlobRegex(options.includeGlob)
     val excludeRegex = workspaceGlobRegex(options.excludeGlob)
     val context = options.contextLines.coerceIn(0, MAX_WORKSPACE_SEARCH_CONTEXT_LINES)
+    val ignoreRules = if (options.respectIgnoreFiles) loadWorkspaceIgnoreRules() else emptyList()
     val hits = mutableListOf<WorkspaceSearchHit>()
     if (!root.exists()) return "No matches for \"$normalizedQuery\"."
 
-    val candidates = if (requested.isFile) sequenceOf(requested) else requested.walkTopDown()
-    candidates
-      .filter { it.isFile }
-      .filter { file -> isWorkspaceSearchCandidate(file, normalizedScope, includeRegex, excludeRegex) }
-      .forEach { file ->
-        hits += runCatching {
-          searchFile(
-            file = file,
-            query = normalizedQuery,
-            tokens = tokens,
-            caseSensitive = options.caseSensitive,
-            mode = searchMode,
-            regex = regex,
-            contextLines = context,
-          )
-        }.getOrDefault(emptyList())
+    var scannedFiles = 0
+    var skippedFiles = 0
+    var stoppedEarly = false
+    val candidates = workspaceSearchCandidates(requested, normalizedScope, ignoreRules)
+    for (file in candidates) {
+      if (Thread.currentThread().isInterrupted) {
+        stoppedEarly = true
+        break
       }
+      if (!isWorkspaceSearchCandidate(file, normalizedScope, includeRegex, excludeRegex, ignoreRules)) {
+        skippedFiles += 1
+        continue
+      }
+      if (scannedFiles >= maxFiles) {
+        stoppedEarly = true
+        break
+      }
+      scannedFiles += 1
+      hits += runCatching {
+        searchFile(
+          file = file,
+          query = normalizedQuery,
+          tokens = tokens,
+          caseSensitive = options.caseSensitive,
+          mode = searchMode,
+          regex = regex,
+          contextLines = context,
+        )
+      }.getOrDefault(emptyList())
+    }
 
     val topHits = hits
       .sortedWith(compareByDescending<WorkspaceSearchHit> { it.score }.thenBy { it.path }.thenBy { it.lineNumber })
       .take(limit)
 
-    if (topHits.isEmpty()) return "No matches for \"$normalizedQuery\"."
+    if (topHits.isEmpty()) {
+      return "No matches for \"$normalizedQuery\" " +
+        workspaceSearchSummary(scannedFiles, skippedFiles, stoppedEarly, maxFiles) +
+        "."
+    }
+    if (output == WORKSPACE_SEARCH_OUTPUT_FILES) {
+      return workspaceSearchFilesOutput(
+        query = normalizedQuery,
+        requested = requested,
+        scope = normalizedScope,
+        mode = searchMode,
+        hits = hits,
+        limit = limit,
+        scannedFiles = scannedFiles,
+        skippedFiles = skippedFiles,
+        stoppedEarly = stoppedEarly,
+        maxFiles = maxFiles,
+      )
+    }
+    if (output == WORKSPACE_SEARCH_OUTPUT_COUNT) {
+      return workspaceSearchCountOutput(
+        query = normalizedQuery,
+        requested = requested,
+        scope = normalizedScope,
+        mode = searchMode,
+        hits = hits,
+        limit = limit,
+        scannedFiles = scannedFiles,
+        skippedFiles = skippedFiles,
+        stoppedEarly = stoppedEarly,
+        maxFiles = maxFiles,
+      )
+    }
     return buildString {
       appendLine(
         "Found ${topHits.size} matches for \"$normalizedQuery\" " +
-          "(path=${relativeToRoot(requested)}, scope=$normalizedScope, mode=$searchMode):",
+          "(path=${relativeToRoot(requested)}, scope=$normalizedScope, mode=$searchMode, " +
+          workspaceSearchSummary(scannedFiles, skippedFiles, stoppedEarly, maxFiles) +
+          "):",
       )
       topHits.forEachIndexed { index, hit ->
         appendLine("${index + 1}. ${hit.path}:${hit.lineNumber} score=${hit.score}")
@@ -529,15 +594,63 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     return hits
   }
 
+  private fun workspaceSearchCandidates(
+    requested: File,
+    scope: String,
+    ignoreRules: List<WorkspaceIgnoreRule>,
+  ): Sequence<File> = sequence {
+    if (requested.isFile) {
+      yield(requested)
+      return@sequence
+    }
+
+    suspend fun SequenceScope<File>.visit(dir: File) {
+      dir.listFiles()
+        ?.sortedWith(compareBy<File> { !it.isDirectory }.thenBy { it.name.lowercase() })
+        ?.forEach { child ->
+          if (Thread.currentThread().isInterrupted) return
+          if (child.isDirectory) {
+            if (isWorkspaceSearchDirectoryCandidate(child, scope, ignoreRules)) {
+              visit(child)
+            }
+          } else {
+            yield(child)
+          }
+        }
+    }
+
+    visit(requested)
+  }
+
+  private fun isWorkspaceSearchDirectoryCandidate(
+    dir: File,
+    scope: String,
+    ignoreRules: List<WorkspaceIgnoreRule>,
+  ): Boolean {
+    val path = relativeToRoot(dir).replace('\\', '/')
+    if (path == ".") return true
+    if (path == ".flovera") return scope != WORKSPACE_SEARCH_SCOPE_PUBLIC
+    if (path.startsWith(".flovera/retrieval") || path.startsWith(".flovera/cache")) return false
+    if (path.startsWith(".flovera/")) {
+      return scope == WORKSPACE_SEARCH_SCOPE_INTERNAL ||
+        (scope == WORKSPACE_SEARCH_SCOPE_APP_METADATA && path.startsWith(".flovera/proposals"))
+    }
+    if (path.startsWith(".") || path.contains("/.")) return false
+    if (isWorkspaceIgnored(path, isDirectory = true, ignoreRules = ignoreRules)) return false
+    return true
+  }
+
   private fun isWorkspaceSearchCandidate(
     file: File,
     scope: String,
     includeRegex: Regex?,
     excludeRegex: Regex?,
+    ignoreRules: List<WorkspaceIgnoreRule>,
   ): Boolean {
     val path = relativeToRoot(file)
     if (!isWorkspaceSearchPathAllowed(path, scope)) return false
     val normalizedPath = path.replace('\\', '/')
+    if (isWorkspaceIgnored(normalizedPath, isDirectory = false, ignoreRules = ignoreRules)) return false
     if (includeRegex != null && !includeRegex.matches(normalizedPath)) return false
     if (excludeRegex != null && excludeRegex.matches(normalizedPath)) return false
     if (file.length() > MAX_WORKSPACE_SEARCH_FILE_BYTES) return false
@@ -581,6 +694,109 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
       val value = byte.toInt() and 0xff
       value == 0 || (value < 0x09) || (value in 0x0e..0x1f)
     }
+  }
+
+  private fun loadWorkspaceIgnoreRules(): List<WorkspaceIgnoreRule> {
+    if (!root.exists()) return emptyList()
+    val rules = mutableListOf<WorkspaceIgnoreRule>()
+    workspaceSearchIgnoreFiles().forEach { ignoreFile ->
+      val basePath = relativeToRoot(ignoreFile.parentFile ?: root).replace('\\', '/').let { if (it == ".") "" else "$it/" }
+      readUtf8Text(ignoreFile).lineSequence().forEach { rawLine ->
+        workspaceIgnoreRule(basePath, rawLine)?.let { rules += it }
+      }
+    }
+    return rules
+  }
+
+  private fun workspaceSearchIgnoreFiles(): Sequence<File> = sequence {
+    suspend fun SequenceScope<File>.visit(dir: File) {
+      dir.listFiles()
+        ?.sortedWith(compareBy<File> { !it.isDirectory }.thenBy { it.name.lowercase() })
+        ?.forEach { child ->
+          val path = relativeToRoot(child).replace('\\', '/')
+          if (child.isDirectory) {
+            if (path != ".flovera" && !path.startsWith(".flovera/") && !path.startsWith(".") && !path.contains("/.")) {
+              visit(child)
+            }
+          } else if (child.name == ".gitignore" || child.name == ".ignore") {
+            yield(child)
+          }
+        }
+    }
+
+    visit(root)
+  }
+
+  private fun isWorkspaceIgnored(
+    path: String,
+    isDirectory: Boolean,
+    ignoreRules: List<WorkspaceIgnoreRule>,
+  ): Boolean {
+    var ignored = false
+    ignoreRules.forEach { rule ->
+      val matches = rule.regex.matches(path) || rule.descendantRegex?.matches(path) == true
+      if (matches || (isDirectory && rule.descendantRegex?.matches("$path/") == true)) {
+        ignored = !rule.negated
+      }
+    }
+    return ignored
+  }
+
+  private fun workspaceSearchFilesOutput(
+    query: String,
+    requested: File,
+    scope: String,
+    mode: String,
+    hits: List<WorkspaceSearchHit>,
+    limit: Int,
+    scannedFiles: Int,
+    skippedFiles: Int,
+    stoppedEarly: Boolean,
+    maxFiles: Int,
+  ): String {
+    val allFiles = hits
+      .sortedWith(compareByDescending<WorkspaceSearchHit> { it.score }.thenBy { it.path })
+      .map { it.path }
+      .distinct()
+    val files = allFiles.take(limit)
+    return buildString {
+      appendLine(
+        "Found ${allFiles.size} files for \"$query\" " +
+          "(path=${relativeToRoot(requested)}, scope=$scope, mode=$mode, " +
+          workspaceSearchSummary(scannedFiles, skippedFiles, stoppedEarly, maxFiles) +
+          "):",
+      )
+      files.forEachIndexed { index, path -> appendLine("${index + 1}. $path") }
+    }.trimEnd()
+  }
+
+  private fun workspaceSearchCountOutput(
+    query: String,
+    requested: File,
+    scope: String,
+    mode: String,
+    hits: List<WorkspaceSearchHit>,
+    limit: Int,
+    scannedFiles: Int,
+    skippedFiles: Int,
+    stoppedEarly: Boolean,
+    maxFiles: Int,
+  ): String {
+    val allCounts = hits
+      .groupingBy { it.path }
+      .eachCount()
+      .entries
+      .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+    val counts = allCounts.take(limit)
+    return buildString {
+      appendLine(
+        "Found ${hits.size} matches in ${allCounts.size} files for \"$query\" " +
+          "(path=${relativeToRoot(requested)}, scope=$scope, mode=$mode, " +
+          workspaceSearchSummary(scannedFiles, skippedFiles, stoppedEarly, maxFiles) +
+          "):",
+      )
+      counts.forEachIndexed { index, entry -> appendLine("${index + 1}. ${entry.key} count=${entry.value}") }
+    }.trimEnd()
   }
 
   private fun safeFile(path: String): File {
@@ -638,9 +854,14 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     const val WORKSPACE_SEARCH_SCOPE_INTERNAL = "workspace_internal"
     const val WORKSPACE_SEARCH_MODE_LITERAL = "literal"
     const val WORKSPACE_SEARCH_MODE_REGEX = "regex"
+    const val WORKSPACE_SEARCH_OUTPUT_MATCHES = "matches"
+    const val WORKSPACE_SEARCH_OUTPUT_FILES = "files"
+    const val WORKSPACE_SEARCH_OUTPUT_COUNT = "count"
     const val MAX_WORKSPACE_SEARCH_RESULTS = 25
     const val MAX_WORKSPACE_SEARCH_CONTEXT_LINES = 5
     const val MAX_WORKSPACE_SEARCH_FILE_BYTES = 512 * 1024L
+    const val DEFAULT_WORKSPACE_SEARCH_MAX_FILES = 2000
+    const val MAX_WORKSPACE_SEARCH_FILES = 10000
   }
 }
 
@@ -657,6 +878,14 @@ private fun normalizeWorkspaceSearchMode(mode: String): String {
   return when (mode.trim().lowercase()) {
     "regex", "regexp" -> "regex"
     else -> "literal"
+  }
+}
+
+private fun normalizeWorkspaceSearchOutput(output: String): String {
+  return when (output.trim().lowercase()) {
+    "file", "files", "files_with_matches", "paths" -> "files"
+    "count", "counts", "count_only" -> "count"
+    else -> "matches"
   }
 }
 
@@ -721,6 +950,10 @@ private fun workspaceGlobRegex(glob: String): Regex? {
     while (index < chars.length) {
       val char = chars[index]
       when {
+        char == '*' && index + 1 < chars.length && chars[index + 1] == '*' && index + 2 < chars.length && chars[index + 2] == '/' -> {
+          append("(?:.*/)?")
+          index += 2
+        }
         char == '*' && index + 1 < chars.length && chars[index + 1] == '*' -> {
           append(".*")
           index += 1
@@ -736,6 +969,31 @@ private fun workspaceGlobRegex(glob: String): Regex? {
     append("$")
   }
   return Regex(pattern, RegexOption.IGNORE_CASE)
+}
+
+private fun workspaceIgnoreRule(basePath: String, rawLine: String): WorkspaceIgnoreRule? {
+  var line = rawLine.trim()
+  if (line.isBlank() || line.startsWith("#")) return null
+  val negated = line.startsWith("!")
+  if (negated) line = line.drop(1).trim()
+  if (line.isBlank()) return null
+  val directoryOnly = line.endsWith("/")
+  line = line.trim('/')
+  if (line.isBlank()) return null
+  val anchored = rawLine.trim().removePrefix("!").startsWith("/")
+  val hasSlash = "/" in line
+  val pattern = when {
+    anchored || hasSlash -> basePath + line
+    else -> basePath + "**/$line"
+  }
+  val regex = workspaceGlobRegex(pattern) ?: return null
+  val descendantRegex = if (directoryOnly) workspaceGlobRegex("$pattern/**") else null
+  return WorkspaceIgnoreRule(regex = regex, descendantRegex = descendantRegex, negated = negated)
+}
+
+private fun workspaceSearchSummary(scannedFiles: Int, skippedFiles: Int, stoppedEarly: Boolean, maxFiles: Int): String {
+  val stopped = if (stoppedEarly) ", stoppedAfterMaxFiles=$maxFiles" else ""
+  return "scannedFiles=$scannedFiles, skippedFiles=$skippedFiles$stopped"
 }
 
 private fun workspaceSearchSnippet(lines: List<String>, index: Int, contextLines: Int): String {
