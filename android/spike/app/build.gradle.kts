@@ -64,6 +64,10 @@ android {
 chaquopy {
   defaultConfig {
     version = "3.11"
+    pip {
+      install("lxml==5.3.0")
+      install("python-docx==1.2.0")
+    }
   }
 }
 

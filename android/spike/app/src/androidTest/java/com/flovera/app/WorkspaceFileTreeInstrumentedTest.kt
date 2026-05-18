@@ -344,6 +344,53 @@ class WorkspaceFileTreeInstrumentedTest {
   }
 
   @Test
+  fun pythonRunSupportsXmlAndDocxDocumentProcessing() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "python-docs-${System.currentTimeMillis()}")
+    val tool = PythonRunTool(workspace, ToolEventRecorder())
+
+    val result = tool.execute(
+      PythonRunTool.Args(
+        code = """
+        import os
+        from docx import Document
+        from lxml import etree
+
+        os.makedirs("docs", exist_ok=True)
+
+        root = etree.Element("report")
+        etree.SubElement(root, "title").text = "Flovera Python Document"
+        etree.SubElement(root, "status").text = "ready"
+        with open("docs/report.xml", "w", encoding="utf-8") as handle:
+            handle.write(etree.tostring(root, encoding="unicode", pretty_print=True))
+
+        document = Document()
+        document.add_heading("Flovera Python Document", level=1)
+        document.add_paragraph("lxml and python-docx are available.")
+        table = document.add_table(rows=2, cols=2)
+        table.cell(0, 0).text = "Capability"
+        table.cell(0, 1).text = "Status"
+        table.cell(1, 0).text = "document-processing"
+        table.cell(1, 1).text = "ready"
+        document.save("docs/report.docx")
+
+        loaded = Document("docs/report.docx")
+        parsed = etree.parse("docs/report.xml")
+        print(loaded.paragraphs[0].text)
+        print(parsed.getroot().findtext("status"))
+        """.trimIndent(),
+        snapshotBeforeRun = false,
+      ),
+    )
+
+    assertTrue(result, result.contains("Python status=ok exitCode=0"))
+    assertTrue(result, result.contains("Flovera Python Document"))
+    assertTrue(result, result.contains("ready"))
+    assertTrue(workspace.readFile("docs/report.xml").contains("<status>ready</status>"))
+    assertTrue(workspace.exportableFile("docs/report.docx")!!.length() > 0)
+  }
+
+  @Test
   fun pythonRunKeepsConversationSessionState() = runBlocking {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val workspace = WorkspaceManager(context, "python-session-${System.currentTimeMillis()}")

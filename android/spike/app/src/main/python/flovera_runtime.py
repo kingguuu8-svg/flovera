@@ -38,6 +38,7 @@ def run_code(code, workspace_root, cwd, timeout_ms, max_output_chars, session_id
         globals_dict = _globals_for_session(session_id, reset_session)
         globals_dict["WORKSPACE_ROOT"] = root
         globals_dict["WORKSPACE_CWD"] = start_cwd
+        _preload_runtime_packages()
 
         old_cwd = os.getcwd()
         deadline = time.monotonic() + timeout_s
@@ -91,6 +92,11 @@ def _globals_for_session(session_id, reset_session):
     return _sessions[key]
 
 
+def _preload_runtime_packages():
+    import docx
+    import lxml.etree
+
+
 def _timeout_trace(deadline):
     def trace(frame, event, arg):
         if time.monotonic() > deadline:
@@ -100,16 +106,55 @@ def _timeout_trace(deadline):
     return trace
 
 
-def _normalize_path(root, current_cwd, path, scope, write):
+def _normalize_path(root, current_cwd, path, scope, write, read_roots=None):
     if isinstance(path, int):
         return path
     raw = os.fspath(path)
     base = current_cwd if not os.path.isabs(raw) else root
     resolved = os.path.realpath(raw if os.path.isabs(raw) else os.path.join(base, raw))
     if resolved != root and not resolved.startswith(root + os.sep):
+        if not write and (
+            _is_under_any(resolved, read_roots or ())
+            or _is_chaquopy_asset_path(raw)
+            or _is_chaquopy_asset_path(resolved)
+        ):
+            return resolved
         raise FloveraPythonBoundaryError("Path escapes workspace: " + raw)
     _check_flovera_scope(root, resolved, scope, write)
     return resolved
+
+
+def _is_under_any(path, roots):
+    for candidate in roots:
+        if path == candidate or path.startswith(candidate + os.sep):
+            return True
+    return False
+
+
+def _is_chaquopy_asset_path(path):
+    return (os.sep + "chaquopy" + os.sep + "AssetFinder" + os.sep) in path
+
+
+def _python_read_roots():
+    roots = set()
+
+    def add_root(value, require_exists=True):
+        if not value:
+            return
+        try:
+            resolved = os.path.realpath(value)
+        except (OSError, TypeError, ValueError):
+            return
+        if not require_exists or os.path.exists(resolved):
+            roots.add(resolved)
+
+    module_dir = os.path.dirname(__file__)
+    asset_root = os.path.dirname(module_dir)
+    for value in (module_dir, asset_root, os.path.join(asset_root, "requirements")):
+        add_root(value, require_exists=False)
+    for value in list(sys.path) + [sys.prefix, sys.exec_prefix]:
+        add_root(value)
+    return tuple(sorted(roots))
 
 
 def _check_flovera_scope(root, path, scope, write):
@@ -144,13 +189,14 @@ def _install_boundaries(root, start_cwd, scope, network_enabled, deadline):
     original_open = builtins.open
     original_chdir = os.chdir
     original_sleep = time.sleep
+    read_roots = _python_read_roots()
 
     def patch(obj, name, value):
         patches.append((obj, name, getattr(obj, name)))
         setattr(obj, name, value)
 
     def guarded_path(path, write=False):
-        return _normalize_path(root, current_cwd[0], path, scope, write)
+        return _normalize_path(root, current_cwd[0], path, scope, write, read_roots)
 
     def guarded_open(file, mode="r", *args, **kwargs):
         write = any(flag in str(mode) for flag in ("w", "a", "x", "+"))

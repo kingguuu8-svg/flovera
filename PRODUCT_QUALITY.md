@@ -317,18 +317,43 @@ so future work can be planned without losing the product direction.
 - Keep tool availability visible to the agent only when the corresponding user
   permission is enabled.
 
+### Agent Capability Expansion
+
+- Treat Python and HTML as the first two production surfaces, not as the whole
+  capability boundary.
+- Keep future expansion organized around what lets the agent sense, execute,
+  verify, and connect work inside the workspace:
+  - file format engines for office documents, PDF, images, SQLite, archives,
+    and structured data;
+  - render and inspect tools for validating generated artifacts before the user
+    opens them;
+  - local native tools for work that does not fit inside Python, such as PDF
+    rendering, screenshots, OCR, and media processing;
+  - retrieval and index layers for workspace text, file metadata, structured
+    document content, and later embeddings;
+  - external connectors such as Git, browser, cloud drive, mail, calendar, and
+    provider APIs, each behind explicit permission and audit boundaries;
+  - task orchestration primitives such as snapshots, artifact records,
+    resumable plans, and permission-scoped tool manifests.
+- Do not expand this backlog by adding another unconstrained runtime. Prefer
+  small app-owned tools with schemas, timeouts, output limits, event records,
+  snapshots, and tests.
+- Keep this backlog item as the holding area for capability-boundary ideas while
+  the current implementation focus remains the controlled Python runtime.
+
 ### Controlled Python Runtime
 
-- This backlog item is gated: do not implement Python runtime support until the
-  user explicitly approves starting that implementation. Other backlog items can
-  continue autonomously in safety-first order.
+- This backlog item is now approved and active. The first implementation target
+  is a conversation-bound, blocking Python runtime owned by the Android app
+  lifecycle, not a background service or general Android terminal.
 - Add Python as a workspace-scoped execution tool, not as a general Android
   terminal or full IDE.
-- Expose a minimal agent tool such as `run_python(path, args?, stdin?)`.
+- Expose a minimal agent tool such as `python_run(code, cwd?, timeoutMs?,
+  sessionId?)`.
 - Capture `stdout`, `stderr`, `exit_code`, and runtime duration for each run.
 - Enforce timeout and cancellation so scripts cannot freeze the app.
-- Start with Python standard library support; do not require arbitrary `pip`
-  package installation in v1.
+- Start with Python standard library support; do not require arbitrary live
+  `pip` package installation in v1.
 - Allow scripts to read and write only inside the active workspace unless a
   future explicit permission grants broader access.
 - Follow existing network/tool permission settings when Python code performs
@@ -344,6 +369,22 @@ so future work can be planned without losing the product direction.
 - Make the runtime complete enough for the agent to write lightweight agent
   programs inside the workspace using standard library features such as HTTP,
   JSON, SQLite, path handling, compression, and local modules.
+- Add a small production-runtime package layer by user task, not by package
+  novelty:
+  - document processing: `lxml` plus `python-docx`;
+  - spreadsheets: `openpyxl` and, if needed, `XlsxWriter`;
+  - PDF text and page manipulation: `pypdf`;
+  - Markdown and templating: `markdown` or `mistune`, plus `jinja2`;
+  - data/demo support: lightweight pure-Python utilities such as `pyyaml`,
+    `faker`, and `sympy` after catalog rules exist.
+- Treat native Python dependencies such as `lxml` and Pillow as APK/runtime
+  decisions, not dynamic pure-Python catalog entries.
+- Maintain a Flovera pure-Python wheel catalog for dynamic installs after the
+  core runtime is stable. Each entry must include package name, version, wheel
+  URL, sha256, top-level imports, dependencies, and whether the wheel is
+  `py3-none-any`.
+- Keep full PyPI resolver behavior out of scope until package provenance,
+  dependency closure, storage location, and rollback behavior are explicit.
 
 ### Vector Search Runtime
 
