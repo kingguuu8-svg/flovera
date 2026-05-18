@@ -161,6 +161,74 @@ class WorkspaceFileTreeInstrumentedTest {
   }
 
   @Test
+  fun workspaceSearchL2OptionsNarrowAndShapeResults() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "search-l2-${System.currentTimeMillis()}")
+    val tool = WorkspaceSearchTool(workspace, ToolEventRecorder())
+    workspace.writeFile(
+      "src/main/Routes.kt",
+      """
+      package demo
+      fun routeProvider() {
+        val transport = "Codex Responses"
+      }
+      """.trimIndent(),
+      createAutoSnapshot = false,
+    )
+    workspace.writeFile("src/test/RoutesTest.kt", "val transport = \"test\"")
+    workspace.writeFile("docs/routes.md", "transport docs")
+
+    val scoped = tool.execute(
+      WorkspaceSearchTool.Args(query = "transport", path = "src/main", topK = 10),
+    )
+    val includeGlob = tool.execute(
+      WorkspaceSearchTool.Args(query = "transport", includeGlob = "src/**/*.kt", excludeGlob = "src/test/**", topK = 10),
+    )
+    val fileTypeGlob = tool.execute(
+      WorkspaceSearchTool.Args(query = "transport", includeGlob = "*.kt", topK = 10),
+    )
+    val contextResult = tool.execute(
+      WorkspaceSearchTool.Args(query = "transport", path = "src/main/Routes.kt", contextLines = 1),
+    )
+
+    assertTrue(scoped.contains("src/main/Routes.kt:3"))
+    assertFalse(scoped.contains("src/test/RoutesTest.kt"))
+    assertFalse(scoped.contains("docs/routes.md"))
+    assertTrue(includeGlob.contains("src/main/Routes.kt:3"))
+    assertFalse(includeGlob.contains("src/test/RoutesTest.kt"))
+    assertFalse(includeGlob.contains("docs/routes.md"))
+    assertTrue(fileTypeGlob.contains("src/main/Routes.kt:3"))
+    assertTrue(fileTypeGlob.contains("src/test/RoutesTest.kt:1"))
+    assertFalse(fileTypeGlob.contains("docs/routes.md"))
+    assertTrue(contextResult.contains(" 2: fun routeProvider()"))
+    assertTrue(contextResult.contains(">3: val transport"))
+    assertTrue(contextResult.contains(" 4: }"))
+  }
+
+  @Test
+  fun workspaceSearchSupportsRegexAndCaseSensitivity() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "search-regex-${System.currentTimeMillis()}")
+    val tool = WorkspaceSearchTool(workspace, ToolEventRecorder())
+    workspace.writeFile("code.kt", "val ProviderTransport = \"ok\"\nval providertransport = \"lower\"", createAutoSnapshot = false)
+
+    val regex = tool.execute(
+      WorkspaceSearchTool.Args(query = "Provider[A-Za-z]+", mode = "regex"),
+    )
+    val caseSensitive = tool.execute(
+      WorkspaceSearchTool.Args(query = "ProviderTransport", caseSensitive = true, topK = 10),
+    )
+    val invalidRegex = tool.execute(
+      WorkspaceSearchTool.Args(query = "[", mode = "regex"),
+    )
+
+    assertTrue(regex.contains("code.kt:1"))
+    assertTrue(caseSensitive.contains("code.kt:1"))
+    assertFalse(caseSensitive.contains("code.kt:2"))
+    assertTrue(invalidRegex.contains("Invalid regex"))
+  }
+
+  @Test
   fun workspaceImportsSharedFilesToRootWithUniqueNames() {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val workspace = WorkspaceManager(context, "shared-import-${System.currentTimeMillis()}")

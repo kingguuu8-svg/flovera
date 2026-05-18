@@ -30,6 +30,18 @@ data class WorkspaceSearchHit(
   val snippet: String,
 )
 
+data class WorkspaceSearchOptions(
+  val query: String,
+  val path: String = ".",
+  val topK: Int = 10,
+  val scope: String = "workspace_public",
+  val contextLines: Int = 0,
+  val caseSensitive: Boolean = false,
+  val mode: String = "literal",
+  val includeGlob: String = "",
+  val excludeGlob: String = "",
+)
+
 class WorkspaceManager(context: Context, workspaceId: String = "default") {
   private val appContext = context.applicationContext
   private val workspacesRoot = File(context.filesDir, "workspaces")
@@ -286,20 +298,68 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     query: String,
     topK: Int = 10,
     scope: String = WORKSPACE_SEARCH_SCOPE_PUBLIC,
+    path: String = ".",
+    contextLines: Int = 0,
+    caseSensitive: Boolean = false,
+    mode: String = WORKSPACE_SEARCH_MODE_LITERAL,
+    includeGlob: String = "",
+    excludeGlob: String = "",
   ): String {
-    val normalizedQuery = query.trim()
+    return searchFiles(
+      WorkspaceSearchOptions(
+        query = query,
+        path = path,
+        topK = topK,
+        scope = scope,
+        contextLines = contextLines,
+        caseSensitive = caseSensitive,
+        mode = mode,
+        includeGlob = includeGlob,
+        excludeGlob = excludeGlob,
+      ),
+    )
+  }
+
+  fun searchFiles(options: WorkspaceSearchOptions): String {
+    val normalizedQuery = options.query.trim()
     if (normalizedQuery.isBlank()) return "Search query is blank."
-    val limit = topK.coerceIn(1, MAX_WORKSPACE_SEARCH_RESULTS)
-    val normalizedScope = normalizeWorkspaceSearchScope(scope)
-    val tokens = workspaceSearchTokens(normalizedQuery)
+    val requested = runCatching { safeFile(options.path.ifBlank { "." }) }.getOrElse {
+      return it.message ?: it.toString()
+    }
+    if (!requested.exists()) return "Path does not exist: ${options.path}"
+    val limit = options.topK.coerceIn(1, MAX_WORKSPACE_SEARCH_RESULTS)
+    val normalizedScope = normalizeWorkspaceSearchScope(options.scope)
+    val searchMode = normalizeWorkspaceSearchMode(options.mode)
+    val regex = if (searchMode == WORKSPACE_SEARCH_MODE_REGEX) {
+      runCatching {
+        Regex(normalizedQuery, if (options.caseSensitive) emptySet() else setOf(RegexOption.IGNORE_CASE))
+      }.getOrElse { return "Invalid regex: ${it.message}" }
+    } else {
+      null
+    }
+    val tokens = workspaceSearchTokens(normalizedQuery, options.caseSensitive)
+    val includeRegex = workspaceGlobRegex(options.includeGlob)
+    val excludeRegex = workspaceGlobRegex(options.excludeGlob)
+    val context = options.contextLines.coerceIn(0, MAX_WORKSPACE_SEARCH_CONTEXT_LINES)
     val hits = mutableListOf<WorkspaceSearchHit>()
     if (!root.exists()) return "No matches for \"$normalizedQuery\"."
 
-    root.walkTopDown()
+    val candidates = if (requested.isFile) sequenceOf(requested) else requested.walkTopDown()
+    candidates
       .filter { it.isFile }
-      .filter { file -> isWorkspaceSearchCandidate(file, normalizedScope) }
+      .filter { file -> isWorkspaceSearchCandidate(file, normalizedScope, includeRegex, excludeRegex) }
       .forEach { file ->
-        hits += runCatching { searchFile(file, normalizedQuery, tokens) }.getOrDefault(emptyList())
+        hits += runCatching {
+          searchFile(
+            file = file,
+            query = normalizedQuery,
+            tokens = tokens,
+            caseSensitive = options.caseSensitive,
+            mode = searchMode,
+            regex = regex,
+            contextLines = context,
+          )
+        }.getOrDefault(emptyList())
       }
 
     val topHits = hits
@@ -308,7 +368,10 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
 
     if (topHits.isEmpty()) return "No matches for \"$normalizedQuery\"."
     return buildString {
-      appendLine("Found ${topHits.size} matches for \"$normalizedQuery\" (scope=$normalizedScope):")
+      appendLine(
+        "Found ${topHits.size} matches for \"$normalizedQuery\" " +
+          "(path=${relativeToRoot(requested)}, scope=$normalizedScope, mode=$searchMode):",
+      )
       topHits.forEachIndexed { index, hit ->
         appendLine("${index + 1}. ${hit.path}:${hit.lineNumber} score=${hit.score}")
         appendLine("   ${hit.snippet}")
@@ -426,25 +489,32 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     )
   }
 
-  private fun searchFile(file: File, query: String, tokens: List<String>): List<WorkspaceSearchHit> {
+  private fun searchFile(
+    file: File,
+    query: String,
+    tokens: List<String>,
+    caseSensitive: Boolean,
+    mode: String,
+    regex: Regex?,
+    contextLines: Int,
+  ): List<WorkspaceSearchHit> {
     val path = relativeToRoot(file)
-    val pathScore = workspaceSearchPathScore(path, query, tokens)
+    val pathScore = workspaceSearchPathScore(path, query, tokens, caseSensitive, mode, regex)
     val hits = mutableListOf<WorkspaceSearchHit>()
     var firstNonBlank: Pair<Int, String>? = null
-    file.useLines(Charsets.UTF_8) { lines ->
-      lines.forEachIndexed { index, line ->
-        if (firstNonBlank == null && line.isNotBlank()) {
-          firstNonBlank = index + 1 to line
-        }
-        val score = pathScore + workspaceSearchLineScore(line, query, tokens)
-        if (score > 0) {
-          hits += WorkspaceSearchHit(
-            path = path,
-            lineNumber = index + 1,
-            score = score,
-            snippet = workspaceSearchSnippet(line),
-          )
-        }
+    val lines = file.readLines(Charsets.UTF_8)
+    lines.forEachIndexed { index, line ->
+      if (firstNonBlank == null && line.isNotBlank()) {
+        firstNonBlank = index + 1 to line
+      }
+      val score = pathScore + workspaceSearchLineScore(line, query, tokens, caseSensitive, mode, regex)
+      if (score > 0) {
+        hits += WorkspaceSearchHit(
+          path = path,
+          lineNumber = index + 1,
+          score = score,
+          snippet = workspaceSearchSnippet(lines, index, contextLines),
+        )
       }
     }
     if (hits.isEmpty() && pathScore > 0) {
@@ -459,9 +529,17 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     return hits
   }
 
-  private fun isWorkspaceSearchCandidate(file: File, scope: String): Boolean {
+  private fun isWorkspaceSearchCandidate(
+    file: File,
+    scope: String,
+    includeRegex: Regex?,
+    excludeRegex: Regex?,
+  ): Boolean {
     val path = relativeToRoot(file)
     if (!isWorkspaceSearchPathAllowed(path, scope)) return false
+    val normalizedPath = path.replace('\\', '/')
+    if (includeRegex != null && !includeRegex.matches(normalizedPath)) return false
+    if (excludeRegex != null && excludeRegex.matches(normalizedPath)) return false
     if (file.length() > MAX_WORKSPACE_SEARCH_FILE_BYTES) return false
     if (!isLikelyTextFile(file)) return false
     return true
@@ -558,7 +636,10 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     const val WORKSPACE_SEARCH_SCOPE_PUBLIC = "workspace_public"
     const val WORKSPACE_SEARCH_SCOPE_APP_METADATA = "workspace_app_metadata"
     const val WORKSPACE_SEARCH_SCOPE_INTERNAL = "workspace_internal"
+    const val WORKSPACE_SEARCH_MODE_LITERAL = "literal"
+    const val WORKSPACE_SEARCH_MODE_REGEX = "regex"
     const val MAX_WORKSPACE_SEARCH_RESULTS = 25
+    const val MAX_WORKSPACE_SEARCH_CONTEXT_LINES = 5
     const val MAX_WORKSPACE_SEARCH_FILE_BYTES = 512 * 1024L
   }
 }
@@ -572,35 +653,99 @@ private fun normalizeWorkspaceSearchScope(scope: String): String {
   }
 }
 
-private fun workspaceSearchTokens(query: String): List<String> {
+private fun normalizeWorkspaceSearchMode(mode: String): String {
+  return when (mode.trim().lowercase()) {
+    "regex", "regexp" -> "regex"
+    else -> "literal"
+  }
+}
+
+private fun workspaceSearchTokens(query: String, caseSensitive: Boolean): List<String> {
+  val source = if (caseSensitive) query else query.lowercase()
   return Regex("[\\p{L}\\p{N}_./:-]+")
-    .findAll(query.lowercase())
+    .findAll(source)
     .map { it.value.trim('.', '/', ':', '-') }
     .filter { it.length >= 2 }
     .distinct()
     .toList()
 }
 
-private fun workspaceSearchPathScore(path: String, query: String, tokens: List<String>): Int {
-  val haystack = path.lowercase()
-  val needle = query.lowercase()
+private fun workspaceSearchPathScore(
+  path: String,
+  query: String,
+  tokens: List<String>,
+  caseSensitive: Boolean,
+  mode: String,
+  regex: Regex?,
+): Int {
+  val haystack = if (caseSensitive) path else path.lowercase()
+  val needle = if (caseSensitive) query else query.lowercase()
   var score = 0
-  if (needle.length >= 2 && haystack.contains(needle)) score += 24
+  if (mode == "regex" && regex?.containsMatchIn(path) == true) score += 24
+  if (mode == "literal" && needle.length >= 2 && haystack.contains(needle)) score += 24
   tokens.forEach { token ->
     if (haystack.contains(token)) score += if (path.substringAfterLast('/').lowercase().contains(token)) 8 else 4
   }
   return score
 }
 
-private fun workspaceSearchLineScore(line: String, query: String, tokens: List<String>): Int {
-  val haystack = line.lowercase()
-  val needle = query.lowercase()
+private fun workspaceSearchLineScore(
+  line: String,
+  query: String,
+  tokens: List<String>,
+  caseSensitive: Boolean,
+  mode: String,
+  regex: Regex?,
+): Int {
+  val haystack = if (caseSensitive) line else line.lowercase()
+  val needle = if (caseSensitive) query else query.lowercase()
   var score = 0
-  if (needle.length >= 2 && haystack.contains(needle)) score += 40
+  if (mode == "regex" && regex?.containsMatchIn(line) == true) score += 40
+  if (mode == "literal" && needle.length >= 2 && haystack.contains(needle)) score += 40
   tokens.forEach { token ->
     if (haystack.contains(token)) score += 12
   }
   return score
+}
+
+private fun workspaceGlobRegex(glob: String): Regex? {
+  val raw = glob.trim()
+  if (raw.isBlank()) return null
+  val normalized = raw.replace('\\', '/').let { value ->
+    if ("/" in value) value else "**/$value"
+  }
+  val pattern = buildString {
+    append("^")
+    val chars = normalized
+    var index = 0
+    while (index < chars.length) {
+      val char = chars[index]
+      when {
+        char == '*' && index + 1 < chars.length && chars[index + 1] == '*' -> {
+          append(".*")
+          index += 1
+        }
+        char == '*' -> append("[^/]*")
+        char == '?' -> append("[^/]")
+        char == '.' -> append("\\.")
+        char == '/' -> append("/")
+        else -> append(Regex.escape(char.toString()))
+      }
+      index += 1
+    }
+    append("$")
+  }
+  return Regex(pattern, RegexOption.IGNORE_CASE)
+}
+
+private fun workspaceSearchSnippet(lines: List<String>, index: Int, contextLines: Int): String {
+  if (contextLines <= 0) return workspaceSearchSnippet(lines[index])
+  val start = (index - contextLines).coerceAtLeast(0)
+  val end = (index + contextLines).coerceAtMost(lines.lastIndex)
+  return (start..end).joinToString(" | ") { lineIndex ->
+    val marker = if (lineIndex == index) ">" else " "
+    "$marker${lineIndex + 1}: ${workspaceSearchSnippet(lines[lineIndex])}"
+  }
 }
 
 private fun workspaceSearchSnippet(line: String): String {
