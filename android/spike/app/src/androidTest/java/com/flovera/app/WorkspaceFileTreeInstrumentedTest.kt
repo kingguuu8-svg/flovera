@@ -3,6 +3,7 @@ package com.flovera.app
 import android.net.Uri
 import androidx.core.content.FileProvider
 import androidx.test.platform.app.InstrumentationRegistry
+import com.flovera.app.koog.PythonRunTool
 import com.flovera.app.config.AppSettings
 import com.flovera.app.koog.ToolEventRecorder
 import com.flovera.app.koog.WorkspaceSearchTool
@@ -316,6 +317,98 @@ class WorkspaceFileTreeInstrumentedTest {
   }
 
   @Test
+  fun pythonRunCalculatesAndWritesWorkspaceFiles() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "python-run-${System.currentTimeMillis()}")
+    val tool = PythonRunTool(workspace, ToolEventRecorder())
+
+    val result = tool.execute(
+      PythonRunTool.Args(
+        code = """
+        import json
+        import math
+        import os
+
+        os.makedirs("out", exist_ok=True)
+        with open("out/result.json", "w", encoding="utf-8") as handle:
+            json.dump({"hypot": math.hypot(3, 4)}, handle)
+        print("computed", math.factorial(5))
+        """.trimIndent(),
+        snapshotBeforeRun = false,
+      ),
+    )
+
+    assertTrue(result, result.contains("Python status=ok exitCode=0"))
+    assertTrue(result, result.contains("computed 120"))
+    assertTrue(result, workspace.readFile("out/result.json").contains("\"hypot\": 5.0"))
+  }
+
+  @Test
+  fun pythonRunKeepsConversationSessionState() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "python-session-${System.currentTimeMillis()}")
+    val tool = PythonRunTool(workspace, ToolEventRecorder())
+
+    tool.execute(
+      PythonRunTool.Args(code = "value = 41", sessionId = "conversation-1", snapshotBeforeRun = false),
+    )
+    val result = tool.execute(
+      PythonRunTool.Args(code = "print(value + 1)", sessionId = "conversation-1", snapshotBeforeRun = false),
+    )
+
+    assertTrue(result, result.contains("session=conversation-1"))
+    assertTrue(result, result.contains("42"))
+  }
+
+  @Test
+  fun pythonRunRejectsEscapesAndBackgroundEntrypoints() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "python-boundary-${System.currentTimeMillis()}")
+    val tool = PythonRunTool(workspace, ToolEventRecorder())
+
+    val escape = tool.execute(
+      PythonRunTool.Args(
+        code = """open("/data/data/com.flovera.app/files/not-workspace.txt", "w").write("bad")""",
+        snapshotBeforeRun = false,
+      ),
+    )
+    val thread = tool.execute(
+      PythonRunTool.Args(
+        code = """
+        import threading
+        threading.Thread(target=lambda: None).start()
+        """.trimIndent(),
+        snapshotBeforeRun = false,
+      ),
+    )
+
+    assertTrue(escape, escape.contains("Path escapes workspace"))
+    assertTrue(thread, thread.contains("threading.Thread.start is disabled"))
+  }
+
+  @Test
+  fun pythonRunTimesOutBlockingSleep() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "python-timeout-${System.currentTimeMillis()}")
+    val tool = PythonRunTool(workspace, ToolEventRecorder())
+
+    val result = tool.execute(
+      PythonRunTool.Args(
+        code = """
+        import time
+        time.sleep(5)
+        print("unreachable")
+        """.trimIndent(),
+        timeoutMs = 1000,
+        snapshotBeforeRun = false,
+      ),
+    )
+
+    assertTrue(result, result.contains("Python status=timeout exitCode=124"))
+    assertFalse(result, result.contains("unreachable"))
+  }
+
+  @Test
   fun workspaceImportsSharedFilesToRootWithUniqueNames() {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val workspace = WorkspaceManager(context, "shared-import-${System.currentTimeMillis()}")
@@ -405,6 +498,7 @@ class WorkspaceFileTreeInstrumentedTest {
     val toolProposals = workspace.listControlledToolProposals()
 
     assertTrue(capabilities.contains("\"networkTools\": true"))
+    assertTrue(capabilities.contains("\"pythonRuntime\": true"))
     assertTrue(capabilities.contains("\"workspaceSearch\": true"))
     assertTrue(capabilities.contains("\"workspaceSearchScopes\""))
     assertTrue(capabilities.contains("\"workspace_app_metadata\""))

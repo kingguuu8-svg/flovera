@@ -64,6 +64,8 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
   private val appContext = context.applicationContext
   private val workspacesRoot = File(context.filesDir, "workspaces")
   val root: File = File(workspacesRoot, workspaceId).apply { mkdirs() }
+  val applicationContext: Context
+    get() = appContext
   private val snapshotStore = WorkspaceSnapshotStore(appContext, workspaceId, root)
   private val json = Json {
     prettyPrint = true
@@ -256,6 +258,10 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     return snapshotStore.createManual(name, selectedHtmlPath)
   }
 
+  fun createAutomaticSnapshot(reason: String) {
+    snapshotStore.createAutomatic(reason)
+  }
+
   fun restoreSnapshot(id: String): WorkspaceSnapshotRecord? = snapshotStore.restore(id)
 
   fun deleteSnapshot(id: String): Boolean = snapshotStore.delete(id)
@@ -286,6 +292,14 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     if (!file.exists() || !file.isFile) return null
     return file
   }
+
+  fun workspaceRuntimeDirectory(path: String = "."): File {
+    val file = safeFile(path.ifBlank { "." })
+    if (!file.exists()) return file
+    return if (file.isFile) file.parentFile ?: root else file
+  }
+
+  fun workspaceRelativePath(file: File): String = relativeToRoot(file)
 
   fun mimeType(path: String): String {
     val extension = safeFile(path).extension.lowercase()
@@ -1216,7 +1230,7 @@ data class FloveraCapabilities(
   val snapshots: Boolean = true,
   val notifications: Boolean = true,
   val networkTools: Boolean = false,
-  val pythonRuntime: Boolean = false,
+  val pythonRuntime: Boolean = true,
   val webSearch: Boolean = false,
   val settingsView: Boolean = true,
   val settingsProposals: Boolean = true,

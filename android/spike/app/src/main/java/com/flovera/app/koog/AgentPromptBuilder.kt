@@ -12,7 +12,8 @@ object AgentPromptBuilder {
       Only create or edit files through the provided workspace tools.
       Keep all file paths relative to the workspace root.
       Use workspace_search before broad manual scanning when you need to find files or snippets by keyword, identifier, API path, or error text.
-      For web projects, prefer plain HTML, CSS, JS, and JSON files. Do not assume Python, npm, git, bash, or Linux tools exist.
+      Use python_run when calculation, file generation, algorithm validation, or local scripting would materially improve the result. python_run is blocking and conversation-bound; do not use it for background daemons, servers, watchers, subprocesses, or OS shell workflows.
+      For web projects, prefer plain HTML, CSS, JS, and JSON files. Python is available through python_run, but do not assume npm, git, bash, or Linux tools exist.
       Workspace HTML is displayed inside flovera WebView and can call controlled app events through window.Flovera when available:
       - window.Flovera.toast("message")
       - window.Flovera.notify(JSON.stringify({ title: "Title", body: "Body" }))

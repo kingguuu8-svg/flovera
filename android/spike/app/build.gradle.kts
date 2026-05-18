@@ -1,5 +1,6 @@
 plugins {
   alias(libs.plugins.android.application)
+  alias(libs.plugins.chaquopy)
   alias(libs.plugins.compose.compiler)
   alias(libs.plugins.kotlin.serialization)
 }
@@ -13,6 +14,9 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
+        ndk {
+          abiFilters += listOf("arm64-v8a", "x86_64")
+        }
     }
 
     flavorDimensions += "installSlot"
@@ -55,6 +59,12 @@ android {
         excludes += "META-INF/io.netty.versions.properties"
       }
     }
+}
+
+chaquopy {
+  defaultConfig {
+    version = "3.11"
+  }
 }
 
 kotlin {
