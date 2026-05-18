@@ -7,6 +7,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import traceback
@@ -28,6 +29,7 @@ def run_code(code, workspace_root, cwd, timeout_ms, max_output_chars, session_id
     with _run_lock:
         started_at = time.monotonic()
         root = os.path.realpath(workspace_root)
+        _install_workspace_site_packages(root)
         start_cwd = _normalize_path(root, root, cwd, scope, False)
         timeout_s = max(1, int(timeout_ms)) / 1000.0
         max_chars = max(1000, int(max_output_chars))
@@ -41,11 +43,13 @@ def run_code(code, workspace_root, cwd, timeout_ms, max_output_chars, session_id
         _preload_runtime_packages()
 
         old_cwd = os.getcwd()
+        old_tempdir = tempfile.tempdir
         deadline = time.monotonic() + timeout_s
         patches = _install_boundaries(root, start_cwd, scope, bool(network_enabled), deadline)
         old_trace = sys.gettrace()
         try:
             os.chdir(start_cwd)
+            tempfile.tempdir = start_cwd
             sys.settrace(_timeout_trace(deadline))
             with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
                 exec(compile(code, "<flovera-python-run>", "exec"), globals_dict)
@@ -63,6 +67,7 @@ def run_code(code, workspace_root, cwd, timeout_ms, max_output_chars, session_id
         finally:
             sys.settrace(old_trace)
             _restore_patches(patches)
+            tempfile.tempdir = old_tempdir
             os.chdir(old_cwd)
 
         elapsed_ms = int((time.monotonic() - started_at) * 1000)
@@ -94,7 +99,18 @@ def _globals_for_session(session_id, reset_session):
 
 def _preload_runtime_packages():
     import docx
+    import jinja2
     import lxml.etree
+    import markdown
+    import openpyxl
+    import pypdf
+    import xlsxwriter
+
+
+def _install_workspace_site_packages(root):
+    site_packages = os.path.join(root, ".flovera", "python", "site-packages")
+    if site_packages not in sys.path:
+        sys.path.insert(0, site_packages)
 
 
 def _timeout_trace(deadline):
@@ -173,6 +189,8 @@ def _check_flovera_scope(root, path, scope, write):
             ".flovera/manifest.json",
             ".flovera/settings-view.json",
             ".flovera/capabilities.json",
+            ".flovera/python/wheel-catalog.json",
+            ".flovera/tools/manifest.json",
         }
         if rel in metadata_read:
             if write:

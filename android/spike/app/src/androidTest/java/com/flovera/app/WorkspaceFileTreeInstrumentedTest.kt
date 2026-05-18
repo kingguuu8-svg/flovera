@@ -3,7 +3,9 @@ package com.flovera.app
 import android.net.Uri
 import androidx.core.content.FileProvider
 import androidx.test.platform.app.InstrumentationRegistry
+import com.flovera.app.koog.ArtifactInspectTool
 import com.flovera.app.koog.PythonRunTool
+import com.flovera.app.koog.PythonPackageInstallTool
 import com.flovera.app.config.AppSettings
 import com.flovera.app.koog.ToolEventRecorder
 import com.flovera.app.koog.WorkspaceSearchTool
@@ -391,6 +393,133 @@ class WorkspaceFileTreeInstrumentedTest {
   }
 
   @Test
+  fun pythonRunSupportsProductionPackagesForOfficePdfAndHtml() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "python-production-${System.currentTimeMillis()}").also { it.ensureSeedFiles() }
+    val tool = PythonRunTool(workspace, ToolEventRecorder())
+
+    val result = tool.execute(
+      PythonRunTool.Args(
+        code = """
+        import json
+        import markdown
+        import openpyxl
+        import xlsxwriter
+        from jinja2 import Template
+        from pypdf import PdfWriter
+
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        sheet.title = "Data"
+        sheet["A1"] = "value"
+        sheet["A2"] = 42
+        workbook.save("production-openpyxl.xlsx")
+
+        xlsx = xlsxwriter.Workbook("production-xlsxwriter.xlsx")
+        worksheet = xlsx.add_worksheet("Report")
+        worksheet.write("A1", "metric")
+        worksheet.write("B1", "score")
+        xlsx.close()
+
+        html = Template("<h1>{{ title }}</h1>{{ body }}").render(
+            title="Generated",
+            body=markdown.markdown("**ready**"),
+        )
+        open("production.html", "w", encoding="utf-8").write(html)
+        open("production.json", "w", encoding="utf-8").write(json.dumps({"ready": True}))
+
+        writer = PdfWriter()
+        writer.add_blank_page(width=72, height=72)
+        with open("production.pdf", "wb") as handle:
+            writer.write(handle)
+
+        print("production packages ready")
+        """.trimIndent(),
+        snapshotBeforeRun = false,
+      ),
+    )
+
+    assertTrue(result, result.contains("Python status=ok exitCode=0"))
+    assertTrue(result, result.contains("production packages ready"))
+    assertTrue(workspace.exportableFile("production-openpyxl.xlsx")!!.length() > 0)
+    assertTrue(workspace.exportableFile("production-xlsxwriter.xlsx")!!.length() > 0)
+    assertTrue(workspace.readFile("production.html").contains("<strong>ready</strong>"))
+    assertTrue(workspace.exportableFile("production.pdf")!!.length() > 0)
+  }
+
+  @Test
+  fun artifactInspectValidatesCommonWorkspaceArtifacts() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "artifact-inspect-${System.currentTimeMillis()}").also { it.ensureSeedFiles() }
+    val python = PythonRunTool(workspace, ToolEventRecorder())
+    val inspector = ArtifactInspectTool(workspace, ToolEventRecorder())
+
+    val createResult = python.execute(
+      PythonRunTool.Args(
+        code = """
+        import json
+        import openpyxl
+        from docx import Document
+        from pypdf import PdfWriter
+
+        open("artifact.html", "w", encoding="utf-8").write("<!doctype html><title>Artifact</title><h1>Ready</h1>")
+        open("artifact.json", "w", encoding="utf-8").write(json.dumps({"status": "ready", "items": [1, 2]}))
+
+        doc = Document()
+        doc.add_heading("Artifact Document", level=1)
+        doc.add_paragraph("Generated for inspection.")
+        doc.save("artifact.docx")
+
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        sheet.title = "Summary"
+        sheet["A1"] = "status"
+        sheet["B1"] = "=1+1"
+        workbook.save("artifact.xlsx")
+
+        writer = PdfWriter()
+        writer.add_blank_page(width=72, height=72)
+        with open("artifact.pdf", "wb") as handle:
+            writer.write(handle)
+        """.trimIndent(),
+        snapshotBeforeRun = false,
+      ),
+    )
+    assertTrue(createResult, createResult.contains("Python status=ok exitCode=0"))
+
+    val json = inspector.execute(ArtifactInspectTool.Args(path = "artifact.json"))
+    val html = inspector.execute(ArtifactInspectTool.Args(path = "artifact.html"))
+    val docx = inspector.execute(ArtifactInspectTool.Args(path = "artifact.docx"))
+    val xlsx = inspector.execute(ArtifactInspectTool.Args(path = "artifact.xlsx"))
+    val pdf = inspector.execute(ArtifactInspectTool.Args(path = "artifact.pdf"))
+
+    assertTrue(json, json.contains("\"format\":\"json\""))
+    assertTrue(json, json.contains("\"status\":\"ok\""))
+    assertTrue(html, html.contains("\"format\":\"html\""))
+    assertTrue(html, html.contains("Artifact"))
+    assertTrue(docx, docx.contains("\"format\":\"docx\""))
+    assertTrue(docx, docx.contains("Artifact Document"))
+    assertTrue(xlsx, xlsx.contains("\"format\":\"xlsx\""))
+    assertTrue(xlsx, xlsx.contains("\"formulaCount\":1"))
+    assertTrue(pdf, pdf.contains("\"format\":\"pdf\""))
+    assertTrue(pdf, pdf.contains("\"pageCount\":1"))
+  }
+
+  @Test
+  fun pythonPackageCatalogAndToolManifestAreExposed() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "python-catalog-${System.currentTimeMillis()}").also { it.ensureSeedFiles() }
+    val installer = PythonPackageInstallTool(workspace, ToolEventRecorder())
+
+    val installResult = installer.execute(PythonPackageInstallTool.Args(packageName = "openpyxl"))
+
+    assertTrue(installResult, installResult.contains("\"status\":\"ok\""))
+    assertTrue(installResult, installResult.contains("Package already available"))
+    assertTrue(workspace.readFile(".flovera/python/wheel-catalog.json").contains("\"name\": \"openpyxl\""))
+    assertTrue(workspace.readFile(".flovera/tools/manifest.json").contains("\"tools\""))
+  }
+
+  @Test
   fun pythonRunKeepsConversationSessionState() = runBlocking {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val workspace = WorkspaceManager(context, "python-session-${System.currentTimeMillis()}")
@@ -546,6 +675,12 @@ class WorkspaceFileTreeInstrumentedTest {
 
     assertTrue(capabilities.contains("\"networkTools\": true"))
     assertTrue(capabilities.contains("\"pythonRuntime\": true"))
+    assertTrue(capabilities.contains("\"pythonPackageInstall\": true"))
+    assertTrue(capabilities.contains("\"pythonPackageCatalogPath\""))
+    assertTrue(capabilities.contains("\"pythonBuiltInPackages\""))
+    assertTrue(capabilities.contains("\"openpyxl\""))
+    assertTrue(capabilities.contains("\"artifactInspect\": true"))
+    assertTrue(capabilities.contains("\"artifactInspectFormats\""))
     assertTrue(capabilities.contains("\"workspaceSearch\": true"))
     assertTrue(capabilities.contains("\"workspaceSearchScopes\""))
     assertTrue(capabilities.contains("\"workspace_app_metadata\""))

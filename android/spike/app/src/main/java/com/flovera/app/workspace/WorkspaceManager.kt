@@ -179,6 +179,21 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
       createAutoSnapshot = false,
     )
     safeFile(".flovera/proposals").mkdirs()
+    safeFile(".flovera/tools").mkdirs()
+    safeFile(".flovera/python/site-packages").mkdirs()
+    safeFile(".flovera/python/wheels").mkdirs()
+    writeFile(
+      path = ".flovera/tools/manifest.json",
+      content = json.encodeToString(FloveraPythonToolsManifest()),
+      overwrite = false,
+      createAutoSnapshot = false,
+    )
+    writeFile(
+      path = ".flovera/python/wheel-catalog.json",
+      content = json.encodeToString(FloveraPythonWheelCatalog.default()),
+      overwrite = true,
+      createAutoSnapshot = false,
+    )
   }
 
   fun readAgentRules(): String = readFile("AGENT.md")
@@ -1225,12 +1240,19 @@ data class FloveraCapabilities(
   val workspaceFiles: Boolean = true,
   val workspaceSearch: Boolean = true,
   val workspaceSearchScopes: List<String> = listOf("workspace_public", "workspace_app_metadata", "workspace_internal"),
+  val artifactInspect: Boolean = true,
+  val artifactInspectFormats: List<String> = listOf("json", "html", "docx", "xlsx", "pdf", "png", "jpg", "jpeg", "webp", "text"),
   val webPreview: Boolean = true,
   val previewFormats: List<String> = listOf("html", "markdown", "json", "csv", "text", "image", "pdf"),
   val snapshots: Boolean = true,
   val notifications: Boolean = true,
   val networkTools: Boolean = false,
   val pythonRuntime: Boolean = true,
+  val pythonPackageInstall: Boolean = true,
+  val pythonPackageCatalogPath: String = ".flovera/python/wheel-catalog.json",
+  val pythonWorkspaceSitePackagesPath: String = ".flovera/python/site-packages",
+  val pythonToolManifestPath: String = ".flovera/tools/manifest.json",
+  val pythonBuiltInPackages: List<String> = listOf("lxml", "python-docx", "openpyxl", "XlsxWriter", "pypdf", "Markdown", "Jinja2"),
   val webSearch: Boolean = false,
   val settingsView: Boolean = true,
   val settingsProposals: Boolean = true,
@@ -1272,6 +1294,97 @@ data class FloveraCapabilities(
     }
   }
 }
+
+@Serializable
+data class FloveraPythonToolsManifest(
+  val version: Int = 1,
+  val tools: List<FloveraPythonToolManifestEntry> = emptyList(),
+)
+
+@Serializable
+data class FloveraPythonToolManifestEntry(
+  val name: String = "",
+  val path: String = "",
+  val description: String = "",
+  val entrypoint: String = "",
+  val permissions: List<String> = listOf("workspace_public"),
+)
+
+@Serializable
+data class FloveraPythonWheelCatalog(
+  val version: Int = 1,
+  val packages: List<FloveraPythonWheelPackage>,
+) {
+  companion object {
+    fun default(): FloveraPythonWheelCatalog = FloveraPythonWheelCatalog(
+      packages = listOf(
+        FloveraPythonWheelPackage(
+          name = "openpyxl",
+          version = "3.1.5",
+          wheelUrl = "https://files.pythonhosted.org/packages/c0/da/977ded879c29cbd04de313843e76868e6e13408a94ed6b987245dc7c8506/openpyxl-3.1.5-py2.py3-none-any.whl",
+          sha256 = "5282c12b107bffeef825f4617dc029afaf41d0ea60823bbb665ef3079dc79de2",
+          topLevelImports = listOf("openpyxl"),
+          dependencies = listOf("et_xmlfile"),
+          bundled = true,
+        ),
+        FloveraPythonWheelPackage(
+          name = "et_xmlfile",
+          version = "2.0.0",
+          wheelUrl = "https://files.pythonhosted.org/packages/c1/8b/5fe2cc11fee489817272089c4203e679c63b570a5aaeb18d852ae3cbba6a/et_xmlfile-2.0.0-py3-none-any.whl",
+          sha256 = "7a91720bc756843502c3b7504c77b8fe44217c85c537d85037f0f536151b2caa",
+          topLevelImports = listOf("et_xmlfile"),
+          bundled = true,
+        ),
+        FloveraPythonWheelPackage(
+          name = "XlsxWriter",
+          version = "3.2.9",
+          wheelUrl = "https://files.pythonhosted.org/packages/3a/0c/3662f4a66880196a590b202f0db82d919dd2f89e99a27fadef91c4a33d41/xlsxwriter-3.2.9-py3-none-any.whl",
+          sha256 = "9a5db42bc5dff014806c58a20b9eae7322a134abb6fce3c92c181bfb275ec5b3",
+          topLevelImports = listOf("xlsxwriter"),
+          bundled = true,
+        ),
+        FloveraPythonWheelPackage(
+          name = "pypdf",
+          version = "6.11.0",
+          wheelUrl = "https://files.pythonhosted.org/packages/07/b1/68feb7eb3b99f0c020b414234825f4a5d70e0126c18d933770e8c93a35fc/pypdf-6.11.0-py3-none-any.whl",
+          sha256 = "769394d5756d5b304c9b6bef88b54b1816b328e7e6fc9254e625529a15ed4ab8",
+          topLevelImports = listOf("pypdf"),
+          bundled = true,
+        ),
+        FloveraPythonWheelPackage(
+          name = "Markdown",
+          version = "3.10.2",
+          wheelUrl = "https://files.pythonhosted.org/packages/de/1f/77fa3081e4f66ca3576c896ae5d31c3002ac6607f9747d2e3aa49227e464/markdown-3.10.2-py3-none-any.whl",
+          sha256 = "e91464b71ae3ee7afd3017d9f358ef0baf158fd9a298db92f1d4761133824c36",
+          topLevelImports = listOf("markdown"),
+          bundled = true,
+        ),
+        FloveraPythonWheelPackage(
+          name = "Jinja2",
+          version = "3.1.6",
+          wheelUrl = "https://files.pythonhosted.org/packages/62/a1/3d680cbfd5f4b8f15abc1d571870c5fc3e594bb582bc3b64ea099db13e56/jinja2-3.1.6-py3-none-any.whl",
+          sha256 = "85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67",
+          topLevelImports = listOf("jinja2"),
+          dependencies = listOf("MarkupSafe"),
+          bundled = true,
+          purePython = false,
+        ),
+      ),
+    )
+  }
+}
+
+@Serializable
+data class FloveraPythonWheelPackage(
+  val name: String,
+  val version: String,
+  val wheelUrl: String,
+  val sha256: String,
+  val topLevelImports: List<String>,
+  val dependencies: List<String> = emptyList(),
+  val purePython: Boolean = true,
+  val bundled: Boolean = false,
+)
 
 @Serializable
 data class WorkspaceSettingsProposalFile(

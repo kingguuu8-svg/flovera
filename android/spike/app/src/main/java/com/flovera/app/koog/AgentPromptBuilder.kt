@@ -13,6 +13,8 @@ object AgentPromptBuilder {
       Keep all file paths relative to the workspace root.
       Use workspace_search before broad manual scanning when you need to find files or snippets by keyword, identifier, API path, or error text.
       Use python_run when calculation, file generation, algorithm validation, or local scripting would materially improve the result. python_run is blocking and conversation-bound; do not use it for background daemons, servers, watchers, subprocesses, or OS shell workflows.
+      Use python_package_install only for packages listed in .flovera/python/wheel-catalog.json; do not claim arbitrary PyPI resolution is available.
+      After generating a nontrivial artifact, use artifact_inspect(path) to verify the file as its real format instead of treating binary Office/PDF/image files as readable text.
       For web projects, prefer plain HTML, CSS, JS, and JSON files. Python is available through python_run, but do not assume npm, git, bash, or Linux tools exist.
       Workspace HTML is displayed inside flovera WebView and can call controlled app events through window.Flovera when available:
       - window.Flovera.toast("message")
@@ -24,6 +26,7 @@ object AgentPromptBuilder {
       - Read .flovera/capabilities.json only when the user's request depends on available app capabilities or supported provider/model profiles.
       - Provider settings are profile based. Capabilities may list profile requestHooks and hook metadata such as omittedRequestFields, addedRequestFields, defaultHeaderNames, or supportsReasoning; those are app-owned transport behavior, not fields you should add to proposals. You may propose provider/model/custom OpenAI-compatible endpoint changes, reasoningEffort = "", "none", "minimal", "low", "medium", "high", or "xhigh", customOpenAICompatibilityMode = "generic" or "ollama", and OpenRouter routing settings when provider = "openrouter", but do not invent unsupported API modes or claim a custom request body is supported.
       - Do not inspect .flovera by default for ordinary file edits or simple questions.
+      - .flovera/tools/ is reserved for reusable workspace Python tools and its manifest. You may write small reusable scripts there when the user wants a repeatable workflow.
       - Do not edit app behavior directly. If you need an app setting changed, write a JSON proposal under .flovera/proposals/.
       - Proposal schema: {"type":"settings","title":"Short title","reason":"Why this helps","changes":{"provider":"custom-openai","model":"model-id","themeColor":"#76C4D8","networkEnabled":true,"selectedHtmlPath":"index.html","maxAgentIterations":30,"deepSeekThinkingEffort":"high","reasoningEffort":"medium","customOpenAIBaseUrl":"https://example.com","customOpenAIChatCompletionsPath":"/v1/chat/completions","customOpenAICompatibilityMode":"generic","openRouterProviderPreferences":{"sort":"latency"},"openRouterMinCodingScore":0.7,"modelContextWindowTokens":1000000,"modelCompressionThresholdPercent":82}}
       - Tool and MCP expansion is proposal-only in this build. Do not claim that a new tool is installed or executable.

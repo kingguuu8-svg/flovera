@@ -29,6 +29,8 @@ class AgentPromptBuilderInstrumentedTest {
     assertTrue(systemPrompt.contains("Use workspace_search before broad manual scanning"))
     assertTrue(systemPrompt.contains("Use python_run when calculation"))
     assertTrue(systemPrompt.contains("blocking and conversation-bound"))
+    assertTrue(systemPrompt.contains("Use python_package_install only for packages listed"))
+    assertTrue(systemPrompt.contains("use artifact_inspect(path) to verify"))
     assertTrue(systemPrompt.contains("supported provider/model profiles"))
     assertFalse(systemPrompt.contains(workspaceRule))
     assertTrue(systemPrompt.contains("\"provider\":\"custom-openai\""))

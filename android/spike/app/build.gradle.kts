@@ -67,6 +67,11 @@ chaquopy {
     pip {
       install("lxml==5.3.0")
       install("python-docx==1.2.0")
+      install("openpyxl==3.1.5")
+      install("XlsxWriter==3.2.9")
+      install("pypdf==6.11.0")
+      install("Markdown==3.10.2")
+      install("Jinja2==3.1.6")
     }
   }
 }

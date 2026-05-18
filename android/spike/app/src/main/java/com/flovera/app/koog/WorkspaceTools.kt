@@ -19,6 +19,8 @@ fun workspaceToolRegistry(
   tool(ListFilesTool(workspace, recorder))
   tool(WorkspaceSearchTool(workspace, recorder))
   tool(PythonRunTool(workspace, recorder, networkEnabled))
+  tool(PythonPackageInstallTool(workspace, recorder, networkEnabled))
+  tool(ArtifactInspectTool(workspace, recorder))
   tool(ReadFileTool(workspace, recorder))
   tool(WriteFileTool(workspace, recorder))
   tool(EditFileTool(workspace, recorder))

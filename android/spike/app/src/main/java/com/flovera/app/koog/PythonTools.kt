@@ -51,6 +51,70 @@ class PythonRunTool(
   }
 }
 
+class ArtifactInspectTool(
+  private val workspace: WorkspaceManager,
+  private val recorder: ToolEventRecorder,
+) : SimpleTool<ArtifactInspectTool.Args>(
+  argsType = typeToken<Args>(),
+  name = "artifact_inspect",
+  description = "Inspect a workspace artifact as its actual file format. Use after generating DOCX, XLSX, PDF, HTML, JSON, image, or text files to verify that the artifact opens and contains the expected structure.",
+) {
+  @Serializable
+  data class Args(
+    @property:LLMDescription("Relative workspace file path to inspect.")
+    val path: String,
+    @property:LLMDescription("Maximum text preview characters for text-bearing formats. Values are clamped to 500..20000.")
+    val maxTextChars: Int = 4000,
+  )
+
+  override suspend fun execute(args: Args): String {
+    val result = runCatching {
+      val file = workspace.exportableFile(args.path) ?: return@runCatching "Artifact does not exist or is not a file: ${args.path}"
+      FloveraPythonRuntime.ensureStarted(workspace)
+      val module = Python.getInstance().getModule("artifact_inspector")
+      module.callAttr(
+        "inspect_artifact",
+        workspace.root.canonicalPath,
+        workspace.workspaceRelativePath(file),
+        args.maxTextChars.coerceIn(500, 20_000),
+      ).toString()
+    }.getOrElse { it.message ?: it.toString() }
+    recorder.record(name, "path=${args.path}", result)
+    return result
+  }
+}
+
+class PythonPackageInstallTool(
+  private val workspace: WorkspaceManager,
+  private val recorder: ToolEventRecorder,
+  private val networkEnabled: Boolean = false,
+) : SimpleTool<PythonPackageInstallTool.Args>(
+  argsType = typeToken<Args>(),
+  name = "python_package_install",
+  description = "Install or confirm a package from Flovera's pure-Python wheel catalog into the current workspace Python site-packages. Network downloads require the conversation Network toggle.",
+) {
+  @Serializable
+  data class Args(
+    @property:LLMDescription("Catalog package name, for example openpyxl, XlsxWriter, pypdf, Markdown, or Jinja2.")
+    val packageName: String,
+  )
+
+  override suspend fun execute(args: Args): String {
+    val result = runCatching {
+      FloveraPythonRuntime.ensureStarted(workspace)
+      val module = Python.getInstance().getModule("flovera_packages")
+      module.callAttr(
+        "install_catalog_package",
+        workspace.root.canonicalPath,
+        args.packageName,
+        networkEnabled,
+      ).toString()
+    }.getOrElse { it.message ?: it.toString() }
+    recorder.record(name, "package=${args.packageName}", result)
+    return result
+  }
+}
+
 private class FloveraPythonRuntime(
   private val workspace: WorkspaceManager,
   private val networkEnabled: Boolean,
@@ -105,7 +169,7 @@ private class FloveraPythonRuntime(
     }.trimEnd()
   }
 
-  private companion object {
+  companion object {
     const val MIN_TIMEOUT_MS = 1_000
     const val MAX_TIMEOUT_MS = 600_000
     const val MIN_OUTPUT_CHARS = 1_000
