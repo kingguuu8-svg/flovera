@@ -1,10 +1,17 @@
 package com.flovera.app
 
 import androidx.test.platform.app.InstrumentationRegistry
+import com.flovera.app.config.AppSettings
+import com.flovera.app.config.SettingsStore
 import com.flovera.app.session.AgentSessionStore
+import com.flovera.app.session.ContextUsageRecord
+import com.flovera.app.session.RuntimeSessionHistory
+import com.flovera.app.session.SESSION_ROLE_COMPRESSION
 import com.flovera.app.session.SessionController
 import com.flovera.app.session.SessionMessage
+import com.flovera.app.session.ToolEvent
 import java.io.File
+import java.util.UUID
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -16,8 +23,7 @@ import org.junit.Test
 class SessionManagementInstrumentedTest {
   @Test
   fun storeCanRenameDuplicateArchiveAndRestoreSessions() {
-    val context = InstrumentationRegistry.getInstrumentation().targetContext
-    val store = AgentSessionStore(context)
+    val store = isolatedSessionStore("rename-archive").store
     val suffix = System.currentTimeMillis()
     val source = store.create("Source $suffix")
     val withMessage = store.appendMessage(source, SessionMessage(role = "user", content = "hello"))
@@ -50,8 +56,7 @@ class SessionManagementInstrumentedTest {
 
   @Test
   fun storeSortsPinnedSessionsFirstThenByLatestUpdate() {
-    val context = InstrumentationRegistry.getInstrumentation().targetContext
-    val store = AgentSessionStore(context)
+    val store = isolatedSessionStore("sort").store
     val suffix = System.currentTimeMillis()
     val olderPinned = store.appendMessage(store.create("Older pinned $suffix"), SessionMessage(role = "user", content = "old"))
     val newerPinned = store.appendMessage(store.create("Newer pinned $suffix"), SessionMessage(role = "user", content = "new"))
@@ -71,11 +76,11 @@ class SessionManagementInstrumentedTest {
 
   @Test
   fun sessionStoreWritesJsonWithoutLeavingAtomicTempFiles() {
-    val context = InstrumentationRegistry.getInstrumentation().targetContext
-    val store = AgentSessionStore(context)
+    val harness = isolatedSessionStore("atomic")
+    val store = harness.store
     val session = store.create("Atomic ${System.currentTimeMillis()}")
     val updated = store.appendMessage(session, SessionMessage(role = "user", content = "persist me"))
-    val sessionFile = File(File(context.filesDir, "sessions"), "${session.id}.json")
+    val sessionFile = File(harness.sessionsRoot, "${session.id}.json")
 
     assertEquals(updated.messages, store.load(session.id)?.messages)
     assertTrue(sessionFile.isFile)
@@ -84,36 +89,133 @@ class SessionManagementInstrumentedTest {
   }
 
   @Test
-  fun controllerArchivesActiveSessionAndSwitchesToUsableSession() {
-    val context = InstrumentationRegistry.getInstrumentation().targetContext
-    val controller = AgentController(context)
-    val store = AgentSessionStore(context)
-    val first = store.appendMessage(
-      store.create("Managed source ${System.currentTimeMillis()}"),
-      SessionMessage(role = "user", content = "persisted"),
+  fun sessionStorePersistsContextUsageRecords() {
+    val store = isolatedSessionStore("context-record").store
+    val session = store.create("Context ${System.currentTimeMillis()}")
+
+    val updated = store.appendContextRecord(
+      session,
+      ContextUsageRecord(
+        id = "record-1",
+        source = "agent_run",
+        messageCount = 3,
+        inputChars = 12,
+        historyChars = 34,
+        rulesChars = 56,
+        workspaceListingChars = 78,
+        approximateTokens = 45,
+        compressed = false,
+        summary = "No compression was applied.",
+      ),
     )
-    controller.openSession(first.id)
 
-    controller.renameSession(first.id, "Managed ${System.currentTimeMillis()}")
-    assertTrue(controller.state.value.session?.title?.startsWith("Managed ") == true)
-    controller.setSessionPinned(first.id, true)
-    assertNotNull(controller.state.value.session?.pinnedAtMillis)
+    val loaded = store.load(updated.id)
+    assertEquals(1, loaded?.contextRecords?.size)
+    assertEquals(45, loaded?.contextRecords?.single()?.approximateTokens)
+  }
 
-    controller.duplicateSession(first.id)
-    val duplicate = controller.state.value.session
-    assertNotNull(duplicate)
-    assertNotEquals(first.id, duplicate?.id)
+  @Test
+  fun sessionStoreAppendsCompressionDividerMessage() {
+    val store = isolatedSessionStore("compression-divider").store
+    val session = store.create("Compression ${System.currentTimeMillis()}")
+    val record = ContextUsageRecord(
+      id = "record-compress",
+      source = "agent_run",
+      provider = "deepseek",
+      model = "deepseek-v4-pro",
+      messageCount = 8,
+      inputChars = 12,
+      historyChars = 34,
+      rulesChars = 56,
+      workspaceListingChars = 78,
+      approximateTokens = 900_000,
+      contextBudgetStatus = "compression_recommended",
+      compressed = true,
+      summary = "handoff",
+    )
 
-    controller.archiveSession(duplicate!!.id)
-    val afterArchive = controller.state.value
-    assertNotEquals(duplicate.id, afterArchive.session?.id)
-    assertTrue(afterArchive.archivedSessions.any { it.id == duplicate.id })
+    val updated = store.appendCompressionDivider(session, record, "Keep project facts and pending tasks.")
+    val divider = store.load(updated.id)?.messages?.single()
+
+    assertEquals(SESSION_ROLE_COMPRESSION, divider?.role)
+    assertTrue(divider?.content?.contains("Context compressed") == true)
+    assertTrue(divider?.content?.contains("record-compress") == true)
+    assertTrue(divider?.content?.contains("Keep project facts") == true)
+  }
+
+  @Test
+  fun sessionStoreCanGenerateLocalHandoffSummaryForCompressionDivider() {
+    val store = isolatedSessionStore("handoff-summary").store
+    val session = store.create("Calendar workspace")
+    val one = store.appendMessage(
+      session,
+      SessionMessage(role = "user", content = "Create a weekly calendar HTML page."),
+    )
+    val two = store.appendMessage(
+      one,
+      SessionMessage(
+        role = "assistant",
+        content = "Created calendar.html and updated the preview.",
+        toolEvents = listOf(
+          ToolEvent(name = "write_file", args = "calendar.html", result = "wrote calendar.html"),
+        ),
+      ),
+    )
+    val record = ContextUsageRecord(
+      id = "handoff-record",
+      source = "agent_run",
+      provider = "deepseek",
+      model = "deepseek-v4-pro",
+      messageCount = 2,
+      inputChars = 10,
+      historyChars = 20,
+      rulesChars = 30,
+      workspaceListingChars = 40,
+      approximateTokens = 900_000,
+      contextBudgetStatus = "compression_recommended",
+      compressed = true,
+      summary = "handoff",
+    )
+
+    val updated = store.appendCompressionDivider(two, record)
+    val content = store.load(updated.id)?.messages?.last()?.content.orEmpty()
+
+    assertTrue(content.contains("# Handoff Summary"))
+    assertTrue(content.contains("Create a weekly calendar HTML page."))
+    assertTrue(content.contains("Created calendar.html"))
+    assertTrue(content.contains("write_file"))
+    assertTrue(content.contains("handoff-record"))
+  }
+
+  @Test
+  fun controllerArchivesActiveSessionAndSwitchesToUsableSession() {
+    withIsolatedController("archive-active") { controller, store ->
+      val first = store.appendMessage(
+        store.create("Managed source ${System.currentTimeMillis()}"),
+        SessionMessage(role = "user", content = "persisted"),
+      )
+      controller.openSession(first.id)
+
+      controller.renameSession(first.id, "Managed ${System.currentTimeMillis()}")
+      assertTrue(controller.state.value.session?.title?.startsWith("Managed ") == true)
+      controller.setSessionPinned(first.id, true)
+      assertNotNull(controller.state.value.session?.pinnedAtMillis)
+
+      controller.duplicateSession(first.id)
+      val duplicate = controller.state.value.session
+      assertNotNull(duplicate)
+      assertNotEquals(first.id, duplicate?.id)
+
+      controller.archiveSession(duplicate!!.id)
+      val afterArchive = controller.state.value
+      assertNotEquals(duplicate.id, afterArchive.session?.id)
+      assertTrue(afterArchive.archivedSessions.any { it.id == duplicate.id })
+    }
   }
 
   @Test
   fun storeCanTruncateConversationHistory() {
-    val context = InstrumentationRegistry.getInstrumentation().targetContext
-    val store = AgentSessionStore(context)
+    val store = isolatedSessionStore("truncate").store
     val session = store.create("Truncate ${System.currentTimeMillis()}")
     val one = store.appendMessage(session, SessionMessage(role = "user", content = "one"))
     val two = store.appendMessage(one, SessionMessage(role = "assistant", content = "two"))
@@ -128,8 +230,7 @@ class SessionManagementInstrumentedTest {
 
   @Test
   fun emptySessionsAreDeletedAndDraftSessionsAreNotListed() {
-    val context = InstrumentationRegistry.getInstrumentation().targetContext
-    val store = AgentSessionStore(context)
+    val store = isolatedSessionStore("empty").store
     val controller = SessionController(store)
     val empty = store.create("Empty ${System.currentTimeMillis()}")
     val draft = controller.createSession()
@@ -141,74 +242,70 @@ class SessionManagementInstrumentedTest {
 
   @Test
   fun controllerRevertExcludesSelectedMessage() {
-    val context = InstrumentationRegistry.getInstrumentation().targetContext
-    val controller = AgentController(context)
-    controller.newSession()
-    val session = controller.state.value.session
-    assertNotNull(session)
+    withIsolatedController("revert-excludes") { controller, store ->
+      controller.newSession()
+      val session = controller.state.value.session
+      assertNotNull(session)
 
-    val store = AgentSessionStore(context)
-    val one = store.appendMessage(session!!, SessionMessage(role = "user", content = "one"))
-    val two = store.appendMessage(one, SessionMessage(role = "assistant", content = "two"))
-    store.appendMessage(two, SessionMessage(role = "user", content = "three"))
+      val one = store.appendMessage(session!!, SessionMessage(role = "user", content = "one"))
+      val two = store.appendMessage(one, SessionMessage(role = "assistant", content = "two"))
+      store.appendMessage(two, SessionMessage(role = "user", content = "three"))
 
-    controller.openSession(session.id)
-    controller.revertSessionToMessage(2)
+      controller.openSession(session.id)
+      controller.revertSessionToMessage(2)
 
-    val reverted = controller.state.value.session
-    assertEquals(2, reverted?.messages?.size)
-    assertEquals("two", reverted?.messages?.last()?.content)
-    assertEquals("three", controller.state.value.input)
+      val reverted = controller.state.value.session
+      assertEquals(2, reverted?.messages?.size)
+      assertEquals("two", reverted?.messages?.last()?.content)
+      assertEquals("three", controller.state.value.input)
+    }
   }
 
   @Test
   fun controllerRejectsRevertFromAssistantMessage() {
-    val context = InstrumentationRegistry.getInstrumentation().targetContext
-    val controller = AgentController(context)
-    controller.newSession()
-    val session = controller.state.value.session
-    assertNotNull(session)
+    withIsolatedController("reject-assistant-revert") { controller, store ->
+      controller.newSession()
+      val session = controller.state.value.session
+      assertNotNull(session)
 
-    val store = AgentSessionStore(context)
-    val one = store.appendMessage(session!!, SessionMessage(role = "user", content = "one"))
-    val two = store.appendMessage(one, SessionMessage(role = "assistant", content = "two"))
-    store.appendMessage(two, SessionMessage(role = "user", content = "three"))
+      val one = store.appendMessage(session!!, SessionMessage(role = "user", content = "one"))
+      val two = store.appendMessage(one, SessionMessage(role = "assistant", content = "two"))
+      store.appendMessage(two, SessionMessage(role = "user", content = "three"))
 
-    controller.openSession(session.id)
-    controller.updateInput("draft")
-    controller.revertSessionToMessage(1)
+      controller.openSession(session.id)
+      controller.updateInput("draft")
+      controller.revertSessionToMessage(1)
 
-    val unchanged = controller.state.value.session
-    assertEquals(3, unchanged?.messages?.size)
-    assertEquals("draft", controller.state.value.input)
+      val unchanged = controller.state.value.session
+      assertEquals(3, unchanged?.messages?.size)
+      assertEquals("draft", controller.state.value.input)
+    }
   }
 
   @Test
   fun controllerRevertsFirstUserMessageIntoDraftInput() {
-    val context = InstrumentationRegistry.getInstrumentation().targetContext
-    val controller = AgentController(context)
-    controller.newSession()
-    val session = controller.state.value.session
-    assertNotNull(session)
+    withIsolatedController("revert-first") { controller, store ->
+      controller.newSession()
+      val session = controller.state.value.session
+      assertNotNull(session)
 
-    val store = AgentSessionStore(context)
-    val one = store.appendMessage(session!!, SessionMessage(role = "user", content = "rewrite me"))
-    store.appendMessage(one, SessionMessage(role = "assistant", content = "answer"))
+      val one = store.appendMessage(session!!, SessionMessage(role = "user", content = "rewrite me"))
+      store.appendMessage(one, SessionMessage(role = "assistant", content = "answer"))
 
-    controller.openSession(session.id)
-    controller.revertSessionToMessage(0)
+      controller.openSession(session.id)
+      controller.revertSessionToMessage(0)
 
-    val state = controller.state.value
-    assertEquals("rewrite me", state.input)
-    assertTrue(state.session?.messages?.isEmpty() == true)
-    assertNull(store.load(session.id))
-    assertFalse(state.sessions.any { it.id == session.id })
+      val state = controller.state.value
+      assertEquals("rewrite me", state.input)
+      assertTrue(state.session?.messages?.isEmpty() == true)
+      assertNull(store.load(session.id))
+      assertFalse(state.sessions.any { it.id == session.id })
+    }
   }
 
   @Test
   fun sessionControllerFallsBackWhenSavedSessionIsArchived() {
-    val context = InstrumentationRegistry.getInstrumentation().targetContext
-    val store = AgentSessionStore(context)
+    val store = isolatedSessionStore("fallback").store
     val controller = SessionController(store)
     val suffix = System.currentTimeMillis()
     val archived = store.appendMessage(store.create("Archived active $suffix"), SessionMessage(role = "user", content = "archived"))
@@ -224,8 +321,7 @@ class SessionManagementInstrumentedTest {
 
   @Test
   fun sessionControllerNamesSessionFromFirstPrompt() {
-    val context = InstrumentationRegistry.getInstrumentation().targetContext
-    val store = AgentSessionStore(context)
+    val store = isolatedSessionStore("first-prompt-title").store
     val controller = SessionController(store)
     val session = store.draft("Session ${System.currentTimeMillis()}")
 
@@ -245,8 +341,7 @@ class SessionManagementInstrumentedTest {
 
   @Test
   fun sessionControllerRevertsBeforeSelectedMessage() {
-    val context = InstrumentationRegistry.getInstrumentation().targetContext
-    val store = AgentSessionStore(context)
+    val store = isolatedSessionStore("controller-revert").store
     val controller = SessionController(store)
     val session = store.create("Controller revert ${System.currentTimeMillis()}")
     val one = controller.appendMessage(session, SessionMessage(role = "user", content = "one"))
@@ -257,5 +352,91 @@ class SessionManagementInstrumentedTest {
 
     assertEquals(1, reverted?.messages?.size)
     assertEquals("one", reverted?.messages?.single()?.content)
+  }
+
+  @Test
+  fun runtimeHistoryUsesLatestCompressionDividerAsHandoffBoundary() {
+    val store = isolatedSessionStore("runtime-history-compressed").store
+    val session = store.create("Runtime history ${System.currentTimeMillis()}")
+    val one = store.appendMessage(session, SessionMessage(role = "user", content = "old user request"))
+    val two = store.appendMessage(one, SessionMessage(role = "assistant", content = "old assistant result"))
+    val compressed = store.appendCompressionDivider(
+      two,
+      contextRecord("compression-record"),
+      "Keep only the project target and pending task.",
+    )
+    val after = store.appendMessage(compressed, SessionMessage(role = "assistant", content = "new assistant result"))
+    val current = store.appendMessage(after, SessionMessage(role = "user", content = "continue the task"))
+
+    val history = RuntimeSessionHistory.promptText(current, currentInput = "continue the task")
+
+    assertTrue(history.contains("handoff_summary:"))
+    assertTrue(history.contains("Keep only the project target and pending task."))
+    assertTrue(history.contains("assistant: new assistant result"))
+    assertFalse(history.contains("old user request"))
+    assertFalse(history.contains("old assistant result"))
+    assertFalse(history.contains("user: continue the task"))
+  }
+
+  @Test
+  fun runtimeHistoryWithoutCompressionKeepsRecentMessagesAndSkipsCurrentInputDuplicate() {
+    val store = isolatedSessionStore("runtime-history-plain").store
+    val session = store.create("Runtime history plain ${System.currentTimeMillis()}")
+    val one = store.appendMessage(session, SessionMessage(role = "user", content = "one"))
+    val two = store.appendMessage(one, SessionMessage(role = "assistant", content = "two"))
+    val three = store.appendMessage(two, SessionMessage(role = "user", content = "three"))
+
+    val entries = RuntimeSessionHistory.entries(three, currentInput = "three", maxMessages = 12)
+
+    assertEquals(listOf("one", "two"), entries.map { it.content })
+  }
+
+  private fun isolatedSessionStore(name: String): SessionStoreHarness {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val root = File(context.cacheDir, "session-tests/$name-${UUID.randomUUID()}")
+    val sessionsRoot = File(root, "sessions")
+    return SessionStoreHarness(
+      store = AgentSessionStore(context, sessionsRoot),
+      root = root,
+      sessionsRoot = sessionsRoot,
+    )
+  }
+
+  private fun withIsolatedController(name: String, block: (AgentController, AgentSessionStore) -> Unit) {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val root = File(context.cacheDir, "controller-tests/$name-${UUID.randomUUID()}")
+    val workspaceId = "controller-$name-${UUID.randomUUID()}"
+    val settingsStore = SettingsStore(context, File(root, "settings.json"))
+    val sessionStore = AgentSessionStore(context, File(root, "sessions"))
+    settingsStore.save(AppSettings(activeWorkspaceId = workspaceId))
+    try {
+      block(AgentController(context, settingsStore, sessionStore), sessionStore)
+    } finally {
+      root.deleteRecursively()
+      File(context.filesDir, "workspaces/$workspaceId").deleteRecursively()
+      File(context.filesDir, "workspace-snapshots/$workspaceId").deleteRecursively()
+    }
+  }
+
+  private data class SessionStoreHarness(
+    val store: AgentSessionStore,
+    val root: File,
+    val sessionsRoot: File,
+  )
+
+  private fun contextRecord(id: String): ContextUsageRecord {
+    return ContextUsageRecord(
+      id = id,
+      source = "test",
+      provider = "deepseek",
+      model = "deepseek-v4-pro",
+      messageCount = 2,
+      inputChars = 10,
+      historyChars = 20,
+      rulesChars = 0,
+      workspaceListingChars = 0,
+      approximateTokens = 10,
+      contextBudgetStatus = "compression_recommended",
+    )
   }
 }

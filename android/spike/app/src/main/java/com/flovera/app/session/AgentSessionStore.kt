@@ -9,6 +9,8 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
+const val SESSION_ROLE_COMPRESSION = "compression"
+
 @Serializable
 data class AgentSession(
   val id: String,
@@ -18,6 +20,7 @@ data class AgentSession(
   val archivedAtMillis: Long? = null,
   val pinnedAtMillis: Long? = null,
   val messages: List<SessionMessage> = emptyList(),
+  val contextRecords: List<ContextUsageRecord> = emptyList(),
 )
 
 @Serializable
@@ -36,8 +39,36 @@ data class ToolEvent(
   val timestampMillis: Long = System.currentTimeMillis(),
 )
 
-class AgentSessionStore(context: Context) {
-  private val root = File(context.filesDir, "sessions")
+@Serializable
+data class ContextUsageRecord(
+  val id: String,
+  val source: String,
+  val createdAtMillis: Long = System.currentTimeMillis(),
+  val provider: String = "",
+  val model: String = "",
+  val messageCount: Int,
+  val inputChars: Int,
+  val historyChars: Int,
+  val rulesChars: Int,
+  val workspaceListingChars: Int,
+  val approximateTokens: Int,
+  val modelContextWindowTokens: Int? = null,
+  val modelContextSource: String = "unknown",
+  val tokenUsageSource: String = "estimate",
+  val contextUsagePermille: Int? = null,
+  val compressionThresholdPercent: Int? = null,
+  val contextBudgetStatus: String = "unknown",
+  val contextBudgetReason: String = "",
+  val compressed: Boolean = false,
+  val summary: String = "",
+  val summarySource: String = "",
+  val compressionError: String = "",
+)
+
+class AgentSessionStore(
+  context: Context,
+  private val root: File = File(context.filesDir, "sessions"),
+) {
   private val json = Json {
     prettyPrint = true
     ignoreUnknownKeys = true
@@ -151,6 +182,43 @@ class AgentSessionStore(context: Context) {
     return updated
   }
 
+  fun appendContextRecord(session: AgentSession, record: ContextUsageRecord): AgentSession {
+    val updated = session.copy(
+      updatedAtMillis = System.currentTimeMillis(),
+      contextRecords = (session.contextRecords + record).takeLast(CONTEXT_RECORD_LIMIT),
+    )
+    save(updated)
+    return updated
+  }
+
+  fun appendCompressionDivider(session: AgentSession, record: ContextUsageRecord): AgentSession {
+    return appendCompressionDivider(session, record, SessionHandoffSummarizer.summarize(session, record))
+  }
+
+  fun appendCompressionDivider(session: AgentSession, record: ContextUsageRecord, summary: String): AgentSession {
+    return appendMessage(
+      session,
+      SessionMessage(
+        role = SESSION_ROLE_COMPRESSION,
+        content = buildString {
+          appendLine("Context compressed")
+          appendLine()
+          appendLine("- recordId: ${record.id}")
+          appendLine("- provider: ${record.provider}")
+          appendLine("- model: ${record.model}")
+          appendLine("- approximateTokens: ${record.approximateTokens}")
+          appendLine("- budgetStatus: ${record.contextBudgetStatus}")
+          appendLine("- summarySource: ${record.summarySource.ifBlank { "local" }}")
+          if (record.compressionError.isNotBlank()) {
+            appendLine("- compressionError: ${record.compressionError}")
+          }
+          appendLine()
+          append(summary.trim().ifBlank { "No handoff summary was provided." })
+        },
+      ),
+    )
+  }
+
   fun truncateMessages(id: String, messageCount: Int): AgentSession? {
     val session = load(id) ?: return null
     val normalizedCount = messageCount.coerceIn(0, session.messages.size)
@@ -184,6 +252,8 @@ class AgentSessionStore(context: Context) {
   private fun fileFor(id: String): File = File(root, "$id.json")
 
   private companion object {
+    const val CONTEXT_RECORD_LIMIT = 80
+
     val sessionSort = compareByDescending<AgentSession> { it.pinnedAtMillis != null }
       .thenByDescending { it.updatedAtMillis }
   }

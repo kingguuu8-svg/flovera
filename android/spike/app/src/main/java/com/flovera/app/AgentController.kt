@@ -4,7 +4,9 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.core.content.FileProvider
+import com.flovera.app.agent.AgentRunStatusNotifier
 import com.flovera.app.agent.AgentRunController
+import com.flovera.app.agent.AndroidAgentRunStatusNotifier
 import com.flovera.app.config.AppSettings
 import com.flovera.app.config.ModelSettingsDraft
 import com.flovera.app.config.SettingsController
@@ -14,7 +16,11 @@ import com.flovera.app.session.AgentSessionStore
 import com.flovera.app.session.SessionController
 import com.flovera.app.session.SessionMessage
 import com.flovera.app.workspace.WorkspaceController
+import com.flovera.app.workspace.WorkspaceControlledToolProposal
 import com.flovera.app.workspace.WorkspaceFileNode
+import com.flovera.app.workspace.WorkspaceSettingsProposal
+import com.flovera.app.workspace.WorkspaceSnapshotRecord
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -28,23 +34,63 @@ data class AgentScreenState(
   val providerDraft: String = AppSettings().provider,
   val modelDraft: String = AppSettings().model,
   val apiKeyDraft: String = "",
+  val customOpenAIBaseUrlDraft: String = "",
+  val customOpenAIChatCompletionsPathDraft: String = "/v1/chat/completions",
+  val customOpenAICompatibilityModeDraft: String = "generic",
   val agentRulesDraft: String = "",
   val workspaceFiles: String = "",
   val workspaceTree: WorkspaceFileNode? = null,
   val htmlFiles: List<String> = emptyList(),
   val selectedHtmlPath: String = "",
   val selectedHtmlUrl: String? = null,
+  val selectedPreviewPath: String = "",
+  val selectedPreviewContent: String = "",
+  val selectedPreviewMimeType: String = "",
+  val selectedPreviewUri: String = "",
   val workspaceRootUrl: String = "",
+  val workspaceSnapshots: List<WorkspaceSnapshotRecord> = emptyList(),
+  val settingsProposals: List<WorkspaceSettingsProposal> = emptyList(),
+  val controlledToolProposals: List<WorkspaceControlledToolProposal> = emptyList(),
   val status: String = "Idle",
   val isRunning: Boolean = false,
   val assistantDraft: SessionMessage? = null,
+  val queuedInputs: List<QueuedAgentInput> = emptyList(),
 )
 
-class AgentController(context: Context) {
+data class QueuedAgentInput(
+  val content: String,
+  val mode: String = QUEUED_INPUT_REQUEST,
+)
+
+private data class FullAuthoritySettingsApplyResult(
+  val settings: AppSettings,
+  val appliedCount: Int = 0,
+)
+
+const val QUEUED_INPUT_REQUEST = "request"
+const val QUEUED_INPUT_GUIDANCE = "guidance"
+
+private fun QueuedAgentInput.toRunInput(): String {
+  if (mode != QUEUED_INPUT_GUIDANCE) return content
+  return """
+    Guidance while the previous agent run was active:
+    $content
+
+    Continue the current task using this guidance. If the task was already completed, revise or continue only when useful.
+  """.trimIndent()
+}
+
+class AgentController(
+  context: Context,
+  settingsStore: SettingsStore = SettingsStore(context.applicationContext),
+  sessionStore: AgentSessionStore = AgentSessionStore(context.applicationContext),
+  private val agentRunController: AgentRunController = AgentRunController(),
+  private val agentRunStatusNotifier: AgentRunStatusNotifier = AndroidAgentRunStatusNotifier(context.applicationContext),
+) {
   private val appContext = context.applicationContext
-  private val settingsController = SettingsController(SettingsStore(appContext))
-  private val sessionController = SessionController(AgentSessionStore(appContext))
-  private val agentRunController = AgentRunController()
+  private val settingsController = SettingsController(settingsStore)
+  private val sessionController = SessionController(sessionStore)
+  private var activeRunJob: Job? = null
   private var workspaceController: WorkspaceController
 
   private val _state = MutableStateFlow(AgentScreenState())
@@ -55,11 +101,16 @@ class AgentController(context: Context) {
     val loadedSettings = settingsLoad.settings
     workspaceController = WorkspaceController(appContext, loadedSettings.activeWorkspaceId).also { it.ensureSeedFiles() }
     val session = sessionController.initialSession(loadedSettings.activeSessionId)
-    val workspaceSnapshot = workspaceController.snapshot(loadedSettings.selectedHtmlPath)
+    workspaceController.syncFloveraSettings(loadedSettings)
+    var workspaceSnapshot = workspaceController.snapshot(loadedSettings.selectedHtmlPath)
     val settings = settingsController.normalizeSelectedHtml(
       settingsController.setActiveSession(loadedSettings, session?.id),
       workspaceSnapshot.selectedHtmlPath,
     )
+    if (settings != loadedSettings) {
+      workspaceController.syncFloveraSettings(settings)
+      workspaceSnapshot = workspaceController.snapshot(settings.selectedHtmlPath)
+    }
     val modelDraft = settingsController.draftFor(settings)
     _state.value = AgentScreenState(
       settings = settings,
@@ -69,13 +120,22 @@ class AgentController(context: Context) {
       providerDraft = modelDraft.providerId,
       modelDraft = modelDraft.model,
       apiKeyDraft = modelDraft.apiKey,
+      customOpenAIBaseUrlDraft = modelDraft.customOpenAIBaseUrl,
+      customOpenAIChatCompletionsPathDraft = modelDraft.customOpenAIChatCompletionsPath,
+      customOpenAICompatibilityModeDraft = modelDraft.customOpenAICompatibilityMode,
       agentRulesDraft = workspaceController.readAgentRules(),
       workspaceFiles = workspaceSnapshot.files,
       workspaceTree = workspaceSnapshot.tree,
       htmlFiles = workspaceSnapshot.htmlFiles,
       selectedHtmlPath = workspaceSnapshot.selectedHtmlPath,
       selectedHtmlUrl = workspaceSnapshot.selectedHtmlUrl,
+      selectedPreviewPath = workspaceSnapshot.selectedHtmlPath,
+      selectedPreviewMimeType = if (workspaceSnapshot.selectedHtmlPath.isBlank()) "" else "text/html",
+      selectedPreviewUri = "",
       workspaceRootUrl = workspaceSnapshot.workspaceRootUrl,
+      workspaceSnapshots = workspaceSnapshot.snapshots,
+      settingsProposals = workspaceSnapshot.settingsProposals,
+      controlledToolProposals = workspaceSnapshot.controlledToolProposals,
       status = settingsLoad.warning ?: "Ready",
     )
   }
@@ -95,6 +155,9 @@ class AgentController(context: Context) {
         providerDraft = draft.providerId,
         modelDraft = draft.model,
         apiKeyDraft = draft.apiKey,
+        customOpenAIBaseUrlDraft = draft.customOpenAIBaseUrl,
+        customOpenAIChatCompletionsPathDraft = draft.customOpenAIChatCompletionsPath,
+        customOpenAICompatibilityModeDraft = draft.customOpenAICompatibilityMode,
       )
     }
   }
@@ -121,9 +184,16 @@ class AgentController(context: Context) {
     providerId: String = _state.value.providerDraft,
     model: String = _state.value.modelDraft,
     apiKey: String = _state.value.apiKeyDraft,
+    customOpenAIBaseUrl: String = _state.value.customOpenAIBaseUrlDraft,
+    customOpenAIChatCompletionsPath: String = _state.value.customOpenAIChatCompletionsPathDraft,
+    customOpenAICompatibilityMode: String = _state.value.customOpenAICompatibilityModeDraft,
     language: String = _state.value.settings.language,
     themeMode: String = _state.value.settings.themeMode,
     themeColor: String = _state.value.settings.themeColor,
+    authorityMode: String = _state.value.settings.agentAuthorityMode,
+    deepSeekThinkingEffort: String = _state.value.settings.deepSeekThinkingEffort,
+    webSearchEnabled: Boolean = _state.value.settings.webSearchEnabled,
+    braveSearchApiKey: String = _state.value.settings.braveSearchApiKey,
   ) {
     val current = _state.value
     val modelSettings = settingsController.saveModelSettings(
@@ -132,6 +202,9 @@ class AgentController(context: Context) {
         providerId = providerId,
         model = model,
         apiKey = apiKey,
+        customOpenAIBaseUrl = customOpenAIBaseUrl,
+        customOpenAIChatCompletionsPath = customOpenAIChatCompletionsPath,
+        customOpenAICompatibilityMode = customOpenAICompatibilityMode,
       ),
     )
     val settings = settingsController.setAppearance(
@@ -139,13 +212,34 @@ class AgentController(context: Context) {
       themeMode,
       themeColor,
     )
-    val draft = settingsController.draftFor(settings)
+    val settingsWithAuthority = settingsController.setAuthorityMode(settings, authorityMode)
+    val settingsWithThinking = settingsController.setDeepSeekThinkingEffort(settingsWithAuthority, deepSeekThinkingEffort)
+    val settingsWithSearch = settingsController.setWebSearch(settingsWithThinking, webSearchEnabled, braveSearchApiKey)
+    val draft = settingsController.draftFor(settingsWithSearch)
+    workspaceController.syncFloveraSettings(settingsWithSearch)
+    val workspaceSnapshot = workspaceController.snapshot(settingsWithSearch.selectedHtmlPath)
     _state.update {
       it.copy(
-        settings = settings,
+        settings = settingsWithSearch,
         providerDraft = draft.providerId,
         modelDraft = draft.model,
         apiKeyDraft = draft.apiKey,
+        customOpenAIBaseUrlDraft = draft.customOpenAIBaseUrl,
+        customOpenAIChatCompletionsPathDraft = draft.customOpenAIChatCompletionsPath,
+        customOpenAICompatibilityModeDraft = draft.customOpenAICompatibilityMode,
+        workspaceFiles = workspaceSnapshot.files,
+        workspaceTree = workspaceSnapshot.tree,
+        htmlFiles = workspaceSnapshot.htmlFiles,
+        selectedHtmlPath = workspaceSnapshot.selectedHtmlPath,
+        selectedHtmlUrl = workspaceSnapshot.selectedHtmlUrl,
+        selectedPreviewPath = workspaceSnapshot.selectedHtmlPath,
+        selectedPreviewContent = "",
+        selectedPreviewMimeType = if (workspaceSnapshot.selectedHtmlPath.isBlank()) "" else "text/html",
+        selectedPreviewUri = "",
+        workspaceRootUrl = workspaceSnapshot.workspaceRootUrl,
+        workspaceSnapshots = workspaceSnapshot.snapshots,
+        settingsProposals = workspaceSnapshot.settingsProposals,
+        controlledToolProposals = workspaceSnapshot.controlledToolProposals,
         status = "Settings saved",
       )
     }
@@ -160,7 +254,38 @@ class AgentController(context: Context) {
   fun selectHtmlFile(path: String) {
     val current = _state.value
     val settings = settingsController.setSelectedHtml(current.settings, path)
-    refreshWorkspaceState(settings = settings, status = "Displaying $path")
+    refreshWorkspaceState(settings = settings, status = "Displaying $path", resetPreviewToSelectedHtml = true)
+  }
+
+  fun selectWorkspacePreview(path: String) {
+    if (path.endsWith(".html", ignoreCase = true) || path.endsWith(".htm", ignoreCase = true)) {
+      selectHtmlFile(path)
+      return
+    }
+    val mimeType = workspaceController.mimeType(path)
+    val isImage = mimeType.startsWith("image/")
+    val isPdf = mimeType == "application/pdf" || path.endsWith(".pdf", ignoreCase = true)
+    val canPreviewAsText = canPreviewAsText(path, mimeType)
+    val content = when {
+      isImage -> ""
+      isPdf -> ""
+      canPreviewAsText -> workspaceController.previewTextFile(path)
+      else -> "No built-in preview for $mimeType. Use Open with or Share from the file menu."
+    }
+    _state.update {
+      it.copy(
+        selectedPreviewPath = path,
+        selectedPreviewContent = content,
+        selectedPreviewMimeType = mimeType,
+        selectedPreviewUri = if (isImage || isPdf) workspaceFileUri(path)?.toString().orEmpty() else "",
+        status = "Previewing $path",
+      )
+    }
+  }
+
+  fun setHtmlPinned(path: String, pinned: Boolean) {
+    val settings = settingsController.setPinnedHtmlPath(_state.value.settings, path, pinned)
+    refreshWorkspaceState(settings = settings, status = if (pinned) "HTML pinned" else "HTML unpinned")
   }
 
   fun refreshWorkspaceFiles() {
@@ -174,6 +299,44 @@ class AgentController(context: Context) {
   fun renameWorkspacePath(path: String, newName: String) {
     val status = workspaceController.rename(path, newName)
     refreshWorkspaceState(status = status)
+  }
+
+  fun createWorkspaceSnapshot(name: String) {
+    val current = _state.value
+    val snapshot = workspaceController.createSnapshot(name, current.selectedHtmlPath)
+    refreshWorkspaceState(status = "Snapshot created: ${snapshot.name}")
+  }
+
+  fun restoreWorkspaceSnapshot(snapshotId: String) {
+    val restored = workspaceController.restoreSnapshot(snapshotId) ?: return
+    val settings = if (restored.selectedHtmlPath.isBlank()) {
+      _state.value.settings
+    } else {
+      settingsController.setSelectedHtml(_state.value.settings, restored.selectedHtmlPath)
+    }
+    refreshWorkspaceState(settings = settings, status = "Snapshot restored: ${restored.name}")
+  }
+
+  fun deleteWorkspaceSnapshot(snapshotId: String) {
+    val deleted = workspaceController.deleteSnapshot(snapshotId)
+    refreshWorkspaceState(status = if (deleted) "Snapshot deleted" else "Snapshot could not be deleted")
+  }
+
+  fun approveSettingsProposal(path: String) {
+    val proposal = workspaceController.listSettingsProposals().firstOrNull { it.path == path } ?: return
+    val settings = settingsController.applySettingsProposal(_state.value.settings, proposal.changes)
+    workspaceController.deleteSettingsProposal(path)
+    refreshWorkspaceState(settings = settings, status = "Settings proposal applied: ${proposal.title}")
+  }
+
+  fun rejectSettingsProposal(path: String) {
+    val deleted = workspaceController.deleteSettingsProposal(path)
+    refreshWorkspaceState(status = if (deleted) "Settings proposal rejected" else "Settings proposal not found")
+  }
+
+  fun dismissControlledToolProposal(path: String) {
+    val deleted = workspaceController.deleteControlledToolProposal(path)
+    refreshWorkspaceState(status = if (deleted) "Tool proposal dismissed" else "Tool proposal not found")
   }
 
   fun workspaceFileUri(path: String): Uri? {
@@ -321,18 +484,64 @@ class AgentController(context: Context) {
 
   fun submit() {
     val current = _state.value
-    val session = current.session ?: sessionController.createSession()
-    if (current.isRunning) return
+    val trimmed = current.input.trim()
+    if (trimmed.isBlank()) return
+    if (current.isRunning) {
+      enqueueInput(trimmed, QUEUED_INPUT_REQUEST, "Message queued")
+      return
+    }
+    startAgentRun(trimmed, current.session ?: sessionController.createSession())
+  }
 
-    agentRunController.submit(
-      input = current.input,
+  fun guideAgentRun() {
+    val current = _state.value
+    val trimmed = current.input.trim()
+    if (!current.isRunning || trimmed.isBlank()) return
+    enqueueInput(trimmed, QUEUED_INPUT_GUIDANCE, "Guidance queued")
+  }
+
+  fun markQueuedInputAsGuidance(index: Int) {
+    _state.update {
+      val updated = it.queuedInputs.mapIndexed { itemIndex, input ->
+        if (itemIndex == index) input.copy(mode = QUEUED_INPUT_GUIDANCE) else input
+      }
+      it.copy(queuedInputs = updated, status = "Guidance queued")
+    }
+  }
+
+  fun removeQueuedInput(index: Int) {
+    _state.update {
+      it.copy(
+        queuedInputs = it.queuedInputs.filterIndexed { itemIndex, _ -> itemIndex != index },
+        status = "Queued message removed",
+      )
+    }
+  }
+
+  private fun enqueueInput(input: String, mode: String, status: String) {
+    _state.update {
+      it.copy(
+        input = "",
+        queuedInputs = it.queuedInputs + QueuedAgentInput(content = input, mode = mode),
+        status = status,
+      )
+    }
+  }
+
+  private fun startAgentRun(input: String, session: AgentSession) {
+    val current = _state.value
+    activeRunJob = agentRunController.submit(
+      input = input,
       settings = current.settings,
       session = session,
       workspace = workspaceController.runtimeWorkspace(),
       appendUserPrompt = sessionController::appendUserPrompt,
+      appendContextRecord = sessionController::appendContextRecord,
+      appendCompressionDivider = sessionController::appendCompressionDivider,
       appendMessage = sessionController::appendMessage,
       onStarted = { withUser, draft ->
         val settings = settingsController.setActiveSession(current.settings, withUser.id)
+        agentRunStatusNotifier.running(draft.content)
         _state.update {
           it.copy(
             settings = settings,
@@ -350,14 +559,63 @@ class AgentController(context: Context) {
           it.copy(assistantDraft = draft)
         }
       },
-      onFinished = { updated, succeeded ->
-        val status = if (succeeded) "Agent loop completed" else "Agent loop failed"
-        refreshWorkspaceState(
-          session = updated,
-          isRunning = false,
-          status = status,
-        )
+      onSessionUpdated = { updatedSession, draft ->
+        agentRunStatusNotifier.running(draft.content)
+        _state.update {
+          it.copy(
+            session = updatedSession,
+            sessions = sessionController.listActive(),
+            assistantDraft = draft,
+          )
+        }
       },
+      onFinished = { updated, succeeded ->
+        activeRunJob = null
+        val status = if (succeeded) "Agent loop completed" else "Agent loop failed"
+        val nextInput = _state.value.queuedInputs.firstOrNull()
+        if (nextInput == null) {
+          agentRunStatusNotifier.finished(succeeded)
+          refreshWorkspaceState(
+            session = updated,
+            isRunning = false,
+            status = status,
+          )
+        } else {
+          _state.update { it.copy(queuedInputs = it.queuedInputs.drop(1)) }
+          agentRunStatusNotifier.running("Running queued message...")
+          refreshWorkspaceState(
+            session = updated,
+            isRunning = false,
+            status = "Running queued message...",
+          )
+          startAgentRun(nextInput.toRunInput(), updated)
+        }
+      },
+    )
+  }
+
+  fun clearQueuedInputs() {
+    _state.update {
+      it.copy(
+        queuedInputs = emptyList(),
+        status = "Queued messages cleared",
+      )
+    }
+  }
+
+  fun interruptAgentRun() {
+    val current = _state.value
+    if (!current.isRunning) return
+    activeRunJob?.cancel()
+    activeRunJob = null
+    val interrupted = current.session?.let { session ->
+      sessionController.appendMessage(session, SessionMessage(role = "assistant", content = "Run interrupted by user."))
+    }
+    agentRunStatusNotifier.interrupted()
+    refreshWorkspaceState(
+      session = interrupted ?: current.session,
+      isRunning = false,
+      status = "Agent loop interrupted",
     )
   }
 
@@ -367,10 +625,44 @@ class AgentController(context: Context) {
     input: String = _state.value.input,
     isRunning: Boolean = _state.value.isRunning,
     status: String = _state.value.status,
+    resetPreviewToSelectedHtml: Boolean = false,
   ) {
-    val workspaceSnapshot = workspaceController.snapshot(settings.selectedHtmlPath)
-    val normalizedSettings = settingsController.normalizeSelectedHtml(settings, workspaceSnapshot.selectedHtmlPath)
+    val fullAuthorityResult = applyFullAuthoritySettingsProposals(settings)
+    val settingsAfterAuthority = fullAuthorityResult.settings
+    val statusAfterAuthority = if (fullAuthorityResult.appliedCount > 0) {
+      "Full Authority applied ${fullAuthorityResult.appliedCount} settings proposal(s)"
+    } else {
+      status
+    }
+    workspaceController.syncFloveraSettings(settingsAfterAuthority)
+    var workspaceSnapshot = workspaceController.snapshot(settingsAfterAuthority.selectedHtmlPath)
+    val normalizedSettings = settingsController.normalizeSelectedHtml(settingsAfterAuthority, workspaceSnapshot.selectedHtmlPath)
+    if (normalizedSettings != settingsAfterAuthority) {
+      workspaceController.syncFloveraSettings(normalizedSettings)
+      workspaceSnapshot = workspaceController.snapshot(normalizedSettings.selectedHtmlPath)
+    }
     _state.update {
+      val previewPath = when {
+        resetPreviewToSelectedHtml -> workspaceSnapshot.selectedHtmlPath
+        it.selectedPreviewPath.isBlank() -> workspaceSnapshot.selectedHtmlPath
+        else -> it.selectedPreviewPath
+      }
+      val previewContent = when {
+        resetPreviewToSelectedHtml -> ""
+        it.selectedPreviewPath.isBlank() -> ""
+        else -> it.selectedPreviewContent
+      }
+      val previewMimeType = when {
+        resetPreviewToSelectedHtml && workspaceSnapshot.selectedHtmlPath.isNotBlank() -> "text/html"
+        resetPreviewToSelectedHtml -> ""
+        it.selectedPreviewMimeType.isBlank() && workspaceSnapshot.selectedHtmlPath.isNotBlank() -> "text/html"
+        else -> it.selectedPreviewMimeType
+      }
+      val previewUri = when {
+        resetPreviewToSelectedHtml -> ""
+        it.selectedPreviewPath.isBlank() -> ""
+        else -> it.selectedPreviewUri
+      }
       it.copy(
         settings = normalizedSettings,
         session = session,
@@ -382,12 +674,49 @@ class AgentController(context: Context) {
         htmlFiles = workspaceSnapshot.htmlFiles,
         selectedHtmlPath = workspaceSnapshot.selectedHtmlPath,
         selectedHtmlUrl = workspaceSnapshot.selectedHtmlUrl,
+        selectedPreviewPath = previewPath,
+        selectedPreviewContent = previewContent,
+        selectedPreviewMimeType = previewMimeType,
+        selectedPreviewUri = previewUri,
         workspaceRootUrl = workspaceSnapshot.workspaceRootUrl,
+        workspaceSnapshots = workspaceSnapshot.snapshots,
+        settingsProposals = workspaceSnapshot.settingsProposals,
+        controlledToolProposals = workspaceSnapshot.controlledToolProposals,
         isRunning = isRunning,
         assistantDraft = if (isRunning) it.assistantDraft else null,
-        status = status,
+        status = statusAfterAuthority,
       )
     }
+  }
+
+  private fun applyFullAuthoritySettingsProposals(settings: AppSettings): FullAuthoritySettingsApplyResult {
+    if (settings.agentAuthorityMode != "full") return FullAuthoritySettingsApplyResult(settings)
+    val proposals = workspaceController.listSettingsProposals().sortedBy { it.createdAtMillis }
+    if (proposals.isEmpty()) return FullAuthoritySettingsApplyResult(settings)
+    workspaceController.runtimeWorkspace().createAutomaticSnapshot("full_authority_settings")
+    var updatedSettings = settings
+    var appliedCount = 0
+    proposals.forEach { proposal ->
+      workspaceController.runtimeWorkspace().appendFullAuthorityAudit(
+        action = "settings_proposal_auto_apply",
+        targetPath = proposal.path,
+        title = proposal.title,
+        reason = proposal.reason,
+        changes = proposal.changes,
+      )
+      updatedSettings = settingsController.applySettingsProposal(updatedSettings, proposal.changes)
+      if (workspaceController.deleteSettingsProposal(proposal.path)) {
+        appliedCount += 1
+      }
+    }
+    return FullAuthoritySettingsApplyResult(updatedSettings, appliedCount)
+  }
+
+  private fun canPreviewAsText(path: String, mimeType: String): Boolean {
+    val extension = path.substringAfterLast('.', missingDelimiterValue = "").lowercase()
+    return mimeType.startsWith("text/") ||
+      mimeType == "application/json" ||
+      extension in setOf("md", "markdown", "json", "js", "css", "csv", "xml", "kt", "java", "py")
   }
 
   private fun activateSession(session: AgentSession, status: String) {

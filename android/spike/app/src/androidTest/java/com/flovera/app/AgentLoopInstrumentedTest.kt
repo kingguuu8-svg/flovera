@@ -45,6 +45,7 @@ class AgentLoopInstrumentedTest {
     )
     val output = KoogAgentRuntime().run(
       input = "Create hello.txt with exact content OK using workspace tools.",
+      agentRunId = "${session.id}-instrumented-file",
       settings = settings,
       session = withUser,
       workspace = workspace,
@@ -64,5 +65,53 @@ class AgentLoopInstrumentedTest {
     assertNotNull("Session should be loadable after persistence", loaded)
     assertEquals(2, loaded?.messages?.size)
     assertTrue("Assistant message should include tool events", loaded?.messages?.last()?.toolEvents?.isNotEmpty() == true)
+  }
+
+  @Test
+  fun deepSeekAgentCanUseNetworkToolThenWriteFile() = runBlocking {
+    val arguments = InstrumentationRegistry.getArguments()
+    val apiKey = arguments.getString("deepseekApiKey").orEmpty()
+    assumeTrue("Pass -e deepseekApiKey to run the live DeepSeek network loop test.", apiKey.isNotBlank())
+
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspaceId = "instrumented-network-${System.currentTimeMillis()}"
+    val workspace = WorkspaceManager(context, workspaceId).also { it.ensureSeedFiles() }
+    val sessionStore = AgentSessionStore(context)
+    val session = sessionStore.create("Instrumented network loop")
+    val settings = AppSettings(
+      apiKey = apiKey,
+      activeWorkspaceId = workspaceId,
+      activeSessionId = session.id,
+      maxAgentIterations = 10,
+      networkEnabled = true,
+    )
+    workspace.writeFile(
+      path = "AGENT.md",
+      content = """
+        # Agent Rules
+
+        - For this test, you must call fetch_url before writing the file.
+        - Write files exactly as requested and keep responses concise.
+      """.trimIndent(),
+    )
+    val recorder = ToolEventRecorder()
+    val prompt = "Call fetch_url on https://httpbin.org/ip, then create network.txt containing FETCH_OK on the first line."
+    val withUser = sessionStore.appendMessage(session, SessionMessage(role = "user", content = prompt))
+
+    val output = KoogAgentRuntime().run(
+      input = prompt,
+      agentRunId = "${session.id}-instrumented-network",
+      settings = settings,
+      session = withUser,
+      workspace = workspace,
+      recorder = recorder,
+    )
+    sessionStore.appendMessage(withUser, SessionMessage(role = "assistant", content = output, toolEvents = recorder.snapshot()))
+
+    val networkFile = File(workspace.root, "network.txt")
+    assertTrue("network.txt should be created in the Android workspace", networkFile.exists())
+    assertTrue(networkFile.readText().trim().startsWith("FETCH_OK"))
+    assertTrue("Koog should call fetch_url", recorder.snapshot().any { it.name == "fetch_url" })
+    assertTrue("Koog should call write_file", recorder.snapshot().any { it.name == "write_file" })
   }
 }

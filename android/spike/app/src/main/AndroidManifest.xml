@@ -4,6 +4,8 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
     <application
         android:allowBackup="false"
@@ -22,6 +24,11 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/workspace_file_paths" />
         </provider>
+
+        <service
+            android:name="com.flovera.app.agent.AgentRunForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <activity
             android:name="com.flovera.app.MainActivity"

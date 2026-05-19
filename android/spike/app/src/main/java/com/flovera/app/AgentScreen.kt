@@ -6,14 +6,19 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.graphics.Bitmap
+import android.graphics.pdf.PdfRenderer
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.ImageView
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -62,6 +67,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -72,20 +79,30 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.flovera.app.agent.AgentContextBudget
+import com.flovera.app.config.normalizeBraveSearchApiKey
 import com.flovera.app.koog.ModelProviderCatalog
+import com.flovera.app.session.ContextUsageRecord
+import com.flovera.app.session.SESSION_ROLE_COMPRESSION
 import com.flovera.app.session.SessionMessage
 import com.flovera.app.session.ToolEvent
 import com.flovera.app.web.FloveraWebBridge
+import com.flovera.app.workspace.WorkspaceControlledToolProposal
 import com.flovera.app.workspace.WorkspaceFileNode
+import com.flovera.app.workspace.WorkspaceSettingsProposal
+import com.flovera.app.workspace.WorkspaceSnapshotRecord
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import org.json.JSONArray
+import org.json.JSONObject
 
 private val FloveraFabShape = RoundedCornerShape(999.dp)
 private val FloveraPanelShape = RoundedCornerShape(18.dp)
@@ -100,11 +117,12 @@ private enum class AgentPanel {
   Conversation,
   HtmlFiles,
   Files,
+  Snapshots,
   AgentFile,
   Settings,
 }
 
-private const val EmptyWebPrompt = "\u53ef\u9009\u62e9 HTML \u8fdb\u884c\u6253\u5f00"
+private const val EmptyWebPrompt = "\u53ef\u9009\u62e9 HTML / Markdown / JSON / CSV / Text \u8fdb\u884c\u6253\u5f00"
 
 @Composable
 fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
@@ -120,25 +138,39 @@ fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
   }
 
   Box(modifier = modifier.fillMaxSize()) {
-    WorkspaceWebView(url = state.selectedHtmlUrl, workspaceRootUrl = state.workspaceRootUrl)
+    WorkspacePreview(state = state)
 
-    FloatingActionButton(
-      onClick = { activePanel = AgentPanel.Conversation },
+    Row(
       modifier = Modifier
         .align(Alignment.BottomEnd)
-        .padding(18.dp)
-        .semantics { contentDescription = "Open agent conversation" },
-      shape = FloveraFabShape,
-      containerColor = FloveraFabContainer,
-      contentColor = FloveraFabText,
+        .padding(18.dp),
+      horizontalArrangement = Arrangement.spacedBy(10.dp),
+      verticalAlignment = Alignment.CenterVertically,
     ) {
-      Row(
-        modifier = Modifier.padding(horizontal = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+      FloatingActionButton(
+        onClick = { activePanel = AgentPanel.HtmlFiles },
+        modifier = Modifier.semantics { contentDescription = "Open HTML quick picker" },
+        shape = FloveraFabShape,
+        containerColor = FloveraFabContainer,
+        contentColor = FloveraFabText,
       ) {
-        Icon(Icons.Filled.Menu, contentDescription = null, modifier = Modifier.size(18.dp))
-        Text(t(language, "Agent", "Agent"), style = MaterialTheme.typography.labelLarge)
+        Text("HTML", modifier = Modifier.padding(horizontal = 4.dp), style = MaterialTheme.typography.labelLarge)
+      }
+      FloatingActionButton(
+        onClick = { activePanel = AgentPanel.Conversation },
+        modifier = Modifier.semantics { contentDescription = "Open agent conversation" },
+        shape = FloveraFabShape,
+        containerColor = FloveraFabContainer,
+        contentColor = FloveraFabText,
+      ) {
+        Row(
+          modifier = Modifier.padding(horizontal = 4.dp),
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Icon(Icons.Filled.Menu, contentDescription = null, modifier = Modifier.size(18.dp))
+          Text(t(language, "Agent", "Agent"), style = MaterialTheme.typography.labelLarge)
+        }
       }
     }
   }
@@ -169,6 +201,13 @@ fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
       onDismiss = { activePanel = null },
     )
 
+    AgentPanel.Snapshots -> SnapshotsDialog(
+      state = state,
+      controller = controller,
+      language = language,
+      onDismiss = { activePanel = null },
+    )
+
     AgentPanel.AgentFile -> AgentFileDialog(
       state = state,
       controller = controller,
@@ -184,6 +223,234 @@ fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
     )
 
     null -> Unit
+  }
+}
+
+@Composable
+private fun WorkspacePreview(state: AgentScreenState) {
+  val previewPath = state.selectedPreviewPath
+  val previewContent = state.selectedPreviewContent
+  val mimeType = state.selectedPreviewMimeType
+  val previewUri = state.selectedPreviewUri
+  val htmlUrl = state.selectedHtmlUrl
+  val isImagePreview = previewPath.isNotBlank() && mimeType.startsWith("image/")
+  val isPdfPreview = previewPath.isNotBlank() && isPdfPreview(previewPath, mimeType)
+  val isTextPreview = previewPath.isNotBlank() &&
+    !previewPath.endsWith(".html", ignoreCase = true) &&
+    !previewPath.endsWith(".htm", ignoreCase = true) &&
+    !isImagePreview &&
+    !isPdfPreview
+
+  if (isTextPreview) {
+    WorkspaceTextPreview(
+      path = previewPath,
+      content = previewContent,
+      mimeType = mimeType,
+    )
+    return
+  }
+
+  if (isImagePreview) {
+    WorkspaceImagePreview(
+      path = previewPath,
+      mimeType = mimeType,
+      uri = previewUri,
+    )
+    return
+  }
+
+  if (isPdfPreview) {
+    WorkspacePdfPreview(
+      path = previewPath,
+      mimeType = mimeType,
+      uri = previewUri,
+    )
+    return
+  }
+
+  WorkspaceWebView(url = htmlUrl, workspaceRootUrl = state.workspaceRootUrl)
+}
+
+@Composable
+private fun WorkspaceImagePreview(path: String, mimeType: String, uri: String) {
+  Surface(
+    modifier = Modifier.fillMaxSize(),
+    color = MaterialTheme.colorScheme.background,
+  ) {
+    Column(
+      modifier = Modifier.fillMaxSize().padding(18.dp),
+      verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+      Text(path, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleMedium)
+      Text(mimeType.ifBlank { "image/*" }, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+      Surface(
+        modifier = Modifier.fillMaxWidth().weight(1f),
+        shape = FloveraSmallShape,
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+      ) {
+        if (uri.isBlank()) {
+          Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("Image preview unavailable", color = MaterialTheme.colorScheme.onSurfaceVariant)
+          }
+        } else {
+          AndroidView(
+            modifier = Modifier.fillMaxSize().semantics { contentDescription = "Image preview for $path" },
+            factory = { context ->
+              ImageView(context).apply {
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                adjustViewBounds = true
+              }
+            },
+            update = { imageView ->
+              imageView.setImageURI(Uri.parse(uri))
+            },
+          )
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun WorkspacePdfPreview(path: String, mimeType: String, uri: String) {
+  val context = LocalContext.current
+  var pdfError by remember(uri) { mutableStateOf<String?>(null) }
+  Surface(
+    modifier = Modifier.fillMaxSize(),
+    color = MaterialTheme.colorScheme.background,
+  ) {
+    Column(
+      modifier = Modifier.fillMaxSize().padding(18.dp),
+      verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+      Text(path, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleMedium)
+      Text(mimeType.ifBlank { "application/pdf" }, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+      Surface(
+        modifier = Modifier.fillMaxWidth().weight(1f),
+        shape = FloveraSmallShape,
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+      ) {
+        if (uri.isBlank()) {
+          Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("PDF preview unavailable", color = MaterialTheme.colorScheme.onSurfaceVariant)
+          }
+        } else {
+          Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            AndroidView(
+              modifier = Modifier.fillMaxSize().semantics { contentDescription = "PDF preview for $path" },
+              factory = { viewContext ->
+                ImageView(viewContext).apply {
+                  scaleType = ImageView.ScaleType.FIT_CENTER
+                  adjustViewBounds = true
+                  setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                }
+              },
+              update = { imageView ->
+                val bitmap = renderPdfFirstPage(context, uri)
+                if (bitmap == null) {
+                  pdfError = "PDF preview unavailable"
+                  imageView.setImageDrawable(null)
+                } else {
+                  pdfError = null
+                  imageView.setImageBitmap(bitmap)
+                }
+              },
+            )
+            pdfError?.let {
+              Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun WorkspaceTextPreview(path: String, content: String, mimeType: String) {
+  Surface(
+    modifier = Modifier.fillMaxSize(),
+    color = MaterialTheme.colorScheme.background,
+  ) {
+    Column(
+      modifier = Modifier.fillMaxSize().padding(18.dp).verticalScroll(rememberScrollState()),
+      verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+      Text(path, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleMedium)
+      Text(mimeType.ifBlank { "text/plain" }, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+      when {
+        isMarkdownPreview(path) -> MarkdownMessageText(content = content, color = MaterialTheme.colorScheme.onSurface)
+        isJsonPreview(path, mimeType) -> WorkspaceJsonPreview(content)
+        isCsvPreview(path, mimeType) -> WorkspaceCsvPreview(content)
+        else -> WorkspacePlainTextPreview(content)
+      }
+    }
+  }
+}
+
+@Composable
+private fun WorkspacePlainTextPreview(content: String) {
+  Surface(
+    modifier = Modifier.fillMaxWidth(),
+    shape = FloveraSmallShape,
+    color = MaterialTheme.colorScheme.surface,
+    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+  ) {
+    Text(
+      text = content,
+      modifier = Modifier.padding(12.dp),
+      color = MaterialTheme.colorScheme.onSurface,
+      fontFamily = FontFamily.Monospace,
+      style = MaterialTheme.typography.bodySmall,
+    )
+  }
+}
+
+@Composable
+private fun WorkspaceJsonPreview(content: String) {
+  Text("JSON preview", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
+  WorkspacePlainTextPreview(prettyJsonPreview(content))
+}
+
+@Composable
+private fun WorkspaceCsvPreview(content: String) {
+  val rows = remember(content) { parseCsvPreview(content) }
+  Text("CSV preview", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
+  if (rows.isEmpty()) {
+    WorkspacePlainTextPreview(content)
+    return
+  }
+  Surface(
+    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+    shape = FloveraSmallShape,
+    color = MaterialTheme.colorScheme.surface,
+    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+  ) {
+    Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+      rows.forEachIndexed { rowIndex, row ->
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+          row.forEach { cell ->
+            Surface(
+              modifier = Modifier.size(width = 132.dp, height = if (rowIndex == 0) 42.dp else 38.dp),
+              shape = RoundedCornerShape(6.dp),
+              color = if (rowIndex == 0) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.background,
+              border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            ) {
+              Text(
+                text = cell,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 7.dp),
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodySmall,
+              )
+            }
+          }
+        }
+      }
+    }
   }
 }
 
@@ -255,6 +522,97 @@ private fun WorkspaceWebView(url: String?, workspaceRootUrl: String) {
   }
 }
 
+private fun isMarkdownPreview(path: String): Boolean {
+  return path.endsWith(".md", ignoreCase = true) || path.endsWith(".markdown", ignoreCase = true)
+}
+
+private fun isJsonPreview(path: String, mimeType: String): Boolean {
+  return mimeType == "application/json" || path.endsWith(".json", ignoreCase = true)
+}
+
+private fun isCsvPreview(path: String, mimeType: String): Boolean {
+  return mimeType == "text/csv" || path.endsWith(".csv", ignoreCase = true)
+}
+
+private fun isPdfPreview(path: String, mimeType: String): Boolean {
+  return mimeType == "application/pdf" || path.endsWith(".pdf", ignoreCase = true)
+}
+
+private fun renderPdfFirstPage(context: Context, uri: String): Bitmap? {
+  return runCatching {
+    val descriptor = context.contentResolver.openFileDescriptor(Uri.parse(uri), "r") ?: return null
+    descriptor.use { parcel ->
+      val renderer = PdfRenderer(parcel)
+      try {
+        if (renderer.pageCount <= 0) return null
+        val page = renderer.openPage(0)
+        try {
+          val width = page.width.coerceAtLeast(1)
+          val height = page.height.coerceAtLeast(1)
+          val scale = (1600f / width).coerceIn(1f, 3f)
+          val bitmap = Bitmap.createBitmap(
+            (width * scale).toInt().coerceAtLeast(1),
+            (height * scale).toInt().coerceAtLeast(1),
+            Bitmap.Config.ARGB_8888,
+          )
+          bitmap.eraseColor(android.graphics.Color.WHITE)
+          page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+          bitmap
+        } finally {
+          page.close()
+        }
+      } finally {
+        renderer.close()
+      }
+    }
+  }.getOrNull()
+}
+
+private fun prettyJsonPreview(content: String): String {
+  val trimmed = content.trim()
+  if (trimmed.isBlank()) return content
+  return runCatching {
+    when {
+      trimmed.startsWith("{") -> JSONObject(trimmed).toString(2)
+      trimmed.startsWith("[") -> JSONArray(trimmed).toString(2)
+      else -> content
+    }
+  }.getOrDefault(content)
+}
+
+private fun parseCsvPreview(content: String, maxRows: Int = 40, maxColumns: Int = 12): List<List<String>> {
+  return content.lineSequence()
+    .filter { it.isNotBlank() }
+    .take(maxRows)
+    .map { parseCsvLine(it).take(maxColumns) }
+    .toList()
+}
+
+private fun parseCsvLine(line: String): List<String> {
+  val cells = mutableListOf<String>()
+  val current = StringBuilder()
+  var quoted = false
+  var index = 0
+  while (index < line.length) {
+    val char = line[index]
+    when {
+      char == '"' && quoted && index + 1 < line.length && line[index + 1] == '"' -> {
+        current.append('"')
+        index += 1
+      }
+      char == '"' -> quoted = !quoted
+      char == ',' && !quoted -> {
+        cells += current.toString()
+        current.clear()
+      }
+      else -> current.append(char)
+    }
+    index += 1
+  }
+  cells += current.toString()
+  return cells
+}
+
 private fun t(language: String, en: String, zh: String): String = if (language == "zh") zh else en
 
 private class FloveraWorkspaceWebViewClient(
@@ -310,6 +668,7 @@ private fun ConversationDialog(
 ) {
   val listState = rememberLazyListState()
   val messages = state.session?.messages.orEmpty()
+  val latestContextRecord = state.session?.contextRecords?.lastOrNull()
   val visibleMessageCount = messages.size + if (state.assistantDraft == null) 0 else 1
   var pendingRevertIndex by remember { mutableStateOf<Int?>(null) }
   var sessionPickerOpen by remember { mutableStateOf(false) }
@@ -360,6 +719,32 @@ private fun ConversationDialog(
               color = MaterialTheme.colorScheme.onSurfaceVariant,
               style = MaterialTheme.typography.bodySmall,
             )
+            if (!isDraftSession && latestContextRecord != null) {
+              var contextDetailsOpen by remember(latestContextRecord.id) { mutableStateOf(false) }
+              Row(
+                modifier = Modifier
+                  .clickable { contextDetailsOpen = true }
+                  .semantics {
+                    contentDescription = "Context usage details"
+                  },
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+              ) {
+                ContextUsageRing(latestContextRecord)
+                Text(
+                  text = formatContextUsageCompact(latestContextRecord, language),
+                  color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.82f),
+                  style = MaterialTheme.typography.bodySmall,
+                )
+              }
+              if (contextDetailsOpen) {
+                ContextUsageDetailsDialog(
+                  record = latestContextRecord,
+                  language = language,
+                  onDismiss = { contextDetailsOpen = false },
+                )
+              }
+            }
           }
           Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             OutlinedButton(
@@ -399,6 +784,13 @@ private fun ConversationDialog(
                   onClick = {
                     moreMenuOpen = false
                     onOpenPanel(AgentPanel.Files)
+                  },
+                )
+                DropdownMenuItem(
+                  text = { Text(t(language, "Snapshots", "\u5feb\u7167")) },
+                  onClick = {
+                    moreMenuOpen = false
+                    onOpenPanel(AgentPanel.Snapshots)
                   },
                 )
                 DropdownMenuItem(
@@ -444,10 +836,14 @@ private fun ConversationDialog(
               items = messages,
               key = { index, message -> "${message.timestampMillis}-${message.role}-$index" },
             ) { index, message ->
-              MessageBubble(
-                message = message,
-                onRevert = if (!state.isRunning && message.role == "user") ({ pendingRevertIndex = index }) else null,
-              )
+              if (message.role == SESSION_ROLE_COMPRESSION) {
+                CompressionDivider(message)
+              } else {
+                MessageBubble(
+                  message = message,
+                  onRevert = if (!state.isRunning && message.role == "user") ({ pendingRevertIndex = index }) else null,
+                )
+              }
             }
             state.assistantDraft?.let { draft ->
               item(key = "assistant-draft") {
@@ -455,6 +851,15 @@ private fun ConversationDialog(
               }
             }
           }
+        }
+
+        if (state.queuedInputs.isNotEmpty()) {
+          QueuedMessagesPanel(
+            inputs = state.queuedInputs,
+            language = language,
+            onGuide = controller::markQueuedInputAsGuidance,
+            onRemove = controller::removeQueuedInput,
+          )
         }
 
         Row(
@@ -477,17 +882,25 @@ private fun ConversationDialog(
             ),
             modifier = Modifier.weight(1f),
           )
+          val hasInput = state.input.isNotBlank()
+          val actionStopsRun = state.isRunning && !hasInput
           Surface(
             modifier = Modifier
               .size(52.dp)
-              .semantics { contentDescription = "Send message" }
-              .clickable(enabled = !state.isRunning, onClick = controller::submit),
+              .semantics { contentDescription = if (actionStopsRun) "Interrupt agent" else "Send message" }
+              .clickable(
+                onClick = if (actionStopsRun) controller::interruptAgentRun else controller::submit,
+              ),
             shape = RoundedCornerShape(12.dp),
-            color = if (state.isRunning) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.primaryContainer,
-            contentColor = if (state.isRunning) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onPrimaryContainer,
+            color = if (actionStopsRun) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer,
+            contentColor = if (actionStopsRun) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer,
           ) {
             Box(contentAlignment = Alignment.Center) {
-              Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(20.dp))
+              if (actionStopsRun) {
+                Icon(Icons.Filled.Close, contentDescription = null, modifier = Modifier.size(20.dp))
+              } else {
+                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(20.dp))
+              }
             }
           }
         }
@@ -500,7 +913,11 @@ private fun ConversationDialog(
             Text(t(language, "Network", "\u8054\u7f51"), style = MaterialTheme.typography.bodyMedium)
             Text(
               text = if (state.settings.networkEnabled) {
-                t(language, "fetch_url and download_file available", "fetch_url \u548c download_file \u53ef\u7528")
+                if (state.settings.webSearchEnabled && state.settings.braveSearchApiKey.isNotBlank()) {
+                  t(language, "fetch_url, download_file, and web_search available", "fetch_url\u3001download_file \u548c web_search \u53ef\u7528")
+                } else {
+                  t(language, "fetch_url and download_file available", "fetch_url \u548c download_file \u53ef\u7528")
+                }
               } else {
                 t(language, "network tools disabled", "\u8054\u7f51\u5de5\u5177\u5df2\u5173\u95ed")
               },
@@ -549,6 +966,137 @@ private fun ConversationDialog(
       language = language,
       onDismiss = { sessionPickerOpen = false },
     )
+  }
+}
+
+@Composable
+private fun CompressionDivider(message: SessionMessage) {
+  var expanded by remember(message.timestampMillis, message.content) { mutableStateOf(false) }
+  Surface(
+    modifier = Modifier.fillMaxWidth(),
+    shape = FloveraSmallShape,
+    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.42f),
+    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.44f)),
+    tonalElevation = 0.dp,
+  ) {
+    Column(
+      modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+      horizontalAlignment = Alignment.CenterHorizontally,
+      verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+      Text(
+        text = "Context compressed",
+        color = MaterialTheme.colorScheme.onPrimaryContainer,
+        style = MaterialTheme.typography.labelMedium,
+        fontWeight = FontWeight.SemiBold,
+      )
+      Text(
+        text = formatMessageTime(message.timestampMillis),
+        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.68f),
+        style = MaterialTheme.typography.labelSmall,
+      )
+      TextButton(onClick = { expanded = !expanded }) {
+        Text(
+          text = if (expanded) "Hide handoff summary" else "Show handoff summary",
+          color = MaterialTheme.colorScheme.onPrimaryContainer,
+          style = MaterialTheme.typography.labelSmall,
+        )
+      }
+      if (expanded) {
+        Surface(
+          modifier = Modifier.fillMaxWidth(),
+          shape = FloveraSmallShape,
+          color = MaterialTheme.colorScheme.background.copy(alpha = 0.78f),
+          border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        ) {
+          Box(modifier = Modifier.padding(10.dp)) {
+            MarkdownMessageText(
+              content = message.content,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+          }
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun QueuedMessagesPanel(
+  inputs: List<QueuedAgentInput>,
+  language: String,
+  onGuide: (Int) -> Unit,
+  onRemove: (Int) -> Unit,
+) {
+  Surface(
+    modifier = Modifier.fillMaxWidth(),
+    shape = RoundedCornerShape(14.dp),
+    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.62f),
+    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+  ) {
+    Column(
+      modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+      verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+      inputs.forEachIndexed { index, input ->
+        QueuedMessageRow(
+          index = index,
+          input = input,
+          language = language,
+          onGuide = onGuide,
+          onRemove = onRemove,
+        )
+      }
+    }
+  }
+}
+
+@Composable
+private fun QueuedMessageRow(
+  index: Int,
+  input: QueuedAgentInput,
+  language: String,
+  onGuide: (Int) -> Unit,
+  onRemove: (Int) -> Unit,
+) {
+  Row(
+    modifier = Modifier.fillMaxWidth(),
+    horizontalArrangement = Arrangement.spacedBy(8.dp),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    Text(
+      text = if (input.mode == QUEUED_INPUT_GUIDANCE) "\u21b3" else "\u21b1",
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+      style = MaterialTheme.typography.bodyMedium,
+    )
+    Text(
+      text = input.content,
+      modifier = Modifier.weight(1f),
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+      maxLines = 1,
+      overflow = TextOverflow.Ellipsis,
+      style = MaterialTheme.typography.bodyMedium,
+    )
+    if (input.mode == QUEUED_INPUT_GUIDANCE) {
+      Text(
+        text = t(language, "Guidance", "\u5f15\u5bfc"),
+        color = MaterialTheme.colorScheme.primary,
+        style = MaterialTheme.typography.labelMedium,
+      )
+    } else {
+      TextButton(
+        onClick = { onGuide(index) },
+        modifier = Modifier.semantics { contentDescription = "Guide queued message" },
+      ) {
+        Text(t(language, "Guide", "\u5f15\u5bfc"))
+      }
+    }
+    IconButton(
+      onClick = { onRemove(index) },
+      modifier = Modifier.semantics { contentDescription = "Remove queued message" },
+    ) {
+      Icon(Icons.Filled.Close, contentDescription = null, modifier = Modifier.size(18.dp))
+    }
   }
 }
 
@@ -789,6 +1337,131 @@ private fun formatMessageTime(timestampMillis: Long): String {
   return SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(timestampMillis))
 }
 
+@Composable
+private fun ContextUsageRing(record: ContextUsageRecord) {
+  val permille = effectiveContextPermille(record)
+  val rawProgress = ((permille ?: 0).toFloat() / 1_000f).coerceIn(0f, 1f)
+  val progress = if (rawProgress == 0f && record.approximateTokens > 0 && effectiveContextWindow(record) != null) {
+    0.01f
+  } else {
+    rawProgress
+  }
+  val percent = if (permille == null) {
+    "?"
+  } else {
+    val rounded = ((permille + 5) / 10).coerceIn(0, 100)
+    if (rounded == 0 && record.approximateTokens > 0) "<1" else rounded.toString()
+  }
+  val trackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.28f)
+  val progressColor = when (record.contextBudgetStatus) {
+    AgentContextBudget.STATUS_WATCH -> MaterialTheme.colorScheme.tertiary
+    AgentContextBudget.STATUS_COMPRESSION_RECOMMENDED -> MaterialTheme.colorScheme.error
+    else -> MaterialTheme.colorScheme.primary
+  }
+  Box(contentAlignment = Alignment.Center, modifier = Modifier.size(38.dp)) {
+    Canvas(modifier = Modifier.fillMaxSize()) {
+      val stroke = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
+      drawArc(
+        color = trackColor,
+        startAngle = -90f,
+        sweepAngle = 360f,
+        useCenter = false,
+        style = stroke,
+      )
+      drawArc(
+        color = progressColor,
+        startAngle = -90f,
+        sweepAngle = 360f * progress,
+        useCenter = false,
+        style = stroke,
+      )
+    }
+    Text(
+      text = percent,
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+      style = MaterialTheme.typography.labelSmall,
+    )
+  }
+}
+
+@Composable
+private fun ContextUsageDetailsDialog(record: ContextUsageRecord, language: String, onDismiss: () -> Unit) {
+  AlertDialog(
+    onDismissRequest = onDismiss,
+    title = { Text(t(language, "Context", "\u4e0a\u4e0b\u6587")) },
+    text = {
+      Text(
+        text = formatContextUsageDetails(record, language),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.bodyMedium,
+      )
+    },
+    confirmButton = {
+      TextButton(onClick = onDismiss) {
+        Text(t(language, "OK", "\u786e\u5b9a"))
+      }
+    },
+  )
+}
+
+private fun formatContextUsageCompact(record: ContextUsageRecord, language: String): String {
+  val percent = formatContextPercent(record, language)
+  val window = effectiveContextWindow(record)
+  val used = formatTokenCount(record.approximateTokens)
+  val total = window?.let(::formatTokenCount) ?: "?"
+  return "$percent · $used/$total"
+}
+
+private fun formatContextUsageDetails(record: ContextUsageRecord, language: String): String {
+  val window = effectiveContextWindow(record)
+  val used = formatTokenCount(record.approximateTokens)
+  val total = window?.let(::formatTokenCount) ?: t(language, "unknown", "\u672a\u77e5")
+  return t(
+    language,
+    "Used $used tokens, total $total. Flovera automatically compresses background information when the context approaches its budget.",
+    "\u5df2\u7528 $used tokens\uff0c\u5171 $total\u3002Flovera \u4f1a\u5728\u4e0a\u4e0b\u6587\u63a5\u8fd1\u9884\u7b97\u65f6\u81ea\u52a8\u538b\u7f29\u5176\u80cc\u666f\u4fe1\u606f\u3002",
+  )
+}
+
+private fun formatContextPercent(record: ContextUsageRecord, language: String): String {
+  val permille = effectiveContextPermille(record) ?: return t(language, "estimate", "\u4f30\u7b97")
+  val value = ((permille + 5) / 10).coerceIn(0, 100)
+  if (value == 0 && record.approximateTokens > 0) return t(language, "<1%", "<1%")
+  return "$value%"
+}
+
+private fun effectiveContextWindow(record: ContextUsageRecord): Int? {
+  return record.modelContextWindowTokens
+    ?: ModelProviderCatalog.findProvider(record.provider)?.contextFor(record.model)?.contextWindowTokens
+}
+
+private fun effectiveContextPermille(record: ContextUsageRecord): Int? {
+  record.contextUsagePermille?.let { return it }
+  val window = effectiveContextWindow(record) ?: return null
+  if (window <= 0) return null
+  return ((record.approximateTokens.coerceAtLeast(0).toLong() * 1_000L) / window)
+    .coerceIn(0L, 1_000L)
+    .toInt()
+}
+
+private fun formatTokenCount(tokens: Int): String {
+  return when {
+    tokens >= 1_000_000 -> {
+      val value = tokens / 1_000_000.0
+      if (tokens % 1_000_000 == 0) "${tokens / 1_000_000}M" else String.format(Locale.US, "%.1fM", value)
+    }
+    tokens >= 1_000 -> {
+      val value = tokens / 1_000.0
+      if (tokens % 1_000 == 0) "${tokens / 1_000}k" else String.format(Locale.US, "%.1fk", value)
+    }
+    else -> tokens.toString()
+  }
+}
+
+private fun formatSnapshotTime(timestampMillis: Long): String {
+  return SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(timestampMillis))
+}
+
 private fun collapsedMessageContent(content: String): String {
   val maxLines = 24
   val maxChars = 1600
@@ -910,6 +1583,15 @@ private fun HtmlFilesDialog(
   language: String,
   onDismiss: () -> Unit,
 ) {
+  val sortedHtmlFiles = remember(state.htmlFiles, state.settings.pinnedHtmlPaths, state.settings.recentHtmlPaths) {
+    val recentRank = state.settings.recentHtmlPaths.withIndex().associate { it.value to it.index }
+    state.htmlFiles.sortedWith(
+      compareByDescending<String> { it in state.settings.pinnedHtmlPaths }
+        .thenBy { recentRank[it] ?: Int.MAX_VALUE }
+        .thenBy { it.lowercase() },
+    )
+  }
+
   AlertDialog(
     onDismissRequest = onDismiss,
     title = { Text(t(language, "Select HTML", "\u9009\u62e9 HTML")) },
@@ -918,21 +1600,23 @@ private fun HtmlFilesDialog(
         modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 420.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
       ) {
-        if (state.htmlFiles.isEmpty()) {
+        if (sortedHtmlFiles.isEmpty()) {
           item {
             Text(t(language, "No HTML files in this workspace.", "\u5f53\u524d workspace \u6ca1\u6709 HTML \u6587\u4ef6\u3002"), style = MaterialTheme.typography.bodyMedium)
           }
         }
-        items(state.htmlFiles) { path ->
-          OutlinedButton(
-            onClick = {
+        items(sortedHtmlFiles) { path ->
+          HtmlFilePickerRow(
+            path = path,
+            selected = path == state.selectedHtmlPath,
+            pinned = path in state.settings.pinnedHtmlPaths,
+            language = language,
+            onOpen = {
               controller.selectHtmlFile(path)
               onDismiss()
             },
-            modifier = Modifier.fillMaxWidth(),
-          ) {
-            Text(if (path == state.selectedHtmlPath) t(language, "$path  selected", "$path  \u5df2\u9009\u4e2d") else path)
-          }
+            onPin = { pinned -> controller.setHtmlPinned(path, pinned) },
+          )
         }
       }
     },
@@ -1205,12 +1889,8 @@ private fun FilesDialog(
                 }
               },
               onDefaultOpen = { path ->
-                if (path.endsWith(".html", ignoreCase = true)) {
-                  controller.selectHtmlFile(path)
-                  onDismiss()
-                } else {
-                  openWorkspaceFile(context, controller, path)
-                }
+                controller.selectWorkspacePreview(path)
+                onDismiss()
               },
               onOpenWith = { path -> openWorkspaceFile(context, controller, path) },
               onShare = { path -> shareWorkspaceFile(context, controller, path) },
@@ -1414,6 +2094,173 @@ private fun shareWorkspaceFile(context: Context, controller: AgentController, pa
   }
 }
 
+@Composable
+private fun SnapshotsDialog(
+  state: AgentScreenState,
+  controller: AgentController,
+  language: String,
+  onDismiss: () -> Unit,
+) {
+  var snapshotName by remember { mutableStateOf("") }
+  var restoreTarget by remember { mutableStateOf<WorkspaceSnapshotRecord?>(null) }
+  var deleteTarget by remember { mutableStateOf<WorkspaceSnapshotRecord?>(null) }
+
+  AlertDialog(
+    onDismissRequest = onDismiss,
+    title = { Text(t(language, "Workspace Snapshots", "Workspace \u5feb\u7167")) },
+    text = {
+      Column(
+        modifier = Modifier.fillMaxWidth().heightIn(max = 560.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+      ) {
+        OutlinedTextField(
+          value = snapshotName,
+          onValueChange = { snapshotName = it },
+          label = { Text(t(language, "Snapshot name", "\u5feb\u7167\u540d\u79f0")) },
+          singleLine = true,
+          modifier = Modifier.fillMaxWidth(),
+        )
+        Button(
+          onClick = {
+            controller.createWorkspaceSnapshot(snapshotName)
+            snapshotName = ""
+          },
+          modifier = Modifier.fillMaxWidth(),
+        ) {
+          Text(t(language, "Create Manual Snapshot", "\u521b\u5efa\u624b\u52a8\u5feb\u7167"))
+        }
+        Text(
+          text = t(
+            language,
+            "Automatic snapshots are created before workspace file changes and keep the latest 3.",
+            "\u6587\u4ef6\u53d8\u66f4\u524d\u4f1a\u81ea\u52a8\u521b\u5efa\u5feb\u7167\uff0c\u4ec5\u4fdd\u7559\u6700\u8fd1 3 \u4e2a\u3002",
+          ),
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
+          style = MaterialTheme.typography.bodySmall,
+        )
+        LazyColumn(
+          modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 340.dp),
+          verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+          if (state.workspaceSnapshots.isEmpty()) {
+            item {
+              Text(t(language, "No snapshots yet.", "\u6682\u65e0\u5feb\u7167\u3002"), style = MaterialTheme.typography.bodyMedium)
+            }
+          }
+          items(state.workspaceSnapshots, key = { it.id }) { snapshot ->
+            SnapshotListItem(
+              snapshot = snapshot,
+              language = language,
+              onRestore = { restoreTarget = snapshot },
+              onDelete = { deleteTarget = snapshot },
+            )
+          }
+        }
+      }
+    },
+    confirmButton = {
+      TextButton(onClick = onDismiss) {
+        Text(t(language, "Close", "\u5173\u95ed"))
+      }
+    },
+  )
+
+  restoreTarget?.let { snapshot ->
+    AlertDialog(
+      onDismissRequest = { restoreTarget = null },
+      title = { Text(t(language, "Restore snapshot?", "\u6062\u590d\u5feb\u7167\uff1f")) },
+      text = {
+        Text(
+          t(
+            language,
+            "This will overwrite the current workspace with ${snapshot.name}.",
+            "\u8fd9\u4f1a\u7528 ${snapshot.name} \u8986\u76d6\u5f53\u524d workspace\u3002",
+          ),
+        )
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            controller.restoreWorkspaceSnapshot(snapshot.id)
+            restoreTarget = null
+          },
+        ) {
+          Text(t(language, "Restore", "\u6062\u590d"))
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { restoreTarget = null }) {
+          Text(t(language, "Cancel", "\u53d6\u6d88"))
+        }
+      },
+    )
+  }
+
+  deleteTarget?.let { snapshot ->
+    AlertDialog(
+      onDismissRequest = { deleteTarget = null },
+      title = { Text(t(language, "Delete snapshot?", "\u5220\u9664\u5feb\u7167\uff1f")) },
+      text = { Text(snapshot.name) },
+      confirmButton = {
+        Button(
+          onClick = {
+            controller.deleteWorkspaceSnapshot(snapshot.id)
+            deleteTarget = null
+          },
+        ) {
+          Text(t(language, "Delete", "\u5220\u9664"))
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { deleteTarget = null }) {
+          Text(t(language, "Cancel", "\u53d6\u6d88"))
+        }
+      },
+    )
+  }
+}
+
+@Composable
+private fun SnapshotListItem(
+  snapshot: WorkspaceSnapshotRecord,
+  language: String,
+  onRestore: () -> Unit,
+  onDelete: () -> Unit,
+) {
+  val kind = if (snapshot.kind == "auto") t(language, "Auto", "\u81ea\u52a8") else t(language, "Manual", "\u624b\u52a8")
+
+  Surface(
+    modifier = Modifier.fillMaxWidth(),
+    shape = RoundedCornerShape(8.dp),
+    color = MaterialTheme.colorScheme.surfaceVariant,
+  ) {
+    Column(
+      modifier = Modifier.fillMaxWidth().padding(10.dp),
+      verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+      Text(snapshot.name, style = MaterialTheme.typography.bodyLarge)
+      Text(
+        "$kind / ${formatSnapshotTime(snapshot.createdAtMillis)} / ${snapshot.fileCount} files / ${snapshot.totalBytes} bytes",
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.bodySmall,
+      )
+      if (snapshot.reason.isNotBlank()) {
+        Text(snapshot.reason, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+      }
+      Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        OutlinedButton(onClick = onRestore) {
+          Text(t(language, "Restore", "\u6062\u590d"))
+        }
+        if (snapshot.kind != "auto") {
+          TextButton(onClick = onDelete) {
+            Text(t(language, "Delete", "\u5220\u9664"))
+          }
+        }
+      }
+    }
+  }
+}
+
 fun shouldShowStatusToast(status: String): Boolean {
   val normalized = status.trim()
   if (normalized.isBlank() || normalized == "Idle" || normalized == "Ready") return false
@@ -1482,13 +2329,31 @@ private fun SettingsDialog(
   var providerDraft by remember(state.providerDraft) { mutableStateOf(state.providerDraft) }
   var modelDraft by remember(state.modelDraft) { mutableStateOf(state.modelDraft) }
   var apiKeyDraft by remember(state.apiKeyDraft) { mutableStateOf(state.apiKeyDraft) }
+  var customOpenAIBaseUrlDraft by remember(state.customOpenAIBaseUrlDraft) {
+    mutableStateOf(state.customOpenAIBaseUrlDraft)
+  }
+  var customOpenAIChatPathDraft by remember(state.customOpenAIChatCompletionsPathDraft) {
+    mutableStateOf(state.customOpenAIChatCompletionsPathDraft)
+  }
+  var customOpenAICompatibilityModeDraft by remember(state.customOpenAICompatibilityModeDraft) {
+    mutableStateOf(state.customOpenAICompatibilityModeDraft)
+  }
   var languageDraft by remember(state.settings.language) { mutableStateOf(state.settings.language) }
   var themeModeDraft by remember(state.settings.themeMode) { mutableStateOf(state.settings.themeMode) }
   var themeColorDraft by remember(state.settings.themeColor) { mutableStateOf(state.settings.themeColor) }
+  var authorityModeDraft by remember(state.settings.agentAuthorityMode) { mutableStateOf(state.settings.agentAuthorityMode) }
+  var deepSeekThinkingEffortDraft by remember(state.settings.deepSeekThinkingEffort) {
+    mutableStateOf(state.settings.deepSeekThinkingEffort)
+  }
+  var webSearchEnabledDraft by remember(state.settings.webSearchEnabled) { mutableStateOf(state.settings.webSearchEnabled) }
+  var braveSearchApiKeyDraft by remember(state.settings.braveSearchApiKey) { mutableStateOf(state.settings.braveSearchApiKey) }
   val selectedProvider = ModelProviderCatalog.findProvider(providerDraft) ?: ModelProviderCatalog.defaultProvider
   var providerMenuOpen by remember { mutableStateOf(false) }
   var modelMenuOpen by remember { mutableStateOf(false) }
   var languageMenuOpen by remember { mutableStateOf(false) }
+  var authorityMenuOpen by remember { mutableStateOf(false) }
+  var deepSeekThinkingMenuOpen by remember { mutableStateOf(false) }
+  var customOpenAICompatibilityMenuOpen by remember { mutableStateOf(false) }
   val themeColorPreview = remember(themeColorDraft) { parseUiColor(themeColorDraft) ?: Color(0xFF76C4D8) }
 
   AlertDialog(
@@ -1513,6 +2378,9 @@ private fun SettingsDialog(
                   providerDraft = provider.id
                   modelDraft = provider.defaultModel
                   apiKeyDraft = state.settings.apiKeyFor(provider.id)
+                  customOpenAIBaseUrlDraft = state.settings.customOpenAIProvider.baseUrl
+                  customOpenAIChatPathDraft = state.settings.customOpenAIProvider.chatCompletionsPath
+                  customOpenAICompatibilityModeDraft = state.settings.customOpenAIProvider.compatibilityMode
                 },
               )
             }
@@ -1550,6 +2418,104 @@ private fun SettingsDialog(
           singleLine = true,
           modifier = Modifier.fillMaxWidth(),
         )
+        if (selectedProvider.id == "custom-openai") {
+          Text(t(language, "Custom endpoint", "\u81ea\u5b9a\u4e49\u7aef\u70b9"), style = MaterialTheme.typography.titleSmall)
+          OutlinedTextField(
+            value = customOpenAIBaseUrlDraft,
+            onValueChange = { customOpenAIBaseUrlDraft = it },
+            label = { Text(t(language, "Base URL", "Base URL")) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+          )
+          OutlinedTextField(
+            value = customOpenAIChatPathDraft,
+            onValueChange = { customOpenAIChatPathDraft = it },
+            label = { Text(t(language, "Chat completions path", "Chat completions path")) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+          )
+          Box {
+            OutlinedButton(
+              onClick = { customOpenAICompatibilityMenuOpen = true },
+              modifier = Modifier.fillMaxWidth(),
+            ) {
+              Text(customOpenAICompatibilityModeLabel(language, customOpenAICompatibilityModeDraft))
+            }
+            DropdownMenu(
+              expanded = customOpenAICompatibilityMenuOpen,
+              onDismissRequest = { customOpenAICompatibilityMenuOpen = false },
+            ) {
+              listOf("generic", "ollama").forEach { mode ->
+                DropdownMenuItem(
+                  text = { Text(customOpenAICompatibilityModeLabel(language, mode)) },
+                  onClick = {
+                    customOpenAICompatibilityMenuOpen = false
+                    customOpenAICompatibilityModeDraft = mode
+                  },
+                )
+              }
+            }
+          }
+          Text(
+            t(
+              language,
+              "Ollama mode adds the profile-controlled num_ctx option from model context. Custom request bodies are not enabled.",
+              "Ollama \u6a21\u5f0f\u4f1a\u6839\u636e\u6a21\u578b\u4e0a\u4e0b\u6587\u6ce8\u5165 profile \u63a7\u5236\u7684 num_ctx\u3002\u5f53\u524d\u4e0d\u5f00\u653e\u81ea\u5b9a\u4e49\u8bf7\u6c42\u4f53\u3002",
+            ),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall,
+          )
+        }
+        if (selectedProvider.id == "deepseek") {
+          Text(t(language, "DeepSeek", "DeepSeek"), style = MaterialTheme.typography.titleSmall)
+          Box {
+            OutlinedButton(onClick = { deepSeekThinkingMenuOpen = true }, modifier = Modifier.fillMaxWidth()) {
+              Text(deepSeekThinkingEffortLabel(language, deepSeekThinkingEffortDraft))
+            }
+            DropdownMenu(expanded = deepSeekThinkingMenuOpen, onDismissRequest = { deepSeekThinkingMenuOpen = false }) {
+              listOf("off", "high", "max").forEach { effort ->
+                DropdownMenuItem(
+                  text = { Text(deepSeekThinkingEffortLabel(language, effort)) },
+                  onClick = {
+                    deepSeekThinkingMenuOpen = false
+                    deepSeekThinkingEffortDraft = effort
+                  },
+                )
+              }
+            }
+          }
+        }
+        Text(t(language, "Web search", "Web search"), style = MaterialTheme.typography.titleSmall)
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Column(modifier = Modifier.weight(1f)) {
+            Text(t(language, "Brave Search", "Brave Search"), style = MaterialTheme.typography.bodyMedium)
+            Text(
+              t(
+                language,
+                "Requires Network enabled in each conversation.",
+                "\u9700\u8981\u5728\u6bcf\u6b21\u5bf9\u8bdd\u4e2d\u6253\u5f00\u8054\u7f51\u5f00\u5173\u3002",
+              ),
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+              style = MaterialTheme.typography.bodySmall,
+            )
+          }
+          Switch(
+            checked = webSearchEnabledDraft,
+            onCheckedChange = { webSearchEnabledDraft = it },
+            modifier = Modifier.semantics { contentDescription = "Web search switch" },
+          )
+        }
+        OutlinedTextField(
+          value = braveSearchApiKeyDraft,
+          onValueChange = { braveSearchApiKeyDraft = normalizeBraveSearchApiKey(it) },
+          label = { Text(t(language, "Brave Search API key", "Brave Search API key")) },
+          singleLine = true,
+          modifier = Modifier.fillMaxWidth(),
+        )
         Box {
           OutlinedButton(onClick = { languageMenuOpen = true }, modifier = Modifier.fillMaxWidth()) {
             Text(t(language, "Language: ${languageLabel(languageDraft)}", "\u8bed\u8a00\uff1a${languageLabel(languageDraft)}"))
@@ -1568,6 +2534,65 @@ private fun SettingsDialog(
                 languageMenuOpen = false
                 languageDraft = "zh"
               },
+            )
+          }
+        }
+        Text(t(language, "Agent authority", "Agent \u6743\u9650"), style = MaterialTheme.typography.titleSmall)
+        Box {
+          OutlinedButton(onClick = { authorityMenuOpen = true }, modifier = Modifier.fillMaxWidth()) {
+            Text(authorityModeLabel(language, authorityModeDraft))
+          }
+          DropdownMenu(expanded = authorityMenuOpen, onDismissRequest = { authorityMenuOpen = false }) {
+            DropdownMenuItem(
+              text = { Text(authorityModeLabel(language, "safe")) },
+              onClick = {
+                authorityMenuOpen = false
+                authorityModeDraft = "safe"
+              },
+            )
+            DropdownMenuItem(
+              text = { Text(authorityModeLabel(language, "assisted")) },
+              onClick = {
+                authorityMenuOpen = false
+                authorityModeDraft = "assisted"
+              },
+            )
+            DropdownMenuItem(
+              text = { Text(authorityModeLabel(language, "full")) },
+              onClick = {
+                authorityMenuOpen = false
+                authorityModeDraft = "full"
+              },
+            )
+          }
+        }
+        Text(
+          t(
+            language,
+            "Full Authority auto-applies settings proposals after a workspace snapshot and audit log. Android permissions and secrets remain app-owned boundaries.",
+            "Full Authority 会在创建 workspace 快照和审计日志后自动应用设置提案。Android 权限和密钥仍然是 app 边界。",
+          ),
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
+          style = MaterialTheme.typography.bodySmall,
+        )
+        if (state.settingsProposals.isNotEmpty()) {
+          Text(t(language, "Pending proposals", "\u5f85\u786e\u8ba4\u63d0\u6848"), style = MaterialTheme.typography.titleSmall)
+          state.settingsProposals.forEach { proposal ->
+            SettingsProposalItem(
+              proposal = proposal,
+              language = language,
+              onApprove = { controller.approveSettingsProposal(proposal.path) },
+              onReject = { controller.rejectSettingsProposal(proposal.path) },
+            )
+          }
+        }
+        if (state.controlledToolProposals.isNotEmpty()) {
+          Text(t(language, "Tool proposals", "\u5de5\u5177\u63d0\u6848"), style = MaterialTheme.typography.titleSmall)
+          state.controlledToolProposals.forEach { proposal ->
+            ControlledToolProposalItem(
+              proposal = proposal,
+              language = language,
+              onDismiss = { controller.dismissControlledToolProposal(proposal.path) },
             )
           }
         }
@@ -1624,9 +2649,16 @@ private fun SettingsDialog(
             providerId = providerDraft,
             model = modelDraft,
             apiKey = apiKeyDraft,
+            customOpenAIBaseUrl = customOpenAIBaseUrlDraft,
+            customOpenAIChatCompletionsPath = customOpenAIChatPathDraft,
+            customOpenAICompatibilityMode = customOpenAICompatibilityModeDraft,
             language = languageDraft,
             themeMode = themeModeDraft,
             themeColor = themeColorDraft,
+            authorityMode = authorityModeDraft,
+            deepSeekThinkingEffort = deepSeekThinkingEffortDraft,
+            webSearchEnabled = webSearchEnabledDraft,
+            braveSearchApiKey = braveSearchApiKeyDraft,
           )
           onDismiss()
         },
@@ -1640,6 +2672,183 @@ private fun SettingsDialog(
       }
     },
   )
+}
+
+@Composable
+private fun HtmlFilePickerRow(
+  path: String,
+  selected: Boolean,
+  pinned: Boolean,
+  language: String,
+  onOpen: () -> Unit,
+  onPin: (Boolean) -> Unit,
+) {
+  var menuOpen by remember { mutableStateOf(false) }
+  Row(
+    modifier = Modifier.fillMaxWidth(),
+    horizontalArrangement = Arrangement.spacedBy(8.dp),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    OutlinedButton(
+      onClick = onOpen,
+      modifier = Modifier.weight(1f),
+    ) {
+      val marker = if (pinned) "* " else ""
+      Text(if (selected) t(language, "$marker$path  selected", "$marker$path  \u5df2\u9009\u4e2d") else "$marker$path")
+    }
+    Box {
+      IconButton(
+        onClick = { menuOpen = true },
+        modifier = Modifier.semantics { contentDescription = "HTML actions for $path" },
+      ) {
+        Icon(Icons.Filled.Menu, contentDescription = null)
+      }
+      DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+        DropdownMenuItem(
+          text = { Text(if (pinned) t(language, "Unpin", "\u53d6\u6d88\u7f6e\u9876") else t(language, "Pin", "\u7f6e\u9876")) },
+          onClick = {
+            menuOpen = false
+            onPin(!pinned)
+          },
+        )
+      }
+    }
+  }
+}
+
+@Composable
+private fun SettingsProposalItem(
+  proposal: WorkspaceSettingsProposal,
+  language: String,
+  onApprove: () -> Unit,
+  onReject: () -> Unit,
+) {
+  Surface(
+    modifier = Modifier.fillMaxWidth(),
+    shape = RoundedCornerShape(8.dp),
+    color = MaterialTheme.colorScheme.surfaceVariant,
+  ) {
+    Column(
+      modifier = Modifier.fillMaxWidth().padding(10.dp),
+      verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+      Text(proposal.title, style = MaterialTheme.typography.bodyLarge)
+      if (proposal.reason.isNotBlank()) {
+        Text(proposal.reason, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+      }
+      Text(
+        settingsProposalSummary(proposal),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.bodySmall,
+      )
+      Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        OutlinedButton(onClick = onApprove) {
+          Text(t(language, "Apply", "\u5e94\u7528"))
+        }
+        TextButton(onClick = onReject) {
+          Text(t(language, "Reject", "\u62d2\u7edd"))
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun ControlledToolProposalItem(
+  proposal: WorkspaceControlledToolProposal,
+  language: String,
+  onDismiss: () -> Unit,
+) {
+  Surface(
+    modifier = Modifier.fillMaxWidth(),
+    shape = RoundedCornerShape(8.dp),
+    color = MaterialTheme.colorScheme.surfaceVariant,
+  ) {
+    Column(
+      modifier = Modifier.fillMaxWidth().padding(10.dp),
+      verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+      Text(proposal.title, style = MaterialTheme.typography.bodyLarge)
+      if (proposal.reason.isNotBlank()) {
+        Text(proposal.reason, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+      }
+      Text(
+        controlledToolProposalSummary(proposal),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.bodySmall,
+      )
+      Text(
+        t(
+          language,
+          "Recorded only. Tool and MCP installation are not enabled in this build.",
+          "\u4ec5\u8bb0\u5f55\u63d0\u6848\u3002\u5f53\u524d\u7248\u672c\u4e0d\u5f00\u653e\u5de5\u5177\u6216 MCP \u5b89\u88c5\u3002",
+        ),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.bodySmall,
+      )
+      TextButton(onClick = onDismiss) {
+        Text(t(language, "Dismiss", "\u5ffd\u7565"))
+      }
+    }
+  }
+}
+
+private fun settingsProposalSummary(proposal: WorkspaceSettingsProposal): String {
+  val changes = proposal.changes
+  val parts = listOfNotNull(
+    changes.provider?.let { "provider=$it" },
+    changes.model?.let { "model=$it" },
+    changes.selectedHtmlPath?.let { "selectedHtml=$it" },
+    changes.maxAgentIterations?.let { "maxIterations=$it" },
+    changes.networkEnabled?.let { "network=$it" },
+    changes.webSearchEnabled?.let { "webSearch=$it" },
+    changes.language?.let { "language=$it" },
+    changes.themeMode?.let { "themeMode=$it" },
+    changes.themeColor?.let { "themeColor=$it" },
+    changes.agentAuthorityMode?.let { "authority=$it" },
+    changes.deepSeekThinkingEffort?.let { "deepSeekThinking=$it" },
+    changes.customOpenAIBaseUrl?.let { "customBaseUrl=$it" },
+    changes.customOpenAIChatCompletionsPath?.let { "customChatPath=$it" },
+    changes.customOpenAICompatibilityMode?.let { "customCompatibility=$it" },
+    changes.modelContextWindowTokens?.let { "context=$it" },
+    changes.modelCompressionThresholdPercent?.let { "compression=$it%" },
+  )
+  return parts.ifEmpty { listOf(proposal.path) }.joinToString(", ")
+}
+
+private fun controlledToolProposalSummary(proposal: WorkspaceControlledToolProposal): String {
+  val parts = listOfNotNull(
+    "type=${proposal.type}",
+    proposal.name.takeIf { it.isNotBlank() }?.let { "name=$it" },
+    proposal.command.takeIf { it.isNotBlank() }?.let { "command=$it" },
+    proposal.endpoint.takeIf { it.isNotBlank() }?.let { "endpoint=$it" },
+    proposal.requestedCapabilities.takeIf { it.isNotEmpty() }?.joinToString(prefix = "capabilities=", separator = "|"),
+    proposal.permissions.takeIf { it.isNotEmpty() }?.joinToString(prefix = "permissions=", separator = "|"),
+  )
+  return parts.joinToString(", ")
+}
+
+private fun authorityModeLabel(language: String, authorityMode: String): String {
+  return when (authorityMode) {
+    "assisted" -> t(language, "Assisted: agent proposes, user confirms", "Assisted\uff1aagent \u63d0\u6848\uff0c\u7528\u6237\u786e\u8ba4")
+    "full" -> t(language, "Full Authority: auto-apply proposals", "Full Authority\uff1a\u81ea\u52a8\u5e94\u7528\u63d0\u6848")
+    else -> t(language, "Safe: read-only app settings", "Safe\uff1a\u53ea\u8bfb app \u8bbe\u7f6e")
+  }
+}
+
+private fun deepSeekThinkingEffortLabel(language: String, effort: String): String {
+  return when (effort) {
+    "off" -> t(language, "Thinking: off", "\u601d\u8003\uff1a\u5173\u95ed")
+    "max" -> t(language, "Thinking: max", "\u601d\u8003\uff1a\u6700\u9ad8")
+    else -> t(language, "Thinking: high", "\u601d\u8003\uff1a\u9ad8")
+  }
+}
+
+private fun customOpenAICompatibilityModeLabel(language: String, mode: String): String {
+  return when (mode) {
+    "ollama" -> t(language, "Compatibility: Ollama", "\u517c\u5bb9\uff1aOllama")
+    else -> t(language, "Compatibility: generic OpenAI", "\u517c\u5bb9\uff1a\u901a\u7528 OpenAI")
+  }
 }
 
 private fun languageLabel(language: String): String = if (language == "zh") "\u4e2d\u6587" else "English"
