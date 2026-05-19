@@ -418,48 +418,27 @@ so future work can be planned without losing the product direction.
 
 ### Controlled Python Runtime
 
-- This backlog item is now approved and active. The first implementation target
-  is a conversation-bound, blocking Python runtime owned by the Android app
-  lifecycle, not a background service or general Android terminal.
-- Add Python as a workspace-scoped execution tool, not as a general Android
-  terminal or full IDE.
-- Expose a minimal agent tool such as `python_run(code, cwd?, timeoutMs?,
-  sessionId?)`.
-- Capture `stdout`, `stderr`, `exit_code`, and runtime duration for each run.
-- Enforce timeout and cancellation so scripts cannot freeze the app.
-- Start with Python standard library support; do not require arbitrary live
-  `pip` package installation in v1.
-- Allow scripts to read and write only inside the active workspace unless a
-  future explicit permission grants broader access.
-- Follow existing network/tool permission settings when Python code performs
-  HTTP requests.
-- Support `.flovera/tools/` and a tool manifest so the agent can create,
-  register, and reuse small Python tools.
-- Treat Python as the agent's scriptable capability layer for file processing,
-  data conversion, validation, workspace maintenance, and generating web
-  artifacts.
-- Preserve the product boundary: Kotlin/Android owns permissions, secrets,
+- Baseline status: the conversation-bound, blocking Python runtime is
+  implemented as a workspace-scoped agent tool, with stdout/stderr/exit code,
+  duration reporting, timeout/cancellation, workspace file boundaries, tool
+  manifest support, artifact inspection, and a small production package layer
+  for document, spreadsheet, PDF, Markdown, and templating workflows.
+- Keep the product boundary intact: Kotlin/Android owns permissions, secrets,
   WebView, notifications, lifecycle, timeout, and restore; Python only runs
   inside the controlled runtime.
-- Make the runtime complete enough for the agent to write lightweight agent
-  programs inside the workspace using standard library features such as HTTP,
-  JSON, SQLite, path handling, compression, and local modules.
-- Add a small production-runtime package layer by user task, not by package
-  novelty:
-  - document processing: `lxml` plus `python-docx`;
-  - spreadsheets: `openpyxl` and, if needed, `XlsxWriter`;
-  - PDF text and page manipulation: `pypdf`;
-  - Markdown and templating: `markdown` or `mistune`, plus `jinja2`;
-  - data/demo support: lightweight pure-Python utilities such as `pyyaml`,
-    `faker`, and `sympy` after catalog rules exist.
 - Treat native Python dependencies such as `lxml` and Pillow as APK/runtime
   decisions, not dynamic pure-Python catalog entries.
-- Maintain a Flovera pure-Python wheel catalog for dynamic installs after the
-  core runtime is stable. Each entry must include package name, version, wheel
-  URL, sha256, top-level imports, dependencies, and whether the wheel is
-  `py3-none-any`.
-- Keep full PyPI resolver behavior out of scope until package provenance,
-  dependency closure, storage location, and rollback behavior are explicit.
+- Remaining backlog is runtime polish, not the initial Python enablement:
+  - maintain and expand the Flovera pure-Python wheel catalog for dynamic
+    installs. Each entry must include package name, version, wheel URL, sha256,
+    top-level imports, dependencies, and whether the wheel is `py3-none-any`;
+  - add lightweight pure-Python utilities such as `pyyaml`, `faker`, and
+    `sympy` only when a concrete user task needs them;
+  - improve package provenance, dependency closure checks, storage location,
+    rollback behavior, and diagnostics before full PyPI resolver behavior is
+    considered;
+  - keep Python execution blocking and conversation-bound unless a future
+    Android lifecycle design explicitly expands that boundary.
 
 ### Rendering Coverage
 
