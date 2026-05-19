@@ -3,6 +3,7 @@ package com.flovera.app
 import com.flovera.app.koog.AgentPromptBuilder
 import com.flovera.app.session.AgentSession
 import com.flovera.app.session.SessionMessage
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -31,25 +32,53 @@ class AgentPromptBuilderInstrumentedTest {
 
     assertTrue(systemPrompt.contains("System rules in this prompt have the highest priority"))
     assertTrue(systemPrompt.contains("Workspace user rules from AGENT.md"))
+    assertTrue(systemPrompt.contains("Core boundaries:"))
+    assertTrue(systemPrompt.contains("Tool routing:"))
+    assertTrue(systemPrompt.contains("Current run facts:"))
     assertTrue(systemPrompt.contains("Use workspace_search before broad manual scanning"))
     assertTrue(systemPrompt.contains("Use python_run when calculation"))
     assertTrue(systemPrompt.contains("blocking and conversation-bound"))
     assertTrue(systemPrompt.contains("Use python_package_install only for packages listed"))
     assertTrue(systemPrompt.contains("use artifact_inspect(path) to verify"))
-    assertTrue(systemPrompt.contains("supported provider/model profiles"))
+    assertTrue(systemPrompt.contains("provider/model profiles"))
+    assertTrue(systemPrompt.contains("authorityMode=safe"))
+    assertTrue(systemPrompt.contains("networkTools=enabled"))
+    assertTrue(systemPrompt.contains("webSearch=enabled"))
     assertFalse(systemPrompt.contains(workspaceRule))
-    assertTrue(systemPrompt.contains("\"provider\":\"custom-openai\""))
-    assertTrue(systemPrompt.contains("\"model\":\"model-id\""))
-    assertTrue(systemPrompt.contains("\"reasoningEffort\":\"medium\""))
-    assertTrue(systemPrompt.contains("\"customOpenAICompatibilityMode\":\"generic\""))
-    assertTrue(systemPrompt.contains("\"openRouterProviderPreferences\":{\"sort\":\"latency\"}"))
-    assertTrue(systemPrompt.contains("\"openRouterMinCodingScore\":0.7"))
-    assertTrue(fullAuthorityPrompt.contains("Full Authority is enabled"))
+    assertFalse(systemPrompt.contains("\"provider\":\"custom-openai\""))
+    assertFalse(systemPrompt.contains("\"openRouterProviderPreferences\""))
+    assertTrue(fullAuthorityPrompt.contains("authorityMode=full"))
+    assertTrue(fullAuthorityPrompt.contains("Full Authority mode: still write settings proposals"))
     assertTrue(fullAuthorityPrompt.contains(".flovera/logs/full-authority.jsonl"))
-    assertTrue(fullAuthorityPrompt.contains("without a separate user approval click"))
+    assertTrue(fullAuthorityPrompt.contains("does not expose plaintext secrets"))
     assertTrue(userInput.contains("Workspace user rules from AGENT.md:"))
     assertTrue(userInput.contains(workspaceRule))
     assertTrue(userInput.contains("Recent session history:"))
     assertTrue(userInput.contains("Current user request:"))
+  }
+
+  @Test
+  fun systemPromptUsesStablePrefixAndShortRunFacts() {
+    val safePrompt = AgentPromptBuilder.systemPrompt(
+      networkEnabled = false,
+      webSearchAvailable = false,
+      authorityMode = "safe",
+    )
+    val fullPrompt = AgentPromptBuilder.systemPrompt(
+      networkEnabled = true,
+      webSearchAvailable = true,
+      authorityMode = "full",
+    )
+    val safeFactsStart = safePrompt.indexOf("Current run facts:")
+    val fullFactsStart = fullPrompt.indexOf("Current run facts:")
+
+    assertTrue(safeFactsStart > 0)
+    assertEquals(
+      safePrompt.substring(0, safeFactsStart),
+      fullPrompt.substring(0, fullFactsStart),
+    )
+    assertTrue(safePrompt.contains("authorityMode=safe"))
+    assertTrue(fullPrompt.contains("authorityMode=full"))
+    assertTrue(safePrompt.length < 4_500)
   }
 }
