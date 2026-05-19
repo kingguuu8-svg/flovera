@@ -6,6 +6,7 @@ import com.flovera.app.koog.FetchUrlTool
 import com.flovera.app.koog.NetworkHttpClient
 import com.flovera.app.koog.NetworkResponse
 import com.flovera.app.koog.ToolEventRecorder
+import com.flovera.app.koog.WebSearchTool
 import com.flovera.app.workspace.WorkspaceManager
 import java.io.File
 import java.net.URL
@@ -13,6 +14,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 
 class NetworkToolsInstrumentedTest {
@@ -100,15 +102,103 @@ class NetworkToolsInstrumentedTest {
     assertFalse(File(workspace.root.parentFile, escapeName).exists())
   }
 
+  @Test
+  fun webSearchUsesBraveApiHeadersAndFormatsResults() = runBlocking {
+    val recorder = ToolEventRecorder()
+    val client = FakeNetworkHttpClient(
+      NetworkResponse(
+        statusCode = 200,
+        contentType = "application/json",
+        finalUrl = "https://api.search.brave.com/res/v1/web/search?q=flovera",
+        body = """
+          {
+            "web": {
+              "results": [
+                {
+                  "title": "Flovera",
+                  "url": "https://example.com/flovera",
+                  "description": "A workspace agent result"
+                }
+              ]
+            }
+          }
+        """.trimIndent().encodeToByteArray(),
+        truncated = false,
+      ),
+    )
+
+    val result = WebSearchTool("brave-key", recorder, client).execute(
+      WebSearchTool.Args(query = "flovera workspace", count = 3),
+    )
+
+    assertEquals("brave-key", client.headersSeen["X-Subscription-Token"])
+    assertTrue(client.requestedUrl?.contains("api.search.brave.com") == true)
+    assertTrue(result.contains("Flovera"))
+    assertTrue(result.contains("https://example.com/flovera"))
+    assertTrue(recorder.snapshot().any { it.name == "web_search" })
+  }
+
+  @Test
+  fun webSearchExtractsBraveKeyFromPastedTextBeforeSendingHeader() = runBlocking {
+    val recorder = ToolEventRecorder()
+    val client = FakeNetworkHttpClient(
+      NetworkResponse(
+        statusCode = 200,
+        contentType = "application/json",
+        finalUrl = "https://api.search.brave.com/res/v1/web/search?q=flovera",
+        body = """{"web":{"results":[{"title":"Flovera","url":"https://example.com","description":"ok"}]}}"""
+          .encodeToByteArray(),
+        truncated = false,
+      ),
+    )
+    val pasted = """
+      BSAmkdXRBkbVDqD6mHralmPbYtSY5JH
+      unrelated pasted notification text
+      brave key
+      BSAmkdXRBkbVDqD6mHralmPbYtSY5JH
+    """.trimIndent()
+
+    val result = WebSearchTool(pasted, recorder, client).execute(
+      WebSearchTool.Args(query = "flovera", count = 1),
+    )
+
+    assertEquals("BSAmkdXRBkbVDqD6mHralmPbYtSY5JH", client.headersSeen["X-Subscription-Token"])
+    assertTrue(result.contains("status: 200"))
+  }
+
+  @Test
+  fun liveBraveWebSearchReturnsResultsWhenApiKeyProvided() = runBlocking {
+    val apiKey = InstrumentationRegistry.getArguments().getString("braveSearchApiKey").orEmpty()
+    assumeTrue("Pass -e braveSearchApiKey to run the live Brave Search test.", apiKey.isNotBlank())
+
+    val recorder = ToolEventRecorder()
+    val result = WebSearchTool(apiKey, recorder).execute(
+      WebSearchTool.Args(query = "flovera android agent", count = 3),
+    )
+
+    val reachedBrave = result.contains("status: 200") ||
+      result.contains("USAGE_LIMIT_EXCEEDED") ||
+      result.contains("status: 429")
+    assertTrue(result, reachedBrave)
+    if (result.contains("status: 200")) {
+      assertTrue(result, result.contains("results:"))
+    }
+    assertFalse(result, result.contains("Unexpected char"))
+    assertFalse(result, result.contains("header value", ignoreCase = true))
+    assertTrue(recorder.snapshot().any { it.name == "web_search" })
+  }
+
   private class FakeNetworkHttpClient(
     private val response: NetworkResponse,
   ) : NetworkHttpClient {
     var requestedUrl: String? = null
     var maxBytesSeen: Int? = null
+    var headersSeen: Map<String, String> = emptyMap()
 
-    override suspend fun get(url: URL, maxBytes: Int?): NetworkResponse {
+    override suspend fun get(url: URL, maxBytes: Int?, headers: Map<String, String>): NetworkResponse {
       requestedUrl = url.toString()
       maxBytesSeen = maxBytes
+      headersSeen = headers
       return response
     }
   }

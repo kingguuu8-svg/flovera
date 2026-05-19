@@ -10,6 +10,7 @@ import com.flovera.app.workspace.WorkspaceManager
 interface AgentRuntime {
   suspend fun run(
     input: String,
+    agentRunId: String,
     settings: AppSettings,
     session: AgentSession,
     workspace: WorkspaceManager,
@@ -20,6 +21,7 @@ interface AgentRuntime {
 class KoogAgentRuntime : AgentRuntime {
   override suspend fun run(
     input: String,
+    agentRunId: String,
     settings: AppSettings,
     session: AgentSession,
     workspace: WorkspaceManager,
@@ -28,50 +30,37 @@ class KoogAgentRuntime : AgentRuntime {
     val provider = ModelProviderCatalog.requireProvider(settings.provider)
     val apiKey = settings.apiKeyFor(provider.id)
     require(apiKey.isNotBlank()) { "${provider.label} API key is not configured." }
+    val webSearchAvailable = settings.networkEnabled && settings.webSearchEnabled && settings.braveSearchApiKey.isNotBlank()
+    val modelContext = ModelProviderCatalog.contextFor(settings)
+    val workspaceUserRules = workspace.readAgentRules()
 
     val agent = AIAgent(
-      promptExecutor = MultiLLMPromptExecutor(provider.createClient(apiKey)),
-      llmModel = provider.createModel(settings.model),
-      toolRegistry = workspaceToolRegistry(workspace, recorder, networkEnabled = settings.networkEnabled),
-      systemPrompt = buildSystemPrompt(workspace.readAgentRules(), settings.networkEnabled),
+      promptExecutor = MultiLLMPromptExecutor(ModelProviderCatalog.createClient(provider, apiKey, settings)),
+      llmModel = provider.createModel(settings.model, modelContext),
+      toolRegistry = workspaceToolRegistry(
+        workspace = workspace,
+        recorder = recorder,
+        networkEnabled = settings.networkEnabled,
+        webSearchEnabled = webSearchAvailable,
+        braveSearchApiKey = settings.braveSearchApiKey,
+      ),
+      systemPrompt = AgentPromptBuilder.systemPrompt(
+        networkEnabled = settings.networkEnabled,
+        webSearchAvailable = webSearchAvailable,
+        authorityMode = settings.agentAuthorityMode,
+      ),
       maxIterations = settings.maxAgentIterations,
     )
 
     return agent.use {
-      it.run(buildUserInput(input, session), sessionId = session.id)
+      it.run(
+        AgentPromptBuilder.userInput(
+          input = input,
+          session = session,
+          workspaceUserRules = workspaceUserRules,
+        ),
+        sessionId = agentRunId,
+      )
     }
-  }
-
-  private fun buildSystemPrompt(agentRules: String, networkEnabled: Boolean): String {
-    return """
-      You are an Android-local workspace agent.
-      You can talk with the user and use tools to inspect or modify the current workspace.
-      Only create or edit files through the provided workspace tools.
-      Keep all file paths relative to the workspace root.
-      For web projects, prefer plain HTML, CSS, JS, and JSON files. Do not assume Python, npm, git, bash, or Linux tools exist.
-      Workspace HTML is displayed inside flovera WebView and can call controlled app events through window.Flovera when available:
-      - window.Flovera.toast("message")
-      - window.Flovera.notify(JSON.stringify({ title: "Title", body: "Body" }))
-      - window.Flovera.postEvent(JSON.stringify({ type: "notification", title: "Title", body: "Body" }))
-      Always guard these calls with if (window.Flovera) and make the behavior clear in the UI.
-      Network tools are ${if (networkEnabled) "enabled. Use fetch_url and download_file only when they directly help the user's request." else "disabled for this run."}
-      When the user asks you to create files, call the tools and then summarize the files changed.
-
-      Workspace AGENT.md:
-      ${agentRules.ifBlank { "(empty)" }}
-    """.trimIndent()
-  }
-
-  private fun buildUserInput(input: String, session: AgentSession): String {
-    val history = session.messages.takeLast(12).joinToString("\n") { message ->
-      "${message.role}: ${message.content.take(1_500)}"
-    }
-    return """
-      Recent session history:
-      ${history.ifBlank { "(empty)" }}
-
-      Current user request:
-      $input
-    """.trimIndent()
   }
 }
