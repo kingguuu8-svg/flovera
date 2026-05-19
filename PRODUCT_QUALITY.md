@@ -230,6 +230,41 @@ so future work can be planned without losing the product direction.
   retained, summarized, or dropped.
 - Treat compression as part of session history, not as invisible runtime state.
 
+### Workspace Search Performance
+
+- Improve workspace search around measured latency, result quality, and
+  responsiveness before expanding it into heavier retrieval features.
+- Build or reuse an incremental workspace file index for searchable text,
+  metadata, file type, modified time, and lightweight content summaries.
+- Exclude ignored files, generated outputs, binary blobs, oversized files, and
+  app-private metadata unless the user explicitly includes them.
+- Debounce repeated search input, cancel stale searches, and stream or page large
+  result sets so the UI stays responsive on big workspaces.
+- Prefer stable ranking signals such as exact path matches, filename matches,
+  recent edits, pinned files, and workspace-open context before fuzzy matches.
+- Record search timing, candidate counts, skipped-file reasons, and top-result
+  quality signals so performance regressions are visible.
+- Keep search local to the workspace unless a future permission explicitly
+  allows broader device or connector search.
+
+### Targeted Cache Hit Rate Improvements
+
+- Improve cache hit rate through specific cache keys and invalidation rules, not
+  by broadening stale-cache tolerance.
+- Identify cacheable surfaces separately: workspace file metadata, search index
+  shards, rendered previews, provider/model capability metadata, tool manifests,
+  and stable prompt fragments.
+- Use content hashes, file mtimes, settings versions, tool versions, and model
+  capability versions as invalidation inputs so correctness remains explainable.
+- Record hit, miss, bypass, and invalidation reasons in debug logs or lightweight
+  diagnostics.
+- Make cache scope explicit: app-global, workspace-local, session-local, or
+  conversation-local.
+- Add low-risk warmup paths for common workspace views and recently used files
+  without blocking app startup.
+- Provide a user-visible cache clear path for corrupted or privacy-sensitive
+  local cache state.
+
 ### Agent-Controlled App Settings
 
 - Treat workspace snapshots and restore as the safety floor before broad agent
@@ -246,9 +281,11 @@ so future work can be planned without losing the product direction.
     they take effect.
   - Full Authority: agent can directly modify broad app settings after an
     automatic restore point is created.
-- Current implementation target is Safe plus Assisted. Full Authority remains a
-  pending backlog item until app settings restore, tool manifests, and high-risk
-  confirmation boundaries are mature enough.
+- Current implementation supports Safe, Assisted, and Full Authority for
+  workspace files plus low/mid-risk app settings. Full Authority still uses the
+  same settings proposal schema, but applies proposals automatically after a
+  workspace snapshot and writes an audit record under
+  `.flovera/logs/full-authority.jsonl`.
 - Support a high-trust mode where the user can hand broad app-control authority
   to the agent, with every change logged, inspectable, and reversible.
 - Let the agent change low-risk settings first, such as theme mode, theme color,
@@ -308,6 +345,23 @@ so future work can be planned without losing the product direction.
 - Background execution must preserve existing settings, session persistence,
   error logs, and notification permission boundaries.
 
+### System Prompt Optimization
+
+- Audit the app-owned system prompt for duplicated rules, stale project history,
+  and instructions that can be represented as structured capability metadata.
+- Split prompt construction into stable system constraints, app capability
+  manifests, workspace rules, conversation state, and task-specific context.
+- Keep permission, privacy, restore, and source-separation boundaries as
+  non-optional system constraints; prompt shortening must not weaken them.
+- Use deterministic prompt templates so changes can be reviewed with diffs and
+  tested with golden prompt snapshots.
+- Measure prompt token cost by section and show the major contributors in
+  diagnostics.
+- Prefer compact structured summaries for app state, settings, tools, and
+  workspace context instead of repeating prose instructions.
+- Add regression checks for high-risk behaviors such as secret exposure,
+  permission bypass, destructive edits, and tool availability mismatches.
+
 ### Web Search And Tool Expansion
 
 - Add Brave Search API support as the first non-provider web search path.
@@ -340,6 +394,27 @@ so future work can be planned without losing the product direction.
   snapshots, and tests.
 - Keep this backlog item as the holding area for capability-boundary ideas while
   the current implementation focus remains the controlled Python runtime.
+
+### Android App Permission Expansion
+
+- Inventory additional Android permissions and app capabilities that could make
+  Flovera more useful, then group them by user value, privacy risk, and Android
+  version behavior before implementation.
+- Candidate permission surfaces include scoped media/document access,
+  notifications, camera, microphone, location, contacts, calendar, nearby
+  devices, clipboard-related flows, accessibility integrations, and background
+  execution limits where Android allows them.
+- Each permission must have a concrete product use case, an in-app explanation,
+  a runtime request path, a denial fallback, and an audit trail when the agent
+  can influence behavior through that permission.
+- Do not expose newly granted Android capabilities directly to the agent until
+  they are represented as narrow app-owned tools with explicit schemas,
+  permission gates, timeouts, output limits, and event records.
+- Keep high-risk permissions opt-in and reversible, with settings that show
+  current grant state and what agent/tool features depend on the grant.
+- Treat accessibility, contacts, calendar, microphone, camera, and precise
+  location as high-impact capabilities that require separate design approval
+  before implementation.
 
 ### Controlled Python Runtime
 
@@ -385,23 +460,6 @@ so future work can be planned without losing the product direction.
   `py3-none-any`.
 - Keep full PyPI resolver behavior out of scope until package provenance,
   dependency closure, storage location, and rollback behavior are explicit.
-
-### Vector Search Runtime
-
-- This backlog item is gated at the same level as Controlled Python Runtime: do
-  not implement vector search until the user explicitly approves starting that
-  implementation.
-- Treat vector search as a workspace-scoped retrieval capability, not as a
-  general hidden memory layer.
-- The first design must define what can be indexed, where embeddings and indexes
-  are stored, how stale entries are refreshed, and how users can inspect or
-  delete indexed data.
-- Keep model/provider, embedding dimensions, index format, snapshot/restore
-  behavior, and privacy boundaries explicit before exposing retrieval to the
-  agent.
-- Prefer a small, auditable local implementation first. Any remote embedding or
-  hosted vector database path needs separate approval because it changes the
-  privacy and cost model.
 
 ### Rendering Coverage
 

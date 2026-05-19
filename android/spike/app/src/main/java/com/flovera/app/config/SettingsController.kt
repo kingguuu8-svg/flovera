@@ -294,6 +294,7 @@ class SettingsController(private val store: SettingsStore) {
   private fun normalizeAuthorityModeId(authorityMode: String): String {
     return when (authorityMode) {
       "assisted" -> "assisted"
+      "full" -> "full"
       else -> "safe"
     }
   }

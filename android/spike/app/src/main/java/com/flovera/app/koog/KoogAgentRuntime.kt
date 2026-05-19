@@ -47,6 +47,7 @@ class KoogAgentRuntime : AgentRuntime {
       systemPrompt = AgentPromptBuilder.systemPrompt(
         networkEnabled = settings.networkEnabled,
         webSearchAvailable = webSearchAvailable,
+        authorityMode = settings.agentAuthorityMode,
       ),
       maxIterations = settings.maxAgentIterations,
     )

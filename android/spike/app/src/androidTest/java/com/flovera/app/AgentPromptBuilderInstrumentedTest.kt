@@ -12,6 +12,11 @@ class AgentPromptBuilderInstrumentedTest {
   fun systemPromptKeepsWorkspaceRulesOutOfSystemLayer() {
     val workspaceRule = "Prefer compact UI labels."
     val systemPrompt = AgentPromptBuilder.systemPrompt(networkEnabled = true, webSearchAvailable = true)
+    val fullAuthorityPrompt = AgentPromptBuilder.systemPrompt(
+      networkEnabled = true,
+      webSearchAvailable = true,
+      authorityMode = "full",
+    )
     val userInput = AgentPromptBuilder.userInput(
       input = "build a timer",
       session = AgentSession(
@@ -39,6 +44,9 @@ class AgentPromptBuilderInstrumentedTest {
     assertTrue(systemPrompt.contains("\"customOpenAICompatibilityMode\":\"generic\""))
     assertTrue(systemPrompt.contains("\"openRouterProviderPreferences\":{\"sort\":\"latency\"}"))
     assertTrue(systemPrompt.contains("\"openRouterMinCodingScore\":0.7"))
+    assertTrue(fullAuthorityPrompt.contains("Full Authority is enabled"))
+    assertTrue(fullAuthorityPrompt.contains(".flovera/logs/full-authority.jsonl"))
+    assertTrue(fullAuthorityPrompt.contains("without a separate user approval click"))
     assertTrue(userInput.contains("Workspace user rules from AGENT.md:"))
     assertTrue(userInput.contains(workspaceRule))
     assertTrue(userInput.contains("Recent session history:"))

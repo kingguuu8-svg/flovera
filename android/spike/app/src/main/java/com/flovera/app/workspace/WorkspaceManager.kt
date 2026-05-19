@@ -10,6 +10,7 @@ import com.flovera.app.storage.writeBytesAtomically
 import com.flovera.app.storage.writeStreamAtomically
 import com.flovera.app.storage.writeUtf8TextAtomically
 import java.io.File
+import java.util.UUID
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -69,6 +70,10 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
   private val snapshotStore = WorkspaceSnapshotStore(appContext, workspaceId, root)
   private val json = Json {
     prettyPrint = true
+    ignoreUnknownKeys = true
+    encodeDefaults = true
+  }
+  private val compactJson = Json {
     ignoreUnknownKeys = true
     encodeDefaults = true
   }
@@ -257,6 +262,34 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     }.getOrNull() ?: return false
     if (!decoded.type.equals("settings", ignoreCase = true)) return false
     return file.delete()
+  }
+
+  fun appendFullAuthorityAudit(
+    action: String,
+    targetPath: String,
+    title: String,
+    reason: String,
+    changes: SettingsProposalChanges,
+  ): String {
+    val file = safeFile(".flovera/logs/full-authority.jsonl")
+    val existing = if (file.exists()) readUtf8Text(file).trimEnd() else ""
+    val record = WorkspaceFullAuthorityAuditRecord(
+      id = UUID.randomUUID().toString(),
+      timestampMillis = System.currentTimeMillis(),
+      action = action,
+      targetPath = targetPath,
+      title = title,
+      reason = reason,
+      changes = changes,
+    )
+    val updated = buildString {
+      if (existing.isNotBlank()) {
+        appendLine(existing)
+      }
+      appendLine(compactJson.encodeToString(record))
+    }
+    writeUtf8TextAtomically(file, updated)
+    return relativeToRoot(file)
   }
 
   fun deleteControlledToolProposal(path: String): Boolean {
@@ -1275,8 +1308,8 @@ data class FloveraCapabilities(
   val executableToolExpansion: Boolean = false,
   val proposalTypes: List<String> = listOf("settings", "tool", "mcp"),
   val authorityMode: String = "safe",
-  val supportedAuthorityModes: List<String> = listOf("safe", "assisted"),
-  val pendingAuthorityModes: List<String> = listOf("full"),
+  val supportedAuthorityModes: List<String> = listOf("safe", "assisted", "full"),
+  val pendingAuthorityModes: List<String> = emptyList(),
 ) {
   companion object {
     fun fromSettings(
@@ -1284,11 +1317,13 @@ data class FloveraCapabilities(
       providerProfileCatalog: List<FloveraProviderProfileView> = emptyList(),
       providerApiModes: List<String> = listOf("chat_completions", "anthropic_messages"),
     ): FloveraCapabilities {
+      val fullAuthority = settingsView.authorityMode == "full"
       return FloveraCapabilities(
         networkTools = settingsView.networkEnabled,
         webSearch = settingsView.webSearchEnabled,
         providerApiModes = providerApiModes,
         providerProfileCatalog = providerProfileCatalog,
+        directSettingsWrite = fullAuthority,
         authorityMode = settingsView.authorityMode,
       )
     }
@@ -1392,6 +1427,17 @@ data class WorkspaceSettingsProposalFile(
   val title: String = "",
   val reason: String = "",
   val changes: SettingsProposalChanges = SettingsProposalChanges(),
+)
+
+@Serializable
+data class WorkspaceFullAuthorityAuditRecord(
+  val id: String,
+  val timestampMillis: Long,
+  val action: String,
+  val targetPath: String,
+  val title: String,
+  val reason: String,
+  val changes: SettingsProposalChanges,
 )
 
 data class WorkspaceSettingsProposal(

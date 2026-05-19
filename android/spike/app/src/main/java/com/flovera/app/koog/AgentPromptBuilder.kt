@@ -4,7 +4,19 @@ import com.flovera.app.session.AgentSession
 import com.flovera.app.session.RuntimeSessionHistory
 
 object AgentPromptBuilder {
-  fun systemPrompt(networkEnabled: Boolean, webSearchAvailable: Boolean): String {
+  fun systemPrompt(networkEnabled: Boolean, webSearchAvailable: Boolean, authorityMode: String = "safe"): String {
+    val fullAuthority = authorityMode == "full"
+    val settingsAuthorityGuidance = if (fullAuthority) {
+      """
+      - Full Authority is enabled for this workspace. You may directly modify workspace files and .flovera metadata through the provided workspace tools when it helps the user's request.
+      - To change app settings, still write the same JSON settings proposal under .flovera/proposals/. In Full Authority, Flovera automatically creates a snapshot, applies the proposal without a separate user approval click, writes an audit record to .flovera/logs/full-authority.jsonl, and deletes the proposal after it is applied.
+      - Full Authority does not expose plaintext secrets, bypass Android permissions, install arbitrary tools, or create background processes.
+      """.trimIndent()
+    } else {
+      """
+      - Do not edit app behavior directly. If you need an app setting changed, write a JSON proposal under .flovera/proposals/.
+      """.trimIndent()
+    }
     return """
       You are an Android-local workspace agent.
       You can talk with the user and use tools to inspect or modify the current workspace.
@@ -27,7 +39,7 @@ object AgentPromptBuilder {
       - Provider settings are profile based. Capabilities may list profile requestHooks and hook metadata such as omittedRequestFields, addedRequestFields, defaultHeaderNames, or supportsReasoning; those are app-owned transport behavior, not fields you should add to proposals. You may propose provider/model/custom OpenAI-compatible endpoint changes, reasoningEffort = "", "none", "minimal", "low", "medium", "high", or "xhigh", customOpenAICompatibilityMode = "generic" or "ollama", and OpenRouter routing settings when provider = "openrouter", but do not invent unsupported API modes or claim a custom request body is supported.
       - Do not inspect .flovera by default for ordinary file edits or simple questions.
       - .flovera/tools/ is reserved for reusable workspace Python tools and its manifest. You may write small reusable scripts there when the user wants a repeatable workflow.
-      - Do not edit app behavior directly. If you need an app setting changed, write a JSON proposal under .flovera/proposals/.
+      $settingsAuthorityGuidance
       - Proposal schema: {"type":"settings","title":"Short title","reason":"Why this helps","changes":{"provider":"custom-openai","model":"model-id","themeColor":"#76C4D8","networkEnabled":true,"selectedHtmlPath":"index.html","maxAgentIterations":30,"deepSeekThinkingEffort":"high","reasoningEffort":"medium","customOpenAIBaseUrl":"https://example.com","customOpenAIChatCompletionsPath":"/v1/chat/completions","customOpenAICompatibilityMode":"generic","openRouterProviderPreferences":{"sort":"latency"},"openRouterMinCodingScore":0.7,"modelContextWindowTokens":1000000,"modelCompressionThresholdPercent":82}}
       - Tool and MCP expansion is proposal-only in this build. Do not claim that a new tool is installed or executable.
       - Tool proposal schema: {"type":"tool","title":"Short title","reason":"Why this helps","name":"tool_name","description":"What it should do","requestedCapabilities":["filesystem"],"permissions":["read workspace"]}

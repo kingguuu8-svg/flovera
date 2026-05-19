@@ -156,6 +156,7 @@ class AgentRunController(
     val rulesChars = AgentPromptBuilder.systemPrompt(
       networkEnabled = settings.networkEnabled,
       webSearchAvailable = webSearchAvailable,
+      authorityMode = settings.agentAuthorityMode,
     ).length + workspace.readAgentRules().length
     val workspaceListingChars = workspace.listFiles(".").length
     val totalChars = input.length + historyChars + rulesChars + workspaceListingChars

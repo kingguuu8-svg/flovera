@@ -1493,7 +1493,7 @@ class ProviderConfigInstrumentedTest {
   }
 
   @Test
-  fun fullAuthorityIsNotEnabledInCurrentSettings() {
+  fun fullAuthorityCanBeSelectedInCurrentSettings() {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val store = SettingsStore(context)
     val original = store.load()
@@ -1502,7 +1502,51 @@ class ProviderConfigInstrumentedTest {
 
       val normalized = controller.setAuthorityMode(AppSettings(), "full")
 
-      assertEquals("safe", normalized.agentAuthorityMode)
+      assertEquals("full", normalized.agentAuthorityMode)
+    } finally {
+      store.save(original)
+    }
+  }
+
+  @Test
+  fun fullAuthorityAutoAppliesSettingsProposalsWithSnapshotAndAudit() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val store = SettingsStore(context)
+    val original = store.load()
+    val workspaceId = "test-full-authority-auto-${System.currentTimeMillis()}"
+    try {
+      store.save(AppSettings(activeWorkspaceId = workspaceId, agentAuthorityMode = "full"))
+      val controller = AgentController(context, settingsStore = store)
+      val workspace = WorkspaceManager(context, workspaceId)
+      workspace.writeFile(
+        path = ".flovera/proposals/theme.json",
+        content = """
+          {
+            "type": "settings",
+            "title": "Switch theme",
+            "reason": "Exercise Full Authority auto-apply.",
+            "changes": {
+              "themeMode": "light",
+              "themeColor": "#C989B8",
+              "maxAgentIterations": 44
+            }
+          }
+        """.trimIndent(),
+        createAutoSnapshot = false,
+      )
+
+      controller.refreshWorkspaceFiles()
+      val state = controller.state.value
+      val audit = workspace.readFile(".flovera/logs/full-authority.jsonl")
+
+      assertEquals("full", state.settings.agentAuthorityMode)
+      assertEquals("light", state.settings.themeMode)
+      assertEquals("#C989B8", state.settings.themeColor)
+      assertEquals(44, state.settings.maxAgentIterations)
+      assertTrue(workspace.listSettingsProposals().isEmpty())
+      assertTrue(audit.contains("\"action\":\"settings_proposal_auto_apply\""))
+      assertTrue(audit.contains("\"targetPath\":\".flovera/proposals/theme.json\""))
+      assertTrue(workspace.listSnapshots().any { it.reason == "full_authority_settings" })
     } finally {
       store.save(original)
     }
@@ -1525,7 +1569,7 @@ class ProviderConfigInstrumentedTest {
           webSearchEnabled = true,
           language = "zh",
           maxAgentIterations = 120,
-          agentAuthorityMode = "assisted",
+          agentAuthorityMode = "full",
           deepSeekThinkingEffort = "max",
           reasoningEffort = "XHIGH",
           customOpenAIBaseUrl = "https://llm.example.com/",
@@ -1544,7 +1588,7 @@ class ProviderConfigInstrumentedTest {
       assertTrue(updated.webSearchEnabled)
       assertEquals("zh", updated.language)
       assertEquals(80, updated.maxAgentIterations)
-      assertEquals("assisted", updated.agentAuthorityMode)
+      assertEquals("full", updated.agentAuthorityMode)
       assertEquals("max", updated.deepSeekThinkingEffort)
       assertEquals("xhigh", updated.reasoningEffort)
       assertEquals("https://llm.example.com", updated.customOpenAIProvider.baseUrl)

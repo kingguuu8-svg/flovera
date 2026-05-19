@@ -62,6 +62,11 @@ data class QueuedAgentInput(
   val mode: String = QUEUED_INPUT_REQUEST,
 )
 
+private data class FullAuthoritySettingsApplyResult(
+  val settings: AppSettings,
+  val appliedCount: Int = 0,
+)
+
 const val QUEUED_INPUT_REQUEST = "request"
 const val QUEUED_INPUT_GUIDANCE = "guidance"
 
@@ -622,10 +627,17 @@ class AgentController(
     status: String = _state.value.status,
     resetPreviewToSelectedHtml: Boolean = false,
   ) {
-    workspaceController.syncFloveraSettings(settings)
-    var workspaceSnapshot = workspaceController.snapshot(settings.selectedHtmlPath)
-    val normalizedSettings = settingsController.normalizeSelectedHtml(settings, workspaceSnapshot.selectedHtmlPath)
-    if (normalizedSettings != settings) {
+    val fullAuthorityResult = applyFullAuthoritySettingsProposals(settings)
+    val settingsAfterAuthority = fullAuthorityResult.settings
+    val statusAfterAuthority = if (fullAuthorityResult.appliedCount > 0) {
+      "Full Authority applied ${fullAuthorityResult.appliedCount} settings proposal(s)"
+    } else {
+      status
+    }
+    workspaceController.syncFloveraSettings(settingsAfterAuthority)
+    var workspaceSnapshot = workspaceController.snapshot(settingsAfterAuthority.selectedHtmlPath)
+    val normalizedSettings = settingsController.normalizeSelectedHtml(settingsAfterAuthority, workspaceSnapshot.selectedHtmlPath)
+    if (normalizedSettings != settingsAfterAuthority) {
       workspaceController.syncFloveraSettings(normalizedSettings)
       workspaceSnapshot = workspaceController.snapshot(normalizedSettings.selectedHtmlPath)
     }
@@ -672,9 +684,32 @@ class AgentController(
         controlledToolProposals = workspaceSnapshot.controlledToolProposals,
         isRunning = isRunning,
         assistantDraft = if (isRunning) it.assistantDraft else null,
-        status = status,
+        status = statusAfterAuthority,
       )
     }
+  }
+
+  private fun applyFullAuthoritySettingsProposals(settings: AppSettings): FullAuthoritySettingsApplyResult {
+    if (settings.agentAuthorityMode != "full") return FullAuthoritySettingsApplyResult(settings)
+    val proposals = workspaceController.listSettingsProposals().sortedBy { it.createdAtMillis }
+    if (proposals.isEmpty()) return FullAuthoritySettingsApplyResult(settings)
+    workspaceController.runtimeWorkspace().createAutomaticSnapshot("full_authority_settings")
+    var updatedSettings = settings
+    var appliedCount = 0
+    proposals.forEach { proposal ->
+      workspaceController.runtimeWorkspace().appendFullAuthorityAudit(
+        action = "settings_proposal_auto_apply",
+        targetPath = proposal.path,
+        title = proposal.title,
+        reason = proposal.reason,
+        changes = proposal.changes,
+      )
+      updatedSettings = settingsController.applySettingsProposal(updatedSettings, proposal.changes)
+      if (workspaceController.deleteSettingsProposal(proposal.path)) {
+        appliedCount += 1
+      }
+    }
+    return FullAuthoritySettingsApplyResult(updatedSettings, appliedCount)
   }
 
   private fun canPreviewAsText(path: String, mimeType: String): Boolean {

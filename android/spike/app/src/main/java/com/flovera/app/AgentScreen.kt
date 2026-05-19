@@ -2557,13 +2557,20 @@ private fun SettingsDialog(
                 authorityModeDraft = "assisted"
               },
             )
+            DropdownMenuItem(
+              text = { Text(authorityModeLabel(language, "full")) },
+              onClick = {
+                authorityMenuOpen = false
+                authorityModeDraft = "full"
+              },
+            )
           }
         }
         Text(
           t(
             language,
-            "Full Authority is planned, but not enabled in this build.",
-            "Full Authority \u5df2\u7eb3\u5165\u5f85\u5b9e\u73b0\uff0c\u5f53\u524d\u7248\u672c\u4e0d\u5f00\u653e\u3002",
+            "Full Authority auto-applies settings proposals after a workspace snapshot and audit log. Android permissions and secrets remain app-owned boundaries.",
+            "Full Authority 会在创建 workspace 快照和审计日志后自动应用设置提案。Android 权限和密钥仍然是 app 边界。",
           ),
           color = MaterialTheme.colorScheme.onSurfaceVariant,
           style = MaterialTheme.typography.bodySmall,
@@ -2824,6 +2831,7 @@ private fun controlledToolProposalSummary(proposal: WorkspaceControlledToolPropo
 private fun authorityModeLabel(language: String, authorityMode: String): String {
   return when (authorityMode) {
     "assisted" -> t(language, "Assisted: agent proposes, user confirms", "Assisted\uff1aagent \u63d0\u6848\uff0c\u7528\u6237\u786e\u8ba4")
+    "full" -> t(language, "Full Authority: auto-apply proposals", "Full Authority\uff1a\u81ea\u52a8\u5e94\u7528\u63d0\u6848")
     else -> t(language, "Safe: read-only app settings", "Safe\uff1a\u53ea\u8bfb app \u8bbe\u7f6e")
   }
 }

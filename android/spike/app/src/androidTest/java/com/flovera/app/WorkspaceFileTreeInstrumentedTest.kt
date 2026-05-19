@@ -692,6 +692,9 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"modelContextOverrides\": true"))
     assertTrue(capabilities.contains("\"reasoningEffort\": true"))
     assertTrue(capabilities.contains("\"directSettingsWrite\": false"))
+    assertTrue(capabilities.contains("\"supportedAuthorityModes\""))
+    assertTrue(capabilities.contains("\"full\""))
+    assertTrue(capabilities.contains("\"pendingAuthorityModes\": []"))
     assertTrue(capabilities.contains("\"customOpenAICompatibleProvider\": true"))
     assertTrue(capabilities.contains("\"openRouterRouting\": true"))
     assertTrue(capabilities.contains("\"customUrlRouting\": true"))
@@ -807,6 +810,21 @@ class WorkspaceFileTreeInstrumentedTest {
     assertFalse(workspace.deleteSettingsProposal(".flovera/proposals/search-tool.json"))
     assertTrue(workspace.deleteControlledToolProposal(".flovera/proposals/search-tool.json"))
     assertTrue(workspace.listControlledToolProposals().isEmpty())
+  }
+
+  @Test
+  fun fullAuthorityCapabilitiesExposeDirectSettingsWrite() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "test-full-authority-capabilities-${System.currentTimeMillis()}")
+    workspace.ensureFloveraMetadata(FloveraSettingsView(authorityMode = "full"))
+
+    val capabilities = workspace.readFile(".flovera/capabilities.json")
+
+    assertTrue(capabilities.contains("\"authorityMode\": \"full\""))
+    assertTrue(capabilities.contains("\"directSettingsWrite\": true"))
+    assertTrue(capabilities.contains("\"supportedAuthorityModes\""))
+    assertTrue(capabilities.contains("\"full\""))
+    assertTrue(capabilities.contains("\"pendingAuthorityModes\": []"))
   }
 
   @Test
