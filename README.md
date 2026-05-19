@@ -18,6 +18,7 @@ This repository is still pre-release. The Android app already supports:
 - Configurable model provider settings stored outside source code.
 - Optional network tools behind a user setting.
 - Markdown conversation rendering and collapsed tool output.
+- Product quality and backlog rules in `PRODUCT_QUALITY.md`.
 
 Planned work includes workspace snapshots, broader agent-controlled settings,
 controlled Python runtime support, Brave Search integration, and more workspace
@@ -28,6 +29,9 @@ renderers.
 ```text
 .
 |-- android/spike/                 Android app source
+|-- docs/                          Project docs
+|-- PRODUCT_QUALITY.md             Product quality model and backlog
+|-- docs/OPEN_SOURCE_READINESS.md  Open-source readiness checklist
 |-- CHANGELOG.md                   Pre-release change notes
 |-- LICENSE                        MIT license
 `-- .env.example                   Local environment template
@@ -80,6 +84,9 @@ workspace data.
 
 Runtime provider settings are stored by the Android app, not hardcoded in
 source. `.env.example` is only a template for local development.
+
+Before publishing or cutting a release, run the checks in
+`docs/OPEN_SOURCE_READINESS.md`.
 
 Pre-release changes are tracked in `CHANGELOG.md`.
 
