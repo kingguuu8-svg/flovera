@@ -452,6 +452,30 @@ class WorkspaceFileTreeInstrumentedTest {
   }
 
   @Test
+  fun pythonRunAllowsChaquopyStdlibReadsForNetworkAndAsyncImports() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "python-stdlib-${System.currentTimeMillis()}")
+    val tool = PythonRunTool(workspace, ToolEventRecorder())
+
+    val result = tool.execute(
+      PythonRunTool.Args(
+        code = """
+        import asyncio
+        import ssl
+        import urllib.request
+
+        print("stdlib imports ready")
+        print(asyncio.__name__, ssl.__name__, urllib.request.__name__)
+        """.trimIndent(),
+        snapshotBeforeRun = false,
+      ),
+    )
+
+    assertTrue(result, result.contains("Python status=ok exitCode=0"))
+    assertTrue(result, result.contains("stdlib imports ready"))
+  }
+
+  @Test
   fun artifactInspectValidatesCommonWorkspaceArtifacts() = runBlocking {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val workspace = WorkspaceManager(context, "artifact-inspect-${System.currentTimeMillis()}").also { it.ensureSeedFiles() }
