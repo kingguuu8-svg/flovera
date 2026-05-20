@@ -3,6 +3,9 @@ package com.flovera.app.config
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
 
+const val AGENT_ITERATIONS_UNLIMITED = 0
+const val AGENT_ITERATIONS_INTERNAL_GUARD = 1_000_000
+
 @Serializable
 data class ModelContextOverride(
   val contextWindowTokens: Int? = null,
@@ -35,7 +38,7 @@ data class AppSettings(
   val selectedHtmlPath: String = "",
   val pinnedHtmlPaths: List<String> = emptyList(),
   val recentHtmlPaths: List<String> = emptyList(),
-  val maxAgentIterations: Int = 20,
+  val maxAgentIterations: Int = AGENT_ITERATIONS_UNLIMITED,
   val networkEnabled: Boolean = false,
   val webSearchEnabled: Boolean = false,
   val braveSearchApiKey: String = "",

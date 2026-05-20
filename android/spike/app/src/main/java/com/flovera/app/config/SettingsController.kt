@@ -26,9 +26,11 @@ class SettingsController(private val store: SettingsStore) {
     val normalized = normalizeReasoningEffort(
       normalizeDeepSeekThinkingEffort(
         normalizeAuthorityMode(
-          normalizeAppearance(
-            normalizeLanguage(
-              normalizeCustomOpenAIProvider(normalizeProviderAndModel(normalizeHtmlLists(loaded))),
+          normalizeRunLimits(
+            normalizeAppearance(
+              normalizeLanguage(
+                normalizeCustomOpenAIProvider(normalizeProviderAndModel(normalizeHtmlLists(loaded))),
+              ),
             ),
           ),
         ),
@@ -129,7 +131,9 @@ class SettingsController(private val store: SettingsStore) {
       ?: ModelProviderCatalog.findProvider(settings.provider)
       ?: ModelProviderCatalog.defaultProvider
     val model = changes.model?.trim()?.takeIf { it.isNotBlank() } ?: settings.model.ifBlank { provider.defaultModel }
-    val maxIterations = changes.maxAgentIterations?.coerceIn(1, 80) ?: settings.maxAgentIterations
+    val maxIterations = changes.maxAgentIterations
+      ?.let { normalizeMaxAgentIterations(it) }
+      ?: settings.maxAgentIterations
     val updated = settings.copy(
       provider = provider.id,
       model = model,
@@ -225,6 +229,10 @@ class SettingsController(private val store: SettingsStore) {
       themeMode = normalizeThemeMode(settings.themeMode),
       themeColor = normalizeThemeColor(settings.themeColor),
     )
+  }
+
+  private fun normalizeRunLimits(settings: AppSettings): AppSettings {
+    return settings.copy(maxAgentIterations = normalizeMaxAgentIterations(settings.maxAgentIterations))
   }
 
   private fun normalizeHtmlLists(settings: AppSettings): AppSettings {
@@ -343,6 +351,10 @@ class SettingsController(private val store: SettingsStore) {
 
   private fun normalizeOpenRouterMinCodingScore(score: Double): Double? {
     return score.takeIf { it in 0.0..1.0 }
+  }
+
+  private fun normalizeMaxAgentIterations(value: Int): Int {
+    return value.coerceAtLeast(AGENT_ITERATIONS_UNLIMITED)
   }
 
   private fun normalizeHtmlPathList(paths: List<String>): List<String> {

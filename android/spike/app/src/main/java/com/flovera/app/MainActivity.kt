@@ -24,7 +24,7 @@ class MainActivity : ComponentActivity() {
     super.onCreate(savedInstanceState)
 
     enableEdgeToEdge()
-    controller = AgentController(applicationContext)
+    controller = AgentControllerProvider.get(applicationContext)
     consumeShareIntent(intent)
     setContent {
       val appController = remember { controller }

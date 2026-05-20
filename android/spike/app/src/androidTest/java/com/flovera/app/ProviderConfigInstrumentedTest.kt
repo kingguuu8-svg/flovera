@@ -1587,7 +1587,7 @@ class ProviderConfigInstrumentedTest {
       assertTrue(updated.networkEnabled)
       assertTrue(updated.webSearchEnabled)
       assertEquals("zh", updated.language)
-      assertEquals(80, updated.maxAgentIterations)
+      assertEquals(120, updated.maxAgentIterations)
       assertEquals("full", updated.agentAuthorityMode)
       assertEquals("max", updated.deepSeekThinkingEffort)
       assertEquals("xhigh", updated.reasoningEffort)

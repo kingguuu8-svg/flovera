@@ -3,6 +3,8 @@ package com.flovera.app.koog
 import ai.koog.agents.core.agent.AIAgent
 import ai.koog.prompt.executor.llms.MultiLLMPromptExecutor
 import ai.koog.utils.io.use
+import com.flovera.app.config.AGENT_ITERATIONS_INTERNAL_GUARD
+import com.flovera.app.config.AGENT_ITERATIONS_UNLIMITED
 import com.flovera.app.config.AppSettings
 import com.flovera.app.session.AgentSession
 import com.flovera.app.workspace.WorkspaceManager
@@ -49,7 +51,7 @@ class KoogAgentRuntime : AgentRuntime {
         webSearchAvailable = webSearchAvailable,
         authorityMode = settings.agentAuthorityMode,
       ),
-      maxIterations = settings.maxAgentIterations,
+      maxIterations = settings.maxAgentIterations.toKoogMaxIterations(),
     )
 
     return agent.use {
@@ -61,6 +63,14 @@ class KoogAgentRuntime : AgentRuntime {
         ),
         sessionId = agentRunId,
       )
+    }
+  }
+
+  private fun Int.toKoogMaxIterations(): Int {
+    return if (this <= AGENT_ITERATIONS_UNLIMITED) {
+      AGENT_ITERATIONS_INTERNAL_GUARD
+    } else {
+      this
     }
   }
 }
