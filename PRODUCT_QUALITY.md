@@ -420,6 +420,9 @@ so future work can be planned without losing the product direction.
 
 - Treat Python and HTML as the first two production surfaces, not as the whole
   capability boundary.
+- Treat generated interactive work as portable workspace artifacts first, with
+  Flovera metadata only as an enhancement layer. The design is captured in
+  `docs/01-interactive-workspace-artifact-runtime.md`.
 - Keep future expansion organized around what lets the agent sense, execute,
   verify, and connect work inside the workspace:
   - file format engines for office documents, PDF, images, SQLite, archives,
@@ -439,6 +442,38 @@ so future work can be planned without losing the product direction.
   snapshots, and tests.
 - Keep this backlog item as the holding area for capability-boundary ideas while
   the current implementation focus remains the controlled Python runtime.
+
+### Interactive Workspace Artifact Runtime
+
+- Goal: let the agent create a portable project that can be opened, run, edited,
+  and iterated inside Flovera without inventing a project-specific JSON handoff
+  protocol.
+- Product boundary:
+  - artifacts are ordinary projects first;
+  - `flovera.app.json` is an optional adapter, not a private project format;
+  - Flovera owns lifecycle, permissions, timeout, job status, and recovery;
+  - Python, HTML, local HTTP, and future renderers are runtime adapters, not the
+    product goal.
+- Implementation sequence:
+  1. define and validate `flovera.app.json` schema v1;
+  2. discover manifests in the workspace and show artifact entries;
+  3. open manifest preview entrypoints, starting with WebView paths;
+  4. add manifest actions, starting with `python_job` on top of the controlled
+     Python runtime;
+  5. persist bounded job state under `.flovera/jobs/` and mark stale running jobs
+     as `interrupted` after restart;
+  6. expose a narrow preview bridge such as `window.Flovera.runAction(id, input)`
+     for declared actions;
+  7. rebuild the current `agent-app` as the first portable validation demo.
+- Acceptance criteria:
+  - generated artifacts remain understandable and runnable outside Flovera with
+    README and standard commands;
+  - inside Flovera, a user can open the artifact, start a declared action, see
+    stdout/stderr/result, inspect changed files, and ask the agent to iterate;
+  - an interrupted job preserves status and output instead of pretending to be
+    complete;
+  - the main flow does not rely on each project inventing its own
+    `input.json`/`output.json` protocol.
 
 ### Android App Permission Expansion
 
