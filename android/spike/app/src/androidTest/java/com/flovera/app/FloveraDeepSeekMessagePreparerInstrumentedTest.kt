@@ -12,7 +12,9 @@ import com.flovera.app.koog.FloveraDeepSeekLLMClient
 import com.flovera.app.koog.FloveraDeepSeekRequestSettings
 import com.flovera.app.koog.FloveraDeepSeekThinking
 import com.flovera.app.koog.ModelProviderCatalog
+import com.flovera.app.koog.isTransientDeepSeekClientFailure
 import com.flovera.app.koog.prepareDeepSeekMessagesForFlovera
+import java.io.IOException
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -130,6 +132,21 @@ class FloveraDeepSeekMessagePreparerInstrumentedTest {
 
     assertTrue(request.contains("\"type\":\"disabled\""))
     assertFalse(request.contains("\"reasoning_effort\""))
+  }
+
+  @Test
+  fun detectsTransientDeepSeekSocketFailuresWithoutRetryingApiValidationErrors() {
+    assertTrue(isTransientDeepSeekClientFailure(IOException("Software caused connection abort")))
+    assertTrue(
+      isTransientDeepSeekClientFailure(
+        RuntimeException("Error from client: FloveraDeepSeekLLMClient", IOException("connection reset")),
+      ),
+    )
+    assertFalse(
+      isTransientDeepSeekClientFailure(
+        RuntimeException("Error from client: FloveraDeepSeekLLMClient\nStatus code: 400\nreasoning_content must be passed back"),
+      ),
+    )
   }
 
   private fun toolCall(id: String, name: String): OpenAIToolCall {
