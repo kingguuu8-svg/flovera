@@ -125,6 +125,8 @@ class WorkspaceController(context: Context, workspaceId: String) {
 
   fun rename(path: String, newName: String): String = workspace.rename(path, newName)
 
+  fun deletePath(path: String): String = workspace.deletePath(path)
+
   fun exportableFile(path: String): File? = workspace.exportableFile(path)
 
   fun mimeType(path: String): String = workspace.mimeType(path)

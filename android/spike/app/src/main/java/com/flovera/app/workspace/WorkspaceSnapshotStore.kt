@@ -76,7 +76,8 @@ class WorkspaceSnapshotStore(
     val id = "${kind}-${createdAtMillis}-${workspaceId.hashCode().toUInt().toString(16)}"
     val snapshotDir = snapshotDir(id)
     val dataDir = File(snapshotDir, DATA_DIR)
-    snapshotDir.mkdirs()
+    snapshotDir.deleteRecursively()
+    dataDir.mkdirs()
     copyDirectoryContents(workspaceRoot, dataDir)
     val stats = dataDir.walkTopDown().filter { it.isFile }.fold(SnapshotStats()) { current, file ->
       current.copy(fileCount = current.fileCount + 1, totalBytes = current.totalBytes + file.length())

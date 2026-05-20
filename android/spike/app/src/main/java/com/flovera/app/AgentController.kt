@@ -301,6 +301,14 @@ class AgentController(
     refreshWorkspaceState(status = status)
   }
 
+  fun deleteWorkspacePath(path: String) {
+    val status = workspaceController.deletePath(path)
+    refreshWorkspaceState(
+      status = status,
+      resetPreviewToSelectedHtml = _state.value.selectedPreviewPath == path,
+    )
+  }
+
   fun createWorkspaceSnapshot(name: String) {
     val current = _state.value
     val snapshot = workspaceController.createSnapshot(name, current.selectedHtmlPath)

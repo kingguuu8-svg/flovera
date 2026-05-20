@@ -41,5 +41,7 @@ class AgentFilePanelInstrumentedTest {
     composeRule.onNodeWithText("Refresh").assertIsDisplayed()
     composeRule.onNodeWithText(" index.html", substring = true).assertIsDisplayed()
     composeRule.onNodeWithContentDescription("File actions for index.html").assertIsDisplayed()
+    composeRule.onNodeWithContentDescription("File actions for index.html").performClick()
+    composeRule.onNodeWithText("Delete").assertIsDisplayed()
   }
 }

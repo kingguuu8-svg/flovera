@@ -613,6 +613,20 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     }
   }
 
+  fun deletePath(path: String): String {
+    val file = safeFile(path)
+    if (!file.exists()) return "Path does not exist: $path"
+    if (file.canonicalFile == root.canonicalFile) return "Cannot delete workspace root."
+    val relative = relativeToRoot(file)
+    snapshotStore.createAutomatic("delete:$relative")
+    val deleted = if (file.isDirectory) file.deleteRecursively() else file.delete()
+    return if (deleted) {
+      "Deleted $relative"
+    } else {
+      "Failed to delete $relative"
+    }
+  }
+
   private fun toNode(file: File): WorkspaceFileNode {
     val isDirectory = file.isDirectory
     val children = if (isDirectory) {

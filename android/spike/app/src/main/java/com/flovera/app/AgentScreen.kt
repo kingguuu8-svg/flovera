@@ -40,6 +40,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
@@ -1851,6 +1852,7 @@ private fun FilesDialog(
   val root = state.workspaceTree
   val expandedPaths = remember { mutableStateOf(setOf<String>()) }
   var renameTarget by remember { mutableStateOf<WorkspaceFileNode?>(null) }
+  var deleteTarget by remember { mutableStateOf<WorkspaceFileNode?>(null) }
   val context = LocalContext.current
   val clipboard = context.getSystemService(ClipboardManager::class.java)
   val visibleNodes = remember(root, expandedPaths.value) {
@@ -1895,6 +1897,7 @@ private fun FilesDialog(
               onOpenWith = { path -> openWorkspaceFile(context, controller, path) },
               onShare = { path -> shareWorkspaceFile(context, controller, path) },
               onRename = { renameTarget = it },
+              onDelete = { deleteTarget = it },
               onCopyPath = { path -> clipboard.setPrimaryClip(ClipData.newPlainText("Workspace path", path)) },
               language = language,
             )
@@ -1920,6 +1923,43 @@ private fun FilesDialog(
       },
     )
   }
+
+  deleteTarget?.let { target ->
+    AlertDialog(
+      onDismissRequest = { deleteTarget = null },
+      title = { Text(t(language, "Delete file?", "\u5220\u9664\u6587\u4ef6\uff1f")) },
+      text = {
+        Text(
+          if (target.isDirectory) {
+            t(
+              language,
+              "This will delete ${target.path} and everything inside it.",
+              "\u8fd9\u4f1a\u5220\u9664 ${target.path} \u53ca\u5176\u4e2d\u6240\u6709\u5185\u5bb9\u3002",
+            )
+          } else {
+            target.path
+          },
+        )
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            controller.deleteWorkspacePath(target.path)
+            deleteTarget = null
+          },
+          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+        ) {
+          Icon(Icons.Filled.Delete, contentDescription = null, modifier = Modifier.size(17.dp))
+          Text(t(language, "Delete", "\u5220\u9664"))
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { deleteTarget = null }) {
+          Text(t(language, "Cancel", "\u53d6\u6d88"))
+        }
+      },
+    )
+  }
 }
 
 @Composable
@@ -1933,6 +1973,7 @@ private fun WorkspaceFileTreeNode(
   onOpenWith: (String) -> Unit,
   onShare: (String) -> Unit,
   onRename: (WorkspaceFileNode) -> Unit,
+  onDelete: (WorkspaceFileNode) -> Unit,
   onCopyPath: (String) -> Unit,
 ) {
   var menuOpen by remember { mutableStateOf(false) }
@@ -1993,6 +2034,13 @@ private fun WorkspaceFileTreeNode(
           onClick = {
             menuOpen = false
             onRename(node)
+          },
+        )
+        DropdownMenuItem(
+          text = { Text(t(language, "Delete", "\u5220\u9664")) },
+          onClick = {
+            menuOpen = false
+            onDelete(node)
           },
         )
         DropdownMenuItem(

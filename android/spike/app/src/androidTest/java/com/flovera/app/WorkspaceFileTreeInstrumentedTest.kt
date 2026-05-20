@@ -44,6 +44,10 @@ class WorkspaceFileTreeInstrumentedTest {
     val result = workspace.rename("nested/page.html", "home.html")
     assertTrue(result.startsWith("Renamed"))
     assertTrue(workspace.listHtmlFiles().contains("nested/home.html"))
+
+    val deleteResult = workspace.deletePath("nested/home.html")
+    assertEquals("Deleted nested/home.html", deleteResult)
+    assertEquals("File does not exist: nested/home.html", workspace.readFile("nested/home.html"))
   }
 
   @Test
@@ -618,6 +622,27 @@ class WorkspaceFileTreeInstrumentedTest {
     assertEquals("alpha", workspace.readFile("notes/today.md"))
     assertTrue(workspace.readFile(".flovera/settings-view.json").contains("deepseek-v4-pro"))
     assertTrue(workspace.deleteSnapshot(snapshot.id))
+  }
+
+  @Test
+  fun manualSnapshotAfterRestoreCountsCurrentWorkspaceFiles() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "snapshot-count-${System.currentTimeMillis()}").also {
+      it.ensureSeedFiles()
+      it.writeFile("only-in-baseline.txt", "baseline")
+    }
+    val baseline = workspace.createManualSnapshot("baseline", selectedHtmlPath = "index.html")
+    workspace.writeFile("new-a.txt", "a")
+    workspace.writeFile("new-b.txt", "b")
+
+    workspace.restoreSnapshot(baseline.id)
+    val expectedFileCount = workspace.root.walkTopDown().count { it.isFile }
+    val afterRestore = workspace.createManualSnapshot("after restore", selectedHtmlPath = "index.html")
+
+    assertEquals(expectedFileCount, afterRestore.fileCount)
+    assertEquals(baseline.fileCount, afterRestore.fileCount)
+    assertEquals("File does not exist: new-a.txt", workspace.readFile("new-a.txt"))
+    assertEquals("baseline", workspace.readFile("only-in-baseline.txt"))
   }
 
   @Test
