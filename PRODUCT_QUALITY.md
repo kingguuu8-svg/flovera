@@ -260,6 +260,21 @@ so future work can be planned without losing the product direction.
   trace details expandable and bounded so long tool runs do not flood the
   conversation.
 
+### Final Assistant Response Streaming
+
+- Stream the final assistant answer into the conversation instead of waiting for
+  `AIAgent.run` to return a complete string.
+- This is distinct from tool progress narration and interleaved model
+  conversation: it only concerns the final natural-language answer after the
+  agent has enough information to respond.
+- Update the running assistant draft incrementally so long responses start
+  reading immediately and can show provider latency or stalls clearly.
+- Keep the persisted session message as one final assistant message after the
+  stream completes; partial deltas should remain transient unless the run fails.
+- Prefer runtime/provider streaming APIs when they preserve existing tool-call
+  behavior. If Koog cannot stream final text from the current `AIAgent.run`
+  path, evaluate a narrow runtime adapter rather than weakening tool routing.
+
 ### Workspace Search Performance
 
 - Improve workspace search around measured latency, result quality, and
