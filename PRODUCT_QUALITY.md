@@ -230,6 +230,36 @@ so future work can be planned without losing the product direction.
   retained, summarized, or dropped.
 - Treat compression as part of session history, not as invisible runtime state.
 
+### Tool Progress Narration
+
+- Add lightweight app-generated progress narration between tool calls so the
+  user can see what the agent is doing before the final assistant answer.
+- Keep this narration deterministic and derived from tool events, for example
+  "Listed agent-app", "Read backend/agent.py", or "Edited frontend/app.js".
+- Treat progress narration as transient run state by default, not permanent
+  assistant content, unless a future audit view explicitly stores it.
+- Do not ask the model to produce these lines; the point is low-latency,
+  provider-independent visibility into current tool activity.
+- Keep the copy compact so it improves observability without crowding the
+  conversation or pretending to be model reasoning.
+
+### Interleaved Model Conversation Streaming
+
+- Add a separate streaming conversation track where the model can emit
+  assistant text before, between, and after tool calls.
+- This is distinct from app-generated tool progress narration: the text comes
+  from the model/runtime event stream and can carry planning, observations, and
+  intermediate explanations.
+- Investigate whether Koog exposes a stable event, trace, or streaming API for
+  assistant deltas around tool calls before replacing the current `AIAgent.run`
+  flow.
+- If Koog cannot expose the needed events, consider a controlled
+  OpenAI-compatible tool loop owned by Flovera for providers that support
+  interleaved assistant messages.
+- Persist only user-meaningful assistant text in session history; keep raw
+  trace details expandable and bounded so long tool runs do not flood the
+  conversation.
+
 ### Workspace Search Performance
 
 - Improve workspace search around measured latency, result quality, and
