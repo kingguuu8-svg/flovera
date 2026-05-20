@@ -28,10 +28,13 @@ For each focused product change:
 3. Compare with mature agent tools such as Codex, Claude Code, and small
    Claude-Code-like agents: where does Flovera require extra thought or clicks?
 4. Implement the smallest change that removes the friction.
-5. Add or update an instrumented/user-journey test when the behavior can regress.
-6. Run the standard Android verifier on a real device when the change affects UI,
+5. For new or changed Flovera capabilities, update the app-owned system prompt
+   and the settings JSON surface when affected: settings persistence,
+   `.flovera/settings-view.json`, and `.flovera/capabilities.json`.
+6. Add or update an instrumented/user-journey test when the behavior can regress.
+7. Run the standard Android verifier on a real device when the change affects UI,
    app lifecycle, sessions, workspace files, WebView, permissions, or release output.
-7. Commit the change independently.
+8. Commit the change independently.
 
 ## Anti-Pattern Library
 

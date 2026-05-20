@@ -25,6 +25,11 @@ This file defines repository-local rules for AI collaboration.
 - Do not delete, rewrite, or revert user changes without explicit instruction.
 - Do not use destructive git commands such as `git reset --hard` or `git checkout -- <file>` unless the user explicitly asks.
 - If PyTorch is ever introduced, only CUDA builds are allowed.
+- When adding or changing Flovera capabilities, update the app-owned system prompt
+  and settings JSON surface in the same change set when they are affected. This
+  includes `AgentPromptBuilder`, app settings persistence, `.flovera/settings-view.json`,
+  and `.flovera/capabilities.json` so the agent, settings UI, and workspace view
+  stay consistent.
 
 ## Git Rules
 
