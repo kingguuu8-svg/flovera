@@ -354,7 +354,7 @@ class SettingsController(private val store: SettingsStore) {
   }
 
   private fun normalizeMaxAgentIterations(value: Int): Int {
-    return value.coerceAtLeast(AGENT_ITERATIONS_UNLIMITED)
+    return AGENT_ITERATIONS_UNLIMITED
   }
 
   private fun normalizeHtmlPathList(paths: List<String>): List<String> {
