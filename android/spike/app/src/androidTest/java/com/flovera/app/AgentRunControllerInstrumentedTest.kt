@@ -85,6 +85,9 @@ class AgentRunControllerInstrumentedTest {
     assertEquals(2, finishedSession?.messages?.size)
     assertEquals("assistant output", finishedSession?.messages?.last()?.content)
     assertTrue(finishedSession?.messages?.last()?.toolEvents?.any { it.name == "fake_tool" } == true)
+    val checkpoint = workspace.readFile(".flovera/runs/latest.json")
+    assertTrue(checkpoint, checkpoint.contains("\"status\": \"completed\""))
+    assertTrue(checkpoint, checkpoint.contains("\"fake_tool\""))
   }
 
   @Test
@@ -251,6 +254,8 @@ class AgentRunControllerInstrumentedTest {
     val errorMessage = finishedSession?.messages?.lastOrNull()
     assertEquals("error", errorMessage?.role)
     assertTrue(errorMessage?.content?.contains("Error log saved: .flovera/logs/agent-error-") == true)
+    assertTrue(errorMessage?.content?.contains("Checkpoint saved: .flovera/runs/") == true)
+    assertTrue(errorMessage?.content?.contains("Run interrupted after 1 completed tool call") == true)
     val logs = File(workspace.root, ".flovera/logs").listFiles().orEmpty()
     assertEquals(1, logs.size)
     val logText = logs.single().readText()
@@ -259,6 +264,10 @@ class AgentRunControllerInstrumentedTest {
     assertTrue(logText.contains("networkEnabled: true"))
     assertTrue(logText.contains("agentRunId: ${session.id}-"))
     assertFalse(logText.contains("secret-must-not-be-logged"))
+    val checkpoint = workspace.readFile(".flovera/runs/latest.json")
+    assertTrue(checkpoint, checkpoint.contains("\"status\": \"failed\""))
+    assertTrue(checkpoint, checkpoint.contains("\"fake_tool_before_failure\""))
+    assertTrue(checkpoint, checkpoint.contains("\"resumePrompt\""))
   }
 
   @Test
