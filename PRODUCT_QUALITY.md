@@ -404,6 +404,13 @@ so future work can be planned without losing the product direction.
   diagnostics.
 - Prefer compact structured summaries for app state, settings, tools, and
   workspace context instead of repeating prose instructions.
+- Stable Flovera runtime boundaries should be embedded in the app-owned system
+  prompt instead of rediscovered by repeatedly reading `.flovera` metadata:
+  bounded Python runs, workspace files, WebView preview, documented bridge
+  methods, app-owned provider credentials, and Android lifecycle limits.
+- The prompt must explicitly prevent agents from treating project-specific JSON
+  handoff protocols, mocked outputs, or syntax checks as proof of a real
+  interactive artifact loop.
 - Add regression checks for high-risk behaviors such as secret exposure,
   permission bypass, destructive edits, and tool availability mismatches.
 
