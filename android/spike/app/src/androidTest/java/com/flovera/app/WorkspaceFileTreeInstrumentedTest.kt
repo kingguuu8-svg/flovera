@@ -4,11 +4,13 @@ import android.net.Uri
 import androidx.core.content.FileProvider
 import androidx.test.platform.app.InstrumentationRegistry
 import com.flovera.app.koog.ArtifactInspectTool
+import com.flovera.app.koog.FloveraPythonRuntime
 import com.flovera.app.koog.PythonRunTool
 import com.flovera.app.koog.PythonPackageInstallTool
 import com.flovera.app.config.AppSettings
 import com.flovera.app.koog.ToolEventRecorder
 import com.flovera.app.koog.WorkspaceSearchTool
+import com.flovera.app.web.FloveraWebBridge
 import com.flovera.app.workspace.WorkspaceController
 import com.flovera.app.workspace.FloveraSettingsView
 import com.flovera.app.workspace.WorkspaceManager
@@ -96,6 +98,187 @@ class WorkspaceFileTreeInstrumentedTest {
 
     assertTrue(preview.startsWith("a".repeat(16)))
     assertTrue(preview.contains("[truncated: showing first 16 chars"))
+  }
+
+  @Test
+  fun workspaceDiscoversValidArtifactManifest() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "artifact-valid-${System.currentTimeMillis()}")
+    workspace.writeFile("demo/src/web/index.html", "<!doctype html><title>Agent Demo</title>", createAutoSnapshot = false)
+    workspace.writeFile("demo/src/agent.py", "print('ok')", createAutoSnapshot = false)
+    workspace.writeFile(
+      "demo/flovera.app.json",
+      """
+      {
+        "schema": "https://flovera.dev/schemas/app.v1.json",
+        "name": "agent-demo",
+        "kind": "interactive",
+        "entrypoints": {
+          "preview": {
+            "kind": "webview",
+            "path": "src/web/index.html"
+          }
+        },
+        "actions": [
+          {
+            "id": "run-agent",
+            "label": "Run Agent",
+            "kind": "python_job",
+            "command": "python src/agent.py --input data/input.json --output outputs/result.json",
+            "timeoutMs": 120000,
+            "outputs": ["outputs/result.json"]
+          }
+        ],
+        "outputs": ["outputs/result.json"]
+      }
+      """.trimIndent(),
+      createAutoSnapshot = false,
+    )
+
+    val artifact = workspace.listWorkspaceArtifacts().single()
+
+    assertTrue(artifact.valid)
+    assertEquals("demo/flovera.app.json", artifact.manifestPath)
+    assertEquals("demo", artifact.rootPath)
+    assertEquals("agent-demo", artifact.name)
+    assertEquals("demo/src/web/index.html", artifact.preview?.path)
+    assertEquals("run-agent", artifact.actions.single().id)
+    assertEquals("python_job", artifact.actions.single().kind)
+    assertEquals("demo", artifact.actions.single().cwd)
+    assertEquals(listOf("demo/outputs/result.json"), artifact.actions.single().outputs)
+  }
+
+  @Test
+  fun workspaceReportsInvalidArtifactManifestDiagnostics() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "artifact-invalid-${System.currentTimeMillis()}")
+    workspace.writeFile(
+      "bad/flovera.app.json",
+      """
+      {
+        "name": "",
+        "entrypoints": {
+          "preview": {
+            "kind": "webview",
+            "path": "../escape.html"
+          }
+        },
+        "actions": [
+          {
+            "id": "run",
+            "kind": "shell",
+            "command": "bash run.sh"
+          }
+        ]
+      }
+      """.trimIndent(),
+      createAutoSnapshot = false,
+    )
+
+    val artifact = workspace.listWorkspaceArtifacts().single()
+
+    assertFalse(artifact.valid)
+    assertTrue(artifact.diagnostics.any { it.message.contains("non-empty name") })
+    assertTrue(artifact.diagnostics.any { it.message.contains("Unsupported action kind") })
+    assertTrue(artifact.diagnostics.any { it.message.contains("Path does not exist") || it.message.contains("escapes workspace") })
+  }
+
+  @Test
+  fun workspaceArtifactJobsPersistAndRestartInterruptsRunningJobs() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspaceId = "artifact-job-${System.currentTimeMillis()}"
+    val workspace = WorkspaceManager(context, workspaceId)
+    workspace.writeFile("demo/src/web/index.html", "<!doctype html>", createAutoSnapshot = false)
+    workspace.writeFile("demo/src/agent.py", "print('ok')", createAutoSnapshot = false)
+    workspace.writeFile(
+      "demo/flovera.app.json",
+      """
+      {
+        "name": "agent-demo",
+        "entrypoints": {
+          "preview": { "kind": "webview", "path": "src/web/index.html" }
+        },
+        "actions": [
+          {
+            "id": "run-agent",
+            "kind": "python_job",
+            "command": "python src/agent.py --input data/input.json",
+            "outputs": ["outputs/result.json"]
+          }
+        ]
+      }
+      """.trimIndent(),
+      createAutoSnapshot = false,
+    )
+    val target = workspace.resolveWorkspaceArtifactAction("demo/src/web/index.html", "run-agent")!!
+    val job = workspace.createWorkspaceArtifactJob(target)
+    val running = workspace.writeWorkspaceArtifactJob(job.copy(status = "running"))
+
+    assertEquals("running", workspace.readWorkspaceArtifactJob(running.id)?.status)
+    assertTrue(workspace.workspaceArtifactJobJson(running.id).contains("\"actionId\":\"run-agent\""))
+
+    workspace.ensureFloveraMetadata()
+
+    val interrupted = workspace.readWorkspaceArtifactJob(running.id)
+    assertNotNull(interrupted)
+    assertEquals("interrupted", interrupted!!.status)
+  }
+
+  @Test
+  fun workspaceArtifactPythonJobRunsScriptAndWritesOutputs() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "artifact-python-job-${System.currentTimeMillis()}")
+    workspace.writeFile("demo/data/input.json", """{"message":"hello"}""", createAutoSnapshot = false)
+    workspace.writeFile(
+      "demo/src/agent.py",
+      """
+      import argparse
+      import json
+      import os
+
+      parser = argparse.ArgumentParser()
+      parser.add_argument("--input", required=True)
+      parser.add_argument("--output", required=True)
+      args = parser.parse_args()
+
+      with open(args.input, "r", encoding="utf-8") as handle:
+          payload = json.load(handle)
+      os.makedirs(os.path.dirname(args.output), exist_ok=True)
+      with open(args.output, "w", encoding="utf-8") as handle:
+          json.dump({"reply": payload["message"] + " world"}, handle)
+      print("wrote", args.output)
+      """.trimIndent(),
+      createAutoSnapshot = false,
+    )
+
+    val result = FloveraPythonRuntime(workspace, networkEnabled = false).runScript(
+      scriptPath = "src/agent.py",
+      argv = listOf("--input", "data/input.json", "--output", "outputs/result.json"),
+      cwd = "demo",
+      timeoutMs = 30_000,
+      sessionId = "artifact-test",
+    )
+
+    assertEquals(0, result.exitCode)
+    assertTrue(result.stdout.contains("wrote outputs/result.json"))
+    assertTrue(workspace.readFile("demo/outputs/result.json").contains("hello world"))
+  }
+
+  @Test
+  fun floveraWebBridgeRoutesWorkspaceArtifactCalls() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val bridge = FloveraWebBridge(
+      context,
+      object : FloveraWebBridge.ArtifactActions {
+        override fun runAction(actionId: String, inputJson: String): String = "run:$actionId:$inputJson"
+        override fun getJob(jobId: String): String = "get:$jobId"
+        override fun cancelJob(jobId: String): String = "cancel:$jobId"
+      },
+    )
+
+    assertEquals("run:run-agent:{\"x\":1}", bridge.runAction("run-agent", """{"x":1}"""))
+    assertEquals("get:job-1", bridge.getJob("job-1"))
+    assertEquals("cancel:job-1", bridge.cancelJob("job-1"))
   }
 
   @Test
@@ -730,6 +913,12 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"openpyxl\""))
     assertTrue(capabilities.contains("\"artifactInspect\": true"))
     assertTrue(capabilities.contains("\"artifactInspectFormats\""))
+    assertTrue(capabilities.contains("\"workspaceArtifacts\": true"))
+    assertTrue(capabilities.contains("\"workspaceArtifactManifestName\": \"flovera.app.json\""))
+    assertTrue(capabilities.contains("\"workspaceArtifactActionKinds\""))
+    assertTrue(capabilities.contains("\"python_job\""))
+    assertTrue(capabilities.contains("\"workspaceArtifactBridgeCalls\""))
+    assertTrue(capabilities.contains("\"runAction\""))
     assertTrue(capabilities.contains("\"workspaceSearch\": true"))
     assertTrue(capabilities.contains("\"workspaceSearchScopes\""))
     assertTrue(capabilities.contains("\"workspace_app_metadata\""))

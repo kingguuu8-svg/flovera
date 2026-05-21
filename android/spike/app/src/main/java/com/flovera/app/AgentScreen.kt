@@ -139,7 +139,7 @@ fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
   }
 
   Box(modifier = modifier.fillMaxSize()) {
-    WorkspacePreview(state = state)
+    WorkspacePreview(state = state, controller = controller)
 
     Row(
       modifier = Modifier
@@ -228,7 +228,7 @@ fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun WorkspacePreview(state: AgentScreenState) {
+private fun WorkspacePreview(state: AgentScreenState, controller: AgentController) {
   val previewPath = state.selectedPreviewPath
   val previewContent = state.selectedPreviewContent
   val mimeType = state.selectedPreviewMimeType
@@ -269,7 +269,7 @@ private fun WorkspacePreview(state: AgentScreenState) {
     return
   }
 
-  WorkspaceWebView(url = htmlUrl, workspaceRootUrl = state.workspaceRootUrl)
+  WorkspaceWebView(url = htmlUrl, workspaceRootUrl = state.workspaceRootUrl, controller = controller)
 }
 
 @Composable
@@ -456,7 +456,7 @@ private fun WorkspaceCsvPreview(content: String) {
 }
 
 @Composable
-private fun WorkspaceWebView(url: String?, workspaceRootUrl: String) {
+private fun WorkspaceWebView(url: String?, workspaceRootUrl: String, controller: AgentController) {
   var webError by remember(url) { mutableStateOf<String?>(null) }
 
   if (url.isNullOrBlank()) {
@@ -489,7 +489,25 @@ private fun WorkspaceWebView(url: String?, workspaceRootUrl: String) {
         settings.domStorageEnabled = true
         settings.allowFileAccess = true
         settings.allowContentAccess = true
-        addJavascriptInterface(FloveraWebBridge(context), "Flovera")
+        addJavascriptInterface(
+          FloveraWebBridge(
+            context,
+            object : FloveraWebBridge.ArtifactActions {
+              override fun runAction(actionId: String, inputJson: String): String {
+                return controller.runWorkspaceArtifactAction(actionId, inputJson)
+              }
+
+              override fun getJob(jobId: String): String {
+                return controller.getWorkspaceArtifactJob(jobId)
+              }
+
+              override fun cancelJob(jobId: String): String {
+                return controller.cancelWorkspaceArtifactJob(jobId)
+              }
+            },
+          ),
+          "Flovera",
+        )
         loadUrl(url)
       }
     },
@@ -1601,6 +1619,21 @@ private fun HtmlFilesDialog(
         modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 420.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
       ) {
+        if (state.workspaceArtifacts.isNotEmpty()) {
+          item {
+            Text(t(language, "Workspace Artifacts", "Workspace Artifacts"), style = MaterialTheme.typography.labelLarge)
+          }
+          items(state.workspaceArtifacts, key = { it.manifestPath }) { artifact ->
+            WorkspaceArtifactPickerRow(
+              artifact = artifact,
+              language = language,
+              onOpen = { previewPath ->
+                controller.selectHtmlFile(previewPath)
+                onDismiss()
+              },
+            )
+          }
+        }
         if (sortedHtmlFiles.isEmpty()) {
           item {
             Text(t(language, "No HTML files in this workspace.", "\u5f53\u524d workspace \u6ca1\u6709 HTML \u6587\u4ef6\u3002"), style = MaterialTheme.typography.bodyMedium)
@@ -1627,6 +1660,57 @@ private fun HtmlFilesDialog(
       }
     },
   )
+}
+
+@Composable
+private fun WorkspaceArtifactPickerRow(
+  artifact: com.flovera.app.workspace.WorkspaceArtifact,
+  language: String,
+  onOpen: (String) -> Unit,
+) {
+  val previewPath = artifact.preview?.path.orEmpty()
+  Surface(
+    modifier = Modifier.fillMaxWidth(),
+    shape = FloveraSmallShape,
+    color = MaterialTheme.colorScheme.surface,
+    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+  ) {
+    Row(
+      modifier = Modifier.fillMaxWidth().padding(10.dp),
+      horizontalArrangement = Arrangement.spacedBy(10.dp),
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(artifact.name, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+        Text(
+          listOfNotNull(
+            artifact.kind.takeIf { it.isNotBlank() },
+            previewPath.takeIf { it.isNotBlank() },
+            artifact.actions.takeIf { it.isNotEmpty() }?.joinToString(prefix = "actions=", separator = ",") { it.id },
+          ).joinToString("  "),
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
+          maxLines = 2,
+          overflow = TextOverflow.Ellipsis,
+          style = MaterialTheme.typography.bodySmall,
+        )
+        if (!artifact.valid && artifact.diagnostics.isNotEmpty()) {
+          Text(
+            artifact.diagnostics.first().message,
+            color = MaterialTheme.colorScheme.error,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            style = MaterialTheme.typography.bodySmall,
+          )
+        }
+      }
+      OutlinedButton(
+        enabled = artifact.valid && previewPath.isNotBlank(),
+        onClick = { onOpen(previewPath) },
+      ) {
+        Text(t(language, "Open", "\u6253\u5f00"))
+      }
+    }
+  }
 }
 
 @Composable

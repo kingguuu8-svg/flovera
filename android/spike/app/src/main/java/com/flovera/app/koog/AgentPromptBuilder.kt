@@ -48,9 +48,9 @@ Core boundaries:
 
   private const val STABLE_RUNTIME_CAPABILITY_BOUNDARY = """
 Stable Flovera runtime boundary:
-- Stable surface: workspace files, bounded Python runs, WebView preview, artifact_inspect, workspace_search, and app-owned provider calls.
+- Stable surface: workspace files, bounded Python runs, WebView preview, workspace artifact manifests, artifact_inspect, workspace_search, and app-owned provider calls.
 - python_run is bounded, blocking, and conversation-owned. It is not a daemon, background server, shell, package manager, port listener, SSE/WebSocket service, or subprocess host.
-- WebView bridge is limited to documented calls: window.Flovera.toast(...), window.Flovera.notify(JSON.stringify(...)), and window.Flovera.postEvent(JSON.stringify({type: "toast"|"notification", ...})).
+- WebView bridge is limited to documented calls: window.Flovera.toast(...), window.Flovera.notify(JSON.stringify(...)), window.Flovera.postEvent(JSON.stringify({type: "toast"|"notification", ...})), window.Flovera.runAction(actionId, inputJson), window.Flovera.getJob(jobId), and window.Flovera.cancelJob(jobId).
 - Provider credentials and API keys live in Flovera app settings; do not assume they are environment variables or readable workspace files for Python.
 - Flovera native runtime owns app lifecycle, permissions, secrets, provider behavior, WebView, notifications, background execution, and restore.
 - If a task needs a runtime bridge, stable port, daemon, provider secret in Python, or another capability outside this boundary, report a Flovera platform gap and propose the smallest platform feature. Do not emulate it with a project-specific protocol.
@@ -70,6 +70,8 @@ Tool routing:
   private const val STABLE_INTERACTIVE_ARTIFACT_BOUNDARIES = """
 Interactive artifact rules:
 - Build generated interactive work as portable ordinary projects first. Flovera-specific metadata or adapters may enhance the project, but must not be the only way to understand the project.
+- Use flovera.app.json only as a small adapter: declare name, preview entrypoint, python_job actions, optional inputPath, and outputs. Keep the project understandable without Flovera.
+- For WebView-driven execution, call window.Flovera.runAction(actionId, JSON.stringify(input)), poll window.Flovera.getJob(jobId), and show persisted job stdout/stderr/output files in the UI.
 - Do not invent project-specific JSON handoff protocols such as input.json/output.json as the main solution for missing platform integration. If used temporarily, label it as a workaround and state the missing Flovera capability.
 - Do not claim an interactive artifact is complete unless the intended user action can trigger the runtime path and real output returns to the user-facing surface or session.
 - Syntax checks, import checks, mocked output files, and demo-only scripts are useful verification steps, but they are not proof of an end-to-end interactive loop.
@@ -119,6 +121,7 @@ Current run facts:
 - pythonRuntime=available
 - artifactInspect=available
 - workspaceSearch=available
+- workspaceArtifacts=available
     """.trimIndent()
   }
 }

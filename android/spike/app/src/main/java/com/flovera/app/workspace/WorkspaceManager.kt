@@ -55,6 +55,99 @@ data class WorkspaceSearchOptions(
   val debug: Boolean = false,
 )
 
+@Serializable
+data class FloveraWorkspaceArtifactManifest(
+  val schema: String = "",
+  val schemaVersion: Int = 1,
+  val name: String = "",
+  val kind: String = "app",
+  val entrypoints: Map<String, FloveraArtifactEntrypoint> = emptyMap(),
+  val actions: List<FloveraArtifactAction> = emptyList(),
+  val outputs: List<String> = emptyList(),
+)
+
+@Serializable
+data class FloveraArtifactEntrypoint(
+  val kind: String = "",
+  val path: String = "",
+  val command: String = "",
+  val label: String = "",
+  val fallback: String = "",
+)
+
+@Serializable
+data class FloveraArtifactAction(
+  val id: String = "",
+  val label: String = "",
+  val kind: String = "",
+  val command: String = "",
+  val cwd: String = ".",
+  val inputPath: String = "",
+  val timeoutMs: Int = 30_000,
+  val outputs: List<String> = emptyList(),
+)
+
+data class WorkspaceArtifact(
+  val manifestPath: String,
+  val rootPath: String,
+  val name: String,
+  val kind: String,
+  val preview: WorkspaceArtifactEntrypoint?,
+  val actions: List<WorkspaceArtifactAction>,
+  val outputs: List<String>,
+  val diagnostics: List<WorkspaceArtifactDiagnostic>,
+  val valid: Boolean,
+)
+
+data class WorkspaceArtifactEntrypoint(
+  val kind: String,
+  val path: String,
+  val label: String,
+)
+
+data class WorkspaceArtifactAction(
+  val id: String,
+  val label: String,
+  val kind: String,
+  val command: String,
+  val cwd: String,
+  val inputPath: String,
+  val timeoutMs: Int,
+  val outputs: List<String>,
+)
+
+data class WorkspaceArtifactActionTarget(
+  val artifact: WorkspaceArtifact,
+  val action: WorkspaceArtifactAction,
+)
+
+data class WorkspaceArtifactDiagnostic(
+  val level: String,
+  val path: String,
+  val message: String,
+)
+
+@Serializable
+data class WorkspaceArtifactJob(
+  val id: String,
+  val artifactManifestPath: String,
+  val artifactRootPath: String,
+  val actionId: String,
+  val actionKind: String,
+  val status: String,
+  val createdAtMillis: Long,
+  val updatedAtMillis: Long,
+  val inputPath: String = "",
+  val stdout: String = "",
+  val stderr: String = "",
+  val stdoutTruncated: Boolean = false,
+  val stderrTruncated: Boolean = false,
+  val exitCode: Int? = null,
+  val elapsedMs: Int? = null,
+  val outputPaths: List<String> = emptyList(),
+  val error: String = "",
+)
+
 private data class WorkspaceIgnoreRule(
   val regex: Regex,
   val descendantRegex: Regex?,
@@ -185,8 +278,10 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     )
     safeFile(".flovera/proposals").mkdirs()
     safeFile(".flovera/tools").mkdirs()
+    safeFile(".flovera/jobs").mkdirs()
     safeFile(".flovera/python/site-packages").mkdirs()
     safeFile(".flovera/python/wheels").mkdirs()
+    markStaleWorkspaceArtifactJobsInterrupted()
     writeFile(
       path = ".flovera/tools/manifest.json",
       content = json.encodeToString(FloveraPythonToolsManifest()),
@@ -331,6 +426,80 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     val file = safeFile(path)
     if (!file.exists() || !file.isFile || !file.extension.equals("html", ignoreCase = true)) return null
     return file.toURI().toASCIIString()
+  }
+
+  fun listWorkspaceArtifacts(): List<WorkspaceArtifact> {
+    if (!root.exists()) return emptyList()
+    return root.walkTopDown()
+      .onEnter { dir ->
+        val relative = relativeToRoot(dir).replace('\\', '/')
+        relative == "." || relative != ".flovera" && !relative.startsWith(".flovera/")
+      }
+      .filter { it.isFile && it.name == WORKSPACE_ARTIFACT_MANIFEST_NAME }
+      .take(MAX_WORKSPACE_ARTIFACT_MANIFESTS)
+      .map { artifactFromManifestFile(it) }
+      .sortedBy { it.manifestPath }
+      .toList()
+  }
+
+  fun resolveWorkspaceArtifactAction(previewPath: String, actionId: String): WorkspaceArtifactActionTarget? {
+    val artifacts = listWorkspaceArtifacts().filter { it.valid }
+    val scopedMatches = artifacts
+      .filter { artifact -> previewPath.isNotBlank() && artifact.preview?.path == previewPath }
+      .mapNotNull { artifact -> artifact.actions.firstOrNull { it.id == actionId }?.let { WorkspaceArtifactActionTarget(artifact, it) } }
+    if (scopedMatches.size == 1) return scopedMatches.single()
+    val globalMatches = artifacts
+      .mapNotNull { artifact -> artifact.actions.firstOrNull { it.id == actionId }?.let { WorkspaceArtifactActionTarget(artifact, it) } }
+    return globalMatches.singleOrNull()
+  }
+
+  fun createWorkspaceArtifactJob(target: WorkspaceArtifactActionTarget, inputPath: String = ""): WorkspaceArtifactJob {
+    val now = System.currentTimeMillis()
+    val job = WorkspaceArtifactJob(
+      id = UUID.randomUUID().toString(),
+      artifactManifestPath = target.artifact.manifestPath,
+      artifactRootPath = target.artifact.rootPath,
+      actionId = target.action.id,
+      actionKind = target.action.kind,
+      status = WORKSPACE_ARTIFACT_JOB_QUEUED,
+      createdAtMillis = now,
+      updatedAtMillis = now,
+      inputPath = inputPath,
+      outputPaths = target.action.outputs,
+    )
+    return writeWorkspaceArtifactJob(job)
+  }
+
+  fun readWorkspaceArtifactJob(jobId: String): WorkspaceArtifactJob? {
+    val file = workspaceArtifactJobFile(jobId) ?: return null
+    if (!file.isFile) return null
+    return runCatching { compactJson.decodeFromString<WorkspaceArtifactJob>(readUtf8Text(file)) }.getOrNull()
+  }
+
+  fun workspaceArtifactJobJson(jobId: String): String {
+    return readWorkspaceArtifactJob(jobId)
+      ?.let { compactJson.encodeToString(it) }
+      ?: """{"status":"missing","error":"Workspace artifact job not found"}"""
+  }
+
+  fun writeWorkspaceArtifactJob(job: WorkspaceArtifactJob): WorkspaceArtifactJob {
+    val file = workspaceArtifactJobFile(job.id) ?: error("Invalid artifact job id: ${job.id}")
+    file.parentFile?.mkdirs()
+    writeUtf8TextAtomically(file, compactJson.encodeToString(job.copy(updatedAtMillis = System.currentTimeMillis())))
+    return readWorkspaceArtifactJob(job.id) ?: job
+  }
+
+  fun writeWorkspaceArtifactInput(jobId: String, artifactRootPath: String, inputPath: String, inputJson: String): String {
+    val artifactRoot = safeFile(artifactRootPath)
+    val normalizedInput = inputPath.replace('\\', '/')
+    val normalizedRoot = artifactRootPath.replace('\\', '/')
+    val relativePath = if (normalizedRoot == "." || normalizedInput == normalizedRoot || normalizedInput.startsWith("$normalizedRoot/")) {
+      relativeToRoot(safeFile(inputPath))
+    } else {
+      artifactRelativePathOrThrow(artifactRoot, inputPath)
+    }
+    writeFile(relativePath, inputJson.ifBlank { "{}" }, overwrite = true, createAutoSnapshot = false)
+    return relativePath
   }
 
   fun rootUrl(): String = root.toURI().toASCIIString()
@@ -905,6 +1074,260 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     return requested
   }
 
+  private fun artifactFromManifestFile(file: File): WorkspaceArtifact {
+    val manifestPath = relativeToRoot(file)
+    val artifactRoot = file.parentFile?.canonicalFile ?: root.canonicalFile
+    val rootPath = relativeToRoot(artifactRoot)
+    return runCatching {
+      val manifest = json.decodeFromString<FloveraWorkspaceArtifactManifest>(readUtf8Text(file))
+      val diagnostics = mutableListOf<WorkspaceArtifactDiagnostic>()
+      if (manifest.schemaVersion != 1) {
+        diagnostics += WorkspaceArtifactDiagnostic(
+          level = "error",
+          path = "$manifestPath.schemaVersion",
+          message = "Unsupported artifact manifest schemaVersion ${manifest.schemaVersion}. Supported schemaVersion: 1.",
+        )
+      }
+      val name = manifest.name.trim().ifBlank {
+        diagnostics += WorkspaceArtifactDiagnostic(
+          level = "error",
+          path = manifestPath,
+          message = "Artifact manifest must declare a non-empty name.",
+        )
+        artifactRoot.name.ifBlank { root.name }
+      }
+      val preview = artifactPreview(manifest, artifactRoot, diagnostics)
+      if (preview == null) {
+        diagnostics += WorkspaceArtifactDiagnostic(
+          level = "warning",
+          path = "$manifestPath.entrypoints.preview",
+          message = "No preview entrypoint declared; Flovera can discover the artifact but cannot open an app surface from the manifest.",
+        )
+      }
+      val actions = manifest.actions.mapIndexedNotNull { index, action ->
+        artifactAction(action, artifactRoot, "$manifestPath.actions[$index]", diagnostics)
+      }
+      actions
+        .groupBy { it.id }
+        .filterValues { it.size > 1 }
+        .keys
+        .forEach { duplicateId ->
+          diagnostics += WorkspaceArtifactDiagnostic(
+            level = "error",
+            path = "$manifestPath.actions",
+            message = "Duplicate artifact action id: $duplicateId",
+          )
+        }
+      val outputs = manifest.outputs.mapNotNull { output ->
+        artifactRelativePathOrDiagnostic(artifactRoot, output, "$manifestPath.outputs", diagnostics, mustExist = false)
+      }
+      WorkspaceArtifact(
+        manifestPath = manifestPath,
+        rootPath = rootPath,
+        name = name,
+        kind = manifest.kind.ifBlank { "app" },
+        preview = preview,
+        actions = actions,
+        outputs = outputs,
+        diagnostics = diagnostics.toList(),
+        valid = diagnostics.none { it.level == "error" },
+      )
+    }.getOrElse { error ->
+      WorkspaceArtifact(
+        manifestPath = manifestPath,
+        rootPath = rootPath,
+        name = artifactRoot.name.ifBlank { root.name },
+        kind = "invalid",
+        preview = null,
+        actions = emptyList(),
+        outputs = emptyList(),
+        diagnostics = listOf(
+          WorkspaceArtifactDiagnostic(
+            level = "error",
+            path = manifestPath,
+            message = "Artifact manifest is not valid JSON for schema v1: ${error.message ?: error::class.java.simpleName}",
+          ),
+        ),
+        valid = false,
+      )
+    }
+  }
+
+  private fun artifactPreview(
+    manifest: FloveraWorkspaceArtifactManifest,
+    artifactRoot: File,
+    diagnostics: MutableList<WorkspaceArtifactDiagnostic>,
+  ): WorkspaceArtifactEntrypoint? {
+    val preview = manifest.entrypoints["preview"] ?: return null
+    val diagnosticPath = "${relativeToRoot(File(artifactRoot, WORKSPACE_ARTIFACT_MANIFEST_NAME))}.entrypoints.preview"
+    if (preview.kind != WORKSPACE_ARTIFACT_PREVIEW_WEBVIEW) {
+      diagnostics += WorkspaceArtifactDiagnostic(
+        level = "error",
+        path = diagnosticPath,
+        message = "Unsupported preview kind '${preview.kind}'. Supported preview kinds: $WORKSPACE_ARTIFACT_PREVIEW_WEBVIEW.",
+      )
+      return null
+    }
+    val relativePath = artifactRelativePathOrDiagnostic(
+      artifactRoot = artifactRoot,
+      path = preview.path,
+      diagnosticPath = "$diagnosticPath.path",
+      diagnostics = diagnostics,
+      mustExist = true,
+    ) ?: return null
+    val file = safeFile(relativePath)
+    if (!file.isFile) {
+      diagnostics += WorkspaceArtifactDiagnostic(
+        level = "error",
+        path = "$diagnosticPath.path",
+        message = "Preview path must point to a file: ${preview.path}",
+      )
+      return null
+    }
+    if (!file.extension.equals("html", ignoreCase = true)) {
+      diagnostics += WorkspaceArtifactDiagnostic(
+        level = "error",
+        path = "$diagnosticPath.path",
+        message = "WebView preview path must be an HTML file: ${preview.path}",
+      )
+      return null
+    }
+    return WorkspaceArtifactEntrypoint(
+      kind = preview.kind,
+      path = relativePath,
+      label = preview.label.ifBlank { "Preview" },
+    )
+  }
+
+  private fun artifactAction(
+    action: FloveraArtifactAction,
+    artifactRoot: File,
+    diagnosticPath: String,
+    diagnostics: MutableList<WorkspaceArtifactDiagnostic>,
+  ): WorkspaceArtifactAction? {
+    val id = action.id.trim()
+    if (id.isBlank()) {
+      diagnostics += WorkspaceArtifactDiagnostic(
+        level = "error",
+        path = "$diagnosticPath.id",
+        message = "Artifact action id must be non-empty.",
+      )
+      return null
+    }
+    if (action.kind != WORKSPACE_ARTIFACT_ACTION_PYTHON_JOB) {
+      diagnostics += WorkspaceArtifactDiagnostic(
+        level = "error",
+        path = "$diagnosticPath.kind",
+        message = "Unsupported action kind '${action.kind}'. Supported action kinds: $WORKSPACE_ARTIFACT_ACTION_PYTHON_JOB.",
+      )
+      return null
+    }
+    if (action.command.isBlank()) {
+      diagnostics += WorkspaceArtifactDiagnostic(
+        level = "error",
+        path = "$diagnosticPath.command",
+        message = "python_job actions must declare a command.",
+      )
+    }
+    val cwd = artifactRelativePathOrDiagnostic(
+      artifactRoot = artifactRoot,
+      path = action.cwd.ifBlank { "." },
+      diagnosticPath = "$diagnosticPath.cwd",
+      diagnostics = diagnostics,
+      mustExist = true,
+    ) ?: return null
+    if (!safeFile(cwd).isDirectory) {
+      diagnostics += WorkspaceArtifactDiagnostic(
+        level = "error",
+        path = "$diagnosticPath.cwd",
+        message = "Action cwd must point to a directory: ${action.cwd}",
+      )
+    }
+    val inputPath = action.inputPath.takeIf { it.isNotBlank() }?.let { input ->
+      artifactRelativePathOrDiagnostic(artifactRoot, input, "$diagnosticPath.inputPath", diagnostics, mustExist = false)
+    }.orEmpty()
+    val outputs = action.outputs.mapNotNull { output ->
+      artifactRelativePathOrDiagnostic(artifactRoot, output, "$diagnosticPath.outputs", diagnostics, mustExist = false)
+    }
+    return WorkspaceArtifactAction(
+      id = id,
+      label = action.label.ifBlank { id },
+      kind = action.kind,
+      command = action.command,
+      cwd = cwd,
+      inputPath = inputPath,
+      timeoutMs = action.timeoutMs.coerceIn(WORKSPACE_ARTIFACT_MIN_TIMEOUT_MS, WORKSPACE_ARTIFACT_MAX_TIMEOUT_MS),
+      outputs = outputs,
+    )
+  }
+
+  private fun artifactRelativePathOrThrow(artifactRoot: File, path: String): String {
+    require(path.isNotBlank()) { "Path must be non-empty." }
+    val file = File(artifactRoot, path).canonicalFile
+    val canonicalRoot = root.canonicalFile
+    require(file.path == canonicalRoot.path || file.path.startsWith(canonicalRoot.path + File.separator)) {
+      "Path escapes workspace: $path"
+    }
+    return relativeToRoot(file)
+  }
+
+  private fun artifactRelativePathOrDiagnostic(
+    artifactRoot: File,
+    path: String,
+    diagnosticPath: String,
+    diagnostics: MutableList<WorkspaceArtifactDiagnostic>,
+    mustExist: Boolean,
+  ): String? {
+    if (path.isBlank()) {
+      diagnostics += WorkspaceArtifactDiagnostic(
+        level = "error",
+        path = diagnosticPath,
+        message = "Path must be non-empty.",
+      )
+      return null
+    }
+    return runCatching {
+      val file = File(artifactRoot, path).canonicalFile
+      val canonicalRoot = root.canonicalFile
+      require(file.path == canonicalRoot.path || file.path.startsWith(canonicalRoot.path + File.separator)) {
+        "Path escapes workspace: $path"
+      }
+      if (mustExist && !file.exists()) {
+        error("Path does not exist: $path")
+      }
+      relativeToRoot(file)
+    }.getOrElse { error ->
+      diagnostics += WorkspaceArtifactDiagnostic(
+        level = "error",
+        path = diagnosticPath,
+        message = error.message ?: "Invalid path: $path",
+      )
+      null
+    }
+  }
+
+  private fun workspaceArtifactJobFile(jobId: String): File? {
+    if (!WORKSPACE_ARTIFACT_JOB_ID_REGEX.matches(jobId)) return null
+    return safeFile(".flovera/jobs/$jobId.json")
+  }
+
+  private fun markStaleWorkspaceArtifactJobsInterrupted() {
+    val jobsDir = safeFile(".flovera/jobs")
+    jobsDir.listFiles()
+      ?.filter { it.isFile && it.extension == "json" }
+      ?.forEach { file ->
+        val job = runCatching { compactJson.decodeFromString<WorkspaceArtifactJob>(readUtf8Text(file)) }.getOrNull()
+        if (job?.status == WORKSPACE_ARTIFACT_JOB_QUEUED || job?.status == WORKSPACE_ARTIFACT_JOB_RUNNING) {
+          writeWorkspaceArtifactJob(
+            job.copy(
+              status = WORKSPACE_ARTIFACT_JOB_INTERRUPTED,
+              error = "Flovera restarted before this artifact job finished.",
+            ),
+          )
+        }
+      }
+  }
+
   private fun displayName(uri: Uri): String? {
     return runCatching {
       appContext.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
@@ -946,6 +1369,16 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
   }
 
   private companion object {
+    const val WORKSPACE_ARTIFACT_MANIFEST_NAME = "flovera.app.json"
+    const val WORKSPACE_ARTIFACT_PREVIEW_WEBVIEW = "webview"
+    const val WORKSPACE_ARTIFACT_ACTION_PYTHON_JOB = "python_job"
+    const val MAX_WORKSPACE_ARTIFACT_MANIFESTS = 200
+    const val WORKSPACE_ARTIFACT_MIN_TIMEOUT_MS = 1_000
+    const val WORKSPACE_ARTIFACT_MAX_TIMEOUT_MS = 600_000
+    const val WORKSPACE_ARTIFACT_JOB_QUEUED = "queued"
+    const val WORKSPACE_ARTIFACT_JOB_RUNNING = "running"
+    const val WORKSPACE_ARTIFACT_JOB_INTERRUPTED = "interrupted"
+    val WORKSPACE_ARTIFACT_JOB_ID_REGEX = Regex("[0-9a-fA-F-]{36}")
     const val WORKSPACE_SEARCH_SCOPE_PUBLIC = "workspace_public"
     const val WORKSPACE_SEARCH_SCOPE_APP_METADATA = "workspace_app_metadata"
     const val WORKSPACE_SEARCH_SCOPE_INTERNAL = "workspace_internal"
@@ -1218,6 +1651,8 @@ data class FloveraSettingsView(
   val selectedHtmlPath: String = "",
   val pinnedHtmlPaths: List<String> = emptyList(),
   val recentHtmlPaths: List<String> = emptyList(),
+  val workspaceArtifactManifestName: String = "flovera.app.json",
+  val workspaceArtifactJobsPath: String = ".flovera/jobs",
   val maxAgentIterations: Int = 0,
   val networkEnabled: Boolean = false,
   val webSearchEnabled: Boolean = false,
@@ -1289,6 +1724,12 @@ data class FloveraCapabilities(
   val workspaceSearchScopes: List<String> = listOf("workspace_public", "workspace_app_metadata", "workspace_internal"),
   val artifactInspect: Boolean = true,
   val artifactInspectFormats: List<String> = listOf("json", "html", "docx", "xlsx", "pdf", "png", "jpg", "jpeg", "webp", "text"),
+  val workspaceArtifacts: Boolean = true,
+  val workspaceArtifactManifestName: String = "flovera.app.json",
+  val workspaceArtifactPreviewKinds: List<String> = listOf("webview"),
+  val workspaceArtifactActionKinds: List<String> = listOf("python_job"),
+  val workspaceArtifactJobsPath: String = ".flovera/jobs",
+  val workspaceArtifactBridgeCalls: List<String> = listOf("runAction", "getJob", "cancelJob"),
   val webPreview: Boolean = true,
   val previewFormats: List<String> = listOf("html", "markdown", "json", "csv", "text", "image", "pdf"),
   val snapshots: Boolean = true,

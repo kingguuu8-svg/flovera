@@ -15,6 +15,7 @@ data class WorkspaceSnapshot(
   val selectedHtmlPath: String,
   val selectedHtmlUrl: String?,
   val workspaceRootUrl: String,
+  val workspaceArtifacts: List<WorkspaceArtifact>,
   val snapshots: List<WorkspaceSnapshotRecord>,
   val settingsProposals: List<WorkspaceSettingsProposal>,
   val controlledToolProposals: List<WorkspaceControlledToolProposal>,
@@ -135,6 +136,24 @@ class WorkspaceController(context: Context, workspaceId: String) {
 
   fun previewTextFile(path: String): String = workspace.readFilePreview(path, maxChars = 128 * 1024)
 
+  fun resolveWorkspaceArtifactAction(previewPath: String, actionId: String): WorkspaceArtifactActionTarget? {
+    return workspace.resolveWorkspaceArtifactAction(previewPath, actionId)
+  }
+
+  fun createWorkspaceArtifactJob(target: WorkspaceArtifactActionTarget, inputPath: String = ""): WorkspaceArtifactJob {
+    return workspace.createWorkspaceArtifactJob(target, inputPath)
+  }
+
+  fun updateWorkspaceArtifactJob(job: WorkspaceArtifactJob): WorkspaceArtifactJob = workspace.writeWorkspaceArtifactJob(job)
+
+  fun readWorkspaceArtifactJob(jobId: String): WorkspaceArtifactJob? = workspace.readWorkspaceArtifactJob(jobId)
+
+  fun workspaceArtifactJobJson(jobId: String): String = workspace.workspaceArtifactJobJson(jobId)
+
+  fun writeWorkspaceArtifactInput(jobId: String, artifactRootPath: String, inputPath: String, inputJson: String): String {
+    return workspace.writeWorkspaceArtifactInput(jobId, artifactRootPath, inputPath, inputJson)
+  }
+
   fun createSnapshot(name: String, selectedHtmlPath: String): WorkspaceSnapshotRecord {
     return workspace.createManualSnapshot(name, selectedHtmlPath)
   }
@@ -161,6 +180,7 @@ class WorkspaceController(context: Context, workspaceId: String) {
       selectedHtmlPath = selectedHtmlPath,
       selectedHtmlUrl = workspace.displayUrl(selectedHtmlPath),
       workspaceRootUrl = workspace.rootUrl(),
+      workspaceArtifacts = workspace.listWorkspaceArtifacts(),
       snapshots = workspace.listSnapshots(),
       settingsProposals = workspace.listSettingsProposals(),
       controlledToolProposals = workspace.listControlledToolProposals(),

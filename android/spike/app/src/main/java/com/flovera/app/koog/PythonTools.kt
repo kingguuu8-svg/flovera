@@ -6,7 +6,9 @@ import ai.koog.serialization.typeToken
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
 import com.flovera.app.workspace.WorkspaceManager
+import java.io.File
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 class PythonRunTool(
@@ -115,14 +117,24 @@ class PythonPackageInstallTool(
   }
 }
 
-private class FloveraPythonRuntime(
+class FloveraPythonRuntime(
   private val workspace: WorkspaceManager,
   private val networkEnabled: Boolean,
 ) {
   fun run(args: PythonRunTool.Args): String {
     val cwd = workspace.workspaceRuntimeDirectory(args.cwd)
-    if (!cwd.exists()) return "Python cwd does not exist: ${args.cwd}"
-    if (!cwd.isDirectory) return "Python cwd is not a directory: ${args.cwd}"
+    val result = runRaw(args)
+    return formatResult(result, workspace.workspaceRelativePath(cwd), args.timeoutMs.coerceIn(MIN_TIMEOUT_MS, MAX_TIMEOUT_MS))
+  }
+
+  fun runRaw(args: PythonRunTool.Args): PythonRunResult {
+    val cwd = workspace.workspaceRuntimeDirectory(args.cwd)
+    if (!cwd.exists()) {
+      return PythonRunResult(status = "error", exitCode = 1, stderr = "Python cwd does not exist: ${args.cwd}\n")
+    }
+    if (!cwd.isDirectory) {
+      return PythonRunResult(status = "error", exitCode = 1, stderr = "Python cwd is not a directory: ${args.cwd}\n")
+    }
     if (args.snapshotBeforeRun) {
       workspace.createAutomaticSnapshot("python_run")
     }
@@ -143,8 +155,54 @@ private class FloveraPythonRuntime(
       args.scope,
       networkEnabled,
     ).toString()
-    val result = json.decodeFromString<PythonRunResult>(jsonText)
-    return formatResult(result, workspace.workspaceRelativePath(cwd), timeoutMs)
+    return json.decodeFromString<PythonRunResult>(jsonText)
+  }
+
+  fun runScript(
+    scriptPath: String,
+    argv: List<String>,
+    cwd: String,
+    timeoutMs: Int,
+    maxOutputChars: Int = 20_000,
+    sessionId: String = "",
+    scope: String = "workspace_public",
+  ): PythonRunResult {
+    val cwdFile = workspace.workspaceRuntimeDirectory(cwd)
+    if (!cwdFile.exists()) {
+      return PythonRunResult(status = "error", exitCode = 1, stderr = "Python cwd does not exist: $cwd\n")
+    }
+    if (!cwdFile.isDirectory) {
+      return PythonRunResult(status = "error", exitCode = 1, stderr = "Python cwd is not a directory: $cwd\n")
+    }
+    val scriptFile = File(cwdFile, scriptPath).canonicalFile
+    val root = workspace.root.canonicalFile
+    if (scriptFile.path != root.path && !scriptFile.path.startsWith(root.path + File.separator)) {
+      return PythonRunResult(status = "error", exitCode = 1, stderr = "Python script escapes workspace: $scriptPath\n")
+    }
+    if (!scriptFile.isFile) {
+      return PythonRunResult(status = "error", exitCode = 1, stderr = "Python script does not exist: $scriptPath\n")
+    }
+    val code = """
+      import runpy
+      import sys
+
+      _flovera_script = ${json.encodeToString(scriptFile.canonicalPath)}
+      _flovera_argv = ${json.encodeToString(argv)}
+      sys.argv = [_flovera_script] + _flovera_argv
+      runpy.run_path(_flovera_script, run_name="__main__")
+    """.trimIndent()
+    return runRaw(
+      PythonRunTool.Args(
+        code = code,
+        cwd = cwd,
+        timeoutMs = timeoutMs,
+        maxOutputChars = maxOutputChars,
+        sessionId = sessionId,
+        resetSession = true,
+        scope = scope,
+        snapshotBeforeRun = false,
+      ),
+    )
   }
 
   private fun formatResult(result: PythonRunResult, cwd: String, timeoutMs: Int): String {
@@ -187,7 +245,7 @@ private class FloveraPythonRuntime(
 }
 
 @Serializable
-private data class PythonRunResult(
+data class PythonRunResult(
   val status: String,
   val exitCode: Int,
   val stdout: String = "",

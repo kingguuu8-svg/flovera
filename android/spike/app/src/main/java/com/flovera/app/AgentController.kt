@@ -11,19 +11,29 @@ import com.flovera.app.config.AppSettings
 import com.flovera.app.config.ModelSettingsDraft
 import com.flovera.app.config.SettingsController
 import com.flovera.app.config.SettingsStore
+import com.flovera.app.koog.FloveraPythonRuntime
 import com.flovera.app.session.AgentSession
 import com.flovera.app.session.AgentSessionStore
 import com.flovera.app.session.SessionController
 import com.flovera.app.session.SessionMessage
+import com.flovera.app.workspace.WorkspaceArtifact
+import com.flovera.app.workspace.WorkspaceArtifactActionTarget
 import com.flovera.app.workspace.WorkspaceController
 import com.flovera.app.workspace.WorkspaceControlledToolProposal
 import com.flovera.app.workspace.WorkspaceFileNode
 import com.flovera.app.workspace.WorkspaceSettingsProposal
 import com.flovera.app.workspace.WorkspaceSnapshotRecord
+import java.io.File
+import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import org.json.JSONObject
 
 data class AgentScreenState(
   val settings: AppSettings = AppSettings(),
@@ -41,6 +51,7 @@ data class AgentScreenState(
   val workspaceFiles: String = "",
   val workspaceTree: WorkspaceFileNode? = null,
   val htmlFiles: List<String> = emptyList(),
+  val workspaceArtifacts: List<WorkspaceArtifact> = emptyList(),
   val selectedHtmlPath: String = "",
   val selectedHtmlUrl: String? = null,
   val selectedPreviewPath: String = "",
@@ -91,6 +102,8 @@ class AgentController(
   private val settingsController = SettingsController(settingsStore)
   private val sessionController = SessionController(sessionStore)
   private var activeRunJob: Job? = null
+  private val artifactJobScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+  private val artifactRunJobs = ConcurrentHashMap<String, Job>()
   private var workspaceController: WorkspaceController
 
   private val _state = MutableStateFlow(AgentScreenState())
@@ -127,6 +140,7 @@ class AgentController(
       workspaceFiles = workspaceSnapshot.files,
       workspaceTree = workspaceSnapshot.tree,
       htmlFiles = workspaceSnapshot.htmlFiles,
+      workspaceArtifacts = workspaceSnapshot.workspaceArtifacts,
       selectedHtmlPath = workspaceSnapshot.selectedHtmlPath,
       selectedHtmlUrl = workspaceSnapshot.selectedHtmlUrl,
       selectedPreviewPath = workspaceSnapshot.selectedHtmlPath,
@@ -230,6 +244,7 @@ class AgentController(
         workspaceFiles = workspaceSnapshot.files,
         workspaceTree = workspaceSnapshot.tree,
         htmlFiles = workspaceSnapshot.htmlFiles,
+        workspaceArtifacts = workspaceSnapshot.workspaceArtifacts,
         selectedHtmlPath = workspaceSnapshot.selectedHtmlPath,
         selectedHtmlUrl = workspaceSnapshot.selectedHtmlUrl,
         selectedPreviewPath = workspaceSnapshot.selectedHtmlPath,
@@ -294,6 +309,41 @@ class AgentController(
 
   fun reportStatus(status: String) {
     _state.update { it.copy(status = status) }
+  }
+
+  fun runWorkspaceArtifactAction(actionId: String, inputJson: String): String {
+    val trimmedActionId = actionId.trim()
+    if (trimmedActionId.isBlank()) return artifactBridgeError("missing action id")
+    val previewPath = _state.value.selectedPreviewPath.ifBlank { _state.value.selectedHtmlPath }
+    val target = workspaceController.resolveWorkspaceArtifactAction(previewPath, trimmedActionId)
+      ?: return artifactBridgeError("artifact action not found or ambiguous: $trimmedActionId")
+    val inputPath = target.action.inputPath
+    val job = workspaceController.createWorkspaceArtifactJob(target, inputPath)
+    val runJob = artifactJobScope.launch {
+      executeWorkspaceArtifactJob(job.id, target, inputJson)
+    }
+    artifactRunJobs[job.id] = runJob
+    reportStatus("Artifact job started: ${target.action.id}")
+    return workspaceController.workspaceArtifactJobJson(job.id)
+  }
+
+  fun getWorkspaceArtifactJob(jobId: String): String {
+    return workspaceController.workspaceArtifactJobJson(jobId.trim())
+  }
+
+  fun cancelWorkspaceArtifactJob(jobId: String): String {
+    val id = jobId.trim()
+    val running = artifactRunJobs.remove(id)
+    running?.cancel()
+    val current = workspaceController.readWorkspaceArtifactJob(id) ?: return artifactBridgeError("artifact job not found: $id")
+    val canceled = workspaceController.updateWorkspaceArtifactJob(
+      current.copy(
+        status = "cancelled",
+        error = "Cancellation requested by WebView.",
+      ),
+    )
+    reportStatus("Artifact job cancelled: ${canceled.actionId}")
+    return workspaceController.workspaceArtifactJobJson(id)
   }
 
   fun renameWorkspacePath(path: String, newName: String) {
@@ -627,6 +677,120 @@ class AgentController(
     )
   }
 
+  private fun executeWorkspaceArtifactJob(jobId: String, target: WorkspaceArtifactActionTarget, inputJson: String) {
+    val started = workspaceController.readWorkspaceArtifactJob(jobId) ?: return
+    workspaceController.updateWorkspaceArtifactJob(started.copy(status = "running", error = ""))
+    val result = runCatching {
+      val tokens = splitWorkspaceArtifactCommand(target.action.command)
+      require(tokens.size >= 2) { "python_job command must look like: python path/to/script.py [args...]" }
+      require(tokens.first() == "python" || tokens.first() == "python3") {
+        "Unsupported python_job command launcher '${tokens.first()}'. Use python or python3."
+      }
+      val scriptPath = tokens[1]
+      val argv = tokens.drop(2)
+      val inputPath = declaredInputPath(target, inputJson, argv)
+      if (inputPath.isNotBlank()) {
+        val writtenInputPath = workspaceController.writeWorkspaceArtifactInput(jobId, target.artifact.rootPath, inputPath, inputJson)
+        workspaceController.readWorkspaceArtifactJob(jobId)?.let { currentJob ->
+          workspaceController.updateWorkspaceArtifactJob(currentJob.copy(inputPath = writtenInputPath))
+        }
+      }
+      ensureWorkspaceArtifactOutputDirectories(target)
+      FloveraPythonRuntime(workspaceController.runtimeWorkspace(), networkEnabled = false).runScript(
+        scriptPath = scriptPath,
+        argv = argv,
+        cwd = target.action.cwd,
+        timeoutMs = target.action.timeoutMs,
+        sessionId = "artifact-$jobId",
+      )
+    }
+    val current = workspaceController.readWorkspaceArtifactJob(jobId) ?: return
+    val finished = result.fold(
+      onSuccess = { pythonResult ->
+        current.copy(
+          status = if (pythonResult.exitCode == 0) "succeeded" else pythonResult.status.ifBlank { "failed" },
+          stdout = pythonResult.stdout,
+          stderr = pythonResult.stderr,
+          stdoutTruncated = pythonResult.stdoutTruncated,
+          stderrTruncated = pythonResult.stderrTruncated,
+          exitCode = pythonResult.exitCode,
+          elapsedMs = pythonResult.elapsedMs,
+          error = if (pythonResult.exitCode == 0) "" else pythonResult.stderr.take(500),
+        )
+      },
+      onFailure = { error ->
+        current.copy(
+          status = "failed",
+          exitCode = 1,
+          error = error.message ?: error::class.java.simpleName,
+        )
+      },
+    )
+    workspaceController.updateWorkspaceArtifactJob(finished)
+    artifactRunJobs.remove(jobId)
+    refreshWorkspaceState(status = "Artifact job ${finished.status}: ${target.action.id}")
+  }
+
+  private fun declaredInputPath(
+    target: WorkspaceArtifactActionTarget,
+    inputJson: String,
+    argv: List<String> = splitWorkspaceArtifactCommand(target.action.command).drop(2),
+  ): String {
+    if (inputJson.isBlank()) return ""
+    if (target.action.inputPath.isNotBlank()) return target.action.inputPath
+    val inputFlagIndex = argv.indexOf("--input")
+    return if (inputFlagIndex >= 0 && inputFlagIndex + 1 < argv.size) argv[inputFlagIndex + 1] else ""
+  }
+
+  private fun ensureWorkspaceArtifactOutputDirectories(target: WorkspaceArtifactActionTarget) {
+    val workspaceRoot = workspaceController.runtimeWorkspace().root.canonicalFile
+    target.action.outputs.forEach { outputPath ->
+      val outputFile = File(workspaceRoot, outputPath).canonicalFile
+      if (outputFile.path == workspaceRoot.path || outputFile.path.startsWith(workspaceRoot.path + File.separator)) {
+        outputFile.parentFile?.mkdirs()
+      }
+    }
+  }
+
+  private fun splitWorkspaceArtifactCommand(command: String): List<String> {
+    require(command.none { it == '|' || it == '<' || it == '>' || it == ';' }) {
+      "python_job command does not support shell operators."
+    }
+    val tokens = mutableListOf<String>()
+    val current = StringBuilder()
+    var quote: Char? = null
+    var escaping = false
+    for (char in command.trim()) {
+      when {
+        escaping -> {
+          current.append(char)
+          escaping = false
+        }
+        char == '\\' -> escaping = true
+        quote != null && char == quote -> quote = null
+        quote != null -> current.append(char)
+        char == '\'' || char == '"' -> quote = char
+        char.isWhitespace() -> {
+          if (current.isNotEmpty()) {
+            tokens += current.toString()
+            current.clear()
+          }
+        }
+        else -> current.append(char)
+      }
+    }
+    require(quote == null) { "python_job command has an unterminated quote." }
+    if (current.isNotEmpty()) tokens += current.toString()
+    return tokens
+  }
+
+  private fun artifactBridgeError(message: String): String {
+    return JSONObject()
+      .put("status", "error")
+      .put("error", message)
+      .toString()
+  }
+
   private fun refreshWorkspaceState(
     settings: AppSettings = _state.value.settings,
     session: AgentSession? = _state.value.session,
@@ -680,6 +844,7 @@ class AgentController(
         workspaceFiles = workspaceSnapshot.files,
         workspaceTree = workspaceSnapshot.tree,
         htmlFiles = workspaceSnapshot.htmlFiles,
+        workspaceArtifacts = workspaceSnapshot.workspaceArtifacts,
         selectedHtmlPath = workspaceSnapshot.selectedHtmlPath,
         selectedHtmlUrl = workspaceSnapshot.selectedHtmlUrl,
         selectedPreviewPath = previewPath,
