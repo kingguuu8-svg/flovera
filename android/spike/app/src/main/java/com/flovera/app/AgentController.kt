@@ -12,6 +12,7 @@ import com.flovera.app.config.ModelSettingsDraft
 import com.flovera.app.config.SettingsController
 import com.flovera.app.config.SettingsStore
 import com.flovera.app.koog.FloveraPythonRuntime
+import com.flovera.app.koog.ModelProviderCatalog
 import com.flovera.app.session.AgentSession
 import com.flovera.app.session.AgentSessionStore
 import com.flovera.app.session.SessionController
@@ -22,7 +23,9 @@ import com.flovera.app.workspace.WorkspaceArtifactJob
 import com.flovera.app.workspace.WorkspaceController
 import com.flovera.app.workspace.WorkspaceControlledToolProposal
 import com.flovera.app.workspace.WorkspaceFileNode
+import com.flovera.app.workspace.WorkspaceLocalAppServer
 import com.flovera.app.workspace.WorkspaceSettingsProposal
+import com.flovera.app.workspace.WorkspaceSnapshot
 import com.flovera.app.workspace.WorkspaceSnapshotRecord
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
@@ -83,6 +86,9 @@ private data class FullAuthoritySettingsApplyResult(
 const val QUEUED_INPUT_REQUEST = "request"
 const val QUEUED_INPUT_GUIDANCE = "guidance"
 
+private const val WORKSPACE_ARTIFACT_ACTION_PYTHON_JOB = "python_job"
+private const val WORKSPACE_ARTIFACT_PREVIEW_LOCAL_HTTP = "local_http"
+
 private fun QueuedAgentInput.toRunInput(): String {
   if (mode != QUEUED_INPUT_GUIDANCE) return content
   return """
@@ -107,6 +113,7 @@ class AgentController(
   private val artifactJobScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
   private val artifactRunJobs = ConcurrentHashMap<String, Job>()
   private var workspaceController: WorkspaceController
+  private var workspaceLocalAppServer: WorkspaceLocalAppServer
 
   private val _state = MutableStateFlow(AgentScreenState())
   val state: StateFlow<AgentScreenState> = _state
@@ -115,6 +122,7 @@ class AgentController(
     val settingsLoad = settingsController.loadResult()
     val loadedSettings = settingsLoad.settings
     workspaceController = WorkspaceController(appContext, loadedSettings.activeWorkspaceId).also { it.ensureSeedFiles() }
+    workspaceLocalAppServer = WorkspaceLocalAppServer(workspaceController.runtimeWorkspace()) { _state.value.settings }
     val session = sessionController.initialSession(loadedSettings.activeSessionId)
     workspaceController.syncFloveraSettings(loadedSettings)
     var workspaceSnapshot = workspaceController.snapshot(loadedSettings.selectedHtmlPath)
@@ -127,6 +135,12 @@ class AgentController(
       workspaceSnapshot = workspaceController.snapshot(settings.selectedHtmlPath)
     }
     val modelDraft = settingsController.draftFor(settings)
+    val initialSelectedHtmlUrl = selectedHtmlUrl(workspaceSnapshot)
+    val initialWorkspaceRootUrl = if (initialSelectedHtmlUrl?.startsWith("http://127.0.0.1:") == true) {
+      workspaceLocalAppServer.rootUrl()
+    } else {
+      workspaceSnapshot.workspaceRootUrl
+    }
     _state.value = AgentScreenState(
       settings = settings,
       session = session,
@@ -145,11 +159,11 @@ class AgentController(
       workspaceArtifacts = workspaceSnapshot.workspaceArtifacts,
       workspaceArtifactJobs = workspaceSnapshot.workspaceArtifactJobs,
       selectedHtmlPath = workspaceSnapshot.selectedHtmlPath,
-      selectedHtmlUrl = workspaceSnapshot.selectedHtmlUrl,
+      selectedHtmlUrl = initialSelectedHtmlUrl,
       selectedPreviewPath = workspaceSnapshot.selectedHtmlPath,
       selectedPreviewMimeType = if (workspaceSnapshot.selectedHtmlPath.isBlank()) "" else "text/html",
       selectedPreviewUri = "",
-      workspaceRootUrl = workspaceSnapshot.workspaceRootUrl,
+      workspaceRootUrl = initialWorkspaceRootUrl,
       workspaceSnapshots = workspaceSnapshot.snapshots,
       settingsProposals = workspaceSnapshot.settingsProposals,
       controlledToolProposals = workspaceSnapshot.controlledToolProposals,
@@ -696,10 +710,13 @@ class AgentController(
     )
   }
 
-  private fun executeWorkspaceArtifactJob(jobId: String, target: WorkspaceArtifactActionTarget, inputJson: String) {
+  private suspend fun executeWorkspaceArtifactJob(jobId: String, target: WorkspaceArtifactActionTarget, inputJson: String) {
     val started = workspaceController.readWorkspaceArtifactJob(jobId) ?: return
     workspaceController.updateWorkspaceArtifactJob(started.copy(status = "running", error = ""))
     val result = runCatching {
+      require(target.action.kind == WORKSPACE_ARTIFACT_ACTION_PYTHON_JOB) {
+        "Unsupported artifact action kind: ${target.action.kind}"
+      }
       val tokens = splitWorkspaceArtifactCommand(target.action.command)
       require(tokens.size >= 2) { "python_job command must look like: python path/to/script.py [args...]" }
       require(tokens.first() == "python" || tokens.first() == "python3") {
@@ -715,12 +732,16 @@ class AgentController(
         }
       }
       ensureWorkspaceArtifactOutputDirectories(target)
-      FloveraPythonRuntime(workspaceController.runtimeWorkspace(), networkEnabled = false).runScript(
+      FloveraPythonRuntime(
+        workspaceController.runtimeWorkspace(),
+        networkEnabled = target.action.networkEnabled,
+      ).runScript(
         scriptPath = scriptPath,
         argv = argv,
         cwd = target.action.cwd,
         timeoutMs = target.action.timeoutMs,
         sessionId = "artifact-$jobId",
+        environment = workspaceArtifactActionEnvironment(target),
       )
     }
     val current = workspaceController.readWorkspaceArtifactJob(jobId) ?: return
@@ -768,6 +789,31 @@ class AgentController(
       if (outputFile.path == workspaceRoot.path || outputFile.path.startsWith(workspaceRoot.path + File.separator)) {
         outputFile.parentFile?.mkdirs()
       }
+    }
+  }
+
+  private fun workspaceArtifactActionEnvironment(target: WorkspaceArtifactActionTarget): Map<String, String> {
+    val settings = _state.value.settings
+    return target.action.environment.mapValues { (_, ref) ->
+      when {
+        ref.startsWith("provider:") -> providerEnvironmentValue(ref.removePrefix("provider:"), settings)
+        ref == "settings:model" -> settings.model
+        ref.startsWith("literal:") -> ref.removePrefix("literal:")
+        else -> ref
+      }
+    }.filterKeys { key -> key.isNotBlank() }
+  }
+
+  private fun providerEnvironmentValue(ref: String, settings: AppSettings): String {
+    val providerId = ref.substringBefore('.', missingDelimiterValue = settings.provider).ifBlank { settings.provider }
+    val field = ref.substringAfter('.', missingDelimiterValue = "apiKey")
+    val provider = ModelProviderCatalog.findProvider(providerId) ?: return ""
+    val profile = ModelProviderCatalog.runtimeProfileFor(provider, settings)
+    return when (field) {
+      "apiKey" -> settings.apiKeyFor(providerId)
+      "baseUrl" -> profile.baseUrl
+      "model" -> if (settings.provider == providerId) settings.model else provider.defaultModel
+      else -> ""
     }
   }
 
@@ -832,6 +878,12 @@ class AgentController(
       workspaceController.syncFloveraSettings(normalizedSettings)
       workspaceSnapshot = workspaceController.snapshot(normalizedSettings.selectedHtmlPath)
     }
+    val selectedHtmlUrl = selectedHtmlUrl(workspaceSnapshot)
+    val workspaceRootUrl = if (selectedHtmlUrl?.startsWith("http://127.0.0.1:") == true) {
+      workspaceLocalAppServer.rootUrl()
+    } else {
+      workspaceSnapshot.workspaceRootUrl
+    }
     _state.update {
       val previewPath = when {
         resetPreviewToSelectedHtml -> workspaceSnapshot.selectedHtmlPath
@@ -866,12 +918,12 @@ class AgentController(
         workspaceArtifacts = workspaceSnapshot.workspaceArtifacts,
         workspaceArtifactJobs = workspaceSnapshot.workspaceArtifactJobs,
         selectedHtmlPath = workspaceSnapshot.selectedHtmlPath,
-        selectedHtmlUrl = workspaceSnapshot.selectedHtmlUrl,
+        selectedHtmlUrl = selectedHtmlUrl,
         selectedPreviewPath = previewPath,
         selectedPreviewContent = previewContent,
         selectedPreviewMimeType = previewMimeType,
         selectedPreviewUri = previewUri,
-        workspaceRootUrl = workspaceSnapshot.workspaceRootUrl,
+        workspaceRootUrl = workspaceRootUrl,
         workspaceSnapshots = workspaceSnapshot.snapshots,
         settingsProposals = workspaceSnapshot.settingsProposals,
         controlledToolProposals = workspaceSnapshot.controlledToolProposals,
@@ -879,6 +931,21 @@ class AgentController(
         assistantDraft = if (isRunning) it.assistantDraft else null,
         status = statusAfterAuthority,
       )
+    }
+  }
+
+  private fun selectedHtmlUrl(snapshot: WorkspaceSnapshot): String? {
+    val selectedPath = snapshot.selectedHtmlPath
+    if (selectedPath.isBlank()) return null
+    val localHttpArtifact = snapshot.workspaceArtifacts.firstOrNull { artifact ->
+      artifact.valid &&
+        artifact.preview?.path == selectedPath &&
+        artifact.preview.kind == WORKSPACE_ARTIFACT_PREVIEW_LOCAL_HTTP
+    }
+    return if (localHttpArtifact != null) {
+      workspaceLocalAppServer.workspaceFileUrl(selectedPath)
+    } else {
+      snapshot.selectedHtmlUrl
     }
   }
 

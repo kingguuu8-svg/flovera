@@ -38,6 +38,8 @@ class PythonRunTool(
     val scope: String = "workspace_public",
     @property:LLMDescription("Whether to create an automatic workspace snapshot before running code.")
     val snapshotBeforeRun: Boolean = true,
+    @property:LLMDescription("Optional environment variables for this bounded Python run. Values are restored after the run.")
+    val environment: Map<String, String> = emptyMap(),
   )
 
   override suspend fun execute(args: Args): String {
@@ -154,6 +156,7 @@ class FloveraPythonRuntime(
       args.resetSession,
       args.scope,
       networkEnabled,
+      json.encodeToString(args.environment),
     ).toString()
     return json.decodeFromString<PythonRunResult>(jsonText)
   }
@@ -166,6 +169,7 @@ class FloveraPythonRuntime(
     maxOutputChars: Int = 20_000,
     sessionId: String = "",
     scope: String = "workspace_public",
+    environment: Map<String, String> = emptyMap(),
   ): PythonRunResult {
     val cwdFile = workspace.workspaceRuntimeDirectory(cwd)
     if (!cwdFile.exists()) {
@@ -201,6 +205,7 @@ class FloveraPythonRuntime(
         resetSession = true,
         scope = scope,
         snapshotBeforeRun = false,
+        environment = environment,
       ),
     )
   }

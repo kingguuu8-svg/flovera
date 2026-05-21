@@ -152,12 +152,12 @@ fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
     ) {
       FloatingActionButton(
         onClick = { activePanel = AgentPanel.HtmlFiles },
-        modifier = Modifier.semantics { contentDescription = "Open HTML quick picker" },
+        modifier = Modifier.semantics { contentDescription = "Open workspace apps and previews" },
         shape = FloveraFabShape,
         containerColor = FloveraFabContainer,
         contentColor = FloveraFabText,
       ) {
-        Text("HTML", modifier = Modifier.padding(horizontal = 4.dp), style = MaterialTheme.typography.labelLarge)
+        Text("Preview", modifier = Modifier.padding(horizontal = 4.dp), style = MaterialTheme.typography.labelLarge)
       }
       if (state.workspaceArtifactJobs.isNotEmpty()) {
         FloatingActionButton(
@@ -812,7 +812,7 @@ private fun ConversationDialog(
                   },
                 )
                 DropdownMenuItem(
-                  text = { Text(t(language, "Select HTML", "\u9009\u62e9 HTML")) },
+                  text = { Text(t(language, "Open Preview", "\u6253\u5f00\u9884\u89c8")) },
                   onClick = {
                     moreMenuOpen = false
                     onOpenPanel(AgentPanel.HtmlFiles)
@@ -1633,7 +1633,7 @@ private fun HtmlFilesDialog(
 
   AlertDialog(
     onDismissRequest = onDismiss,
-    title = { Text(t(language, "Select HTML", "\u9009\u62e9 HTML")) },
+    title = { Text(t(language, "Open Preview", "\u6253\u5f00\u9884\u89c8")) },
     text = {
       LazyColumn(
         modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 420.dp),
@@ -1641,7 +1641,7 @@ private fun HtmlFilesDialog(
       ) {
         if (state.workspaceArtifacts.isNotEmpty()) {
           item {
-            Text(t(language, "Workspace Artifacts", "Workspace Artifacts"), style = MaterialTheme.typography.labelLarge)
+            Text(t(language, "Workspace Apps", "\u5de5\u4f5c\u533a\u5e94\u7528"), style = MaterialTheme.typography.labelLarge)
           }
           items(state.workspaceArtifacts, key = { it.manifestPath }) { artifact ->
             WorkspaceArtifactPickerRow(
@@ -1653,6 +1653,9 @@ private fun HtmlFilesDialog(
               },
             )
           }
+        }
+        item {
+          Text(t(language, "HTML Files", "HTML Files"), style = MaterialTheme.typography.labelLarge)
         }
         if (sortedHtmlFiles.isEmpty()) {
           item {
@@ -1705,6 +1708,7 @@ private fun WorkspaceArtifactPickerRow(
         Text(
           listOfNotNull(
             artifact.kind.takeIf { it.isNotBlank() },
+            artifact.preview?.kind?.takeIf { it.isNotBlank() }?.let { "preview=$it" },
             previewPath.takeIf { it.isNotBlank() },
             artifact.actions.takeIf { it.isNotEmpty() }?.joinToString(prefix = "actions=", separator = ",") { it.id },
           ).joinToString("  "),

@@ -25,7 +25,7 @@ class FloveraPythonTimeout(TimeoutError):
     pass
 
 
-def run_code(code, workspace_root, cwd, timeout_ms, max_output_chars, session_id, reset_session, scope, network_enabled):
+def run_code(code, workspace_root, cwd, timeout_ms, max_output_chars, session_id, reset_session, scope, network_enabled, environment_json="{}"):
     with _run_lock:
         started_at = time.monotonic()
         root = os.path.realpath(workspace_root)
@@ -45,6 +45,7 @@ def run_code(code, workspace_root, cwd, timeout_ms, max_output_chars, session_id
         old_cwd = os.getcwd()
         old_tempdir = tempfile.tempdir
         old_dont_write_bytecode = sys.dont_write_bytecode
+        old_environ = os.environ.copy()
         deadline = time.monotonic() + timeout_s
         patches = _install_boundaries(root, start_cwd, scope, bool(network_enabled), deadline)
         old_trace = sys.gettrace()
@@ -52,6 +53,7 @@ def run_code(code, workspace_root, cwd, timeout_ms, max_output_chars, session_id
             os.chdir(start_cwd)
             tempfile.tempdir = start_cwd
             sys.dont_write_bytecode = True
+            os.environ.update(_safe_environment(environment_json))
             sys.settrace(_timeout_trace(deadline))
             with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
                 exec(compile(code, "<flovera-python-run>", "exec"), globals_dict)
@@ -69,6 +71,8 @@ def run_code(code, workspace_root, cwd, timeout_ms, max_output_chars, session_id
         finally:
             sys.settrace(old_trace)
             _restore_patches(patches)
+            os.environ.clear()
+            os.environ.update(old_environ)
             sys.dont_write_bytecode = old_dont_write_bytecode
             tempfile.tempdir = old_tempdir
             os.chdir(old_cwd)
@@ -98,6 +102,22 @@ def _globals_for_session(session_id, reset_session):
     if reset_session or key not in _sessions:
         _sessions[key] = {"__name__": "__main__", "__builtins__": builtins}
     return _sessions[key]
+
+
+def _safe_environment(environment_json):
+    try:
+        parsed = json.loads(environment_json or "{}")
+    except Exception:
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    result = {}
+    for key, value in parsed.items():
+        key_text = str(key)
+        if not key_text or "=" in key_text or "\x00" in key_text:
+            continue
+        result[key_text] = str(value)
+    return result
 
 
 def _preload_runtime_packages():

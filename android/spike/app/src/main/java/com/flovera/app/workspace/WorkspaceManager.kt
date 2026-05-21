@@ -84,6 +84,8 @@ data class FloveraArtifactAction(
   val cwd: String = ".",
   val inputPath: String = "",
   val timeoutMs: Int = 30_000,
+  val networkEnabled: Boolean = false,
+  val environment: Map<String, String> = emptyMap(),
   val outputs: List<String> = emptyList(),
 )
 
@@ -113,6 +115,8 @@ data class WorkspaceArtifactAction(
   val cwd: String,
   val inputPath: String,
   val timeoutMs: Int,
+  val networkEnabled: Boolean,
+  val environment: Map<String, String>,
   val outputs: List<String>,
 )
 
@@ -192,14 +196,17 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
         - Prefer plain HTML, CSS, JavaScript, Markdown, and JSON files.
         - Do not assume Python, npm, git, bash, or Linux tools exist on Android.
         - Do not use emoji unless the user explicitly asks for them.
-        - Workspace HTML can call controlled Android app events through window.Flovera:
+        - For interactive HTML apps, prefer flovera.app.json preview kind `local_http` and call standard routes such as:
+          - GET /__flovera__/api/health
+          - POST /__flovera__/api/deepseek/stream
+        - Legacy Workspace HTML can call controlled Android app events through window.Flovera:
           - window.Flovera.toast("message")
           - window.Flovera.notify(JSON.stringify({ title: "Title", body: "Body" }))
           - window.Flovera.postEvent(JSON.stringify({ type: "notification", title: "Title", body: "Body" }))
           - window.Flovera.runAction("action-id", JSON.stringify({ input: "..." }))
           - window.Flovera.getJob("job-id")
           - window.Flovera.cancelJob("job-id")
-        - Always check window.Flovera exists before calling it, and keep these calls user-visible and intentional.
+        - Always check window.Flovera exists before calling legacy bridge methods.
       """.trimIndent(),
       overwrite = false,
       createAutoSnapshot = false,
@@ -252,102 +259,202 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
   }
 
   private fun ensureWorkspaceArtifactDemo() {
-    writeFile(
+    writeWorkspaceArtifactDemoFile(
       path = "agent-demo/README.md",
       content = """
-        # Flovera Portable Agent Demo
+        # Flovera Workspace Chat Demo
 
-        This is a normal workspace project which can run inside Flovera or outside it.
+        This is a portable local web chat app. Inside Flovera, it is served through the app-owned localhost HTTP runtime and streams DeepSeek replies over standard SSE. The browser code does not call `window.Flovera` or use a project-specific bridge.
 
-        ## Run Outside Flovera
+        ## Inside Flovera
+
+        Open the `Flovera Workspace Chat Demo` artifact from the HTML picker. Flovera serves `src/web/index.html` from `http://127.0.0.1:<port>` and exposes:
+
+        - `GET /__flovera__/api/health`
+        - `POST /__flovera__/api/deepseek/stream`
+
+        The DeepSeek API key comes from Flovera settings.
+
+        ## Outside Flovera
 
         ```text
-        python src/agent.py --input data/input.json --output outputs/result.json
+        set DEEPSEEK_API_KEY=your-key
+        python src/server.py --host 127.0.0.1 --port 8765
         ```
 
-        Open `src/web/index.html` in a browser to inspect the interface. Outside Flovera, use the fallback command above.
-
-        ## Run Inside Flovera
-
-        Open the `Flovera Portable Agent Demo` artifact from the HTML picker. The page calls the declared `summarize` action from `flovera.app.json`; Flovera runs the bounded Python job and writes `outputs/result.json`.
+        Then open `http://127.0.0.1:8765`.
       """.trimIndent(),
-      overwrite = false,
-      createAutoSnapshot = false,
     )
-    writeFile(
+    writeWorkspaceArtifactDemoFile(
       path = "agent-demo/requirements.txt",
       content = """
-        # The demo only uses the Python standard library.
+        # The portable outside-Flovera server only uses the Python standard library.
       """.trimIndent(),
-      overwrite = false,
-      createAutoSnapshot = false,
     )
-    writeFile(
+    writeWorkspaceArtifactDemoFile(
       path = "agent-demo/data/input.json",
       content = """
         {
-          "input": "Summarize how Flovera workspace artifacts connect preview UI to bounded Python jobs."
+          "messages": [
+            {
+              "role": "user",
+              "content": "Write a concise note about what this workspace chat demo proves."
+            }
+          ]
         }
       """.trimIndent(),
-      overwrite = false,
-      createAutoSnapshot = false,
     )
-    writeFile(
+    writeWorkspaceArtifactDemoFile(
       path = "agent-demo/src/agent.py",
+      content = """
+        import runpy
+        from pathlib import Path
+
+
+        if __name__ == "__main__":
+            runpy.run_path(str(Path(__file__).with_name("server.py")), run_name="__main__")
+      """.trimIndent(),
+    )
+    writeWorkspaceArtifactDemoFile(
+      path = "agent-demo/src/server.py",
       content = """
         import argparse
         import json
         import os
-        import re
-        from datetime import datetime, timezone
+        import urllib.request
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        from pathlib import Path
 
 
-        def load_payload(path):
-            with open(path, "r", encoding="utf-8") as handle:
-                return json.load(handle)
+        PROJECT_ROOT = Path(__file__).resolve().parents[1]
+        WEB_ROOT = PROJECT_ROOT / "src" / "web"
 
 
-        def summarize(text):
-            words = re.findall(r"[A-Za-z0-9_'-]+", text)
-            keywords = sorted({word.lower() for word in words if len(word) >= 5})[:8]
-            if not text.strip():
-                summary = "No input was provided."
-            else:
-                summary = "This request asks Flovera to connect a portable preview with a bounded Python action and visible output files."
-            return {
-                "summary": summary,
-                "wordCount": len(words),
-                "keywords": keywords,
-                "generatedAt": datetime.now(timezone.utc).isoformat(),
-            }
+        def sse_event(event, payload):
+            return "event: " + event + "\n" + "data: " + json.dumps(payload, ensure_ascii=False) + "\n\n"
+
+
+        def deepseek_stream(payload):
+            api_key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
+            if not api_key:
+                yield sse_event("error", {"message": "DEEPSEEK_API_KEY is not set."}).encode("utf-8")
+                yield b"data: [DONE]\n\n"
+                return
+            messages = payload.get("messages") or []
+            if not isinstance(messages, list) or not messages:
+                yield sse_event("error", {"message": "Request must include a non-empty messages array."}).encode("utf-8")
+                yield b"data: [DONE]\n\n"
+                return
+            base_url = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip("/")
+            model = payload.get("model") or os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
+            body = json.dumps({
+                "model": model,
+                "messages": messages,
+                "stream": True,
+                "temperature": payload.get("temperature", 0.3),
+            }).encode("utf-8")
+            request = urllib.request.Request(
+                base_url + "/v1/chat/completions",
+                data=body,
+                headers={
+                    "Authorization": "Bearer " + api_key,
+                    "Content-Type": "application/json",
+                    "Accept": "text/event-stream",
+                },
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=180) as response:
+                    for chunk in response:
+                        yield chunk
+            except Exception as error:
+                yield sse_event("error", {"message": str(error)}).encode("utf-8")
+            yield b"data: [DONE]\n\n"
+
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, _format, *args):
+                return
+
+            def send_bytes(self, status, content_type, body):
+                self.send_response(status)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_OPTIONS(self):
+                self.send_response(204)
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+                self.send_header("Access-Control-Allow-Headers", "content-type")
+                self.end_headers()
+
+            def do_GET(self):
+                if self.path == "/api/health":
+                    body = json.dumps({
+                        "ok": True,
+                        "runtime": "portable-python-http",
+                        "provider": "deepseek",
+                        "hasApiKey": bool(os.environ.get("DEEPSEEK_API_KEY", "").strip()),
+                    }).encode("utf-8")
+                    self.send_bytes(200, "application/json; charset=utf-8", body)
+                    return
+                path = self.path.split("?", 1)[0]
+                if path == "/":
+                    path = "/index.html"
+                target = (WEB_ROOT / path.lstrip("/")).resolve()
+                if WEB_ROOT not in target.parents and target != WEB_ROOT:
+                    self.send_bytes(403, "text/plain; charset=utf-8", b"Forbidden")
+                    return
+                if not target.is_file():
+                    self.send_bytes(404, "text/plain; charset=utf-8", b"Not found")
+                    return
+                mime = "text/html; charset=utf-8" if target.suffix == ".html" else "text/plain; charset=utf-8"
+                if target.suffix == ".css":
+                    mime = "text/css; charset=utf-8"
+                if target.suffix == ".js":
+                    mime = "text/javascript; charset=utf-8"
+                self.send_bytes(200, mime, target.read_bytes())
+
+            def do_POST(self):
+                if self.path.split("?", 1)[0] != "/api/deepseek/stream":
+                    self.send_bytes(404, "text/plain; charset=utf-8", b"Not found")
+                    return
+                length = int(self.headers.get("Content-Length") or "0")
+                payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Cache-Control", "no-cache")
+                self.end_headers()
+                for chunk in deepseek_stream(payload):
+                    self.wfile.write(chunk)
+                    self.wfile.flush()
 
 
         def main():
-            parser = argparse.ArgumentParser(description="Portable Flovera artifact demo agent")
-            parser.add_argument("--input", default="data/input.json")
-            parser.add_argument("--output", default="outputs/result.json")
+            parser = argparse.ArgumentParser(description="Portable Flovera workspace chat server")
+            parser.add_argument("--host", default="127.0.0.1")
+            parser.add_argument("--port", type=int, default=8765)
+            parser.add_argument("--self-test", action="store_true")
             args = parser.parse_args()
-
-            payload = load_payload(args.input)
-            text = str(payload.get("input", ""))
-            result = summarize(text)
-            result["input"] = text
-
-            output_dir = os.path.dirname(args.output)
-            if output_dir:
-                os.makedirs(output_dir, exist_ok=True)
-            with open(args.output, "w", encoding="utf-8") as handle:
-                json.dump(result, handle, indent=2, ensure_ascii=False)
-            print("Wrote " + args.output)
+            if args.self_test:
+                print("portable-python-http ok")
+                print(str(WEB_ROOT / "index.html"))
+                return
+            server = ThreadingHTTPServer((args.host, args.port), Handler)
+            print("Serving http://" + args.host + ":" + str(args.port))
+            server.serve_forever()
 
 
         if __name__ == "__main__":
             main()
       """.trimIndent(),
-      overwrite = false,
-      createAutoSnapshot = false,
     )
-    writeFile(
+    writeWorkspaceArtifactDemoFile(
       path = "agent-demo/src/web/index.html",
       content = """
         <!doctype html>
@@ -355,51 +462,51 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
           <head>
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1">
-            <title>Flovera Portable Agent Demo</title>
+            <title>Flovera Workspace Chat</title>
             <link rel="stylesheet" href="styles.css">
           </head>
           <body>
-            <main>
-              <section class="intro">
-                <p class="eyebrow">Portable workspace artifact</p>
-                <h1>Flovera Agent Demo</h1>
-                <p>This project runs as a normal Python CLI outside Flovera and as a declared artifact action inside Flovera.</p>
-              </section>
-
-              <section class="workbench">
-                <label for="prompt">Input</label>
-                <textarea id="prompt">Summarize how Flovera workspace artifacts connect preview UI to bounded Python jobs.</textarea>
-                <div class="actions">
-                  <button id="run">Run Agent</button>
-                  <button id="cancel" disabled>Cancel</button>
+            <main class="shell">
+              <header class="topbar">
+                <div>
+                  <p class="eyebrow">Workspace AI App</p>
+                  <h1>Flovera Workspace Chat</h1>
                 </div>
-                <p id="status">Ready</p>
-                <pre id="result">{}</pre>
-              </section>
-
-              <section class="fallback">
-                <h2>Outside Flovera</h2>
-                <code>python src/agent.py --input data/input.json --output outputs/result.json</code>
-              </section>
+                <label class="model">
+                  <span>Model</span>
+                  <input id="model" value="deepseek-v4-pro" autocomplete="off">
+                </label>
+              </header>
+              <section id="messages" class="messages" aria-live="polite"></section>
+              <form id="composer" class="composer">
+                <textarea id="prompt" placeholder="Ask DeepSeek from this workspace app"></textarea>
+                <div class="composerBar">
+                  <span id="status">Checking runtime...</span>
+                  <div class="buttons">
+                    <button id="clear" type="button">Clear</button>
+                    <button id="send" type="submit">Send</button>
+                  </div>
+                </div>
+              </form>
             </main>
             <script src="app.js"></script>
           </body>
         </html>
       """.trimIndent(),
-      overwrite = false,
-      createAutoSnapshot = false,
     )
-    writeFile(
+    writeWorkspaceArtifactDemoFile(
       path = "agent-demo/src/web/styles.css",
       content = """
         :root {
           color-scheme: light;
           --bg: #f4f7f7;
-          --ink: #142223;
-          --muted: #5e6f73;
-          --line: #c9d7d9;
-          --accent: #2f6f73;
+          --ink: #172126;
+          --muted: #607077;
+          --line: #cfd9dc;
+          --accent: #25636f;
           --surface: #ffffff;
+          --assistant: #eef4f5;
+          --user: #dcefe8;
         }
 
         * {
@@ -414,14 +521,23 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
           color: var(--ink);
         }
 
-        main {
-          width: min(920px, calc(100vw - 32px));
+        .shell {
+          display: grid;
+          grid-template-rows: auto 1fr auto;
+          width: min(980px, 100vw);
+          min-height: 100vh;
           margin: 0 auto;
-          padding: 28px 0 40px;
+          padding: 18px;
+          gap: 14px;
         }
 
-        .intro {
-          margin-bottom: 18px;
+        .topbar {
+          display: flex;
+          align-items: end;
+          justify-content: space-between;
+          gap: 14px;
+          border-bottom: 1px solid var(--line);
+          padding-bottom: 12px;
         }
 
         .eyebrow {
@@ -432,7 +548,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
           text-transform: uppercase;
         }
 
-        h1, h2, p {
+        h1, p {
           margin-top: 0;
         }
 
@@ -441,23 +557,51 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
           font-size: 30px;
         }
 
-        .workbench, .fallback {
-          border: 1px solid var(--line);
-          border-radius: 8px;
-          background: var(--surface);
-          padding: 16px;
-        }
-
-        label {
-          display: block;
-          margin-bottom: 8px;
+        .model {
+          display: grid;
+          gap: 6px;
+          width: min(280px, 45vw);
+          color: var(--muted);
+          font-size: 12px;
           font-weight: 700;
         }
 
-        textarea {
+        .messages {
+          display: grid;
+          gap: 10px;
+          overflow: auto;
+          align-content: start;
+          padding: 2px 0;
+        }
+
+        .message {
+          max-width: 86%;
+          white-space: pre-wrap;
+          word-break: break-word;
+          border-radius: 8px;
+          padding: 10px 12px;
+          line-height: 1.45;
+          border: 1px solid var(--line);
+        }
+
+        .message.user {
+          justify-self: end;
+          background: var(--user);
+        }
+
+        .message.assistant {
+          justify-self: start;
+          background: var(--assistant);
+        }
+
+        .message.error {
+          justify-self: start;
+          background: #fff1f0;
+          border-color: #e3aaa5;
+        }
+
+        textarea, input {
           width: 100%;
-          min-height: 140px;
-          resize: vertical;
           border: 1px solid var(--line);
           border-radius: 6px;
           padding: 10px;
@@ -465,10 +609,35 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
           font: inherit;
         }
 
-        .actions {
-          display: flex;
+        textarea {
+          min-height: 92px;
+          max-height: 180px;
+          resize: vertical;
+        }
+
+        input {
+          min-height: 38px;
+        }
+
+        .composer {
+          display: grid;
           gap: 10px;
-          margin: 12px 0;
+          border-top: 1px solid var(--line);
+          padding-top: 12px;
+        }
+
+        .composerBar {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 12px;
+          color: var(--muted);
+          font-size: 14px;
+        }
+
+        .buttons {
+          display: flex;
+          gap: 8px;
         }
 
         button {
@@ -481,153 +650,307 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
           font-weight: 700;
         }
 
+        #clear {
+          border-color: var(--line);
+          background: var(--surface);
+          color: var(--ink);
+        }
+
         button:disabled {
           border-color: var(--line);
           background: #dce5e6;
           color: var(--muted);
         }
 
-        #status {
-          margin-bottom: 10px;
-          color: var(--muted);
-        }
+        @media (max-width: 640px) {
+          .shell {
+            padding: 14px;
+          }
 
-        pre, code {
-          white-space: pre-wrap;
-          word-break: break-word;
-          border-radius: 6px;
-          background: #eef4f4;
-          padding: 12px;
-        }
+          .topbar {
+            display: grid;
+            align-items: stretch;
+          }
 
-        pre {
-          min-height: 120px;
-        }
+          .model {
+            width: 100%;
+          }
 
-        .fallback {
-          margin-top: 14px;
+          h1 {
+            font-size: 25px;
+          }
+
+          .composerBar {
+            display: grid;
+          }
+
+          .buttons {
+            justify-content: end;
+          }
         }
       """.trimIndent(),
-      overwrite = false,
-      createAutoSnapshot = false,
     )
-    writeFile(
+    writeWorkspaceArtifactDemoFile(
       path = "agent-demo/src/web/app.js",
       content = """
-        const runButton = document.querySelector("#run");
-        const cancelButton = document.querySelector("#cancel");
+        const form = document.querySelector("#composer");
+        const sendButton = document.querySelector("#send");
+        const clearButton = document.querySelector("#clear");
         const promptInput = document.querySelector("#prompt");
+        const modelInput = document.querySelector("#model");
         const statusNode = document.querySelector("#status");
-        const resultNode = document.querySelector("#result");
+        const messagesNode = document.querySelector("#messages");
 
-        let activeJobId = "";
-        let pollTimer = 0;
+        const storageKey = "flovera-workspace-chat-messages";
+        const endpoints = detectEndpoints();
+        let messages = loadMessages();
+        let busy = false;
 
-        function setStatus(message) {
-          statusNode.textContent = message;
+        function detectEndpoints() {
+          if (location.pathname.indexOf("/__flovera__/workspace/") === 0) {
+            return {
+              health: "/__flovera__/api/health",
+              stream: "/__flovera__/api/deepseek/stream"
+            };
+          }
+          if (location.protocol === "file:") {
+            return {
+              health: "http://127.0.0.1:8765/api/health",
+              stream: "http://127.0.0.1:8765/api/deepseek/stream"
+            };
+          }
+          return {
+            health: "/api/health",
+            stream: "/api/deepseek/stream"
+          };
         }
 
-        function show(value) {
-          resultNode.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
-        }
-
-        function parseBridgeResult(text) {
+        function loadMessages() {
           try {
-            return JSON.parse(text);
+            const parsed = JSON.parse(localStorage.getItem(storageKey) || "[]");
+            return Array.isArray(parsed) ? parsed : [];
           } catch (error) {
-            return { status: "error", error: String(error), raw: text };
+            return [];
           }
         }
 
-        function stopPolling() {
-          if (pollTimer) {
-            clearInterval(pollTimer);
-            pollTimer = 0;
-          }
-          cancelButton.disabled = true;
+        function saveMessages() {
+          localStorage.setItem(storageKey, JSON.stringify(messages.slice(-40)));
         }
 
-        function renderJob(job) {
-          setStatus("Job " + job.status);
-          show({
-            id: job.id,
-            status: job.status,
-            stdout: job.stdout,
-            stderr: job.stderr,
-            exitCode: job.exitCode,
-            outputs: job.outputPaths,
-            error: job.error
-          });
-          if (["succeeded", "failed", "timeout", "cancelled", "interrupted", "missing", "error"].includes(job.status)) {
-            stopPolling();
+        function setStatus(text) {
+          statusNode.textContent = text;
+        }
+
+        function addMessage(role, content, className) {
+          const message = { role: role, content: content };
+          messages.push(message);
+          saveMessages();
+          renderMessages();
+          return message;
+        }
+
+        function renderMessages() {
+          messagesNode.innerHTML = "";
+          const visible = messages.length ? messages : [
+            { role: "assistant", content: "Ready for a workspace chat." }
+          ];
+          for (const message of visible) {
+            const node = document.createElement("div");
+            node.className = "message " + (message.role === "user" ? "user" : "assistant");
+            if (message.role === "error") node.className = "message error";
+            node.textContent = message.content;
+            messagesNode.appendChild(node);
+          }
+          messagesNode.scrollTop = messagesNode.scrollHeight;
+        }
+
+        function updateLastAssistant(text) {
+          const last = messages[messages.length - 1];
+          if (last && last.role === "assistant") {
+            last.content = text;
+          } else {
+            messages.push({ role: "assistant", content: text });
+          }
+          saveMessages();
+          renderMessages();
+        }
+
+        async function checkHealth() {
+          try {
+            const response = await fetch(endpoints.health, { cache: "no-store" });
+            const health = await response.json();
+            modelInput.value = health.model || modelInput.value;
+            setStatus(health.hasApiKey ? "Connected" : "Missing DeepSeek API key");
+          } catch (error) {
+            setStatus("Local HTTP runtime unavailable");
           }
         }
 
-        function pollJob() {
-          if (!activeJobId || !window.Flovera) return;
-          renderJob(parseBridgeResult(window.Flovera.getJob(activeJobId)));
+        function parseSseEvents(buffer, onData, onError) {
+          const events = buffer.split("\n\n");
+          const rest = events.pop() || "";
+          for (const eventText of events) {
+            const lines = eventText.split("\n");
+            let event = "message";
+            let data = "";
+            for (const line of lines) {
+              if (line.indexOf("event:") === 0) event = line.slice(6).trim();
+              if (line.indexOf("data:") === 0) data += line.slice(5).trim();
+            }
+            if (!data) continue;
+            if (data === "[DONE]") {
+              onData("[DONE]");
+              continue;
+            }
+            try {
+              const parsed = JSON.parse(data);
+              if (event === "error") {
+                onError(parsed.message || JSON.stringify(parsed));
+              } else {
+                onData(parsed);
+              }
+            } catch (error) {
+              onData(data);
+            }
+          }
+          return rest;
         }
 
-        runButton.addEventListener("click", () => {
-          if (!window.Flovera || !window.Flovera.runAction) {
-            setStatus("Outside Flovera: run the README command in a Python environment.");
-            show("python src/agent.py --input data/input.json --output outputs/result.json");
-            return;
+        function deltaFromDeepSeek(payload) {
+          if (typeof payload === "string") return payload === "[DONE]" ? "" : payload;
+          const choice = payload.choices && payload.choices[0];
+          const delta = choice && choice.delta;
+          if (!delta) return "";
+          return delta.content || delta.reasoning_content || "";
+        }
+
+        async function sendMessage(text) {
+          if (busy) return;
+          busy = true;
+          sendButton.disabled = true;
+          addMessage("user", text);
+          messages.push({ role: "assistant", content: "" });
+          renderMessages();
+          let assistantText = "";
+          setStatus("Streaming...");
+          try {
+            const response = await fetch(endpoints.stream, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                model: modelInput.value.trim(),
+                messages: messages.filter(function (item) {
+                  return item.role === "user" || item.role === "assistant";
+                }).filter(function (item) {
+                  return item.content.trim();
+                }),
+                temperature: 0.3
+              })
+            });
+            if (!response.ok) throw new Error("HTTP " + response.status);
+            if (!response.body || !response.body.getReader) {
+              const textBody = await response.text();
+              updateLastAssistant(textBody);
+              return;
+            }
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = "";
+            while (true) {
+              const chunk = await reader.read();
+              if (chunk.done) break;
+              buffer += decoder.decode(chunk.value, { stream: true });
+              buffer = parseSseEvents(buffer, function (payload) {
+                const delta = deltaFromDeepSeek(payload);
+                if (!delta) return;
+                assistantText += delta;
+                updateLastAssistant(assistantText);
+              }, function (message) {
+                throw new Error(message);
+              });
+            }
+            setStatus("Done");
+          } catch (error) {
+            const message = error.message || String(error);
+            messages[messages.length - 1] = { role: "error", content: message };
+            saveMessages();
+            renderMessages();
+            setStatus("Error");
+          } finally {
+            busy = false;
+            sendButton.disabled = false;
           }
-          const payload = JSON.stringify({ input: promptInput.value });
-          const job = parseBridgeResult(window.Flovera.runAction("summarize", payload));
-          activeJobId = job.id || "";
-          renderJob(job);
-          cancelButton.disabled = !activeJobId;
-          stopPolling();
-          if (activeJobId) {
-            cancelButton.disabled = false;
-            pollTimer = setInterval(pollJob, 750);
-          }
+        }
+
+        form.addEventListener("submit", function (event) {
+          event.preventDefault();
+          const text = promptInput.value.trim();
+          if (!text) return;
+          promptInput.value = "";
+          sendMessage(text);
         });
 
-        cancelButton.addEventListener("click", () => {
-          if (!activeJobId || !window.Flovera) return;
-          renderJob(parseBridgeResult(window.Flovera.cancelJob(activeJobId)));
+        clearButton.addEventListener("click", function () {
+          messages = [];
+          saveMessages();
+          renderMessages();
+          setStatus("Cleared");
         });
+
+        renderMessages();
+        checkHealth();
       """.trimIndent(),
-      overwrite = false,
-      createAutoSnapshot = false,
     )
-    writeFile(
+    writeWorkspaceArtifactDemoFile(
       path = "agent-demo/flovera.app.json",
       content = """
         {
           "schema": "https://flovera.dev/schemas/app.v1.json",
           "schemaVersion": 1,
-          "name": "Flovera Portable Agent Demo",
+          "name": "Flovera Workspace Chat Demo",
           "kind": "interactive",
           "entrypoints": {
             "preview": {
-              "kind": "webview",
+              "kind": "local_http",
               "path": "src/web/index.html",
-              "fallback": "open src/web/index.html"
+              "fallback": "python src/server.py --host 127.0.0.1 --port 8765"
             },
-            "cli": {
-              "kind": "python",
-              "command": "python src/agent.py --input data/input.json --output outputs/result.json"
+            "server": {
+              "kind": "python_http",
+              "command": "python src/server.py --host 127.0.0.1 --port 8765"
             }
           },
-          "actions": [
-            {
-              "id": "summarize",
-              "label": "Summarize",
-              "kind": "python_job",
-              "command": "python src/agent.py --input data/input.json --output outputs/result.json",
-              "inputPath": "data/input.json",
-              "timeoutMs": 120000,
-              "outputs": ["outputs/result.json"]
-            }
-          ],
-          "outputs": ["outputs/result.json"]
+          "actions": [],
+          "outputs": []
         }
       """.trimIndent(),
-      overwrite = false,
+    )
+  }
+
+  private fun writeWorkspaceArtifactDemoFile(path: String, content: String) {
+    val current = readFile(path)
+    val shouldOverwrite = current.startsWith("File does not exist:") ||
+      current.contains("Flovera Portable Agent Demo") ||
+      current.contains("Flovera Agent Demo") ||
+      current.contains("Flovera Code Agent Demo") ||
+      current.contains("bounded Python jobs") ||
+      current.contains("def summarize(text):") ||
+      current.contains("No input was provided.") ||
+      current.contains("The demo only uses the Python standard library.") ||
+      current.contains("Inspect agent-demo and improve the demo README") ||
+      current.contains("\"wordCount\"") ||
+      current.contains("Set DEEPSEEK_API_KEY to call DeepSeek") ||
+      current.contains("flovera-code-agent-messages") ||
+      current.contains("\"id\": \"run-code-agent\"") ||
+      current.contains("runAction(\"run-code-agent\"") ||
+      current.contains(".workbench") ||
+      current.contains("runAction(\"summarize\"") ||
+      current.contains("\"id\": \"summarize\"")
+    writeFile(
+      path = path,
+      content = content,
+      overwrite = shouldOverwrite,
       createAutoSnapshot = false,
     )
   }
@@ -1566,11 +1889,11 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
   ): WorkspaceArtifactEntrypoint? {
     val preview = manifest.entrypoints["preview"] ?: return null
     val diagnosticPath = "${relativeToRoot(File(artifactRoot, WORKSPACE_ARTIFACT_MANIFEST_NAME))}.entrypoints.preview"
-    if (preview.kind != WORKSPACE_ARTIFACT_PREVIEW_WEBVIEW) {
+    if (preview.kind !in WORKSPACE_ARTIFACT_PREVIEW_KINDS) {
       diagnostics += WorkspaceArtifactDiagnostic(
         level = "error",
         path = diagnosticPath,
-        message = "Unsupported preview kind '${preview.kind}'. Supported preview kinds: $WORKSPACE_ARTIFACT_PREVIEW_WEBVIEW.",
+        message = "Unsupported preview kind '${preview.kind}'. Supported preview kinds: ${WORKSPACE_ARTIFACT_PREVIEW_KINDS.joinToString(", ")}.",
       )
       return null
     }
@@ -1594,7 +1917,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
       diagnostics += WorkspaceArtifactDiagnostic(
         level = "error",
         path = "$diagnosticPath.path",
-        message = "WebView preview path must be an HTML file: ${preview.path}",
+        message = "Preview path must be an HTML file: ${preview.path}",
       )
       return null
     }
@@ -1663,6 +1986,8 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
       cwd = cwd,
       inputPath = inputPath,
       timeoutMs = action.timeoutMs.coerceIn(WORKSPACE_ARTIFACT_MIN_TIMEOUT_MS, WORKSPACE_ARTIFACT_MAX_TIMEOUT_MS),
+      networkEnabled = action.networkEnabled,
+      environment = action.environment.filterKeys { it.isNotBlank() },
       outputs = outputs,
     )
   }
@@ -1777,6 +2102,8 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
   private companion object {
     const val WORKSPACE_ARTIFACT_MANIFEST_NAME = "flovera.app.json"
     const val WORKSPACE_ARTIFACT_PREVIEW_WEBVIEW = "webview"
+    const val WORKSPACE_ARTIFACT_PREVIEW_LOCAL_HTTP = "local_http"
+    val WORKSPACE_ARTIFACT_PREVIEW_KINDS = setOf(WORKSPACE_ARTIFACT_PREVIEW_WEBVIEW, WORKSPACE_ARTIFACT_PREVIEW_LOCAL_HTTP)
     const val WORKSPACE_ARTIFACT_ACTION_PYTHON_JOB = "python_job"
     const val MAX_WORKSPACE_ARTIFACT_MANIFESTS = 200
     const val WORKSPACE_ARTIFACT_MIN_TIMEOUT_MS = 1_000
@@ -2132,8 +2459,21 @@ data class FloveraCapabilities(
   val artifactInspectFormats: List<String> = listOf("json", "html", "docx", "xlsx", "pdf", "png", "jpg", "jpeg", "webp", "text"),
   val workspaceArtifacts: Boolean = true,
   val workspaceArtifactManifestName: String = "flovera.app.json",
-  val workspaceArtifactPreviewKinds: List<String> = listOf("webview"),
+  val workspaceArtifactPreviewKinds: List<String> = listOf("webview", "local_http"),
+  val workspaceArtifactPreferredPreviewKind: String = "local_http",
+  val workspaceArtifactLocalHttp: Boolean = true,
+  val workspaceArtifactLocalHttpRoutes: List<String> = listOf(
+    "/__flovera__/workspace/<path>",
+    "/__flovera__/api/health",
+    "/__flovera__/api/deepseek/stream",
+  ),
   val workspaceArtifactActionKinds: List<String> = listOf("python_job"),
+  val workspaceArtifactPythonJobNetwork: Boolean = true,
+  val workspaceArtifactEnvironmentRefs: List<String> = listOf(
+    "provider:deepseek.apiKey",
+    "provider:deepseek.baseUrl",
+    "provider:deepseek.model",
+  ),
   val workspaceArtifactJobsPath: String = ".flovera/jobs",
   val workspaceArtifactBridgeCalls: List<String> = listOf("runAction", "getJob", "cancelJob"),
   val workspaceArtifactJobUi: Boolean = true,

@@ -105,31 +105,46 @@ hardcoding how Python is launched.
 ## Connection Model
 
 Do not make each artifact invent its own JSON handoff protocol. Flovera owns the
-connection layer.
+connection layer, and the primary connection surface for interactive web apps is
+standard local HTTP.
 
 ```text
-Preview surface or Flovera UI
-  -> action id and input
-  -> Flovera runtime
-  -> bounded job runner
-  -> stdout/stderr/result/artifacts
-  -> preview surface and session
+WebView page
+  -> http://127.0.0.1:<port>
+  -> Flovera local HTTP runtime
+  -> app-owned HTTP/SSE endpoints or bounded action runner
+  -> streamed events, JSON, stdout/stderr/result/artifacts
+  -> preview surface and workspace files
 ```
 
-For a WebView preview, the first adapter can be a controlled native bridge:
+For a WebView preview, prefer `entrypoints.preview.kind = "local_http"`:
+
+```json
+{
+  "entrypoints": {
+    "preview": {
+      "kind": "local_http",
+      "path": "src/web/index.html",
+      "fallback": "python src/server.py --host 127.0.0.1 --port 8765"
+    }
+  }
+}
+```
+
+The page is ordinary browser code. It can call:
 
 ```js
-const result = await window.Flovera.runAction("run-agent", {
-  input: "Analyze README.md"
+const response = await fetch("/__flovera__/api/deepseek/stream", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ messages })
 })
 ```
 
-The bridge looks up `run-agent` in `flovera.app.json`, starts the declared
-bounded job, and returns job events or the final result.
-
-Future adapters may expose the same action system through a local HTTP runtime
-server, but the product contract stays the same: artifacts call named actions,
-and Flovera owns lifecycle, permissions, timeout, logs, and recovery.
+The response uses `text/event-stream`, so the page can stream model text without
+a private JavaScript bridge. The old `window.Flovera.runAction/getJob/cancelJob`
+bridge remains a legacy bounded-job adapter, not the default path for new chat
+or web app demos.
 
 ## Runtime Boundaries
 
@@ -223,42 +238,71 @@ Acceptance:
 - App restart explains interrupted jobs instead of pretending they completed.
 - The user or agent can rerun the same action with the same input.
 
-### L4: Preview-To-Action Bridge
+### L4: Local HTTP Preview Runtime
 
-- Expose a narrow WebView bridge for manifest actions:
-  - `window.Flovera.runAction(id, input)`
-  - `window.Flovera.getJob(jobId)`
-  - `window.Flovera.cancelJob(jobId)`
-- Events may be added after the polling/query path is stable.
-- Bridge calls must require a valid workspace artifact context and action id.
+- Serve `local_http` preview entrypoints from `http://127.0.0.1:<port>`.
+- Serve workspace static files under `/__flovera__/workspace/<path>`.
+- Expose app-owned HTTP endpoints under `/__flovera__/api/`.
+- First streaming endpoint: `POST /__flovera__/api/deepseek/stream`.
+- Keep the legacy WebView bridge only for bounded-job compatibility.
 
 Acceptance:
 
-- A generated preview can call a declared action without hardcoding Python paths.
-- Unsupported action ids fail with explicit errors.
-- Pages still work outside Flovera through documented fallback UI.
+- A generated preview can call a standard HTTP/SSE endpoint without
+  `window.Flovera`.
+- Missing provider keys fail through a visible HTTP/SSE error.
+- Pages still work outside Flovera through a documented local server command.
 
 ### L5: Product Validation Demo
 
 - Rebuild the existing `agent-app` as a portable artifact:
   - standard CLI path outside Flovera;
-  - manifest action inside Flovera;
+  - `local_http` preview inside Flovera;
   - WebView or other preview as the editable interaction surface;
   - outputs in standard files.
 - Verify the loop:
   1. user opens preview;
-  2. user starts action;
-  3. action runs Python;
-  4. output appears in the preview or session;
+  2. user sends a message or starts an interaction;
+  3. the preview calls the local HTTP/SSE runtime;
+  4. streamed output appears in the preview or session;
   5. workspace file changes are visible;
   6. user asks Flovera to modify the artifact;
-  7. Flovera edits and reruns the action.
+  7. Flovera edits and reopens or reruns the artifact.
 
 Acceptance:
 
 - The demo is useful inside Flovera.
 - The demo is still understandable and runnable after export.
 - No project-specific JSON handoff is required for the main flow.
+
+## Phase 2 Hardening Scope
+
+Hardening after L4/L5 is about the workspace app runtime base, not about adding
+more features to the seeded demo. The seeded demo is only a probe for the common
+path:
+
+```text
+Workspace HTML/WebView -> localhost HTTP API -> SSE stream -> optional Python/export path
+```
+
+The runtime base should be verified along these axes:
+
+| Area | What must be proven |
+| --- | --- |
+| Local HTTP server | WebView can reach `127.0.0.1:<port>`; static files, API routes, status codes, CORS, cache policy, and `.flovera` denial are stable. |
+| SSE streaming | Chunk boundaries, empty deltas, error events, timeouts, connection aborts, and `[DONE]` are handled without corrupting the UI state. |
+| WebView fetch | Workspace pages can use standard `fetch` against localhost routes without depending on `window.Flovera`. |
+| Python HTTP app shape | A generated app can expose a normal Python local server outside Flovera while using app-owned localhost routes inside Flovera. |
+| Lifecycle | Activity recreation, app background/foreground, workspace switching, and HTML switching do not leave stale ports or dead selected URLs. |
+| Optional live provider smoke | Normal verification must not need API keys; when a key is supplied, a live DeepSeek SSE smoke test proves the real provider route. |
+
+UI should reflect the same boundary:
+
+- `Workspace Apps` means entries declared by `flovera.app.json`, including
+  `local_http` previews.
+- `HTML Files` means ordinary HTML file previews.
+- The seeded `agent-demo` must not look hardcoded; it is just the default
+  workspace app manifest shipped with a new workspace.
 
 ## Non-Goals
 
@@ -275,11 +319,11 @@ The first product-ready slice should be:
 
 ```text
 manifest discovery
-  + webview preview entrypoint
-  + python_job action
-  + persisted job status
-  + minimal WebView runAction bridge
-  + one portable agent demo
+  + local_http preview entrypoint
+  + localhost static file server
+  + app-owned HTTP/SSE DeepSeek endpoint
+  + one portable workspace chat demo
+  + legacy python_job and WebView bridge compatibility
 ```
 
 This is enough to validate whether Flovera can generate and operate a real

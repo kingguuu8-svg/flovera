@@ -355,13 +355,13 @@ class AgentScreenInteractionInstrumentedTest {
     }
 
     composeRule.onNodeWithText("Agent").assertIsDisplayed()
-    composeRule.onNodeWithText("HTML").assertIsDisplayed()
+    composeRule.onNodeWithText("Preview").assertIsDisplayed()
     assertEquals(0, composeRule.onAllNodesWithText("Menu").fetchSemanticsNodes().size)
 
     composeRule.onNodeWithText("Agent").performClick()
     composeRule.onNodeWithContentDescription("More").performClick()
     composeRule.onNodeWithText("Sessions").assertIsDisplayed()
-    composeRule.onNodeWithText("Select HTML").assertIsDisplayed()
+    composeRule.onNodeWithText("Open Preview").assertIsDisplayed()
     composeRule.onNodeWithText("Files").assertIsDisplayed()
     composeRule.onNodeWithText("AGENT.md").assertIsDisplayed()
     composeRule.onNodeWithText("Settings").assertIsDisplayed()
@@ -377,8 +377,10 @@ class AgentScreenInteractionInstrumentedTest {
       AgentScreen(controller)
     }
 
-    composeRule.onNodeWithContentDescription("Open HTML quick picker").performClick()
-    composeRule.onNodeWithText("index.html", substring = true).performClick()
+    composeRule.onNodeWithContentDescription("Open workspace apps and previews").performClick()
+    composeRule.onNodeWithText("Workspace Apps").assertIsDisplayed()
+    composeRule.onNodeWithText("HTML Files").assertIsDisplayed()
+    composeRule.onNodeWithText("index.html").performClick()
 
     composeRule.runOnIdle {
       assertEquals("index.html", controller.state.value.selectedHtmlPath)

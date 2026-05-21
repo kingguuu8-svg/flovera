@@ -16,6 +16,9 @@ import com.flovera.app.workspace.WorkspaceController
 import com.flovera.app.workspace.FloveraSettingsView
 import com.flovera.app.workspace.WorkspaceManager
 import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
+import java.nio.charset.StandardCharsets
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -112,41 +115,115 @@ class WorkspaceFileTreeInstrumentedTest {
     val artifact = workspace.listWorkspaceArtifacts().single { it.manifestPath == "agent-demo/flovera.app.json" }
 
     assertTrue(artifact.valid)
-    assertEquals("Flovera Portable Agent Demo", artifact.name)
+    assertEquals("Flovera Workspace Chat Demo", artifact.name)
+    assertEquals("local_http", artifact.preview?.kind)
     assertEquals("agent-demo/src/web/index.html", artifact.preview?.path)
-    assertEquals("summarize", artifact.actions.single().id)
-    assertTrue(workspace.readFile("agent-demo/README.md").contains("Run Outside Flovera"))
+    assertTrue(artifact.actions.isEmpty())
+    assertTrue(workspace.readFile("agent-demo/README.md").contains("standard SSE"))
+    assertTrue(workspace.readFile("agent-demo/src/web/app.js").contains("/__flovera__/api/deepseek/stream"))
+    assertFalse(workspace.readFile("agent-demo/src/web/app.js").contains("window.Flovera.runAction"))
 
     val outsideResult = FloveraPythonRuntime(workspace, networkEnabled = false).runScript(
-      scriptPath = "src/agent.py",
-      argv = listOf("--input", "data/input.json", "--output", "outputs/result.json"),
+      scriptPath = "src/server.py",
+      argv = listOf("--self-test"),
       cwd = "agent-demo",
       timeoutMs = 30_000,
       sessionId = "portable-demo-outside",
     )
 
     assertEquals(0, outsideResult.exitCode)
-    assertTrue(workspace.readFile("agent-demo/outputs/result.json").contains("wordCount"))
+    assertTrue(outsideResult.stdout.contains("portable-python-http ok"))
   }
 
   @Test
-  fun controllerRunsSeedArtifactActionFromSelectedPreview() = runBlocking {
+  fun controllerServesSeedArtifactThroughLocalHttpPreview() {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
-    val workspaceId = "controller-artifact-${System.currentTimeMillis()}"
+    val workspaceId = "controller-local-http-${System.currentTimeMillis()}"
     val settingsStore = SettingsStore(context, File(context.filesDir, "$workspaceId-settings.json")).also {
-      it.save(AppSettings(activeWorkspaceId = workspaceId))
+      it.save(AppSettings(activeWorkspaceId = workspaceId, provider = "deepseek", model = "deepseek-v4-pro"))
     }
-    val workspace = WorkspaceManager(context, workspaceId)
     val controller = AgentController(context, settingsStore = settingsStore).also {
       it.refreshWorkspaceFiles()
       it.selectHtmlFile("agent-demo/src/web/index.html")
     }
-    val queued = JSONObject(
-      controller.runWorkspaceArtifactAction(
-        "summarize",
-        """{"input":"Show the inside Flovera artifact loop."}""",
-      ),
+
+    val selectedUrl = controller.state.value.selectedHtmlUrl.orEmpty()
+    assertTrue(selectedUrl.startsWith("http://127.0.0.1:"))
+    assertTrue(selectedUrl.contains("/__flovera__/workspace/agent-demo/src/web/index.html"))
+
+    val html = URL(selectedUrl).readText()
+    assertTrue(html.contains("Flovera Workspace Chat"))
+
+    val origin = selectedUrl.substringBefore("/__flovera__/workspace/")
+    val health = JSONObject(URL("$origin/__flovera__/api/health").readText())
+    assertEquals("flovera-local-http", health.getString("runtime"))
+    assertEquals("deepseek-v4-pro", health.getString("model"))
+    assertFalse(health.getBoolean("hasApiKey"))
+
+    val connection = (URL("$origin/__flovera__/api/deepseek/stream").openConnection() as HttpURLConnection).apply {
+      requestMethod = "POST"
+      doOutput = true
+      setRequestProperty("Content-Type", "application/json")
+    }
+    connection.outputStream.use { stream ->
+      stream.write("""{"messages":[{"role":"user","content":"hello"}]}""".toByteArray(StandardCharsets.UTF_8))
+    }
+    val sse = connection.inputStream.bufferedReader().use { it.readText() }
+    assertTrue(sse.contains("DeepSeek API key is not configured"))
+    assertTrue(sse.contains("[DONE]"))
+  }
+
+  @Test
+  fun artifactPythonJobInjectsDeclaredProviderEnvironment() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspaceId = "controller-artifact-env-${System.currentTimeMillis()}"
+    val settingsStore = SettingsStore(context, File(context.filesDir, "$workspaceId-settings.json")).also {
+      it.save(AppSettings(activeWorkspaceId = workspaceId, provider = "deepseek", model = "deepseek-v4-pro", apiKey = "test-deepseek-key"))
+    }
+    val workspace = WorkspaceManager(context, workspaceId)
+    workspace.writeFile("env-demo/src/web/index.html", "<!doctype html><title>Env Demo</title>", createAutoSnapshot = false)
+    workspace.writeFile(
+      "env-demo/src/env_check.py",
+      """
+        import os
+        print(os.environ.get("DEEPSEEK_API_KEY", "missing"))
+        print(os.environ.get("DEEPSEEK_MODEL", "missing"))
+      """.trimIndent(),
+      createAutoSnapshot = false,
     )
+    workspace.writeFile(
+      "env-demo/flovera.app.json",
+      """
+      {
+        "schema": "https://flovera.dev/schemas/app.v1.json",
+        "name": "env-demo",
+        "kind": "interactive",
+        "entrypoints": {
+          "preview": {
+            "kind": "webview",
+            "path": "src/web/index.html"
+          }
+        },
+        "actions": [
+          {
+            "id": "check-env",
+            "kind": "python_job",
+            "command": "python src/env_check.py",
+            "environment": {
+              "DEEPSEEK_API_KEY": "provider:deepseek.apiKey",
+              "DEEPSEEK_MODEL": "provider:deepseek.model"
+            }
+          }
+        ]
+      }
+      """.trimIndent(),
+      createAutoSnapshot = false,
+    )
+    val controller = AgentController(context, settingsStore = settingsStore).also {
+      it.refreshWorkspaceFiles()
+      it.selectHtmlFile("env-demo/src/web/index.html")
+    }
+    val queued = JSONObject(controller.runWorkspaceArtifactAction("check-env", "{}"))
     val jobId = queued.getString("id")
 
     val finished = withTimeout(10_000) {
@@ -159,26 +236,8 @@ class WorkspaceFileTreeInstrumentedTest {
     }
 
     assertEquals("succeeded", finished.getString("status"))
-    assertEquals(0, finished.getInt("exitCode"))
-    assertTrue(controller.state.value.workspaceArtifactJobs.any { it.id == jobId })
-
-    workspace.editFile(
-      "agent-demo/src/agent.py",
-      "This request asks Flovera to connect a portable preview with a bounded Python action and visible output files.",
-      "Modified rerun marker from the same portable project.",
-    )
-    controller.rerunWorkspaceArtifactJob(jobId)
-    val rerun = withTimeout(10_000) {
-      var current = controller.state.value.workspaceArtifactJobs.first { it.id != jobId }
-      while (current.status in setOf("queued", "running")) {
-        delay(100)
-        current = controller.state.value.workspaceArtifactJobs.first { it.id == current.id }
-      }
-      current
-    }
-
-    assertEquals("succeeded", rerun.status)
-    assertTrue(workspace.readFile("agent-demo/outputs/result.json").contains("Modified rerun marker"))
+    assertTrue(finished.getString("stdout").contains("test-deepseek-key"))
+    assertTrue(finished.getString("stdout").contains("deepseek-v4-pro"))
   }
 
   @Test
@@ -999,6 +1058,8 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"workspaceArtifactManifestName\": \"flovera.app.json\""))
     assertTrue(capabilities.contains("\"workspaceArtifactActionKinds\""))
     assertTrue(capabilities.contains("\"python_job\""))
+    assertTrue(capabilities.contains("\"workspaceArtifactPythonJobNetwork\": true"))
+    assertTrue(capabilities.contains("\"workspaceArtifactEnvironmentRefs\""))
     assertTrue(capabilities.contains("\"workspaceArtifactBridgeCalls\""))
     assertTrue(capabilities.contains("\"runAction\""))
     assertTrue(capabilities.contains("\"workspaceArtifactJobUi\": true"))
@@ -1164,4 +1225,5 @@ class WorkspaceFileTreeInstrumentedTest {
     assertEquals(3, automatic.size)
     assertEquals("three", workspace.restoreSnapshot(automatic.first().id)?.let { workspace.readFile("counter.txt") })
   }
+
 }
