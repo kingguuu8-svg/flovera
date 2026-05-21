@@ -16,6 +16,7 @@ data class WorkspaceSnapshot(
   val selectedHtmlUrl: String?,
   val workspaceRootUrl: String,
   val workspaceArtifacts: List<WorkspaceArtifact>,
+  val workspaceArtifactJobs: List<WorkspaceArtifactJob>,
   val snapshots: List<WorkspaceSnapshotRecord>,
   val settingsProposals: List<WorkspaceSettingsProposal>,
   val controlledToolProposals: List<WorkspaceControlledToolProposal>,
@@ -140,6 +141,10 @@ class WorkspaceController(context: Context, workspaceId: String) {
     return workspace.resolveWorkspaceArtifactAction(previewPath, actionId)
   }
 
+  fun resolveWorkspaceArtifactActionByManifest(manifestPath: String, actionId: String): WorkspaceArtifactActionTarget? {
+    return workspace.resolveWorkspaceArtifactActionByManifest(manifestPath, actionId)
+  }
+
   fun createWorkspaceArtifactJob(target: WorkspaceArtifactActionTarget, inputPath: String = ""): WorkspaceArtifactJob {
     return workspace.createWorkspaceArtifactJob(target, inputPath)
   }
@@ -147,6 +152,8 @@ class WorkspaceController(context: Context, workspaceId: String) {
   fun updateWorkspaceArtifactJob(job: WorkspaceArtifactJob): WorkspaceArtifactJob = workspace.writeWorkspaceArtifactJob(job)
 
   fun readWorkspaceArtifactJob(jobId: String): WorkspaceArtifactJob? = workspace.readWorkspaceArtifactJob(jobId)
+
+  fun listWorkspaceArtifactJobs(): List<WorkspaceArtifactJob> = workspace.listWorkspaceArtifactJobs()
 
   fun workspaceArtifactJobJson(jobId: String): String = workspace.workspaceArtifactJobJson(jobId)
 
@@ -181,6 +188,7 @@ class WorkspaceController(context: Context, workspaceId: String) {
       selectedHtmlUrl = workspace.displayUrl(selectedHtmlPath),
       workspaceRootUrl = workspace.rootUrl(),
       workspaceArtifacts = workspace.listWorkspaceArtifacts(),
+      workspaceArtifactJobs = workspace.listWorkspaceArtifactJobs(),
       snapshots = workspace.listSnapshots(),
       settingsProposals = workspace.listSettingsProposals(),
       controlledToolProposals = workspace.listControlledToolProposals(),

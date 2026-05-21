@@ -18,6 +18,7 @@ import com.flovera.app.session.SessionController
 import com.flovera.app.session.SessionMessage
 import com.flovera.app.workspace.WorkspaceArtifact
 import com.flovera.app.workspace.WorkspaceArtifactActionTarget
+import com.flovera.app.workspace.WorkspaceArtifactJob
 import com.flovera.app.workspace.WorkspaceController
 import com.flovera.app.workspace.WorkspaceControlledToolProposal
 import com.flovera.app.workspace.WorkspaceFileNode
@@ -52,6 +53,7 @@ data class AgentScreenState(
   val workspaceTree: WorkspaceFileNode? = null,
   val htmlFiles: List<String> = emptyList(),
   val workspaceArtifacts: List<WorkspaceArtifact> = emptyList(),
+  val workspaceArtifactJobs: List<WorkspaceArtifactJob> = emptyList(),
   val selectedHtmlPath: String = "",
   val selectedHtmlUrl: String? = null,
   val selectedPreviewPath: String = "",
@@ -141,6 +143,7 @@ class AgentController(
       workspaceTree = workspaceSnapshot.tree,
       htmlFiles = workspaceSnapshot.htmlFiles,
       workspaceArtifacts = workspaceSnapshot.workspaceArtifacts,
+      workspaceArtifactJobs = workspaceSnapshot.workspaceArtifactJobs,
       selectedHtmlPath = workspaceSnapshot.selectedHtmlPath,
       selectedHtmlUrl = workspaceSnapshot.selectedHtmlUrl,
       selectedPreviewPath = workspaceSnapshot.selectedHtmlPath,
@@ -245,6 +248,7 @@ class AgentController(
         workspaceTree = workspaceSnapshot.tree,
         htmlFiles = workspaceSnapshot.htmlFiles,
         workspaceArtifacts = workspaceSnapshot.workspaceArtifacts,
+        workspaceArtifactJobs = workspaceSnapshot.workspaceArtifactJobs,
         selectedHtmlPath = workspaceSnapshot.selectedHtmlPath,
         selectedHtmlUrl = workspaceSnapshot.selectedHtmlUrl,
         selectedPreviewPath = workspaceSnapshot.selectedHtmlPath,
@@ -317,13 +321,17 @@ class AgentController(
     val previewPath = _state.value.selectedPreviewPath.ifBlank { _state.value.selectedHtmlPath }
     val target = workspaceController.resolveWorkspaceArtifactAction(previewPath, trimmedActionId)
       ?: return artifactBridgeError("artifact action not found or ambiguous: $trimmedActionId")
+    return startWorkspaceArtifactAction(target, inputJson)
+  }
+
+  private fun startWorkspaceArtifactAction(target: WorkspaceArtifactActionTarget, inputJson: String): String {
     val inputPath = target.action.inputPath
     val job = workspaceController.createWorkspaceArtifactJob(target, inputPath)
     val runJob = artifactJobScope.launch {
       executeWorkspaceArtifactJob(job.id, target, inputJson)
     }
     artifactRunJobs[job.id] = runJob
-    reportStatus("Artifact job started: ${target.action.id}")
+    refreshWorkspaceState(status = "Artifact job started: ${target.action.id}")
     return workspaceController.workspaceArtifactJobJson(job.id)
   }
 
@@ -342,8 +350,19 @@ class AgentController(
         error = "Cancellation requested by WebView.",
       ),
     )
-    reportStatus("Artifact job cancelled: ${canceled.actionId}")
+    refreshWorkspaceState(status = "Artifact job cancelled: ${canceled.actionId}")
     return workspaceController.workspaceArtifactJobJson(id)
+  }
+
+  fun rerunWorkspaceArtifactJob(jobId: String) {
+    val job = workspaceController.readWorkspaceArtifactJob(jobId) ?: return reportStatus("Artifact job not found")
+    val target = workspaceController.resolveWorkspaceArtifactActionByManifest(job.artifactManifestPath, job.actionId)
+      ?: return reportStatus("Artifact action not found: ${job.actionId}")
+    val inputJson = job.inputPath.takeIf { it.isNotBlank() }?.let { path ->
+      workspaceController.previewTextFile(path).takeUnless { it.startsWith("File does not exist:") }
+    }.orEmpty()
+    startWorkspaceArtifactAction(target, inputJson)
+    refreshWorkspaceState(status = "Artifact job rerun started: ${job.actionId}")
   }
 
   fun renameWorkspacePath(path: String, newName: String) {
@@ -845,6 +864,7 @@ class AgentController(
         workspaceTree = workspaceSnapshot.tree,
         htmlFiles = workspaceSnapshot.htmlFiles,
         workspaceArtifacts = workspaceSnapshot.workspaceArtifacts,
+        workspaceArtifactJobs = workspaceSnapshot.workspaceArtifactJobs,
         selectedHtmlPath = workspaceSnapshot.selectedHtmlPath,
         selectedHtmlUrl = workspaceSnapshot.selectedHtmlUrl,
         selectedPreviewPath = previewPath,

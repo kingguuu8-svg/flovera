@@ -11,11 +11,15 @@ import com.flovera.app.config.AppSettings
 import com.flovera.app.koog.ToolEventRecorder
 import com.flovera.app.koog.WorkspaceSearchTool
 import com.flovera.app.web.FloveraWebBridge
+import com.flovera.app.config.SettingsStore
 import com.flovera.app.workspace.WorkspaceController
 import com.flovera.app.workspace.FloveraSettingsView
 import com.flovera.app.workspace.WorkspaceManager
 import java.io.File
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -98,6 +102,83 @@ class WorkspaceFileTreeInstrumentedTest {
 
     assertTrue(preview.startsWith("a".repeat(16)))
     assertTrue(preview.contains("[truncated: showing first 16 chars"))
+  }
+
+  @Test
+  fun seedWorkspaceIncludesPortableAgentDemoArtifact() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "seed-artifact-demo-${System.currentTimeMillis()}").also { it.ensureSeedFiles() }
+
+    val artifact = workspace.listWorkspaceArtifacts().single { it.manifestPath == "agent-demo/flovera.app.json" }
+
+    assertTrue(artifact.valid)
+    assertEquals("Flovera Portable Agent Demo", artifact.name)
+    assertEquals("agent-demo/src/web/index.html", artifact.preview?.path)
+    assertEquals("summarize", artifact.actions.single().id)
+    assertTrue(workspace.readFile("agent-demo/README.md").contains("Run Outside Flovera"))
+
+    val outsideResult = FloveraPythonRuntime(workspace, networkEnabled = false).runScript(
+      scriptPath = "src/agent.py",
+      argv = listOf("--input", "data/input.json", "--output", "outputs/result.json"),
+      cwd = "agent-demo",
+      timeoutMs = 30_000,
+      sessionId = "portable-demo-outside",
+    )
+
+    assertEquals(0, outsideResult.exitCode)
+    assertTrue(workspace.readFile("agent-demo/outputs/result.json").contains("wordCount"))
+  }
+
+  @Test
+  fun controllerRunsSeedArtifactActionFromSelectedPreview() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspaceId = "controller-artifact-${System.currentTimeMillis()}"
+    val settingsStore = SettingsStore(context, File(context.filesDir, "$workspaceId-settings.json")).also {
+      it.save(AppSettings(activeWorkspaceId = workspaceId))
+    }
+    val workspace = WorkspaceManager(context, workspaceId)
+    val controller = AgentController(context, settingsStore = settingsStore).also {
+      it.refreshWorkspaceFiles()
+      it.selectHtmlFile("agent-demo/src/web/index.html")
+    }
+    val queued = JSONObject(
+      controller.runWorkspaceArtifactAction(
+        "summarize",
+        """{"input":"Show the inside Flovera artifact loop."}""",
+      ),
+    )
+    val jobId = queued.getString("id")
+
+    val finished = withTimeout(10_000) {
+      var current = queued
+      while (current.optString("status") in setOf("queued", "running")) {
+        delay(100)
+        current = JSONObject(controller.getWorkspaceArtifactJob(jobId))
+      }
+      current
+    }
+
+    assertEquals("succeeded", finished.getString("status"))
+    assertEquals(0, finished.getInt("exitCode"))
+    assertTrue(controller.state.value.workspaceArtifactJobs.any { it.id == jobId })
+
+    workspace.editFile(
+      "agent-demo/src/agent.py",
+      "This request asks Flovera to connect a portable preview with a bounded Python action and visible output files.",
+      "Modified rerun marker from the same portable project.",
+    )
+    controller.rerunWorkspaceArtifactJob(jobId)
+    val rerun = withTimeout(10_000) {
+      var current = controller.state.value.workspaceArtifactJobs.first { it.id != jobId }
+      while (current.status in setOf("queued", "running")) {
+        delay(100)
+        current = controller.state.value.workspaceArtifactJobs.first { it.id == current.id }
+      }
+      current
+    }
+
+    assertEquals("succeeded", rerun.status)
+    assertTrue(workspace.readFile("agent-demo/outputs/result.json").contains("Modified rerun marker"))
   }
 
   @Test
@@ -217,9 +298,10 @@ class WorkspaceFileTreeInstrumentedTest {
     assertEquals("running", workspace.readWorkspaceArtifactJob(running.id)?.status)
     assertTrue(workspace.workspaceArtifactJobJson(running.id).contains("\"actionId\":\"run-agent\""))
 
-    workspace.ensureFloveraMetadata()
+    val restartedWorkspace = WorkspaceManager(context, workspaceId)
+    restartedWorkspace.ensureFloveraMetadata()
 
-    val interrupted = workspace.readWorkspaceArtifactJob(running.id)
+    val interrupted = restartedWorkspace.readWorkspaceArtifactJob(running.id)
     assertNotNull(interrupted)
     assertEquals("interrupted", interrupted!!.status)
   }
@@ -919,6 +1001,8 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"python_job\""))
     assertTrue(capabilities.contains("\"workspaceArtifactBridgeCalls\""))
     assertTrue(capabilities.contains("\"runAction\""))
+    assertTrue(capabilities.contains("\"workspaceArtifactJobUi\": true"))
+    assertTrue(capabilities.contains("\"seededPortableArtifactDemoPath\": \"agent-demo/flovera.app.json\""))
     assertTrue(capabilities.contains("\"workspaceSearch\": true"))
     assertTrue(capabilities.contains("\"workspaceSearchScopes\""))
     assertTrue(capabilities.contains("\"workspace_app_metadata\""))

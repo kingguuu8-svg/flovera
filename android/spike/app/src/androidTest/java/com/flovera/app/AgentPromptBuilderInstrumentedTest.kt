@@ -47,6 +47,8 @@ class AgentPromptBuilderInstrumentedTest {
     assertTrue(systemPrompt.contains("window.Flovera.getJob"))
     assertTrue(systemPrompt.contains("workspaceArtifacts=available"))
     assertTrue(systemPrompt.contains("flovera.app.json"))
+    assertTrue(systemPrompt.contains("Default generated artifact layout"))
+    assertTrue(systemPrompt.contains("README.md, flovera.app.json"))
     assertTrue(systemPrompt.contains("Do not invent project-specific JSON handoff protocols"))
     assertTrue(systemPrompt.contains("not proof of an end-to-end interactive loop"))
     assertTrue(systemPrompt.contains("Use python_package_install only for packages listed"))

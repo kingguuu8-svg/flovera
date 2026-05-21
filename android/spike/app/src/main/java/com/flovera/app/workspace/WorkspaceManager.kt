@@ -170,6 +170,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     ignoreUnknownKeys = true
     encodeDefaults = true
   }
+  private var staleArtifactJobsChecked = false
 
   fun ensureSeedFiles() {
     writeFile(
@@ -195,6 +196,9 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
           - window.Flovera.toast("message")
           - window.Flovera.notify(JSON.stringify({ title: "Title", body: "Body" }))
           - window.Flovera.postEvent(JSON.stringify({ type: "notification", title: "Title", body: "Body" }))
+          - window.Flovera.runAction("action-id", JSON.stringify({ input: "..." }))
+          - window.Flovera.getJob("job-id")
+          - window.Flovera.cancelJob("job-id")
         - Always check window.Flovera exists before calling it, and keep these calls user-visible and intentional.
       """.trimIndent(),
       overwrite = false,
@@ -243,7 +247,389 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
       overwrite = false,
       createAutoSnapshot = false,
     )
+    ensureWorkspaceArtifactDemo()
     ensureFloveraMetadata()
+  }
+
+  private fun ensureWorkspaceArtifactDemo() {
+    writeFile(
+      path = "agent-demo/README.md",
+      content = """
+        # Flovera Portable Agent Demo
+
+        This is a normal workspace project which can run inside Flovera or outside it.
+
+        ## Run Outside Flovera
+
+        ```text
+        python src/agent.py --input data/input.json --output outputs/result.json
+        ```
+
+        Open `src/web/index.html` in a browser to inspect the interface. Outside Flovera, use the fallback command above.
+
+        ## Run Inside Flovera
+
+        Open the `Flovera Portable Agent Demo` artifact from the HTML picker. The page calls the declared `summarize` action from `flovera.app.json`; Flovera runs the bounded Python job and writes `outputs/result.json`.
+      """.trimIndent(),
+      overwrite = false,
+      createAutoSnapshot = false,
+    )
+    writeFile(
+      path = "agent-demo/requirements.txt",
+      content = """
+        # The demo only uses the Python standard library.
+      """.trimIndent(),
+      overwrite = false,
+      createAutoSnapshot = false,
+    )
+    writeFile(
+      path = "agent-demo/data/input.json",
+      content = """
+        {
+          "input": "Summarize how Flovera workspace artifacts connect preview UI to bounded Python jobs."
+        }
+      """.trimIndent(),
+      overwrite = false,
+      createAutoSnapshot = false,
+    )
+    writeFile(
+      path = "agent-demo/src/agent.py",
+      content = """
+        import argparse
+        import json
+        import os
+        import re
+        from datetime import datetime, timezone
+
+
+        def load_payload(path):
+            with open(path, "r", encoding="utf-8") as handle:
+                return json.load(handle)
+
+
+        def summarize(text):
+            words = re.findall(r"[A-Za-z0-9_'-]+", text)
+            keywords = sorted({word.lower() for word in words if len(word) >= 5})[:8]
+            if not text.strip():
+                summary = "No input was provided."
+            else:
+                summary = "This request asks Flovera to connect a portable preview with a bounded Python action and visible output files."
+            return {
+                "summary": summary,
+                "wordCount": len(words),
+                "keywords": keywords,
+                "generatedAt": datetime.now(timezone.utc).isoformat(),
+            }
+
+
+        def main():
+            parser = argparse.ArgumentParser(description="Portable Flovera artifact demo agent")
+            parser.add_argument("--input", default="data/input.json")
+            parser.add_argument("--output", default="outputs/result.json")
+            args = parser.parse_args()
+
+            payload = load_payload(args.input)
+            text = str(payload.get("input", ""))
+            result = summarize(text)
+            result["input"] = text
+
+            output_dir = os.path.dirname(args.output)
+            if output_dir:
+                os.makedirs(output_dir, exist_ok=True)
+            with open(args.output, "w", encoding="utf-8") as handle:
+                json.dump(result, handle, indent=2, ensure_ascii=False)
+            print("Wrote " + args.output)
+
+
+        if __name__ == "__main__":
+            main()
+      """.trimIndent(),
+      overwrite = false,
+      createAutoSnapshot = false,
+    )
+    writeFile(
+      path = "agent-demo/src/web/index.html",
+      content = """
+        <!doctype html>
+        <html lang="en">
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title>Flovera Portable Agent Demo</title>
+            <link rel="stylesheet" href="styles.css">
+          </head>
+          <body>
+            <main>
+              <section class="intro">
+                <p class="eyebrow">Portable workspace artifact</p>
+                <h1>Flovera Agent Demo</h1>
+                <p>This project runs as a normal Python CLI outside Flovera and as a declared artifact action inside Flovera.</p>
+              </section>
+
+              <section class="workbench">
+                <label for="prompt">Input</label>
+                <textarea id="prompt">Summarize how Flovera workspace artifacts connect preview UI to bounded Python jobs.</textarea>
+                <div class="actions">
+                  <button id="run">Run Agent</button>
+                  <button id="cancel" disabled>Cancel</button>
+                </div>
+                <p id="status">Ready</p>
+                <pre id="result">{}</pre>
+              </section>
+
+              <section class="fallback">
+                <h2>Outside Flovera</h2>
+                <code>python src/agent.py --input data/input.json --output outputs/result.json</code>
+              </section>
+            </main>
+            <script src="app.js"></script>
+          </body>
+        </html>
+      """.trimIndent(),
+      overwrite = false,
+      createAutoSnapshot = false,
+    )
+    writeFile(
+      path = "agent-demo/src/web/styles.css",
+      content = """
+        :root {
+          color-scheme: light;
+          --bg: #f4f7f7;
+          --ink: #142223;
+          --muted: #5e6f73;
+          --line: #c9d7d9;
+          --accent: #2f6f73;
+          --surface: #ffffff;
+        }
+
+        * {
+          box-sizing: border-box;
+        }
+
+        body {
+          margin: 0;
+          min-height: 100vh;
+          font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+          background: var(--bg);
+          color: var(--ink);
+        }
+
+        main {
+          width: min(920px, calc(100vw - 32px));
+          margin: 0 auto;
+          padding: 28px 0 40px;
+        }
+
+        .intro {
+          margin-bottom: 18px;
+        }
+
+        .eyebrow {
+          margin: 0 0 6px;
+          color: var(--accent);
+          font-size: 13px;
+          font-weight: 700;
+          text-transform: uppercase;
+        }
+
+        h1, h2, p {
+          margin-top: 0;
+        }
+
+        h1 {
+          margin-bottom: 8px;
+          font-size: 30px;
+        }
+
+        .workbench, .fallback {
+          border: 1px solid var(--line);
+          border-radius: 8px;
+          background: var(--surface);
+          padding: 16px;
+        }
+
+        label {
+          display: block;
+          margin-bottom: 8px;
+          font-weight: 700;
+        }
+
+        textarea {
+          width: 100%;
+          min-height: 140px;
+          resize: vertical;
+          border: 1px solid var(--line);
+          border-radius: 6px;
+          padding: 10px;
+          color: var(--ink);
+          font: inherit;
+        }
+
+        .actions {
+          display: flex;
+          gap: 10px;
+          margin: 12px 0;
+        }
+
+        button {
+          min-height: 38px;
+          border: 1px solid var(--accent);
+          border-radius: 6px;
+          padding: 0 14px;
+          background: var(--accent);
+          color: white;
+          font-weight: 700;
+        }
+
+        button:disabled {
+          border-color: var(--line);
+          background: #dce5e6;
+          color: var(--muted);
+        }
+
+        #status {
+          margin-bottom: 10px;
+          color: var(--muted);
+        }
+
+        pre, code {
+          white-space: pre-wrap;
+          word-break: break-word;
+          border-radius: 6px;
+          background: #eef4f4;
+          padding: 12px;
+        }
+
+        pre {
+          min-height: 120px;
+        }
+
+        .fallback {
+          margin-top: 14px;
+        }
+      """.trimIndent(),
+      overwrite = false,
+      createAutoSnapshot = false,
+    )
+    writeFile(
+      path = "agent-demo/src/web/app.js",
+      content = """
+        const runButton = document.querySelector("#run");
+        const cancelButton = document.querySelector("#cancel");
+        const promptInput = document.querySelector("#prompt");
+        const statusNode = document.querySelector("#status");
+        const resultNode = document.querySelector("#result");
+
+        let activeJobId = "";
+        let pollTimer = 0;
+
+        function setStatus(message) {
+          statusNode.textContent = message;
+        }
+
+        function show(value) {
+          resultNode.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+        }
+
+        function parseBridgeResult(text) {
+          try {
+            return JSON.parse(text);
+          } catch (error) {
+            return { status: "error", error: String(error), raw: text };
+          }
+        }
+
+        function stopPolling() {
+          if (pollTimer) {
+            clearInterval(pollTimer);
+            pollTimer = 0;
+          }
+          cancelButton.disabled = true;
+        }
+
+        function renderJob(job) {
+          setStatus("Job " + job.status);
+          show({
+            id: job.id,
+            status: job.status,
+            stdout: job.stdout,
+            stderr: job.stderr,
+            exitCode: job.exitCode,
+            outputs: job.outputPaths,
+            error: job.error
+          });
+          if (["succeeded", "failed", "timeout", "cancelled", "interrupted", "missing", "error"].includes(job.status)) {
+            stopPolling();
+          }
+        }
+
+        function pollJob() {
+          if (!activeJobId || !window.Flovera) return;
+          renderJob(parseBridgeResult(window.Flovera.getJob(activeJobId)));
+        }
+
+        runButton.addEventListener("click", () => {
+          if (!window.Flovera || !window.Flovera.runAction) {
+            setStatus("Outside Flovera: run the README command in a Python environment.");
+            show("python src/agent.py --input data/input.json --output outputs/result.json");
+            return;
+          }
+          const payload = JSON.stringify({ input: promptInput.value });
+          const job = parseBridgeResult(window.Flovera.runAction("summarize", payload));
+          activeJobId = job.id || "";
+          renderJob(job);
+          cancelButton.disabled = !activeJobId;
+          stopPolling();
+          if (activeJobId) {
+            cancelButton.disabled = false;
+            pollTimer = setInterval(pollJob, 750);
+          }
+        });
+
+        cancelButton.addEventListener("click", () => {
+          if (!activeJobId || !window.Flovera) return;
+          renderJob(parseBridgeResult(window.Flovera.cancelJob(activeJobId)));
+        });
+      """.trimIndent(),
+      overwrite = false,
+      createAutoSnapshot = false,
+    )
+    writeFile(
+      path = "agent-demo/flovera.app.json",
+      content = """
+        {
+          "schema": "https://flovera.dev/schemas/app.v1.json",
+          "schemaVersion": 1,
+          "name": "Flovera Portable Agent Demo",
+          "kind": "interactive",
+          "entrypoints": {
+            "preview": {
+              "kind": "webview",
+              "path": "src/web/index.html",
+              "fallback": "open src/web/index.html"
+            },
+            "cli": {
+              "kind": "python",
+              "command": "python src/agent.py --input data/input.json --output outputs/result.json"
+            }
+          },
+          "actions": [
+            {
+              "id": "summarize",
+              "label": "Summarize",
+              "kind": "python_job",
+              "command": "python src/agent.py --input data/input.json --output outputs/result.json",
+              "inputPath": "data/input.json",
+              "timeoutMs": 120000,
+              "outputs": ["outputs/result.json"]
+            }
+          ],
+          "outputs": ["outputs/result.json"]
+        }
+      """.trimIndent(),
+      overwrite = false,
+      createAutoSnapshot = false,
+    )
   }
 
   fun ensureFloveraMetadata(
@@ -281,7 +667,10 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     safeFile(".flovera/jobs").mkdirs()
     safeFile(".flovera/python/site-packages").mkdirs()
     safeFile(".flovera/python/wheels").mkdirs()
-    markStaleWorkspaceArtifactJobsInterrupted()
+    if (!staleArtifactJobsChecked) {
+      markStaleWorkspaceArtifactJobsInterrupted()
+      staleArtifactJobsChecked = true
+    }
     writeFile(
       path = ".flovera/tools/manifest.json",
       content = json.encodeToString(FloveraPythonToolsManifest()),
@@ -453,6 +842,12 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     return globalMatches.singleOrNull()
   }
 
+  fun resolveWorkspaceArtifactActionByManifest(manifestPath: String, actionId: String): WorkspaceArtifactActionTarget? {
+    return listWorkspaceArtifacts()
+      .firstOrNull { it.valid && it.manifestPath == manifestPath }
+      ?.let { artifact -> artifact.actions.firstOrNull { it.id == actionId }?.let { WorkspaceArtifactActionTarget(artifact, it) } }
+  }
+
   fun createWorkspaceArtifactJob(target: WorkspaceArtifactActionTarget, inputPath: String = ""): WorkspaceArtifactJob {
     val now = System.currentTimeMillis()
     val job = WorkspaceArtifactJob(
@@ -474,6 +869,17 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     val file = workspaceArtifactJobFile(jobId) ?: return null
     if (!file.isFile) return null
     return runCatching { compactJson.decodeFromString<WorkspaceArtifactJob>(readUtf8Text(file)) }.getOrNull()
+  }
+
+  fun listWorkspaceArtifactJobs(): List<WorkspaceArtifactJob> {
+    val jobsDir = safeFile(".flovera/jobs")
+    return jobsDir.listFiles()
+      ?.asSequence()
+      ?.filter { it.isFile && it.extension == "json" }
+      ?.mapNotNull { file -> runCatching { compactJson.decodeFromString<WorkspaceArtifactJob>(readUtf8Text(file)) }.getOrNull() }
+      ?.sortedByDescending { it.updatedAtMillis }
+      ?.toList()
+      .orEmpty()
   }
 
   fun workspaceArtifactJobJson(jobId: String): String {
@@ -1730,6 +2136,8 @@ data class FloveraCapabilities(
   val workspaceArtifactActionKinds: List<String> = listOf("python_job"),
   val workspaceArtifactJobsPath: String = ".flovera/jobs",
   val workspaceArtifactBridgeCalls: List<String> = listOf("runAction", "getJob", "cancelJob"),
+  val workspaceArtifactJobUi: Boolean = true,
+  val seededPortableArtifactDemoPath: String = "agent-demo/flovera.app.json",
   val webPreview: Boolean = true,
   val previewFormats: List<String> = listOf("html", "markdown", "json", "csv", "text", "image", "pdf"),
   val snapshots: Boolean = true,

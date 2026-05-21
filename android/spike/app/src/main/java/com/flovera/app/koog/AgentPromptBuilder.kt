@@ -70,6 +70,7 @@ Tool routing:
   private const val STABLE_INTERACTIVE_ARTIFACT_BOUNDARIES = """
 Interactive artifact rules:
 - Build generated interactive work as portable ordinary projects first. Flovera-specific metadata or adapters may enhance the project, but must not be the only way to understand the project.
+- Default generated artifact layout: README.md, flovera.app.json, src/ for logic, src/web/ for preview when HTML is useful, data/ for inputs, outputs/ for generated files, and a normal CLI command documented in README.
 - Use flovera.app.json only as a small adapter: declare name, preview entrypoint, python_job actions, optional inputPath, and outputs. Keep the project understandable without Flovera.
 - For WebView-driven execution, call window.Flovera.runAction(actionId, JSON.stringify(input)), poll window.Flovera.getJob(jobId), and show persisted job stdout/stderr/output files in the UI.
 - Do not invent project-specific JSON handoff protocols such as input.json/output.json as the main solution for missing platform integration. If used temporarily, label it as a workaround and state the missing Flovera capability.

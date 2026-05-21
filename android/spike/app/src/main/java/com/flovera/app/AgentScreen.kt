@@ -95,6 +95,7 @@ import com.flovera.app.session.SESSION_ROLE_COMPRESSION
 import com.flovera.app.session.SessionMessage
 import com.flovera.app.session.ToolEvent
 import com.flovera.app.web.FloveraWebBridge
+import com.flovera.app.workspace.WorkspaceArtifactJob
 import com.flovera.app.workspace.WorkspaceControlledToolProposal
 import com.flovera.app.workspace.WorkspaceFileNode
 import com.flovera.app.workspace.WorkspaceSettingsProposal
@@ -117,6 +118,7 @@ private val FloveraFabText = Color(0xFFDEF3F8)
 private enum class AgentPanel {
   Conversation,
   HtmlFiles,
+  ArtifactJobs,
   Files,
   Snapshots,
   AgentFile,
@@ -157,6 +159,17 @@ fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
       ) {
         Text("HTML", modifier = Modifier.padding(horizontal = 4.dp), style = MaterialTheme.typography.labelLarge)
       }
+      if (state.workspaceArtifactJobs.isNotEmpty()) {
+        FloatingActionButton(
+          onClick = { activePanel = AgentPanel.ArtifactJobs },
+          modifier = Modifier.semantics { contentDescription = "Open artifact jobs" },
+          shape = FloveraFabShape,
+          containerColor = FloveraFabContainer,
+          contentColor = FloveraFabText,
+        ) {
+          Text("Jobs", modifier = Modifier.padding(horizontal = 4.dp), style = MaterialTheme.typography.labelLarge)
+        }
+      }
       FloatingActionButton(
         onClick = { activePanel = AgentPanel.Conversation },
         modifier = Modifier.semantics { contentDescription = "Open agent conversation" },
@@ -189,6 +202,13 @@ fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
     )
 
     AgentPanel.HtmlFiles -> HtmlFilesDialog(
+      state = state,
+      controller = controller,
+      language = language,
+      onDismiss = { activePanel = null },
+    )
+
+    AgentPanel.ArtifactJobs -> ArtifactJobsDialog(
       state = state,
       controller = controller,
       language = language,
@@ -1710,6 +1730,134 @@ private fun WorkspaceArtifactPickerRow(
         Text(t(language, "Open", "\u6253\u5f00"))
       }
     }
+  }
+}
+
+@Composable
+private fun ArtifactJobsDialog(
+  state: AgentScreenState,
+  controller: AgentController,
+  language: String,
+  onDismiss: () -> Unit,
+) {
+  AlertDialog(
+    onDismissRequest = onDismiss,
+    title = { Text(t(language, "Artifact Jobs", "Artifact Jobs")) },
+    text = {
+      LazyColumn(
+        modifier = Modifier.fillMaxWidth().heightIn(min = 160.dp, max = 480.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
+        item {
+          OutlinedButton(onClick = controller::refreshWorkspaceFiles, modifier = Modifier.fillMaxWidth()) {
+            Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(17.dp))
+            Text(t(language, "Refresh", "\u5237\u65b0"))
+          }
+        }
+        if (state.workspaceArtifactJobs.isEmpty()) {
+          item {
+            Text(t(language, "No artifact jobs yet.", "No artifact jobs yet."), style = MaterialTheme.typography.bodyMedium)
+          }
+        } else {
+          items(state.workspaceArtifactJobs, key = { it.id }) { job ->
+            ArtifactJobRow(
+              job = job,
+              controller = controller,
+              language = language,
+              onDismiss = onDismiss,
+            )
+          }
+        }
+      }
+    },
+    confirmButton = {
+      TextButton(onClick = onDismiss) {
+        Text(t(language, "Close", "\u5173\u95ed"))
+      }
+    },
+  )
+}
+
+@Composable
+private fun ArtifactJobRow(
+  job: WorkspaceArtifactJob,
+  controller: AgentController,
+  language: String,
+  onDismiss: () -> Unit,
+) {
+  Surface(
+    modifier = Modifier.fillMaxWidth(),
+    shape = FloveraSmallShape,
+    color = MaterialTheme.colorScheme.surface,
+    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+  ) {
+    Column(
+      modifier = Modifier.fillMaxWidth().padding(10.dp),
+      verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+      Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+          Text(
+            "${job.actionId}  ${job.status}",
+            color = MaterialTheme.colorScheme.onSurface,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+          )
+          Text(
+            "${job.artifactRootPath}  ${formatSnapshotTime(job.updatedAtMillis)}",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            style = MaterialTheme.typography.bodySmall,
+          )
+        }
+        OutlinedButton(onClick = { controller.rerunWorkspaceArtifactJob(job.id) }) {
+          Text(t(language, "Rerun", "Rerun"))
+        }
+        OutlinedButton(
+          enabled = job.status == "queued" || job.status == "running",
+          onClick = { controller.cancelWorkspaceArtifactJob(job.id) },
+        ) {
+          Text(t(language, "Cancel", "\u53d6\u6d88"))
+        }
+      }
+      ArtifactJobStream("stdout", job.stdout)
+      ArtifactJobStream("stderr", job.stderr.ifBlank { job.error })
+      if (job.outputPaths.isNotEmpty()) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+          job.outputPaths.take(3).forEach { output ->
+            OutlinedButton(
+              onClick = {
+                controller.selectWorkspacePreview(output)
+                onDismiss()
+              },
+            ) {
+              Text(output.substringAfterLast('/'), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun ArtifactJobStream(label: String, text: String) {
+  if (text.isBlank()) return
+  Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
+  Surface(
+    modifier = Modifier.fillMaxWidth(),
+    shape = FloveraSmallShape,
+    color = MaterialTheme.colorScheme.background,
+    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+  ) {
+    Text(
+      text = text.take(1200),
+      modifier = Modifier.padding(8.dp),
+      color = MaterialTheme.colorScheme.onSurface,
+      fontFamily = FontFamily.Monospace,
+      style = MaterialTheme.typography.bodySmall,
+    )
   }
 }
 
