@@ -348,13 +348,12 @@ explicit provider coverage.
 
 ### Final Assistant Response Streaming
 
-Status: Baseline implemented at the Flovera runtime boundary. `AgentRuntime`
-now has a `runStreaming` path that can emit real final-answer deltas through
-`AgentRunEvent`; those deltas update the running assistant draft and the final
-session still persists one complete assistant message. The default Koog
-`AIAgent.run` adapter still returns a completed string unless Koog/provider
-streaming is wired later, and Flovera must not fake streaming by chunking an
-already completed answer.
+Status: L1 implemented. `KoogAgentRuntime.runStreaming` now uses a
+Flovera-owned Koog streaming strategy that keeps the single-run workspace tool
+loop but routes provider `StreamFrame.TextDelta` events through
+`AgentRunEvent(FINAL_TEXT_DELTA)`. Providers without streaming support fall
+back to the original non-streaming `run()` path before any final delta is
+emitted, and the final session still persists one complete assistant message.
 
 - Stream the final assistant answer into the conversation instead of waiting for
   `AIAgent.run` to return a complete string.
@@ -366,8 +365,9 @@ already completed answer.
 - Keep the persisted session message as one final assistant message after the
   stream completes; partial deltas should remain transient unless the run fails.
 - Prefer runtime/provider streaming APIs when they preserve existing tool-call
-  behavior. If Koog cannot stream final text from the current `AIAgent.run`
-  path, evaluate a narrow runtime adapter rather than weakening tool routing.
+  behavior. Current coverage preserves the Koog single-run tool loop for text
+  and tool-call `StreamFrame` responses; richer interleaved model narration is
+  still a later loop-product milestone.
 
 ### Workspace Search Performance
 

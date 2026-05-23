@@ -263,6 +263,12 @@ Flovera provider client streaming API
 - DeepSeek/OpenAI-compatible 优先，因为普通 API provider 覆盖面最大。
 - 不在 UI 层猜测 chunk。
 
+当前实现：
+
+- `KoogAgentRuntime.runStreaming` 使用 Flovera 专用 Koog streaming strategy，保留单轮 workspace tool loop。
+- Koog `EventHandler.onLLMStreamingFrameReceived` 将真实 `StreamFrame.TextDelta` 转为 `AgentRunEvent(FINAL_TEXT_DELTA)`。
+- fake provider 覆盖纯 final text、tool_call 后 final text、streaming unsupported fallback 三条路径。
+
 验收：
 
 - fake streaming provider 的 delta 能逐步显示。
@@ -418,4 +424,3 @@ loop 表面上不难，难的是产品级边界：
 - final response 可以真实流式显示，或者明确降级为一次性显示。
 - 工具调用次数不再因为固定 20 次硬失败，而是有可解释的运行预算/保护策略。
 - 所有失败都能落到可读错误类别，并提供下一步操作。
-

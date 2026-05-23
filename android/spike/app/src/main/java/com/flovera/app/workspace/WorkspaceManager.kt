@@ -2570,7 +2570,7 @@ data class FloveraCapabilities(
   val agentRunTimeline: Boolean = true,
   val agentRunEventBus: Boolean = true,
   val finalAssistantResponseStreaming: Boolean = true,
-  val finalAssistantResponseStreamingSource: String = "runtime_event_delta_when_available",
+  val finalAssistantResponseStreamingSource: String = "koog_stream_frame_event_handler",
   val mainSurfaceHtmlQuickPicker: Boolean = true,
   val conversationPathLinks: Boolean = true,
   val webPreview: Boolean = true,

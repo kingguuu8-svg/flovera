@@ -1,13 +1,33 @@
 package com.flovera.app.koog
 
 import ai.koog.agents.core.agent.AIAgent
+import ai.koog.agents.core.agent.singleRunStrategy
+import ai.koog.agents.core.agent.entity.AIAgentGraphStrategy
+import ai.koog.agents.core.annotation.InternalAgentsApi
+import ai.koog.agents.core.dsl.builder.node
+import ai.koog.agents.core.dsl.builder.strategy
+import ai.koog.agents.core.dsl.extension.nodeExecuteMultipleTools
+import ai.koog.agents.core.dsl.extension.nodeLLMRequestStreamingAndSendResults
+import ai.koog.agents.core.dsl.extension.onMultipleAssistantMessages
+import ai.koog.agents.core.dsl.extension.onMultipleToolCalls
+import ai.koog.agents.core.environment.ReceivedToolResult
+import ai.koog.agents.core.environment.result
+import ai.koog.agents.features.eventHandler.feature.handleEvents
+import ai.koog.prompt.executor.clients.LLMClient
 import ai.koog.prompt.executor.llms.MultiLLMPromptExecutor
+import ai.koog.prompt.message.Message
+import ai.koog.prompt.streaming.StreamFrame
+import ai.koog.prompt.streaming.toMessageResponses
 import ai.koog.utils.io.use
+import com.flovera.app.agent.AgentRunEvent
+import com.flovera.app.agent.AgentRunEventSink
+import com.flovera.app.agent.AgentRunEventType
 import com.flovera.app.config.AGENT_ITERATIONS_INTERNAL_GUARD
 import com.flovera.app.config.AppSettings
-import com.flovera.app.agent.AgentRunEventSink
 import com.flovera.app.session.AgentSession
 import com.flovera.app.workspace.WorkspaceManager
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.toList
 
 interface AgentRuntime {
   suspend fun run(
@@ -39,7 +59,9 @@ interface AgentRuntime {
   }
 }
 
-class KoogAgentRuntime : AgentRuntime {
+class KoogAgentRuntime(
+  private val clientFactory: (ModelProviderSpec, String, AppSettings) -> LLMClient = ModelProviderCatalog::createClient,
+) : AgentRuntime {
   override suspend fun run(
     input: String,
     agentRunId: String,
@@ -48,16 +70,79 @@ class KoogAgentRuntime : AgentRuntime {
     workspace: WorkspaceManager,
     recorder: ToolEventRecorder,
   ): String {
+    return runAgent(
+      input = input,
+      agentRunId = agentRunId,
+      settings = settings,
+      session = session,
+      workspace = workspace,
+      recorder = recorder,
+      frameForwarder = null,
+      streaming = false,
+    )
+  }
+
+  override suspend fun runStreaming(
+    input: String,
+    agentRunId: String,
+    settings: AppSettings,
+    session: AgentSession,
+    workspace: WorkspaceManager,
+    recorder: ToolEventRecorder,
+    eventSink: AgentRunEventSink,
+  ): String {
+    val frameForwarder = AgentRunStreamFrameForwarder(eventSink)
+    return try {
+      runAgent(
+        input = input,
+        agentRunId = agentRunId,
+        settings = settings,
+        session = session,
+        workspace = workspace,
+        recorder = recorder,
+        frameForwarder = frameForwarder,
+        streaming = true,
+      )
+    } catch (error: CancellationException) {
+      throw error
+    } catch (error: Throwable) {
+      if (frameForwarder.finalTextDeltaCount == 0 && isStreamingUnsupported(error)) {
+        run(
+          input = input,
+          agentRunId = agentRunId,
+          settings = settings,
+          session = session,
+          workspace = workspace,
+          recorder = recorder,
+        )
+      } else {
+        throw error
+      }
+    }
+  }
+
+  private suspend fun runAgent(
+    input: String,
+    agentRunId: String,
+    settings: AppSettings,
+    session: AgentSession,
+    workspace: WorkspaceManager,
+    recorder: ToolEventRecorder,
+    frameForwarder: AgentRunStreamFrameForwarder?,
+    streaming: Boolean,
+  ): String {
     val provider = ModelProviderCatalog.requireProvider(settings.provider)
     val apiKey = settings.apiKeyFor(provider.id)
     require(apiKey.isNotBlank()) { "${provider.label} API key is not configured." }
     val webSearchAvailable = settings.networkEnabled && settings.webSearchEnabled && settings.braveSearchApiKey.isNotBlank()
     val modelContext = ModelProviderCatalog.contextFor(settings)
     val workspaceUserRules = workspace.readAgentRules()
+    val client = clientFactory(provider, apiKey, settings)
 
     val agent = AIAgent(
-      promptExecutor = MultiLLMPromptExecutor(ModelProviderCatalog.createClient(provider, apiKey, settings)),
+      promptExecutor = MultiLLMPromptExecutor(client),
       llmModel = provider.createModel(settings.model, modelContext),
+      strategy = if (streaming) floveraStreamingSingleRunStrategy() else singleRunStrategy(),
       toolRegistry = workspaceToolRegistry(
         workspace = workspace,
         recorder = recorder,
@@ -71,6 +156,15 @@ class KoogAgentRuntime : AgentRuntime {
         authorityMode = settings.agentAuthorityMode,
       ),
       maxIterations = AGENT_ITERATIONS_INTERNAL_GUARD,
+      installFeatures = {
+        if (streaming) {
+          handleEvents {
+            onLLMStreamingFrameReceived { eventContext ->
+              frameForwarder?.emitStreamFrame(eventContext.streamFrame)
+            }
+          }
+        }
+      },
     )
 
     return agent.use {
@@ -84,4 +178,92 @@ class KoogAgentRuntime : AgentRuntime {
       )
     }
   }
+
+  private fun isStreamingUnsupported(error: Throwable): Boolean {
+    var current: Throwable? = error
+    while (current != null) {
+      val message = current.message.orEmpty()
+      if (
+        current is UnsupportedOperationException ||
+        (current is IllegalStateException && message.contains("Not implemented", ignoreCase = true))
+      ) {
+        return true
+      }
+      current = current.cause
+    }
+    return false
+  }
+}
+
+private class AgentRunStreamFrameForwarder(
+  private val delegate: AgentRunEventSink,
+) {
+  var finalTextDeltaCount: Int = 0
+    private set
+
+  fun emitStreamFrame(frame: StreamFrame) {
+    if (frame is StreamFrame.TextDelta && frame.text.isNotEmpty()) {
+      finalTextDeltaCount += 1
+      delegate.emit(
+        AgentRunEvent(
+          type = AgentRunEventType.FINAL_TEXT_DELTA,
+          finalTextDelta = frame.text,
+        ),
+      )
+    }
+  }
+}
+
+@OptIn(InternalAgentsApi::class)
+private fun floveraStreamingSingleRunStrategy(): AIAgentGraphStrategy<String, String> =
+  strategy("flovera_streaming_single_run") {
+    val nodeAppendUser by node<String, String>("append_user") { message ->
+      llm.writeSession {
+        appendPrompt {
+          user(message)
+        }
+      }
+      message
+    }
+    val nodeCallLLM by nodeLLMRequestStreamingAndSendResults<String>("stream_llm")
+    val nodeExecuteTool by nodeExecuteMultipleTools(parallelTools = false)
+    val nodeSendToolResult by nodeLLMSendMultipleToolResultsStreaming("stream_after_tools")
+
+    edge(nodeStart forwardTo nodeAppendUser)
+    edge(nodeAppendUser forwardTo nodeCallLLM)
+    edge(nodeCallLLM forwardTo nodeExecuteTool onMultipleToolCalls { true })
+    edge(
+      nodeCallLLM forwardTo nodeFinish
+        onMultipleAssistantMessages { true }
+        transformed { messages -> messages.joinToString("\n") { message -> message.content } },
+    )
+
+    edge(nodeExecuteTool forwardTo nodeSendToolResult)
+    edge(nodeSendToolResult forwardTo nodeExecuteTool onMultipleToolCalls { true })
+    edge(
+      nodeSendToolResult forwardTo nodeFinish
+        onMultipleAssistantMessages { true }
+        transformed { messages -> messages.joinToString("\n") { message -> message.content } },
+    )
+  }
+
+@OptIn(InternalAgentsApi::class)
+private fun nodeLLMSendMultipleToolResultsStreaming(
+  name: String? = null,
+) = node<List<ReceivedToolResult>, List<Message.Response>>(name) { results ->
+  val frames = llm.writeSession {
+    appendPrompt {
+      tool {
+        results.forEach { result(it) }
+      }
+    }
+    requestLLMStreaming().toList()
+  }
+  val responses = frames.toMessageResponses()
+  llm.writeSession {
+    appendPrompt {
+      messages(responses)
+    }
+  }
+  responses
 }

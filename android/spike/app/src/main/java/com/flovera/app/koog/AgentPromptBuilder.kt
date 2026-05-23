@@ -51,7 +51,7 @@ Stable Flovera runtime boundary:
 - Stable surface: workspace files, bounded Python, WebView previews, workspace artifacts, local_http/python_http apps, app HTTP/SSE routes, artifact_inspect, workspace_search, provider calls, and artifact Python jobs.
 - Tool progress UI is app-generated from tool events, not model reasoning.
 - Conversation UI can show an app-generated run timeline; observability, not hidden chain-of-thought.
-- Final-answer deltas may stream through AgentRunEvent; do not fake-stream completed text.
+- Final-answer deltas may stream through AgentRunEvent from real provider StreamFrame events; do not fake-stream completed text.
 - Conversation UI can link existing workspace-relative paths in messages to the file preview; cite exact paths when reporting changed files.
 - python_run is bounded, blocking, and conversation-owned. It is not a daemon, background server, shell, package manager, port listener, SSE/WebSocket service, or subprocess host.
 - local_http previews are served from Flovera localhost. A manifest may declare a workspace-owned python_http server command; Flovera assigns HOST/PORT and opens that server URL in WebView.
