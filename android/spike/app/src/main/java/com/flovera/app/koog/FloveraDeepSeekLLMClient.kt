@@ -163,6 +163,7 @@ open class FloveraDeepSeekLLMClient(
     return buildStreamFrameFlow {
       var finishReason: String? = null
       var metaInfo: ResponseMetaInfo? = null
+      var receivedFinishReason = false
 
       response.collect { chunk ->
         chunk.choices.firstOrNull()?.let { choice ->
@@ -175,11 +176,17 @@ open class FloveraDeepSeekLLMClient(
               index = toolCall.index,
             )
           }
-          choice.finishReason?.let { finishReason = it }
+          choice.finishReason?.let {
+            finishReason = it
+            receivedFinishReason = true
+          }
         }
         chunk.usage?.let { metaInfo = createMetaInfo(it) }
       }
 
+      check(receivedFinishReason) {
+        "DeepSeek streaming response ended before finish_reason; final answer may be truncated."
+      }
       emitEnd(finishReason, metaInfo)
     }
   }

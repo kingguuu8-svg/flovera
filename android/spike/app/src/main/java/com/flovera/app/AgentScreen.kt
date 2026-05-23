@@ -774,16 +774,13 @@ private fun ConversationDialog(
   val messages = state.session?.messages.orEmpty()
   val latestContextRecord = state.session?.contextRecords?.lastOrNull()
   val visibleMessageCount = messages.size + if (state.assistantDraft == null) 0 else 1
-  val assistantDraftScrollKey = state.assistantDraft?.let { draft ->
-    "${draft.content.length}:${draft.toolEvents.size}:${draft.runEvents.size}"
-  }.orEmpty()
   val workspaceMessagePaths = remember(state.workspaceTree) { state.workspaceTree.workspaceMessageLinkPaths() }
   var pendingRevertIndex by remember { mutableStateOf<Int?>(null) }
   var sessionPickerOpen by remember { mutableStateOf(false) }
   var moreMenuOpen by remember { mutableStateOf(false) }
   val isDraftSession = state.session != null && state.session.messages.isEmpty()
 
-  LaunchedEffect(state.session?.id, visibleMessageCount, assistantDraftScrollKey) {
+  LaunchedEffect(state.session?.id, visibleMessageCount) {
     if (visibleMessageCount > 0) {
       listState.scrollToItem(visibleMessageCount - 1)
     }
@@ -947,32 +944,38 @@ private fun ConversationDialog(
               if (message.role == SESSION_ROLE_COMPRESSION) {
                 CompressionDivider(message)
               } else {
-                MessageBubble(
-                  message = message,
-                  pathLinks = remember(message.content, workspaceMessagePaths) {
-                    conversationPathLinks(message.content, workspaceMessagePaths)
-                  },
-                  onOpenPath = {
-                    controller.selectWorkspacePreview(it)
-                    onDismiss()
-                  },
-                  onRevert = if (!state.isRunning && message.role == "user") ({ pendingRevertIndex = index }) else null,
-                )
+                ConversationRunEvents(message = message, language = language)
+                if (shouldShowConversationMessageBubble(message)) {
+                  MessageBubble(
+                    message = message,
+                    pathLinks = remember(message.content, workspaceMessagePaths) {
+                      conversationPathLinks(message.content, workspaceMessagePaths)
+                    },
+                    onOpenPath = {
+                      controller.selectWorkspacePreview(it)
+                      onDismiss()
+                    },
+                    onRevert = if (!state.isRunning && message.role == "user") ({ pendingRevertIndex = index }) else null,
+                  )
+                }
               }
             }
             state.assistantDraft?.let { draft ->
               item(key = "assistant-draft") {
-                MessageBubble(
-                  message = draft,
-                  pathLinks = remember(draft.content, workspaceMessagePaths) {
-                    conversationPathLinks(draft.content, workspaceMessagePaths)
-                  },
-                  onOpenPath = {
-                    controller.selectWorkspacePreview(it)
-                    onDismiss()
-                  },
-                  onRevert = null,
-                )
+                ConversationRunEvents(message = draft, language = language)
+                if (shouldShowConversationMessageBubble(draft)) {
+                  MessageBubble(
+                    message = draft,
+                    pathLinks = remember(draft.content, workspaceMessagePaths) {
+                      conversationPathLinks(draft.content, workspaceMessagePaths)
+                    },
+                    onOpenPath = {
+                      controller.selectWorkspacePreview(it)
+                      onDismiss()
+                    },
+                    onRevert = null,
+                  )
+                }
               }
             }
           }
@@ -1253,11 +1256,7 @@ private fun MessageBubble(
     isError -> MaterialTheme.colorScheme.error
     else -> FloveraAssistantBubbleBorder
   }
-  val previewContent = remember(message.content) { collapsedMessageContent(message.content) }
-  val canExpand = previewContent != message.content
-  var expanded by remember(message.timestampMillis, message.role, message.content) { mutableStateOf(!canExpand) }
   var selectionEnabled by remember(message.timestampMillis, message.role, message.content) { mutableStateOf(false) }
-  val displayContent = if (expanded) message.content else previewContent
   val surfaceModifier = if (selectionEnabled) {
     Modifier.fillMaxWidth(0.84f)
   } else {
@@ -1320,22 +1319,13 @@ private fun MessageBubble(
               }
             }
           }
-          MarkdownMessageText(content = displayContent, color = textColor)
+          MarkdownMessageText(content = message.content, color = textColor)
           if (!selectionEnabled && pathLinks.isNotEmpty()) {
             ConversationPathLinks(
               paths = pathLinks,
               color = textColor,
               onOpenPath = onOpenPath,
             )
-          }
-          if (canExpand) {
-            TextButton(onClick = { expanded = !expanded }) {
-              Text(
-                text = if (expanded) "Show less" else "Show more",
-                color = textColor.copy(alpha = 0.82f),
-                style = MaterialTheme.typography.labelSmall,
-              )
-            }
           }
           if (selectionEnabled) {
             TextButton(onClick = { selectionEnabled = false }) {
@@ -1346,15 +1336,155 @@ private fun MessageBubble(
               )
             }
           }
-          if (message.runEvents.isNotEmpty()) {
-            AgentRunTimeline(events = message.runEvents, color = textColor)
-          } else {
-            ToolEventsSummary(events = message.toolEvents, color = textColor)
-          }
         }
       }
     }
   }
+}
+
+@Composable
+private fun ConversationRunEvents(message: SessionMessage, language: String) {
+  val events = remember(message.runEvents, message.toolEvents) { compactConversationRunEvents(message) }
+  if (events.isEmpty()) return
+  Column(
+    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+    verticalArrangement = Arrangement.spacedBy(4.dp),
+  ) {
+    events.forEach { event ->
+      ConversationRunEventRow(event = event, language = language)
+    }
+  }
+}
+
+@Composable
+private fun ConversationRunEventRow(event: AgentRunTimelineEvent, language: String) {
+  val color = MaterialTheme.colorScheme.onSurfaceVariant
+  Surface(
+    modifier = Modifier.fillMaxWidth(0.86f),
+    shape = FloveraSmallShape,
+    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f),
+    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
+    tonalElevation = 0.dp,
+  ) {
+    Row(
+      modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+      horizontalArrangement = Arrangement.spacedBy(8.dp),
+      verticalAlignment = Alignment.Top,
+    ) {
+      Text(
+        text = "\u25B9",
+        color = color.copy(alpha = 0.72f),
+        style = MaterialTheme.typography.bodySmall,
+      )
+      Column(
+        modifier = Modifier.weight(1f),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+      ) {
+        Text(
+          text = compactRunEventTitle(event, language),
+          color = color,
+          style = MaterialTheme.typography.bodySmall,
+          fontWeight = FontWeight.SemiBold,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+        )
+        compactRunEventDetail(event)?.let { detail ->
+          Text(
+            text = detail,
+            color = color.copy(alpha = 0.72f),
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+          )
+        }
+      }
+    }
+  }
+}
+
+private fun shouldShowConversationMessageBubble(message: SessionMessage): Boolean {
+  if (message.role != "assistant") return message.content.isNotBlank()
+  val content = message.content.trim()
+  if (content.isBlank()) return false
+  return content != "Working..." &&
+    content != "Compressing context..." &&
+    !content.startsWith("Working...\n\nProgress:")
+}
+
+private fun compactConversationRunEvents(message: SessionMessage): List<AgentRunTimelineEvent> {
+  val filtered = message.runEvents.filter { event ->
+    when (event.type) {
+      "guidance",
+      "compression",
+      "thinking",
+      "tool_call",
+      "tool_omitted",
+      "run_failed",
+      "run_interrupted" -> true
+      "final_response_streaming" -> event.status == "running"
+      else -> false
+    }
+  }
+  if (filtered.isNotEmpty()) return filtered
+  return message.toolEvents.takeLast(6).map { event ->
+    AgentRunTimelineEvent(
+      type = "tool_call",
+      title = "Tool: ${event.name}",
+      detail = toolEventInlineDetail(event),
+      timestampMillis = event.timestampMillis,
+      status = "completed",
+    )
+  }
+}
+
+private fun compactRunEventTitle(event: AgentRunTimelineEvent, language: String): String {
+  return when (event.type) {
+    "thinking" -> t(language, "Thinking", "\u601d\u8003")
+    "tool_call" -> {
+      val toolName = event.title.removePrefix("Tool: ").ifBlank { event.title }
+      t(language, "Tool: $toolName", "\u5de5\u5177\uff1a$toolName")
+    }
+    "tool_omitted" -> t(language, event.title, "\u5df2\u9690\u85cf\u66f4\u65e9\u5de5\u5177\u8c03\u7528")
+    "final_response_streaming" -> t(language, "Writing answer", "\u6b63\u5728\u8f93\u51fa\u56de\u7b54")
+    "run_failed" -> t(language, "Run failed", "\u8fd0\u884c\u5931\u8d25")
+    "run_interrupted" -> t(language, "Run interrupted", "\u8fd0\u884c\u5df2\u4e2d\u65ad")
+    "compression" -> t(language, event.title, event.title)
+    "guidance" -> t(language, "Guidance queued", "\u5df2\u52a0\u5165\u5f15\u5bfc")
+    else -> event.title
+  }
+}
+
+private fun compactRunEventDetail(event: AgentRunTimelineEvent): String? {
+  if (event.type == "tool_call") return event.detail.lineSequence().firstOrNull()?.takeIf { it.isNotBlank() }
+  if (event.type == "thinking") return null
+  return event.detail.takeIf { it.isNotBlank() }
+}
+
+private fun toolEventInlineDetail(event: ToolEvent): String {
+  val path = toolEventArg(event.args, "path")
+  return when (event.name) {
+    "list_files" -> "Listed ${path.ifBlank { "workspace" }}"
+    "workspace_search" -> "Searched ${path.ifBlank { "workspace" }}"
+    "read_file" -> "Read ${path.ifBlank { "file" }}"
+    "write_file" -> "Wrote ${path.ifBlank { "file" }}"
+    "edit_file" -> "Edited ${path.ifBlank { "file" }}"
+    "python_run" -> "Ran Python"
+    "python_package_install" -> "Checked Python package"
+    "artifact_inspect" -> "Inspected ${path.ifBlank { "artifact" }}"
+    "fetch_url" -> "Fetched URL"
+    "download_file" -> "Downloaded ${path.ifBlank { "file" }}"
+    "web_search" -> "Searched the web"
+    else -> "Ran ${event.name}"
+  }
+}
+
+private fun toolEventArg(args: String, name: String): String {
+  val prefix = "$name="
+  return args.split(", ")
+    .firstOrNull { it.startsWith(prefix) }
+    ?.removePrefix(prefix)
+    ?.trim()
+    .orEmpty()
 }
 
 @Composable
@@ -1392,137 +1522,6 @@ private fun MessageBubbleContent(
     }
   } else {
     content()
-  }
-}
-
-@Composable
-private fun AgentRunTimeline(events: List<AgentRunTimelineEvent>, color: Color) {
-  if (events.isEmpty()) return
-  var expanded by remember(events.size, events.lastOrNull()?.timestampMillis) { mutableStateOf(false) }
-  val visibleEvents = remember(events, expanded) {
-    if (expanded || events.size <= 6) {
-      events
-    } else {
-      events.take(2) + events.takeLast(4)
-    }
-  }
-  val hiddenCount = (events.size - visibleEvents.size).coerceAtLeast(0)
-  val hasHiddenDetail = events.any { it.detail.isNotBlank() && it.compact }
-
-  Column(
-    modifier = Modifier
-      .fillMaxWidth()
-      .semantics { contentDescription = "Agent run timeline" },
-    verticalArrangement = Arrangement.spacedBy(5.dp),
-  ) {
-    Text(
-      text = "Run timeline",
-      color = color.copy(alpha = 0.72f),
-      style = MaterialTheme.typography.labelSmall,
-      fontWeight = FontWeight.SemiBold,
-    )
-    visibleEvents.forEachIndexed { index, event ->
-      if (!expanded && hiddenCount > 0 && index == 2) {
-        Text(
-          text = "$hiddenCount earlier event(s) hidden",
-          color = color.copy(alpha = 0.58f),
-          style = MaterialTheme.typography.labelSmall,
-        )
-      }
-      AgentRunTimelineRow(
-        event = event,
-        color = color,
-        showDetail = expanded || !event.compact,
-      )
-    }
-    if (hiddenCount > 0 || hasHiddenDetail) {
-      TextButton(onClick = { expanded = !expanded }) {
-        Text(
-          text = if (expanded) "Show compact timeline" else "Show full timeline",
-          color = color.copy(alpha = 0.82f),
-          style = MaterialTheme.typography.labelSmall,
-        )
-      }
-    }
-  }
-}
-
-@Composable
-private fun AgentRunTimelineRow(event: AgentRunTimelineEvent, color: Color, showDetail: Boolean) {
-  Row(
-    modifier = Modifier.fillMaxWidth(),
-    horizontalArrangement = Arrangement.spacedBy(6.dp),
-    verticalAlignment = Alignment.Top,
-  ) {
-    Text(
-      text = "•",
-      color = color.copy(alpha = 0.62f),
-      style = MaterialTheme.typography.bodySmall,
-    )
-    Column(
-      modifier = Modifier.weight(1f),
-      verticalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
-      Text(
-        text = event.title,
-        color = color,
-        style = MaterialTheme.typography.bodySmall,
-        fontWeight = FontWeight.SemiBold,
-      )
-      val meta = listOf(event.status, formatMessageTime(event.timestampMillis))
-        .filter { it.isNotBlank() }
-        .joinToString(" · ")
-      if (meta.isNotBlank()) {
-        Text(
-          text = meta,
-          color = color.copy(alpha = 0.58f),
-          style = MaterialTheme.typography.labelSmall,
-        )
-      }
-      if (showDetail && event.detail.isNotBlank()) {
-        Text(
-          text = event.detail,
-          color = color.copy(alpha = 0.82f),
-          style = MaterialTheme.typography.bodySmall,
-        )
-      }
-    }
-  }
-}
-
-@Composable
-private fun ToolEventsSummary(events: List<ToolEvent>, color: Color) {
-  if (events.isEmpty()) return
-  var expanded by remember(events.size) { mutableStateOf(false) }
-  val summary = events.joinToString(", ") { it.name }
-
-  Surface(
-    shape = RoundedCornerShape(10.dp),
-    color = MaterialTheme.colorScheme.background,
-    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-  ) {
-    Column(
-      modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 5.dp),
-      verticalArrangement = Arrangement.spacedBy(5.dp),
-    ) {
-      TextButton(onClick = { expanded = !expanded }) {
-        Text(
-          text = if (expanded) "Hide tool calls (${events.size})" else "Tool calls (${events.size}): $summary",
-          color = color,
-          style = MaterialTheme.typography.bodySmall,
-        )
-      }
-      if (expanded) {
-        events.forEach { event ->
-          Text(
-            text = "${event.name} @ ${formatMessageTime(event.timestampMillis)}\nargs: ${event.args}\nresult: ${event.result}",
-            color = color,
-            fontFamily = FontFamily.Monospace,
-            style = MaterialTheme.typography.bodySmall,
-          )
-        }
-      }
-    }
   }
 }
 
@@ -1754,19 +1753,6 @@ private fun formatTokenCount(tokens: Int): String {
 
 private fun formatSnapshotTime(timestampMillis: Long): String {
   return SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(timestampMillis))
-}
-
-private fun collapsedMessageContent(content: String): String {
-  val maxLines = 24
-  val maxChars = 1600
-  val lines = content.lines()
-  val lineCollapsed = lines.size > maxLines
-  val charCollapsed = content.length > maxChars
-  if (!lineCollapsed && !charCollapsed) return content
-
-  val byLines = if (lineCollapsed) lines.take(maxLines).joinToString("\n") else content
-  val preview = if (byLines.length > maxChars) byLines.take(maxChars).trimEnd() else byLines
-  return "$preview\n\n..."
 }
 
 private fun WorkspaceFileNode?.workspaceMessageLinkPaths(): List<String> {

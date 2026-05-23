@@ -8,6 +8,7 @@ import ai.koog.prompt.executor.clients.openai.base.models.OpenAIToolChoice
 import ai.koog.prompt.executor.clients.openai.base.models.OpenAIToolCall
 import ai.koog.prompt.llm.LLModel
 import ai.koog.prompt.params.LLMParams
+import ai.koog.prompt.streaming.StreamFrame
 import com.flovera.app.koog.FloveraDeepSeekLLMClient
 import com.flovera.app.koog.FloveraDeepSeekRequestSettings
 import com.flovera.app.koog.FloveraDeepSeekThinking
@@ -15,8 +16,12 @@ import com.flovera.app.koog.ModelProviderCatalog
 import com.flovera.app.koog.isTransientDeepSeekClientFailure
 import com.flovera.app.koog.prepareDeepSeekMessagesForFlovera
 import java.io.IOException
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
+import org.junit.Assert.fail
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -150,6 +155,75 @@ class FloveraDeepSeekMessagePreparerInstrumentedTest {
   }
 
   @Test
+  fun streamingReasoningContentDoesNotBecomeTextDelta() = runBlocking {
+    val client = TestDeepSeekClient(
+      requestSettings = FloveraDeepSeekRequestSettings(
+        thinking = FloveraDeepSeekThinking("enabled"),
+        reasoningEffort = "high",
+      ),
+    )
+
+    val frames = client.streamFramesForTest(
+      listOf(
+        """
+          {
+            "id":"stream-2",
+            "object":"chat.completion.chunk",
+            "created":1,
+            "model":"deepseek-v4-pro",
+            "system_fingerprint":"fp",
+            "choices":[{"index":0,"delta":{"reasoning_content":"hidden thinking"},"finish_reason":null}]
+          }
+        """.trimIndent(),
+        """
+          {
+            "id":"stream-2",
+            "object":"chat.completion.chunk",
+            "created":1,
+            "model":"deepseek-v4-pro",
+            "system_fingerprint":"fp",
+            "choices":[{"index":0,"delta":{"content":"visible answer"},"finish_reason":"stop"}]
+          }
+        """.trimIndent(),
+      ),
+    )
+
+    val text = frames.filterIsInstance<StreamFrame.TextDelta>().joinToString("") { it.text }
+    assertEquals("visible answer", text)
+    assertFalse(text.contains("hidden thinking"))
+  }
+
+  @Test
+  fun streamingWithoutFinishReasonFailsAsTruncated() = runBlocking {
+    val client = TestDeepSeekClient(
+      requestSettings = FloveraDeepSeekRequestSettings(
+        thinking = FloveraDeepSeekThinking("enabled"),
+        reasoningEffort = "high",
+      ),
+    )
+
+    try {
+      client.streamFramesForTest(
+        listOf(
+          """
+            {
+              "id":"stream-3",
+              "object":"chat.completion.chunk",
+              "created":1,
+              "model":"deepseek-v4-pro",
+              "system_fingerprint":"fp",
+              "choices":[{"index":0,"delta":{"content":"partial"},"finish_reason":null}]
+            }
+          """.trimIndent(),
+        ),
+      )
+      fail("Expected a truncated DeepSeek stream to fail.")
+    } catch (error: IllegalStateException) {
+      assertTrue(error.message.orEmpty().contains("ended before finish_reason"))
+    }
+  }
+
+  @Test
   fun serializesDeepSeekThinkingEffort() {
     val model = ModelProviderCatalog.requireProvider("deepseek").createModel("deepseek-v4-pro")
     val client = TestDeepSeekClient(
@@ -234,6 +308,11 @@ class FloveraDeepSeekMessagePreparerInstrumentedTest {
 
     fun decodeStreamChunkForTest(data: String) {
       super.decodeStreamingResponse(data)
+    }
+
+    suspend fun streamFramesForTest(chunks: List<String>): List<StreamFrame> {
+      val responses = chunks.map { super.decodeStreamingResponse(it) }
+      return super.processStreamingResponse(flowOf(*responses.toTypedArray())).toList()
     }
   }
 }

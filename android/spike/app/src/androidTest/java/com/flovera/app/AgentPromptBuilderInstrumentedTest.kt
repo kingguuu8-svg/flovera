@@ -43,7 +43,7 @@ class AgentPromptBuilderInstrumentedTest {
     assertTrue(systemPrompt.contains("not a daemon, background server"))
     assertTrue(systemPrompt.contains("local_http/python_http apps"))
     assertTrue(systemPrompt.contains("Tool progress UI is app-generated"))
-    assertTrue(systemPrompt.contains("Conversation UI can show an app-generated run timeline"))
+    assertTrue(systemPrompt.contains("Conversation UI can show app-generated run state rows"))
     assertTrue(systemPrompt.contains("not hidden chain-of-thought"))
     assertTrue(systemPrompt.contains("Final-answer deltas may stream through AgentRunEvent"))
     assertTrue(systemPrompt.contains("do not fake-stream completed text"))

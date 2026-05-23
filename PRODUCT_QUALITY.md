@@ -274,7 +274,7 @@ Status: Baseline implemented. During a running agent loop, Flovera turns
 completed tool events into compact deterministic assistant draft progress lines,
 for example listing, reading, editing, Python, package, web, and inspection
 events. The progress narration remains transient UI copy, while the final
-persisted message stores bounded tool events and run timeline events. Remaining
+persisted message stores bounded tool events and run events. Remaining
 work is polish around longer runs and a future audit view if users need deeper
 history.
 
@@ -289,32 +289,32 @@ history.
 - Keep the copy compact so it improves observability without crowding the
   conversation or pretending to be model reasoning.
 
-### Agent Run Timeline
+### Agent Run Events
 
 Status: Baseline implemented with an AgentRunEvent bus. Session messages can
-persist app-generated run timeline events for run started/completed/failed/
+persist app-generated run events for run started/completed/failed/
 interrupted lifecycle boundaries, context checkpoints, compression, tool calls,
 and final-answer streaming. Failure events now include a bounded error category
 (`provider`, `network`, `tool`, `permission`, `context`, or `unknown`) in the
-session timeline, checkpoint, workspace error log, and user-visible error
+session run events, checkpoint, workspace error log, and user-visible error
 message, and the generated `.flovera/logs/...` and `.flovera/runs/...`
 paths are conversation links that open the underlying log/checkpoint preview.
-The conversation UI renders those events inside the relevant
-assistant/error message, with compact and full views. This is observability for
-the run loop, not hidden reasoning.
+The conversation UI renders those events as lightweight status rows before the
+assistant/error message instead of embedding a bulky timeline inside the answer
+bubble. This is observability for the run loop, not hidden reasoning.
 
 - Represent each agent run as a sequence of user-visible runtime events:
   context checkpoint, optional compression, thinking/status, completed tools,
   interruption or final response.
-- Persist the timeline with the session message so interruption and restore do
+- Persist run events with the session message so interruption and restore do
   not erase what happened during the run.
 - Keep event details bounded and deterministic; do not expose private model
-  reasoning as timeline content.
+  reasoning as run-event content.
 - Keep lifecycle event types stable: `run_started`, `run_completed`,
   `run_failed`, and `run_interrupted`.
-- Use the timeline as the future checkpoint boundary for more precise
+- Use run events as the future checkpoint boundary for more precise
   compression and context accounting.
-- Route runtime state through `AgentRunEvent` so UI drafts, timeline, session
+- Route runtime state through `AgentRunEvent` so UI drafts, run events, session
   persistence, notifications, and future compression checks consume the same
   run-state stream.
 - Remaining work: add tool-start/tool-running events from tool entry points and
@@ -322,8 +322,8 @@ the run loop, not hidden reasoning.
 
 ### Interleaved Model Conversation Streaming
 
-Status: Deferred behind runtime contract, with timeline substrate implemented.
-Flovera now has a persisted run timeline for app-generated runtime events, but
+Status: Deferred behind runtime contract, with run-event substrate implemented.
+Flovera now has persisted app-generated runtime events, but
 real interleaved assistant text still needs a runtime/provider event stream
 because the current Koog `AIAgent.run` path does not yet expose a committed
 assistant delta contract in Flovera. Do not implement this as fake app narration

@@ -578,9 +578,8 @@ class AgentScreenInteractionInstrumentedTest {
       controller.state.value.assistantDraft?.toolEvents?.size == 2
     }
     composeRule.waitForIdle()
-    assertTrue(composeRule.onAllNodesWithText("Progress:").fetchSemanticsNodes().isNotEmpty())
-    assertTrue(composeRule.onAllNodesWithText("Run timeline").fetchSemanticsNodes().isNotEmpty())
-    assertTrue(composeRule.onAllNodesWithText("Context checkpoint").fetchSemanticsNodes().isNotEmpty())
+    assertFalse(composeRule.onAllNodesWithText("Progress:").fetchSemanticsNodes().isNotEmpty())
+    assertFalse(composeRule.onAllNodesWithText("Run timeline").fetchSemanticsNodes().isNotEmpty())
     assertTrue(composeRule.onAllNodesWithText("Tool: list_files").fetchSemanticsNodes().isNotEmpty())
     assertTrue(composeRule.onAllNodesWithText("Tool: read_file").fetchSemanticsNodes().isNotEmpty())
     composeRule.runOnIdle {

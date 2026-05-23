@@ -328,7 +328,9 @@ class AgentRunController(
 
     fun finalTextOr(output: String): String {
       if (!finalStreamingStarted) return output
-      return finalText.toString().ifBlank { output }
+      val streamed = finalText.toString()
+      if (output.isNotBlank() && output.length >= streamed.length) return output
+      return streamed.ifBlank { output }
     }
 
     fun persistedTimelineEvents(finalEvents: List<AgentRunTimelineEvent>): List<AgentRunTimelineEvent> {
