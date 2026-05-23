@@ -16,8 +16,11 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performScrollTo
 import com.flovera.app.config.AppSettings
 import com.flovera.app.config.SettingsStore
+import com.flovera.app.agent.AgentRunEvent
 import com.flovera.app.agent.AgentRunController
+import com.flovera.app.agent.AgentRunEventSink
 import com.flovera.app.agent.AgentRunStatusNotifier
+import com.flovera.app.agent.AgentRunEventType
 import com.flovera.app.koog.AgentRuntime
 import com.flovera.app.koog.ToolEventRecorder
 import com.flovera.app.session.AgentSession
@@ -214,13 +217,44 @@ class AgentScreenInteractionInstrumentedTest {
     }
 
     composeRule.onNodeWithText("Agent").performClick()
-    composeRule.onNodeWithText("90% · 900k/1M").assertIsDisplayed()
+    composeRule.onNodeWithText("est 90% · 900k/1M").assertIsDisplayed()
     assertEquals(0, composeRule.onAllNodesWithText("unknown", substring = true).fetchSemanticsNodes().size)
 
     composeRule.onNodeWithContentDescription("Context usage details").performClick()
 
     composeRule.onNodeWithText("Used 900k tokens, total 1M", substring = true).assertIsDisplayed()
+    composeRule.onNodeWithText("Estimated from request characters", substring = true).assertIsDisplayed()
+    composeRule.onNodeWithText("toolSchemaChars", substring = true).assertIsDisplayed()
     composeRule.onNodeWithText("Flovera automatically compresses background information", substring = true).assertIsDisplayed()
+  }
+
+  @Test
+  fun conversationPathLinkOpensExistingWorkspaceFilePreview() {
+    val context = composeRule.activity.applicationContext
+    val workspaceId = "conversation-path-${System.currentTimeMillis()}"
+    SettingsStore(context).save(AppSettings(language = "en", activeWorkspaceId = workspaceId, selectedHtmlPath = "index.html"))
+    val workspace = WorkspaceManager(context, workspaceId).also { it.ensureSeedFiles() }
+    workspace.writeFile("notes/info.md", "# Linked note\nOpen target", createAutoSnapshot = false)
+    val store = AgentSessionStore(context)
+    val session = store.appendMessage(
+      store.create("Path link ${System.currentTimeMillis()}"),
+      SessionMessage(role = "assistant", content = "See `notes/info.md` for the concrete note."),
+    )
+    val controller = AgentController(context)
+    controller.openSession(session.id)
+
+    composeRule.setContent {
+      AgentScreen(controller)
+    }
+
+    composeRule.onNodeWithText("Agent").performClick()
+    composeRule.onNodeWithContentDescription("Open conversation path notes/info.md").performClick()
+
+    composeRule.onNodeWithText("Linked note").assertIsDisplayed()
+    composeRule.runOnIdle {
+      assertEquals("notes/info.md", controller.state.value.selectedPreviewPath)
+      assertTrue(controller.state.value.selectedPreviewContent.contains("Open target"))
+    }
   }
 
   @Test
@@ -248,9 +282,11 @@ class AgentScreenInteractionInstrumentedTest {
     composeRule.waitUntil(timeoutMillis = 5_000) { !controller.state.value.isRunning }
 
     assertTrue(composeRule.onAllNodesWithText("Run interrupted by user.").fetchSemanticsNodes().isNotEmpty())
+    composeRule.onNodeWithText("Interrupted by user").assertIsDisplayed()
     composeRule.runOnIdle {
       assertEquals("Agent loop interrupted", controller.state.value.status)
       assertEquals("Run interrupted by user.", controller.state.value.session?.messages?.lastOrNull()?.content)
+      assertTrue(controller.state.value.session?.messages?.lastOrNull()?.runEvents?.any { it.type == "interrupted" } == true)
       assertTrue(notifier.events.contains("running:Working..."))
       assertTrue(notifier.events.contains("interrupted"))
     }
@@ -355,7 +391,7 @@ class AgentScreenInteractionInstrumentedTest {
     }
 
     composeRule.onNodeWithText("Agent").assertIsDisplayed()
-    composeRule.onNodeWithText("Preview").assertIsDisplayed()
+    composeRule.onNodeWithText("HTML").assertIsDisplayed()
     assertEquals(0, composeRule.onAllNodesWithText("Menu").fetchSemanticsNodes().size)
 
     composeRule.onNodeWithText("Agent").performClick()
@@ -377,7 +413,7 @@ class AgentScreenInteractionInstrumentedTest {
       AgentScreen(controller)
     }
 
-    composeRule.onNodeWithContentDescription("Open workspace apps and previews").performClick()
+    composeRule.onNodeWithContentDescription("Open HTML quick picker").performClick()
     composeRule.onNodeWithText("Workspace Apps").assertIsDisplayed()
     composeRule.onNodeWithText("HTML Files").assertIsDisplayed()
     composeRule.onNodeWithText("index.html").performClick()
@@ -441,6 +477,7 @@ class AgentScreenInteractionInstrumentedTest {
     val workspace = WorkspaceManager(context, workspaceId).also { it.ensureSeedFiles() }
     workspace.writeFile("data.json", """{"name":"Flovera","status":"ready"}""", createAutoSnapshot = false)
     workspace.writeFile("table.csv", "name,status\nFlovera,ready", createAutoSnapshot = false)
+    workspace.writeFile("tool.py", "print('ready')", createAutoSnapshot = false)
     val controller = AgentController(context)
     controller.selectWorkspacePreview("data.json")
 
@@ -460,6 +497,88 @@ class AgentScreenInteractionInstrumentedTest {
     composeRule.onNodeWithText("status").assertIsDisplayed()
     composeRule.onNodeWithText("Flovera").assertIsDisplayed()
     composeRule.onNodeWithText("ready").assertIsDisplayed()
+
+    composeRule.runOnIdle {
+      controller.selectWorkspacePreview("tool.py")
+    }
+
+    composeRule.onNodeWithText("Code preview").assertIsDisplayed()
+    composeRule.onNodeWithText("print('ready')").assertIsDisplayed()
+  }
+
+  @Test
+  fun runningAgentShowsDeterministicToolProgressNarration() {
+    val context = composeRule.activity.applicationContext
+    SettingsStore(context).save(AppSettings(language = "en"))
+    val runtime = ToolProgressAgentRuntime()
+    val controller = AgentController(
+      context,
+      agentRunController = AgentRunController(runtime = runtime),
+      agentRunStatusNotifier = FakeAgentRunStatusNotifier(),
+    )
+
+    composeRule.setContent {
+      AgentScreen(controller)
+    }
+
+    composeRule.onNodeWithText("Agent").performClick()
+    composeRule.onAllNodes(hasSetTextAction())[0].performTextInput("inspect workspace")
+    composeRule.onNodeWithContentDescription("Send message").performClick()
+
+    composeRule.waitUntil(timeoutMillis = 5_000) {
+      controller.state.value.assistantDraft?.toolEvents?.size == 2
+    }
+    composeRule.waitForIdle()
+    assertTrue(composeRule.onAllNodesWithText("Progress:").fetchSemanticsNodes().isNotEmpty())
+    assertTrue(composeRule.onAllNodesWithText("Run timeline").fetchSemanticsNodes().isNotEmpty())
+    assertTrue(composeRule.onAllNodesWithText("Context checkpoint").fetchSemanticsNodes().isNotEmpty())
+    assertTrue(composeRule.onAllNodesWithText("Tool: list_files").fetchSemanticsNodes().isNotEmpty())
+    assertTrue(composeRule.onAllNodesWithText("Tool: read_file").fetchSemanticsNodes().isNotEmpty())
+    composeRule.runOnIdle {
+      val draft = controller.state.value.assistantDraft?.content.orEmpty()
+      assertTrue(draft.contains("Listed agent-demo"))
+      assertTrue(draft.contains("Read agent-demo/README.md"))
+      assertTrue(controller.state.value.assistantDraft?.runEvents?.any { it.title == "Tool: list_files" } == true)
+    }
+
+    runtime.finish()
+    composeRule.waitUntil(timeoutMillis = 5_000) { !controller.state.value.isRunning }
+  }
+
+  @Test
+  fun runningAgentShowsStreamingFinalResponseDraft() {
+    val context = composeRule.activity.applicationContext
+    SettingsStore(context).save(AppSettings(language = "en"))
+    val runtime = StreamingFinalDraftAgentRuntime()
+    val controller = AgentController(
+      context,
+      agentRunController = AgentRunController(runtime = runtime),
+      agentRunStatusNotifier = FakeAgentRunStatusNotifier(),
+    )
+
+    composeRule.setContent {
+      AgentScreen(controller)
+    }
+
+    composeRule.onNodeWithText("Agent").performClick()
+    composeRule.onAllNodes(hasSetTextAction())[0].performTextInput("stream final")
+    composeRule.onNodeWithContentDescription("Send message").performClick()
+
+    composeRule.waitUntil(timeoutMillis = 5_000) {
+      controller.state.value.assistantDraft?.content == "partial final"
+    }
+    composeRule.waitForIdle()
+    assertTrue(composeRule.onAllNodesWithText("partial final").fetchSemanticsNodes().isNotEmpty())
+    composeRule.runOnIdle {
+      assertTrue(controller.state.value.assistantDraft?.runEvents?.any { it.title == "Final response streaming" } == true)
+    }
+
+    runtime.finish()
+    composeRule.waitUntil(timeoutMillis = 5_000) { !controller.state.value.isRunning }
+    composeRule.runOnIdle {
+      assertEquals("partial final answer", controller.state.value.session?.messages?.lastOrNull()?.content)
+      assertTrue(controller.state.value.session?.messages?.lastOrNull()?.runEvents?.any { it.title == "Final response streamed" } == true)
+    }
   }
 
   @Test
@@ -607,6 +726,63 @@ class AgentScreenInteractionInstrumentedTest {
       synchronized(completions) { completions += completion }
       completion.await()
       return "assistant output for $input"
+    }
+  }
+
+  private class ToolProgressAgentRuntime : AgentRuntime {
+    private val completion = CompletableDeferred<Unit>()
+
+    fun finish() {
+      completion.complete(Unit)
+    }
+
+    override suspend fun run(
+      input: String,
+      agentRunId: String,
+      settings: AppSettings,
+      session: AgentSession,
+      workspace: WorkspaceManager,
+      recorder: ToolEventRecorder,
+    ): String {
+      recorder.record("list_files", "path=agent-demo", "agent-demo/README.md")
+      recorder.record("read_file", "path=agent-demo/README.md", "# demo")
+      completion.await()
+      return "assistant output after progress"
+    }
+  }
+
+  private class StreamingFinalDraftAgentRuntime : AgentRuntime {
+    private val completion = CompletableDeferred<Unit>()
+
+    fun finish() {
+      completion.complete(Unit)
+    }
+
+    override suspend fun run(
+      input: String,
+      agentRunId: String,
+      settings: AppSettings,
+      session: AgentSession,
+      workspace: WorkspaceManager,
+      recorder: ToolEventRecorder,
+    ): String {
+      return "fallback output"
+    }
+
+    override suspend fun runStreaming(
+      input: String,
+      agentRunId: String,
+      settings: AppSettings,
+      session: AgentSession,
+      workspace: WorkspaceManager,
+      recorder: ToolEventRecorder,
+      eventSink: AgentRunEventSink,
+    ): String {
+      eventSink.emit(AgentRunEvent(type = AgentRunEventType.FINAL_TEXT_DELTA, finalTextDelta = "partial "))
+      eventSink.emit(AgentRunEvent(type = AgentRunEventType.FINAL_TEXT_DELTA, finalTextDelta = "final"))
+      completion.await()
+      eventSink.emit(AgentRunEvent(type = AgentRunEventType.FINAL_TEXT_DELTA, finalTextDelta = " answer"))
+      return "partial final answer"
     }
   }
 

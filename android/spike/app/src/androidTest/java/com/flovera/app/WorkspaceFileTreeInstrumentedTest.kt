@@ -16,9 +16,15 @@ import com.flovera.app.workspace.WorkspaceController
 import com.flovera.app.workspace.FloveraSettingsView
 import com.flovera.app.workspace.WorkspaceManager
 import java.io.File
+import java.io.Closeable
 import java.net.HttpURLConnection
+import java.net.ServerSocket
 import java.net.URL
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
+import kotlin.concurrent.thread
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -118,9 +124,16 @@ class WorkspaceFileTreeInstrumentedTest {
     assertEquals("Flovera Workspace Chat Demo", artifact.name)
     assertEquals("local_http", artifact.preview?.kind)
     assertEquals("agent-demo/src/web/index.html", artifact.preview?.path)
+    assertTrue(artifact.preview?.command.orEmpty().contains("python src/server.py"))
+    assertEquals("agent-demo", artifact.preview?.cwd)
+    assertEquals("/", artifact.preview?.urlPath)
     assertTrue(artifact.actions.isEmpty())
-    assertTrue(workspace.readFile("agent-demo/README.md").contains("standard SSE"))
-    assertTrue(workspace.readFile("agent-demo/src/web/app.js").contains("/__flovera__/api/deepseek/stream"))
+    assertTrue(workspace.readFile("agent-demo/README.md").contains("standard fetch/SSE"))
+    assertTrue(workspace.readFile("agent-demo/src/web/index.html").contains("id=\"apiKey\""))
+    assertTrue(workspace.readFile("agent-demo/src/web/index.html").contains("id=\"baseUrl\""))
+    assertTrue(workspace.readFile("agent-demo/src/web/app.js").contains("/api/chat/stream"))
+    assertTrue(workspace.readFile("agent-demo/src/web/app.js").contains("apiKey: apiKeyInput.value.trim()"))
+    assertFalse(workspace.readFile("agent-demo/src/web/app.js").contains("/__flovera__/api/deepseek/stream"))
     assertFalse(workspace.readFile("agent-demo/src/web/app.js").contains("window.Flovera.runAction"))
 
     val outsideResult = FloveraPythonRuntime(workspace, networkEnabled = false).runScript(
@@ -136,7 +149,7 @@ class WorkspaceFileTreeInstrumentedTest {
   }
 
   @Test
-  fun controllerServesSeedArtifactThroughLocalHttpPreview() {
+  fun controllerStartsSeedArtifactPythonHttpPreview() {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val workspaceId = "controller-local-http-${System.currentTimeMillis()}"
     val settingsStore = SettingsStore(context, File(context.filesDir, "$workspaceId-settings.json")).also {
@@ -149,18 +162,18 @@ class WorkspaceFileTreeInstrumentedTest {
 
     val selectedUrl = controller.state.value.selectedHtmlUrl.orEmpty()
     assertTrue(selectedUrl.startsWith("http://127.0.0.1:"))
-    assertTrue(selectedUrl.contains("/__flovera__/workspace/agent-demo/src/web/index.html"))
+    assertFalse(selectedUrl.contains("/__flovera__/workspace/"))
 
     val html = URL(selectedUrl).readText()
     assertTrue(html.contains("Flovera Workspace Chat"))
 
-    val origin = selectedUrl.substringBefore("/__flovera__/workspace/")
-    val health = JSONObject(URL("$origin/__flovera__/api/health").readText())
-    assertEquals("flovera-local-http", health.getString("runtime"))
-    assertEquals("deepseek-v4-pro", health.getString("model"))
-    assertFalse(health.getBoolean("hasApiKey"))
+    val origin = selectedUrl.trimEnd('/')
+    val health = JSONObject(URL("$origin/api/health").readText())
+    assertEquals("portable-python-http", health.getString("runtime"))
+    assertFalse(health.getBoolean("hasServerApiKey"))
+    assertTrue(health.getBoolean("acceptsRequestApiKey"))
 
-    val connection = (URL("$origin/__flovera__/api/deepseek/stream").openConnection() as HttpURLConnection).apply {
+    val connection = (URL("$origin/api/chat/stream").openConnection() as HttpURLConnection).apply {
       requestMethod = "POST"
       doOutput = true
       setRequestProperty("Content-Type", "application/json")
@@ -169,8 +182,211 @@ class WorkspaceFileTreeInstrumentedTest {
       stream.write("""{"messages":[{"role":"user","content":"hello"}]}""".toByteArray(StandardCharsets.UTF_8))
     }
     val sse = connection.inputStream.bufferedReader().use { it.readText() }
-    assertTrue(sse.contains("DeepSeek API key is not configured"))
+    assertTrue(sse.contains("Provide an API key in the workspace app"))
     assertTrue(sse.contains("[DONE]"))
+    controller.stopWorkspaceArtifactServer("agent-demo/flovera.app.json")
+  }
+
+  @Test
+  fun controllerReusesStopsAndRestartsSeedArtifactPythonHttpPreview() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspaceId = "controller-local-http-lifecycle-${System.currentTimeMillis()}"
+    val settingsFile = File(context.filesDir, "$workspaceId-settings.json")
+    var controller: AgentController? = null
+    try {
+      val settingsStore = SettingsStore(context, settingsFile).also {
+        it.save(AppSettings(activeWorkspaceId = workspaceId, provider = "", model = ""))
+      }
+      controller = AgentController(context, settingsStore = settingsStore).also {
+        it.refreshWorkspaceFiles()
+        it.selectHtmlFile("agent-demo/src/web/index.html")
+      }
+
+      val firstUrl = controller.state.value.selectedHtmlUrl.orEmpty()
+      assertTrue(firstUrl.startsWith("http://127.0.0.1:"))
+      val runningStatus = controller.state.value.workspaceArtifactServerStatuses
+        .single { it.manifestPath == "agent-demo/flovera.app.json" }
+      assertEquals("running", runningStatus.state)
+      assertEquals(firstUrl, runningStatus.url)
+      assertNotNull(runningStatus.port)
+      assertTrue(runningStatus.command.contains("python src/server.py"))
+      assertEquals("agent-demo", runningStatus.cwd)
+
+      controller.refreshWorkspaceFiles()
+      assertEquals(firstUrl, controller.state.value.selectedHtmlUrl)
+
+      controller.stopWorkspaceArtifactServer("agent-demo/flovera.app.json")
+      val stoppedStatus = controller.state.value.workspaceArtifactServerStatuses
+        .single { it.manifestPath == "agent-demo/flovera.app.json" }
+      assertEquals("stopped", stoppedStatus.state)
+      assertEquals("Artifact server stopped", controller.state.value.status)
+
+      controller.selectHtmlFile("agent-demo/src/web/index.html")
+      val restartedUrl = controller.state.value.selectedHtmlUrl.orEmpty()
+      assertTrue(restartedUrl.startsWith("http://127.0.0.1:"))
+      val restartedStatus = controller.state.value.workspaceArtifactServerStatuses
+        .single { it.manifestPath == "agent-demo/flovera.app.json" }
+      assertEquals("running", restartedStatus.state)
+      assertEquals(restartedUrl, restartedStatus.url)
+    } finally {
+      controller?.stopWorkspaceArtifactServer("agent-demo/flovera.app.json")
+      settingsFile.delete()
+      File(File(context.filesDir, "workspaces"), workspaceId).deleteRecursively()
+    }
+  }
+
+  @Test
+  fun seedArtifactRelaysOpenAiCompatibleSseUsingRequestApiKey() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspaceId = "controller-local-http-upstream-${System.currentTimeMillis()}"
+    val settingsStore = SettingsStore(context, File(context.filesDir, "$workspaceId-settings.json")).also {
+      it.save(AppSettings(activeWorkspaceId = workspaceId, provider = "", model = ""))
+    }
+    val controller = AgentController(context, settingsStore = settingsStore).also {
+      it.refreshWorkspaceFiles()
+      it.selectHtmlFile("agent-demo/src/web/index.html")
+    }
+    val selectedUrl = controller.state.value.selectedHtmlUrl.orEmpty()
+    assertTrue(selectedUrl.startsWith("http://127.0.0.1:"))
+    val origin = selectedUrl.trimEnd('/')
+
+    FakeOpenAiCompatibleSseServer().use { upstream ->
+      val connection = (URL("$origin/api/chat/stream").openConnection() as HttpURLConnection).apply {
+        requestMethod = "POST"
+        doOutput = true
+        setRequestProperty("Content-Type", "application/json")
+      }
+      val requestBody = """
+        {
+          "apiKey": "user-owned-apikey",
+          "baseUrl": "${upstream.baseUrl}/v1",
+          "model": "fake-model",
+          "messages": [{"role":"user","content":"hello"}]
+        }
+      """.trimIndent()
+      connection.outputStream.use { stream ->
+        stream.write(requestBody.toByteArray(StandardCharsets.UTF_8))
+      }
+
+      val sse = connection.inputStream.bufferedReader().use { it.readText() }
+
+      assertTrue(sse.contains("stub-ok"))
+      assertTrue(sse.contains("[DONE]"))
+      assertEquals("Bearer user-owned-apikey", upstream.authorization())
+      assertTrue(upstream.requestBody().contains("\"model\": \"fake-model\""))
+    }
+    controller.stopWorkspaceArtifactServer("agent-demo/flovera.app.json")
+  }
+
+  @Test
+  fun workspaceOwnedPythonHttpDoesNotRequireFloveraProviderSettings() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspaceId = "workspace-owned-http-${System.currentTimeMillis()}"
+    val settingsStore = SettingsStore(context, File(context.filesDir, "$workspaceId-settings.json")).also {
+      it.save(AppSettings(activeWorkspaceId = workspaceId, provider = "", model = ""))
+    }
+    val workspace = WorkspaceManager(context, workspaceId)
+    workspace.writeFile("own-api/src/web/index.html", "<!doctype html><title>Own API</title><main>Own API Chat</main>", createAutoSnapshot = false)
+    workspace.writeFile(
+      "own-api/src/server.py",
+      """
+        import argparse
+        import json
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, _format, *args):
+                return
+
+            def send_body(self, status, content_type, body):
+                self.send_response(status)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_GET(self):
+                if self.path == "/":
+                    self.send_body(200, "text/html; charset=utf-8", b"Own API Chat")
+                    return
+                if self.path == "/api/health":
+                    self.send_body(200, "application/json; charset=utf-8", b'{"ok":true,"runtime":"workspace-python-http"}')
+                    return
+                self.send_body(404, "text/plain; charset=utf-8", b"not found")
+
+            def do_POST(self):
+                if self.path != "/api/chat/stream":
+                    self.send_body(404, "text/plain; charset=utf-8", b"not found")
+                    return
+                length = int(self.headers.get("Content-Length") or "0")
+                payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+                api_key = payload.get("apiKey", "")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(("data: " + json.dumps({"content": "key=" + api_key[-4:]}) + "\n\n").encode("utf-8"))
+                self.wfile.write(b"data: [DONE]\n\n")
+
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--host", default="127.0.0.1")
+        parser.add_argument("--port", type=int, required=True)
+        args = parser.parse_args()
+        ThreadingHTTPServer((args.host, args.port), Handler).serve_forever()
+      """.trimIndent(),
+      createAutoSnapshot = false,
+    )
+    workspace.writeFile(
+      "own-api/flovera.app.json",
+      """
+      {
+        "schemaVersion": 1,
+        "name": "own-api",
+        "kind": "interactive",
+        "entrypoints": {
+          "preview": {
+            "kind": "local_http",
+            "path": "src/web/index.html",
+            "urlPath": "/"
+          },
+          "server": {
+            "kind": "python_http",
+            "command": "python src/server.py --host 127.0.0.1 --port 8765"
+          }
+        }
+      }
+      """.trimIndent(),
+      createAutoSnapshot = false,
+    )
+    val controller = AgentController(context, settingsStore = settingsStore).also {
+      it.refreshWorkspaceFiles()
+      it.selectHtmlFile("own-api/src/web/index.html")
+    }
+
+    val selectedUrl = controller.state.value.selectedHtmlUrl.orEmpty()
+    assertTrue(selectedUrl.startsWith("http://127.0.0.1:"))
+    assertFalse(selectedUrl.contains("/__flovera__/api/"))
+    assertTrue(URL(selectedUrl).readText().contains("Own API Chat"))
+
+    val origin = selectedUrl.trimEnd('/')
+    val health = JSONObject(URL("$origin/api/health").readText())
+    assertEquals("workspace-python-http", health.getString("runtime"))
+
+    val connection = (URL("$origin/api/chat/stream").openConnection() as HttpURLConnection).apply {
+      requestMethod = "POST"
+      doOutput = true
+      setRequestProperty("Content-Type", "application/json")
+    }
+    connection.outputStream.use { stream ->
+      stream.write("""{"apiKey":"user-owned-apikey","messages":[{"role":"user","content":"hello"}]}""".toByteArray(StandardCharsets.UTF_8))
+    }
+    val sse = connection.inputStream.bufferedReader().use { it.readText() }
+    assertTrue(sse.contains("key=ikey"))
+    assertTrue(sse.contains("[DONE]"))
+    controller.stopWorkspaceArtifactServer("own-api/flovera.app.json")
   }
 
   @Test
@@ -644,6 +860,7 @@ class WorkspaceFileTreeInstrumentedTest {
     assertFalse(compact.contains("scannedFiles="))
     assertTrue(debug.contains("maxScore="))
     assertTrue(debug.contains("scannedFiles="))
+    assertTrue(debug.contains("elapsedMs="))
   }
 
   @Test
@@ -993,6 +1210,71 @@ class WorkspaceFileTreeInstrumentedTest {
     assertEquals("baseline", workspace.readFile("only-in-baseline.txt"))
   }
 
+  private class FakeOpenAiCompatibleSseServer : Closeable {
+    private val server = ServerSocket(0)
+    private val requestLatch = CountDownLatch(1)
+    private val auth = AtomicReference("")
+    private val body = AtomicReference("")
+    private val worker = thread(start = true, isDaemon = true, name = "FakeOpenAiCompatibleSseServer") {
+      runCatching {
+        server.accept().use { socket ->
+          val input = socket.getInputStream().bufferedReader(StandardCharsets.UTF_8)
+          input.readLine()
+          var contentLength = 0
+          while (true) {
+            val line = input.readLine() ?: break
+            if (line.isBlank()) break
+            val separator = line.indexOf(':')
+            if (separator > 0) {
+              val name = line.substring(0, separator).trim()
+              val value = line.substring(separator + 1).trim()
+              if (name.equals("Authorization", ignoreCase = true)) auth.set(value)
+              if (name.equals("Content-Length", ignoreCase = true)) contentLength = value.toIntOrNull() ?: 0
+            }
+          }
+          if (contentLength > 0) {
+            val chars = CharArray(contentLength)
+            input.read(chars)
+            body.set(String(chars))
+          }
+          val responseBody = (
+            "data: {\"choices\":[{\"delta\":{\"content\":\"stub-ok\"}}]}\r\n\r\n" +
+              "data: [DONE]\r\n\r\n"
+            ).toByteArray(StandardCharsets.UTF_8)
+          val headers = (
+            "HTTP/1.1 200 OK\r\n" +
+              "Content-Type: text/event-stream; charset=utf-8\r\n" +
+              "Content-Length: ${responseBody.size}\r\n" +
+              "Connection: close\r\n\r\n"
+            ).toByteArray(StandardCharsets.UTF_8)
+          socket.getOutputStream().use { output ->
+            output.write(headers)
+            output.write(responseBody)
+            output.flush()
+          }
+          requestLatch.countDown()
+        }
+      }
+    }
+
+    val baseUrl: String = "http://127.0.0.1:${server.localPort}"
+
+    fun authorization(): String {
+      assertTrue("Fake upstream was not called", requestLatch.await(10, TimeUnit.SECONDS))
+      return auth.get()
+    }
+
+    fun requestBody(): String {
+      assertTrue("Fake upstream was not called", requestLatch.await(10, TimeUnit.SECONDS))
+      return body.get()
+    }
+
+    override fun close() {
+      server.close()
+      worker.join(500)
+    }
+  }
+
   @Test
   fun workspaceFloveraMetadataExposesCapabilitiesAndSettingsProposals() {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
@@ -1058,12 +1340,27 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"workspaceArtifactManifestName\": \"flovera.app.json\""))
     assertTrue(capabilities.contains("\"workspaceArtifactActionKinds\""))
     assertTrue(capabilities.contains("\"python_job\""))
+    assertTrue(capabilities.contains("\"workspaceArtifactPythonHttp\": true"))
+    assertTrue(capabilities.contains("\"workspaceArtifactWorkspaceOwnedHttp\": true"))
+    assertTrue(capabilities.contains("\"workspaceArtifactPythonHttpLifecycle\": true"))
+    assertTrue(capabilities.contains("\"workspaceArtifactPythonHttpDiagnostics\": true"))
+    assertTrue(capabilities.contains("\"workspaceArtifactViewportHelper\": true"))
+    assertTrue(capabilities.contains("\"workspaceArtifactViewportCssVars\""))
+    assertTrue(capabilities.contains("\"--flovera-viewport-height\""))
+    assertTrue(capabilities.contains("\"workspaceArtifactVisibleContentCheck\": true"))
     assertTrue(capabilities.contains("\"workspaceArtifactPythonJobNetwork\": true"))
     assertTrue(capabilities.contains("\"workspaceArtifactEnvironmentRefs\""))
     assertTrue(capabilities.contains("\"workspaceArtifactBridgeCalls\""))
     assertTrue(capabilities.contains("\"runAction\""))
     assertTrue(capabilities.contains("\"workspaceArtifactJobUi\": true"))
     assertTrue(capabilities.contains("\"seededPortableArtifactDemoPath\": \"agent-demo/flovera.app.json\""))
+    assertTrue(capabilities.contains("\"toolProgressNarration\": true"))
+    assertTrue(capabilities.contains("\"agentRunTimeline\": true"))
+    assertTrue(capabilities.contains("\"agentRunEventBus\": true"))
+    assertTrue(capabilities.contains("\"finalAssistantResponseStreaming\": true"))
+    assertTrue(capabilities.contains("\"runtime_event_delta_when_available\""))
+    assertTrue(capabilities.contains("\"mainSurfaceHtmlQuickPicker\": true"))
+    assertTrue(capabilities.contains("\"conversationPathLinks\": true"))
     assertTrue(capabilities.contains("\"workspaceSearch\": true"))
     assertTrue(capabilities.contains("\"workspaceSearchScopes\""))
     assertTrue(capabilities.contains("\"workspace_app_metadata\""))
@@ -1071,6 +1368,7 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"previewFormats\""))
     assertTrue(capabilities.contains("\"json\""))
     assertTrue(capabilities.contains("\"csv\""))
+    assertTrue(capabilities.contains("\"code\""))
     assertTrue(capabilities.contains("\"pdf\""))
     assertTrue(capabilities.contains("\"modelContextOverrides\": true"))
     assertTrue(capabilities.contains("\"reasoningEffort\": true"))

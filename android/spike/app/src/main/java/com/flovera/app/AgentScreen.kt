@@ -72,6 +72,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onClick
@@ -91,6 +92,7 @@ import com.flovera.app.agent.AgentContextBudget
 import com.flovera.app.config.normalizeBraveSearchApiKey
 import com.flovera.app.koog.ModelProviderCatalog
 import com.flovera.app.session.ContextUsageRecord
+import com.flovera.app.session.AgentRunTimelineEvent
 import com.flovera.app.session.SESSION_ROLE_COMPRESSION
 import com.flovera.app.session.SessionMessage
 import com.flovera.app.session.ToolEvent
@@ -152,12 +154,12 @@ fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
     ) {
       FloatingActionButton(
         onClick = { activePanel = AgentPanel.HtmlFiles },
-        modifier = Modifier.semantics { contentDescription = "Open workspace apps and previews" },
+        modifier = Modifier.semantics { contentDescription = "Open HTML quick picker" },
         shape = FloveraFabShape,
         containerColor = FloveraFabContainer,
         contentColor = FloveraFabText,
       ) {
-        Text("Preview", modifier = Modifier.padding(horizontal = 4.dp), style = MaterialTheme.typography.labelLarge)
+        Text("HTML", modifier = Modifier.padding(horizontal = 4.dp), style = MaterialTheme.typography.labelLarge)
       }
       if (state.workspaceArtifactJobs.isNotEmpty()) {
         FloatingActionButton(
@@ -405,6 +407,7 @@ private fun WorkspaceTextPreview(path: String, content: String, mimeType: String
         isMarkdownPreview(path) -> MarkdownMessageText(content = content, color = MaterialTheme.colorScheme.onSurface)
         isJsonPreview(path, mimeType) -> WorkspaceJsonPreview(content)
         isCsvPreview(path, mimeType) -> WorkspaceCsvPreview(content)
+        isCodePreview(path, mimeType) -> WorkspaceCodePreview(content)
         else -> WorkspacePlainTextPreview(content)
       }
     }
@@ -476,6 +479,45 @@ private fun WorkspaceCsvPreview(content: String) {
 }
 
 @Composable
+private fun WorkspaceCodePreview(content: String) {
+  val lines = remember(content) { content.lineSequence().toList().ifEmpty { listOf("") } }
+  Text("Code preview", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
+  Surface(
+    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+    shape = FloveraSmallShape,
+    color = MaterialTheme.colorScheme.surface,
+    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+  ) {
+    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+      lines.take(400).forEachIndexed { index, line ->
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+          Text(
+            text = (index + 1).toString().padStart(3, ' '),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontFamily = FontFamily.Monospace,
+            style = MaterialTheme.typography.bodySmall,
+          )
+          Text(
+            text = line,
+            color = MaterialTheme.colorScheme.onSurface,
+            fontFamily = FontFamily.Monospace,
+            style = MaterialTheme.typography.bodySmall,
+          )
+        }
+      }
+      if (lines.size > 400) {
+        Text(
+          text = "[truncated: showing first 400 lines]",
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
+          fontFamily = FontFamily.Monospace,
+          style = MaterialTheme.typography.bodySmall,
+        )
+      }
+    }
+  }
+}
+
+@Composable
 private fun WorkspaceWebView(url: String?, workspaceRootUrl: String, controller: AgentController) {
   var webError by remember(url) { mutableStateOf<String?>(null) }
 
@@ -498,7 +540,7 @@ private fun WorkspaceWebView(url: String?, workspaceRootUrl: String, controller:
   }
 
   AndroidView(
-    modifier = Modifier.fillMaxSize(),
+    modifier = Modifier.fillMaxSize().semantics { contentDescription = "Workspace WebView" },
     factory = { context ->
       WebView(context).apply {
         webViewClient = FloveraWorkspaceWebViewClient(
@@ -571,6 +613,14 @@ private fun isJsonPreview(path: String, mimeType: String): Boolean {
 
 private fun isCsvPreview(path: String, mimeType: String): Boolean {
   return mimeType == "text/csv" || path.endsWith(".csv", ignoreCase = true)
+}
+
+private fun isCodePreview(path: String, mimeType: String): Boolean {
+  val extension = path.substringAfterLast('.', missingDelimiterValue = "").lowercase()
+  return extension in setOf(
+    "kt", "kts", "java", "py", "js", "mjs", "cjs", "ts", "tsx", "jsx", "css",
+    "xml", "sql", "sh", "ps1", "rb", "go", "rs", "c", "cpp", "h", "hpp",
+  ) || mimeType == "text/x-python" || mimeType == "application/javascript"
 }
 
 private fun isPdfPreview(path: String, mimeType: String): Boolean {
@@ -673,6 +723,20 @@ private class FloveraWorkspaceWebViewClient(
     }
   }
 
+  override fun onPageFinished(view: WebView, url: String) {
+    view.evaluateJavascript(WorkspaceWebViewHardening.viewportHelperJs, null)
+    view.postDelayed(
+      {
+        view.evaluateJavascript(WorkspaceWebViewHardening.visibleContentCheckJs) { result ->
+          if (!WorkspaceWebViewHardening.isVisibleResult(result)) {
+            onError("WebView content may be invisible. Check viewport height, offscreen roots, blocked resources, or missing local HTTP routes.")
+          }
+        }
+      },
+      WorkspaceWebViewHardening.visibleCheckDelayMs,
+    )
+  }
+
   private fun handleUrl(view: WebView, uri: Uri): Boolean {
     val target = uri.toString()
     if (target.startsWith(workspaceRootUrl)) {
@@ -706,15 +770,20 @@ private fun ConversationDialog(
   onDismiss: () -> Unit,
 ) {
   val listState = rememberLazyListState()
+  val focusManager = LocalFocusManager.current
   val messages = state.session?.messages.orEmpty()
   val latestContextRecord = state.session?.contextRecords?.lastOrNull()
   val visibleMessageCount = messages.size + if (state.assistantDraft == null) 0 else 1
+  val assistantDraftScrollKey = state.assistantDraft?.let { draft ->
+    "${draft.content.length}:${draft.toolEvents.size}:${draft.runEvents.size}"
+  }.orEmpty()
+  val workspaceMessagePaths = remember(state.workspaceTree) { state.workspaceTree.workspaceMessageLinkPaths() }
   var pendingRevertIndex by remember { mutableStateOf<Int?>(null) }
   var sessionPickerOpen by remember { mutableStateOf(false) }
   var moreMenuOpen by remember { mutableStateOf(false) }
   val isDraftSession = state.session != null && state.session.messages.isEmpty()
 
-  LaunchedEffect(state.session?.id, visibleMessageCount) {
+  LaunchedEffect(state.session?.id, visibleMessageCount, assistantDraftScrollKey) {
     if (visibleMessageCount > 0) {
       listState.scrollToItem(visibleMessageCount - 1)
     }
@@ -880,13 +949,30 @@ private fun ConversationDialog(
               } else {
                 MessageBubble(
                   message = message,
+                  pathLinks = remember(message.content, workspaceMessagePaths) {
+                    conversationPathLinks(message.content, workspaceMessagePaths)
+                  },
+                  onOpenPath = {
+                    controller.selectWorkspacePreview(it)
+                    onDismiss()
+                  },
                   onRevert = if (!state.isRunning && message.role == "user") ({ pendingRevertIndex = index }) else null,
                 )
               }
             }
             state.assistantDraft?.let { draft ->
               item(key = "assistant-draft") {
-                MessageBubble(message = draft, onRevert = null)
+                MessageBubble(
+                  message = draft,
+                  pathLinks = remember(draft.content, workspaceMessagePaths) {
+                    conversationPathLinks(draft.content, workspaceMessagePaths)
+                  },
+                  onOpenPath = {
+                    controller.selectWorkspacePreview(it)
+                    onDismiss()
+                  },
+                  onRevert = null,
+                )
               }
             }
           }
@@ -928,7 +1014,10 @@ private fun ConversationDialog(
               .size(52.dp)
               .semantics { contentDescription = if (actionStopsRun) "Interrupt agent" else "Send message" }
               .clickable(
-                onClick = if (actionStopsRun) controller::interruptAgentRun else controller::submit,
+                onClick = {
+                  focusManager.clearFocus()
+                  if (actionStopsRun) controller.interruptAgentRun() else controller.submit()
+                },
               ),
             shape = RoundedCornerShape(12.dp),
             color = if (actionStopsRun) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer,
@@ -1142,6 +1231,8 @@ private fun QueuedMessageRow(
 @Composable
 private fun MessageBubble(
   message: SessionMessage,
+  pathLinks: List<String> = emptyList(),
+  onOpenPath: (String) -> Unit = {},
   onRevert: (() -> Unit)?,
 ) {
   val isUser = message.role == "user"
@@ -1230,6 +1321,13 @@ private fun MessageBubble(
             }
           }
           MarkdownMessageText(content = displayContent, color = textColor)
+          if (!selectionEnabled && pathLinks.isNotEmpty()) {
+            ConversationPathLinks(
+              paths = pathLinks,
+              color = textColor,
+              onOpenPath = onOpenPath,
+            )
+          }
           if (canExpand) {
             TextButton(onClick = { expanded = !expanded }) {
               Text(
@@ -1248,8 +1346,36 @@ private fun MessageBubble(
               )
             }
           }
-          ToolEventsSummary(events = message.toolEvents, color = textColor)
+          if (message.runEvents.isNotEmpty()) {
+            AgentRunTimeline(events = message.runEvents, color = textColor)
+          } else {
+            ToolEventsSummary(events = message.toolEvents, color = textColor)
+          }
         }
+      }
+    }
+  }
+}
+
+@Composable
+private fun ConversationPathLinks(
+  paths: List<String>,
+  color: Color,
+  onOpenPath: (String) -> Unit,
+) {
+  Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    paths.take(5).forEach { path ->
+      TextButton(
+        onClick = { onOpenPath(path) },
+        modifier = Modifier.semantics { contentDescription = "Open conversation path $path" },
+      ) {
+        Text(
+          text = path,
+          color = color,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+          style = MaterialTheme.typography.labelMedium,
+        )
       }
     }
   }
@@ -1266,6 +1392,101 @@ private fun MessageBubbleContent(
     }
   } else {
     content()
+  }
+}
+
+@Composable
+private fun AgentRunTimeline(events: List<AgentRunTimelineEvent>, color: Color) {
+  if (events.isEmpty()) return
+  var expanded by remember(events.size, events.lastOrNull()?.timestampMillis) { mutableStateOf(false) }
+  val visibleEvents = remember(events, expanded) {
+    if (expanded || events.size <= 6) {
+      events
+    } else {
+      events.take(2) + events.takeLast(4)
+    }
+  }
+  val hiddenCount = (events.size - visibleEvents.size).coerceAtLeast(0)
+  val hasHiddenDetail = events.any { it.detail.isNotBlank() && it.compact }
+
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .semantics { contentDescription = "Agent run timeline" },
+    verticalArrangement = Arrangement.spacedBy(5.dp),
+  ) {
+    Text(
+      text = "Run timeline",
+      color = color.copy(alpha = 0.72f),
+      style = MaterialTheme.typography.labelSmall,
+      fontWeight = FontWeight.SemiBold,
+    )
+    visibleEvents.forEachIndexed { index, event ->
+      if (!expanded && hiddenCount > 0 && index == 2) {
+        Text(
+          text = "$hiddenCount earlier event(s) hidden",
+          color = color.copy(alpha = 0.58f),
+          style = MaterialTheme.typography.labelSmall,
+        )
+      }
+      AgentRunTimelineRow(
+        event = event,
+        color = color,
+        showDetail = expanded || !event.compact,
+      )
+    }
+    if (hiddenCount > 0 || hasHiddenDetail) {
+      TextButton(onClick = { expanded = !expanded }) {
+        Text(
+          text = if (expanded) "Show compact timeline" else "Show full timeline",
+          color = color.copy(alpha = 0.82f),
+          style = MaterialTheme.typography.labelSmall,
+        )
+      }
+    }
+  }
+}
+
+@Composable
+private fun AgentRunTimelineRow(event: AgentRunTimelineEvent, color: Color, showDetail: Boolean) {
+  Row(
+    modifier = Modifier.fillMaxWidth(),
+    horizontalArrangement = Arrangement.spacedBy(6.dp),
+    verticalAlignment = Alignment.Top,
+  ) {
+    Text(
+      text = "•",
+      color = color.copy(alpha = 0.62f),
+      style = MaterialTheme.typography.bodySmall,
+    )
+    Column(
+      modifier = Modifier.weight(1f),
+      verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+      Text(
+        text = event.title,
+        color = color,
+        style = MaterialTheme.typography.bodySmall,
+        fontWeight = FontWeight.SemiBold,
+      )
+      val meta = listOf(event.status, formatMessageTime(event.timestampMillis))
+        .filter { it.isNotBlank() }
+        .joinToString(" · ")
+      if (meta.isNotBlank()) {
+        Text(
+          text = meta,
+          color = color.copy(alpha = 0.58f),
+          style = MaterialTheme.typography.labelSmall,
+        )
+      }
+      if (showDetail && event.detail.isNotBlank()) {
+        Text(
+          text = event.detail,
+          color = color.copy(alpha = 0.82f),
+          style = MaterialTheme.typography.bodySmall,
+        )
+      }
+    }
   }
 }
 
@@ -1448,18 +1669,46 @@ private fun formatContextUsageCompact(record: ContextUsageRecord, language: Stri
   val window = effectiveContextWindow(record)
   val used = formatTokenCount(record.approximateTokens)
   val total = window?.let(::formatTokenCount) ?: "?"
-  return "$percent · $used/$total"
+  val prefix = if (isEstimatedContextRecord(record)) t(language, "est ", "\u4f30 ") else ""
+  return "$prefix$percent · $used/$total"
 }
 
 private fun formatContextUsageDetails(record: ContextUsageRecord, language: String): String {
   val window = effectiveContextWindow(record)
   val used = formatTokenCount(record.approximateTokens)
   val total = window?.let(::formatTokenCount) ?: t(language, "unknown", "\u672a\u77e5")
-  return t(
-    language,
-    "Used $used tokens, total $total. Flovera automatically compresses background information when the context approaches its budget.",
-    "\u5df2\u7528 $used tokens\uff0c\u5171 $total\u3002Flovera \u4f1a\u5728\u4e0a\u4e0b\u6587\u63a5\u8fd1\u9884\u7b97\u65f6\u81ea\u52a8\u538b\u7f29\u5176\u80cc\u666f\u4fe1\u606f\u3002",
-  )
+  val requestChars = record.estimatedRequestChars.takeIf { it > 0 }
+    ?: (record.inputChars + record.historyChars + record.rulesChars + record.workspaceListingChars)
+  val estimateLabel = if (isEstimatedContextRecord(record)) {
+    t(language, "Estimated from request characters.", "\u57fa\u4e8e\u8bf7\u6c42\u5b57\u7b26\u6570\u4f30\u7b97\u3002")
+  } else {
+    t(language, "Reported by provider or tokenizer.", "\u6765\u81ea provider \u6216 tokenizer \u62a5\u544a\u3002")
+  }
+  return buildString {
+    appendLine(
+      t(
+        language,
+        "Used $used tokens, total $total. $estimateLabel",
+        "\u5df2\u7528 $used tokens\uff0c\u5171 $total\u3002$estimateLabel",
+      ),
+    )
+    appendLine(
+      t(
+        language,
+        "Flovera automatically compresses background information when the context approaches its budget.",
+        "Flovera \u4f1a\u5728\u4e0a\u4e0b\u6587\u63a5\u8fd1\u9884\u7b97\u65f6\u81ea\u52a8\u538b\u7f29\u5176\u80cc\u666f\u4fe1\u606f\u3002",
+      ),
+    )
+    appendLine()
+    appendLine(t(language, "Breakdown:", "\u62c6\u5206\uff1a"))
+    appendLine("- inputChars=${record.inputChars}")
+    appendLine("- historyChars=${record.historyChars}")
+    appendLine("- rulesChars=${record.rulesChars}")
+    appendLine("- workspaceListingChars=${record.workspaceListingChars}")
+    appendLine("- toolSchemaChars=${record.toolSchemaChars}")
+    appendLine("- providerOverheadChars=${record.providerOverheadChars}")
+    append("- estimatedRequestChars=$requestChars")
+  }
 }
 
 private fun formatContextPercent(record: ContextUsageRecord, language: String): String {
@@ -1481,6 +1730,12 @@ private fun effectiveContextPermille(record: ContextUsageRecord): Int? {
   return ((record.approximateTokens.coerceAtLeast(0).toLong() * 1_000L) / window)
     .coerceIn(0L, 1_000L)
     .toInt()
+}
+
+private fun isEstimatedContextRecord(record: ContextUsageRecord): Boolean {
+  return !record.tokenUsageSource.equals("provider", ignoreCase = true) &&
+    !record.tokenUsageSource.equals("provider_reported", ignoreCase = true) &&
+    !record.tokenUsageSource.equals("tokenizer", ignoreCase = true)
 }
 
 private fun formatTokenCount(tokens: Int): String {
@@ -1512,6 +1767,48 @@ private fun collapsedMessageContent(content: String): String {
   val byLines = if (lineCollapsed) lines.take(maxLines).joinToString("\n") else content
   val preview = if (byLines.length > maxChars) byLines.take(maxChars).trimEnd() else byLines
   return "$preview\n\n..."
+}
+
+private fun WorkspaceFileNode?.workspaceMessageLinkPaths(): List<String> {
+  if (this == null) return emptyList()
+  val paths = mutableListOf<String>()
+
+  fun visit(node: WorkspaceFileNode) {
+    if (!node.isDirectory && node.path.isNotBlank()) paths += node.path
+    node.children.forEach(::visit)
+  }
+
+  visit(this)
+  return paths
+    .distinct()
+    .sortedWith(compareByDescending<String> { it.length }.thenBy { it.lowercase(Locale.US) })
+}
+
+private fun conversationPathLinks(content: String, workspacePaths: List<String>): List<String> {
+  if (content.isBlank() || workspacePaths.isEmpty()) return emptyList()
+  return workspacePaths
+    .asSequence()
+    .filter { it.length >= 3 && content.hasWorkspacePathOccurrence(it) }
+    .take(12)
+    .toList()
+}
+
+private fun String.hasWorkspacePathOccurrence(path: String): Boolean {
+  var start = indexOf(path)
+  while (start >= 0) {
+    val before = if (start == 0) null else this[start - 1]
+    val afterIndex = start + path.length
+    val after = if (afterIndex >= length) null else this[afterIndex]
+    if (before.isWorkspacePathBoundary() && after.isWorkspacePathBoundary()) return true
+    start = indexOf(path, start + 1)
+  }
+  return false
+}
+
+private fun Char?.isWorkspacePathBoundary(): Boolean {
+  if (this == null) return true
+  if (isLetterOrDigit() || this == '_' || this == '-' || this == '.' || this == '/') return false
+  return true
 }
 
 private sealed interface MarkdownBlock {
@@ -1630,6 +1927,9 @@ private fun HtmlFilesDialog(
         .thenBy { it.lowercase() },
     )
   }
+  val artifactServerStatusByManifest = remember(state.workspaceArtifactServerStatuses) {
+    state.workspaceArtifactServerStatuses.associateBy { it.manifestPath }
+  }
 
   AlertDialog(
     onDismissRequest = onDismiss,
@@ -1646,11 +1946,13 @@ private fun HtmlFilesDialog(
           items(state.workspaceArtifacts, key = { it.manifestPath }) { artifact ->
             WorkspaceArtifactPickerRow(
               artifact = artifact,
+              serverStatus = artifactServerStatusByManifest[artifact.manifestPath],
               language = language,
               onOpen = { previewPath ->
                 controller.selectHtmlFile(previewPath)
                 onDismiss()
               },
+              onStopServer = { controller.stopWorkspaceArtifactServer(artifact.manifestPath) },
             )
           }
         }
@@ -1685,11 +1987,65 @@ private fun HtmlFilesDialog(
   )
 }
 
+object WorkspaceWebViewHardening {
+  const val visibleCheckDelayMs = 180L
+
+  fun isVisibleResult(result: String?): Boolean {
+    val raw = result.orEmpty()
+    return raw.contains("\\\"visible\\\":true") || raw.contains("\"visible\":true")
+  }
+
+  val viewportHelperJs = """
+    (function () {
+      if (window.__floveraViewportHelperInstalled) return;
+      window.__floveraViewportHelperInstalled = true;
+      function update() {
+        var height = window.innerHeight || document.documentElement.clientHeight || 0;
+        var width = window.innerWidth || document.documentElement.clientWidth || 0;
+        document.documentElement.style.setProperty('--flovera-viewport-height', height + 'px');
+        document.documentElement.style.setProperty('--flovera-viewport-width', width + 'px');
+        document.documentElement.style.setProperty('--flovera-safe-bottom', '0px');
+        window.FloveraViewport = { height: height, width: width, safeBottom: 0 };
+        try {
+          window.dispatchEvent(new CustomEvent('flovera:viewport', { detail: window.FloveraViewport }));
+        } catch (error) {}
+      }
+      window.addEventListener('resize', update);
+      update();
+    })();
+  """.trimIndent()
+
+  val visibleContentCheckJs = """
+    (function () {
+      var viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+      var viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+      var body = document.body;
+      if (!body) return JSON.stringify({ visible: false, reason: 'no-body' });
+      var candidates = Array.prototype.slice.call(body.querySelectorAll('main, [role="main"], section, article, form, button, input, textarea, canvas, svg, img, video, h1, h2, p, div'))
+        .filter(function (node) {
+          var style = window.getComputedStyle(node);
+          if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) return false;
+          var rect = node.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0 && rect.top < viewportHeight && rect.left < viewportWidth;
+        });
+      return JSON.stringify({
+        visible: candidates.length > 0,
+        viewportHeight: viewportHeight,
+        viewportWidth: viewportWidth,
+        bodyHeight: body.scrollHeight || body.offsetHeight || 0,
+        visibleCandidates: candidates.length
+      });
+    })();
+  """.trimIndent()
+}
+
 @Composable
 private fun WorkspaceArtifactPickerRow(
   artifact: com.flovera.app.workspace.WorkspaceArtifact,
+  serverStatus: com.flovera.app.workspace.WorkspacePythonHttpRuntimeStatus?,
   language: String,
   onOpen: (String) -> Unit,
+  onStopServer: () -> Unit,
 ) {
   val previewPath = artifact.preview?.path.orEmpty()
   Surface(
@@ -1709,6 +2065,8 @@ private fun WorkspaceArtifactPickerRow(
           listOfNotNull(
             artifact.kind.takeIf { it.isNotBlank() },
             artifact.preview?.kind?.takeIf { it.isNotBlank() }?.let { "preview=$it" },
+            serverStatus?.state?.takeIf { it.isNotBlank() }?.let { "server=$it" },
+            serverStatus?.port?.let { "port=$it" },
             previewPath.takeIf { it.isNotBlank() },
             artifact.actions.takeIf { it.isNotEmpty() }?.joinToString(prefix = "actions=", separator = ",") { it.id },
           ).joinToString("  "),
@@ -1725,6 +2083,20 @@ private fun WorkspaceArtifactPickerRow(
             overflow = TextOverflow.Ellipsis,
             style = MaterialTheme.typography.bodySmall,
           )
+        }
+        if (serverStatus?.detail?.isNotBlank() == true) {
+          Text(
+            serverStatus.detail,
+            color = MaterialTheme.colorScheme.error,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            style = MaterialTheme.typography.bodySmall,
+          )
+        }
+      }
+      if (serverStatus?.state == "running") {
+        OutlinedButton(onClick = onStopServer) {
+          Text(t(language, "Stop", "\u505c\u6b62"))
         }
       }
       OutlinedButton(

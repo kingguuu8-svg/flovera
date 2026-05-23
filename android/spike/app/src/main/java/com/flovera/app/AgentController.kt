@@ -14,6 +14,7 @@ import com.flovera.app.config.SettingsStore
 import com.flovera.app.koog.FloveraPythonRuntime
 import com.flovera.app.koog.ModelProviderCatalog
 import com.flovera.app.session.AgentSession
+import com.flovera.app.session.AgentRunTimelineEvent
 import com.flovera.app.session.AgentSessionStore
 import com.flovera.app.session.SessionController
 import com.flovera.app.session.SessionMessage
@@ -24,6 +25,8 @@ import com.flovera.app.workspace.WorkspaceController
 import com.flovera.app.workspace.WorkspaceControlledToolProposal
 import com.flovera.app.workspace.WorkspaceFileNode
 import com.flovera.app.workspace.WorkspaceLocalAppServer
+import com.flovera.app.workspace.WorkspacePythonHttpRuntime
+import com.flovera.app.workspace.WorkspacePythonHttpRuntimeStatus
 import com.flovera.app.workspace.WorkspaceSettingsProposal
 import com.flovera.app.workspace.WorkspaceSnapshot
 import com.flovera.app.workspace.WorkspaceSnapshotRecord
@@ -57,6 +60,7 @@ data class AgentScreenState(
   val htmlFiles: List<String> = emptyList(),
   val workspaceArtifacts: List<WorkspaceArtifact> = emptyList(),
   val workspaceArtifactJobs: List<WorkspaceArtifactJob> = emptyList(),
+  val workspaceArtifactServerStatuses: List<WorkspacePythonHttpRuntimeStatus> = emptyList(),
   val selectedHtmlPath: String = "",
   val selectedHtmlUrl: String? = null,
   val selectedPreviewPath: String = "",
@@ -114,6 +118,7 @@ class AgentController(
   private val artifactRunJobs = ConcurrentHashMap<String, Job>()
   private var workspaceController: WorkspaceController
   private var workspaceLocalAppServer: WorkspaceLocalAppServer
+  private var workspacePythonHttpRuntime: WorkspacePythonHttpRuntime
 
   private val _state = MutableStateFlow(AgentScreenState())
   val state: StateFlow<AgentScreenState> = _state
@@ -123,6 +128,7 @@ class AgentController(
     val loadedSettings = settingsLoad.settings
     workspaceController = WorkspaceController(appContext, loadedSettings.activeWorkspaceId).also { it.ensureSeedFiles() }
     workspaceLocalAppServer = WorkspaceLocalAppServer(workspaceController.runtimeWorkspace()) { _state.value.settings }
+    workspacePythonHttpRuntime = WorkspacePythonHttpRuntime(workspaceController.runtimeWorkspace())
     val session = sessionController.initialSession(loadedSettings.activeSessionId)
     workspaceController.syncFloveraSettings(loadedSettings)
     var workspaceSnapshot = workspaceController.snapshot(loadedSettings.selectedHtmlPath)
@@ -136,11 +142,8 @@ class AgentController(
     }
     val modelDraft = settingsController.draftFor(settings)
     val initialSelectedHtmlUrl = selectedHtmlUrl(workspaceSnapshot)
-    val initialWorkspaceRootUrl = if (initialSelectedHtmlUrl?.startsWith("http://127.0.0.1:") == true) {
-      workspaceLocalAppServer.rootUrl()
-    } else {
-      workspaceSnapshot.workspaceRootUrl
-    }
+    val initialWorkspaceRootUrl = workspaceRootUrl(initialSelectedHtmlUrl, workspaceSnapshot)
+    val initialArtifactServerStatuses = workspacePythonHttpRuntime.statusesFor(workspaceSnapshot.workspaceArtifacts)
     _state.value = AgentScreenState(
       settings = settings,
       session = session,
@@ -158,6 +161,7 @@ class AgentController(
       htmlFiles = workspaceSnapshot.htmlFiles,
       workspaceArtifacts = workspaceSnapshot.workspaceArtifacts,
       workspaceArtifactJobs = workspaceSnapshot.workspaceArtifactJobs,
+      workspaceArtifactServerStatuses = initialArtifactServerStatuses,
       selectedHtmlPath = workspaceSnapshot.selectedHtmlPath,
       selectedHtmlUrl = initialSelectedHtmlUrl,
       selectedPreviewPath = workspaceSnapshot.selectedHtmlPath,
@@ -249,6 +253,9 @@ class AgentController(
     val draft = settingsController.draftFor(settingsWithSearch)
     workspaceController.syncFloveraSettings(settingsWithSearch)
     val workspaceSnapshot = workspaceController.snapshot(settingsWithSearch.selectedHtmlPath)
+    val selectedHtmlUrl = selectedHtmlUrl(workspaceSnapshot)
+    val workspaceRootUrl = workspaceRootUrl(selectedHtmlUrl, workspaceSnapshot)
+    val artifactServerStatuses = workspacePythonHttpRuntime.statusesFor(workspaceSnapshot.workspaceArtifacts)
     _state.update {
       it.copy(
         settings = settingsWithSearch,
@@ -263,13 +270,14 @@ class AgentController(
         htmlFiles = workspaceSnapshot.htmlFiles,
         workspaceArtifacts = workspaceSnapshot.workspaceArtifacts,
         workspaceArtifactJobs = workspaceSnapshot.workspaceArtifactJobs,
+        workspaceArtifactServerStatuses = artifactServerStatuses,
         selectedHtmlPath = workspaceSnapshot.selectedHtmlPath,
-        selectedHtmlUrl = workspaceSnapshot.selectedHtmlUrl,
+        selectedHtmlUrl = selectedHtmlUrl,
         selectedPreviewPath = workspaceSnapshot.selectedHtmlPath,
         selectedPreviewContent = "",
         selectedPreviewMimeType = if (workspaceSnapshot.selectedHtmlPath.isBlank()) "" else "text/html",
         selectedPreviewUri = "",
-        workspaceRootUrl = workspaceSnapshot.workspaceRootUrl,
+        workspaceRootUrl = workspaceRootUrl,
         workspaceSnapshots = workspaceSnapshot.snapshots,
         settingsProposals = workspaceSnapshot.settingsProposals,
         controlledToolProposals = workspaceSnapshot.controlledToolProposals,
@@ -377,6 +385,16 @@ class AgentController(
     }.orEmpty()
     startWorkspaceArtifactAction(target, inputJson)
     refreshWorkspaceState(status = "Artifact job rerun started: ${job.actionId}")
+  }
+
+  fun stopWorkspaceArtifactServer(manifestPath: String) {
+    val stopped = workspacePythonHttpRuntime.stopManifest(manifestPath)
+    _state.update {
+      it.copy(
+        workspaceArtifactServerStatuses = workspacePythonHttpRuntime.statusesFor(it.workspaceArtifacts),
+        status = if (stopped) "Artifact server stopped" else "Artifact server was not running",
+      )
+    }
   }
 
   fun renameWorkspacePath(path: String, newName: String) {
@@ -646,6 +664,7 @@ class AgentController(
         }
       },
       onDraft = { draft ->
+        agentRunStatusNotifier.running(draft.content.lineSequence().firstOrNull().orEmpty().ifBlank { "Working..." })
         _state.update {
           it.copy(assistantDraft = draft)
         }
@@ -700,7 +719,22 @@ class AgentController(
     activeRunJob?.cancel()
     activeRunJob = null
     val interrupted = current.session?.let { session ->
-      sessionController.appendMessage(session, SessionMessage(role = "assistant", content = "Run interrupted by user."))
+      sessionController.appendMessage(
+        session,
+        SessionMessage(
+          role = "assistant",
+          content = "Run interrupted by user.",
+          runEvents = listOf(
+            AgentRunTimelineEvent(
+              type = "interrupted",
+              title = "Interrupted by user",
+              detail = "The active agent run was cancelled before completion.",
+              status = "interrupted",
+              compact = false,
+            ),
+          ),
+        ),
+      )
     }
     agentRunStatusNotifier.interrupted()
     refreshWorkspaceState(
@@ -879,11 +913,8 @@ class AgentController(
       workspaceSnapshot = workspaceController.snapshot(normalizedSettings.selectedHtmlPath)
     }
     val selectedHtmlUrl = selectedHtmlUrl(workspaceSnapshot)
-    val workspaceRootUrl = if (selectedHtmlUrl?.startsWith("http://127.0.0.1:") == true) {
-      workspaceLocalAppServer.rootUrl()
-    } else {
-      workspaceSnapshot.workspaceRootUrl
-    }
+    val workspaceRootUrl = workspaceRootUrl(selectedHtmlUrl, workspaceSnapshot)
+    val artifactServerStatuses = workspacePythonHttpRuntime.statusesFor(workspaceSnapshot.workspaceArtifacts)
     _state.update {
       val previewPath = when {
         resetPreviewToSelectedHtml -> workspaceSnapshot.selectedHtmlPath
@@ -917,6 +948,7 @@ class AgentController(
         htmlFiles = workspaceSnapshot.htmlFiles,
         workspaceArtifacts = workspaceSnapshot.workspaceArtifacts,
         workspaceArtifactJobs = workspaceSnapshot.workspaceArtifactJobs,
+        workspaceArtifactServerStatuses = artifactServerStatuses,
         selectedHtmlPath = workspaceSnapshot.selectedHtmlPath,
         selectedHtmlUrl = selectedHtmlUrl,
         selectedPreviewPath = previewPath,
@@ -942,11 +974,23 @@ class AgentController(
         artifact.preview?.path == selectedPath &&
         artifact.preview.kind == WORKSPACE_ARTIFACT_PREVIEW_LOCAL_HTTP
     }
-    return if (localHttpArtifact != null) {
+    return if (localHttpArtifact?.preview?.command?.isNotBlank() == true) {
+      runCatching { workspacePythonHttpRuntime.previewUrl(localHttpArtifact) }.getOrNull()
+        ?: workspaceLocalAppServer.workspaceFileUrl(selectedPath)
+    } else if (localHttpArtifact != null) {
       workspaceLocalAppServer.workspaceFileUrl(selectedPath)
     } else {
       snapshot.selectedHtmlUrl
     }
+  }
+
+  private fun workspaceRootUrl(selectedHtmlUrl: String?, snapshot: WorkspaceSnapshot): String {
+    return if (selectedHtmlUrl?.startsWith("http://127.0.0.1:") == true) {
+      val uri = Uri.parse(selectedHtmlUrl)
+      "${uri.scheme}://${uri.encodedAuthority}/"
+    } else {
+      snapshot.workspaceRootUrl
+    }.let { root -> if (root.endsWith("/")) root else "$root/" }
   }
 
   private fun applyFullAuthoritySettingsProposals(settings: AppSettings): FullAuthoritySettingsApplyResult {
@@ -976,7 +1020,10 @@ class AgentController(
     val extension = path.substringAfterLast('.', missingDelimiterValue = "").lowercase()
     return mimeType.startsWith("text/") ||
       mimeType == "application/json" ||
-      extension in setOf("md", "markdown", "json", "js", "css", "csv", "xml", "kt", "java", "py")
+      extension in setOf(
+        "md", "markdown", "json", "js", "mjs", "cjs", "ts", "tsx", "jsx", "css", "csv",
+        "xml", "kt", "kts", "java", "py", "sql", "sh", "ps1", "rb", "go", "rs", "c", "cpp", "h", "hpp",
+      )
   }
 
   private fun activateSession(session: AgentSession, status: String) {

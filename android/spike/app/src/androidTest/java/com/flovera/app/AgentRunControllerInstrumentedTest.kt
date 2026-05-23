@@ -2,7 +2,10 @@ package com.flovera.app
 
 import androidx.test.platform.app.InstrumentationRegistry
 import com.flovera.app.agent.AgentContextBudget
+import com.flovera.app.agent.AgentRunEvent
 import com.flovera.app.agent.AgentRunController
+import com.flovera.app.agent.AgentRunEventSink
+import com.flovera.app.agent.AgentRunEventType
 import com.flovera.app.agent.HANDOFF_SOURCE_LLM
 import com.flovera.app.agent.SessionHandoffCompression
 import com.flovera.app.agent.SessionHandoffCompressor
@@ -68,6 +71,8 @@ class AgentRunControllerInstrumentedTest {
 
     assertEquals("create file", runtime.inputSeen)
     assertEquals("Working...", startedDraft?.content)
+    assertTrue(startedDraft?.runEvents?.any { it.title == "Context checkpoint" } == true)
+    assertTrue(startedDraft?.runEvents?.any { it.title == "Thinking" } == true)
     assertEquals(1, startedSession?.messages?.size)
     assertEquals(1, startedSession?.contextRecords?.size)
     val contextRecord = startedSession?.contextRecords?.single()
@@ -76,15 +81,28 @@ class AgentRunControllerInstrumentedTest {
     assertEquals("deepseek-v4-pro", contextRecord?.model)
     assertEquals(1_000_000, contextRecord?.modelContextWindowTokens)
     assertEquals("deepseek_catalog", contextRecord?.modelContextSource)
+    assertTrue(contextRecord?.toolSchemaChars ?: 0 > 0)
+    assertTrue(contextRecord?.providerOverheadChars ?: 0 > 0)
+    assertEquals(
+      (contextRecord?.inputChars ?: 0) +
+        (contextRecord?.historyChars ?: 0) +
+        (contextRecord?.rulesChars ?: 0) +
+        (contextRecord?.workspaceListingChars ?: 0) +
+        (contextRecord?.toolSchemaChars ?: 0) +
+        (contextRecord?.providerOverheadChars ?: 0),
+      contextRecord?.estimatedRequestChars,
+    )
     assertNotNull(contextRecord?.contextUsagePermille)
     assertEquals(AgentContextBudget.STATUS_SAFE, contextRecord?.contextBudgetStatus)
     assertEquals("user", startedSession?.messages?.single()?.role)
     assertEquals("create file", startedSession?.messages?.single()?.content)
     assertEquals("fake_tool", drafts.single().toolEvents.single().name)
+    assertTrue(drafts.single().runEvents.any { it.title == "Tool: fake_tool" })
     assertEquals(true, succeeded)
     assertEquals(2, finishedSession?.messages?.size)
     assertEquals("assistant output", finishedSession?.messages?.last()?.content)
     assertTrue(finishedSession?.messages?.last()?.toolEvents?.any { it.name == "fake_tool" } == true)
+    assertTrue(finishedSession?.messages?.last()?.runEvents?.any { it.title == "Final response ready" } == true)
     val checkpoint = workspace.readFile(".flovera/runs/latest.json")
     assertTrue(checkpoint, checkpoint.contains("\"status\": \"completed\""))
     assertTrue(checkpoint, checkpoint.contains("\"fake_tool\""))
@@ -137,8 +155,11 @@ class AgentRunControllerInstrumentedTest {
     job!!.join()
 
     assertEquals("Compressing context...", startedDraft?.content)
+    assertTrue(startedDraft?.runEvents?.any { it.title == "Context compression started" } == true)
     assertTrue(startedSession?.messages?.any { it.role == SESSION_ROLE_COMPRESSION } == false)
     assertEquals("Working...", preparedDraft?.content)
+    assertTrue(preparedDraft?.runEvents?.any { it.title == "Context compressed" } == true)
+    assertTrue(preparedDraft?.runEvents?.any { it.title == "Thinking" } == true)
     assertTrue(preparedSession?.messages?.any { it.role == SESSION_ROLE_COMPRESSION } == true)
     assertTrue(runtime.sessionSeen?.messages?.any { it.role == SESSION_ROLE_COMPRESSION } == true)
     assertTrue(compressor.called)
@@ -176,6 +197,47 @@ class AgentRunControllerInstrumentedTest {
     assertEquals(AgentContextBudget.STATUS_WATCH, watch.status)
     assertEquals(AgentContextBudget.STATUS_COMPRESSION_RECOMMENDED, recommended.status)
     assertEquals(830, recommended.usagePermille)
+  }
+
+  @Test
+  fun runControllerStreamsFinalResponseDraftsAndPersistsOneAssistantMessage() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val store = AgentSessionStore(context)
+    val sessions = SessionController(store)
+    val session = store.create("Streaming final ${System.currentTimeMillis()}")
+    val workspace = WorkspaceManager(context, "streaming-final-${System.currentTimeMillis()}").also { it.ensureSeedFiles() }
+    val controller = AgentRunController(runtime = StreamingFinalAgentRuntime(), scope = this)
+    val drafts = mutableListOf<SessionMessage>()
+    var finishedSession: AgentSession? = null
+
+    val job = controller.submit(
+      input = "stream final answer",
+      settings = AppSettings(),
+      session = session,
+      workspace = workspace,
+      appendUserPrompt = sessions::appendUserPrompt,
+      appendContextRecord = sessions::appendContextRecord,
+      appendCompressionDivider = sessions::appendCompressionDivider,
+      appendMessage = sessions::appendMessage,
+      onStarted = { _, _ -> },
+      onDraft = { drafts += it },
+      onSessionUpdated = { _, _ -> },
+      onFinished = { updated, _ -> finishedSession = updated },
+    )
+
+    assertNotNull(job)
+    job!!.join()
+
+    assertTrue(drafts.any { it.content == "assistant " })
+    assertTrue(drafts.any { it.content == "assistant streamed " })
+    assertTrue(drafts.any { it.content == "assistant streamed output" })
+    assertTrue(drafts.last().runEvents.any { it.title == "Final response streaming" })
+    assertEquals(2, finishedSession?.messages?.size)
+    val assistantMessage = finishedSession?.messages?.lastOrNull()
+    assertEquals("assistant", assistantMessage?.role)
+    assertEquals("assistant streamed output", assistantMessage?.content)
+    assertTrue(assistantMessage?.runEvents?.any { it.title == "Final response streamed" } == true)
+    assertTrue(assistantMessage?.runEvents?.any { it.title == "Final response ready" } == true)
   }
 
   @Test
@@ -256,6 +318,8 @@ class AgentRunControllerInstrumentedTest {
     assertTrue(errorMessage?.content?.contains("Error log saved: .flovera/logs/agent-error-") == true)
     assertTrue(errorMessage?.content?.contains("Checkpoint saved: .flovera/runs/") == true)
     assertTrue(errorMessage?.content?.contains("Run interrupted after 1 completed tool call") == true)
+    assertTrue(errorMessage?.runEvents?.any { it.title == "Tool: fake_tool_before_failure" } == true)
+    assertTrue(errorMessage?.runEvents?.any { it.title == "Run failed" } == true)
     val logs = File(workspace.root, ".flovera/logs").listFiles().orEmpty()
     assertEquals(1, logs.size)
     val logText = logs.single().readText()
@@ -357,6 +421,34 @@ class AgentRunControllerInstrumentedTest {
       sessionSeen = session
       recorder.record("fake_tool", "{}", "ok")
       return "assistant output"
+    }
+  }
+
+  private class StreamingFinalAgentRuntime : AgentRuntime {
+    override suspend fun run(
+      input: String,
+      agentRunId: String,
+      settings: AppSettings,
+      session: AgentSession,
+      workspace: WorkspaceManager,
+      recorder: ToolEventRecorder,
+    ): String {
+      return "fallback output"
+    }
+
+    override suspend fun runStreaming(
+      input: String,
+      agentRunId: String,
+      settings: AppSettings,
+      session: AgentSession,
+      workspace: WorkspaceManager,
+      recorder: ToolEventRecorder,
+      eventSink: AgentRunEventSink,
+    ): String {
+      eventSink.emit(AgentRunEvent(type = AgentRunEventType.FINAL_TEXT_DELTA, finalTextDelta = "assistant "))
+      eventSink.emit(AgentRunEvent(type = AgentRunEventType.FINAL_TEXT_DELTA, finalTextDelta = "streamed "))
+      eventSink.emit(AgentRunEvent(type = AgentRunEventType.FINAL_TEXT_DELTA, finalTextDelta = "output"))
+      return "assistant streamed output"
     }
   }
 

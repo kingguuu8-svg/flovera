@@ -29,6 +29,7 @@ data class SessionMessage(
   val content: String,
   val timestampMillis: Long = System.currentTimeMillis(),
   val toolEvents: List<ToolEvent> = emptyList(),
+  val runEvents: List<AgentRunTimelineEvent> = emptyList(),
 )
 
 @Serializable
@@ -37,6 +38,16 @@ data class ToolEvent(
   val args: String,
   val result: String,
   val timestampMillis: Long = System.currentTimeMillis(),
+)
+
+@Serializable
+data class AgentRunTimelineEvent(
+  val type: String,
+  val title: String,
+  val detail: String = "",
+  val timestampMillis: Long = System.currentTimeMillis(),
+  val status: String = "",
+  val compact: Boolean = true,
 )
 
 @Serializable
@@ -51,6 +62,9 @@ data class ContextUsageRecord(
   val historyChars: Int,
   val rulesChars: Int,
   val workspaceListingChars: Int,
+  val toolSchemaChars: Int = 0,
+  val providerOverheadChars: Int = 0,
+  val estimatedRequestChars: Int = 0,
   val approximateTokens: Int,
   val modelContextWindowTokens: Int? = null,
   val modelContextSource: String = "unknown",

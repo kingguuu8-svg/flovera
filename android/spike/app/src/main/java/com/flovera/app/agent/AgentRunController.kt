@@ -8,6 +8,7 @@ import com.flovera.app.koog.KoogSessionHandoffCompressor
 import com.flovera.app.koog.ModelProviderCatalog
 import com.flovera.app.koog.ToolEventRecorder
 import com.flovera.app.session.AgentSession
+import com.flovera.app.session.AgentRunTimelineEvent
 import com.flovera.app.session.ContextUsageRecord
 import com.flovera.app.session.RuntimeSessionHistory
 import com.flovera.app.session.SessionMessage
@@ -54,6 +55,7 @@ class AgentRunController(
     onDraft: (SessionMessage) -> Unit,
     onSessionUpdated: (AgentSession, SessionMessage) -> Unit,
     onFinished: (AgentSession, Boolean) -> Unit,
+    onRunEvent: (AgentRunEvent) -> Unit = {},
   ): Job? {
     val trimmed = input.trim()
     if (trimmed.isBlank()) return null
@@ -61,15 +63,27 @@ class AgentRunController(
     val withUser = appendUserPrompt(session, trimmed)
     val contextRecord = estimateContextUsage(trimmed, settings, withUser, workspace)
     val contextCompressed = shouldCompressContext(contextRecord)
+    var activeRunEvents = buildInitialRunTimeline(contextRecord, trimmed, contextCompressed)
     val startedSession = if (contextCompressed) {
       withUser
     } else {
       appendContextRecord(withUser, contextRecord)
     }
     val startDraft = if (contextCompressed) {
-      SessionMessage(role = "assistant", content = "Compressing context...")
+      SessionMessage(role = "assistant", content = "Compressing context...", runEvents = activeRunEvents)
     } else {
-      SessionMessage(role = "assistant", content = "Working...")
+      SessionMessage(role = "assistant", content = "Working...", runEvents = activeRunEvents)
+    }
+    val runState = AgentRunEventAccumulator(
+      statusContent = startDraft.content,
+      baseTimelineEvents = activeRunEvents,
+      buildToolProgressNarration = ::buildToolProgressNarration,
+      buildToolTimelineEvents = ::buildToolTimelineEvents,
+      onDraft = onDraft,
+    )
+    val eventSink = AgentRunEventSink { event ->
+      onRunEvent(event)
+      runState.emit(event)
     }
     onStarted(startedSession, startDraft)
 
@@ -89,7 +103,12 @@ class AgentRunController(
         )
         val withContext = appendContextRecord(withUser, compressedRecord)
         appendCompressionDivider(withContext, compressedRecord, compression.summary).also { compressedSession ->
-          onSessionUpdated(compressedSession, SessionMessage(role = "assistant", content = "Working..."))
+          activeRunEvents = buildCompressedRunTimeline(activeRunEvents, compressedRecord)
+          runState.replaceBaseTimeline(activeRunEvents, statusContent = "Working...")
+          onSessionUpdated(
+            compressedSession,
+            runState.draftMessage(),
+          )
         }
       } else {
         startedSession
@@ -108,10 +127,12 @@ class AgentRunController(
           toolEvents = events,
           workspace = workspace,
         )
-        onDraft(
-          SessionMessage(
-            role = "assistant",
-            content = "Running tools...",
+        eventSink.emit(
+          AgentRunEvent(
+            type = AgentRunEventType.TOOL_EVENTS_CHANGED,
+            title = "Tool events changed",
+            detail = "Completed tool calls: ${events.size}",
+            status = AGENT_RUN_STATUS_RUNNING,
             toolEvents = events,
           ),
         )
@@ -128,13 +149,14 @@ class AgentRunController(
       )
       val result = try {
         Result.success(
-          runtime.run(
+          runtime.runStreaming(
             input = trimmed,
             agentRunId = agentRunId,
             settings = settings,
             session = preparedSession,
             workspace = workspace,
             recorder = recorder,
+            eventSink = eventSink,
           ),
         )
       } catch (error: CancellationException) {
@@ -155,7 +177,20 @@ class AgentRunController(
             toolEvents = recorder.snapshot(),
             workspace = workspace,
           )
-          SessionMessage(role = "assistant", content = output, toolEvents = recorder.snapshot())
+          val events = recorder.snapshot()
+          val finalContent = runState.finalTextOr(output)
+          SessionMessage(
+            role = "assistant",
+            content = finalContent,
+            toolEvents = events,
+            runEvents = runState.persistedTimelineEvents(
+              finalTimelineEvent(
+                title = "Final response ready",
+                detail = "The assistant response was saved to the session.",
+                status = AGENT_RUN_STATUS_COMPLETED,
+              ),
+            ),
+          )
         },
         onFailure = { error ->
           val events = recorder.snapshot()
@@ -196,11 +231,122 @@ class AgentRunController(
             append("Error log saved: ")
             append(logPath)
           }
-          SessionMessage(role = "error", content = message, toolEvents = events)
+          SessionMessage(
+            role = "error",
+            content = message,
+            toolEvents = events,
+            runEvents = runState.persistedTimelineEvents(
+              finalTimelineEvent(
+                title = "Run failed",
+                detail = errorSummary.take(TIMELINE_DETAIL_CHARS),
+                status = AGENT_RUN_STATUS_FAILED,
+              ),
+            ),
+          )
         },
       )
       val updated = appendMessage(preparedSession, assistantMessage)
       onFinished(updated, result.isSuccess)
+    }
+  }
+
+  private class AgentRunEventAccumulator(
+    private var statusContent: String,
+    baseTimelineEvents: List<AgentRunTimelineEvent>,
+    private val buildToolProgressNarration: (List<ToolEvent>) -> String,
+    private val buildToolTimelineEvents: (List<ToolEvent>) -> List<AgentRunTimelineEvent>,
+    private val onDraft: (SessionMessage) -> Unit,
+  ) {
+    private var baseTimelineEvents: List<AgentRunTimelineEvent> = baseTimelineEvents
+    private var latestToolEvents: List<ToolEvent> = emptyList()
+    private val finalText = StringBuilder()
+    private var finalStreamingStarted: Boolean = false
+
+    fun replaceBaseTimeline(events: List<AgentRunTimelineEvent>, statusContent: String) {
+      this.baseTimelineEvents = events
+      this.statusContent = statusContent
+    }
+
+    fun emit(event: AgentRunEvent) {
+      when (event.type) {
+        AgentRunEventType.TOOL_EVENTS_CHANGED -> {
+          latestToolEvents = event.toolEvents
+        }
+
+        AgentRunEventType.FINAL_TEXT_DELTA -> {
+          if (event.finalTextDelta.isNotEmpty()) {
+            finalStreamingStarted = true
+            finalText.append(event.finalTextDelta)
+          }
+        }
+
+        else -> {
+          event.timelineEvent?.let { timelineEvent ->
+            baseTimelineEvents = baseTimelineEvents + timelineEvent
+          }
+        }
+      }
+      onDraft(draftMessage())
+    }
+
+    fun draftMessage(): SessionMessage {
+      return SessionMessage(
+        role = "assistant",
+        content = draftContent(),
+        toolEvents = latestToolEvents,
+        runEvents = draftTimelineEvents(),
+      )
+    }
+
+    fun finalTextOr(output: String): String {
+      if (!finalStreamingStarted) return output
+      return finalText.toString().ifBlank { output }
+    }
+
+    fun persistedTimelineEvents(finalEvent: AgentRunTimelineEvent): List<AgentRunTimelineEvent> {
+      return baseTimelineEvents +
+        buildToolTimelineEvents(latestToolEvents) +
+        listOfNotNull(finalStreamingSummaryEvent(status = AGENT_RUN_STATUS_COMPLETED)) +
+        finalEvent
+    }
+
+    private fun draftContent(): String {
+      return when {
+        finalStreamingStarted -> finalText.toString().ifBlank { "Writing final response..." }
+        latestToolEvents.isNotEmpty() -> buildToolProgressNarration(latestToolEvents)
+        else -> statusContent
+      }
+    }
+
+    private fun draftTimelineEvents(): List<AgentRunTimelineEvent> {
+      return baseTimelineEvents +
+        buildToolTimelineEvents(latestToolEvents) +
+        if (finalStreamingStarted) {
+          listOfNotNull(finalStreamingSummaryEvent(status = AGENT_RUN_STATUS_RUNNING))
+        } else if (latestToolEvents.isNotEmpty()) {
+          listOf(
+            AgentRunTimelineEvent(
+              type = "thinking",
+              title = "Thinking",
+              detail = "Waiting for the next model or tool result.",
+              status = AGENT_RUN_STATUS_RUNNING,
+            ),
+          )
+        } else {
+          emptyList()
+        }
+    }
+
+    private fun finalStreamingSummaryEvent(status: String): AgentRunTimelineEvent? {
+      if (!finalStreamingStarted) return null
+      val chars = finalText.length
+      return AgentRunTimelineEvent(
+        type = "final_response_streaming",
+        title = if (status == AGENT_RUN_STATUS_COMPLETED) "Final response streamed" else "Final response streaming",
+        detail = "Received $chars streamed final-answer character(s) from the runtime.",
+        status = status,
+        compact = false,
+      )
     }
   }
 
@@ -221,8 +367,15 @@ class AgentRunController(
       authorityMode = settings.agentAuthorityMode,
     ).length + workspace.readAgentRules().length
     val workspaceListingChars = workspace.listFiles(".").length
-    val totalChars = input.length + historyChars + rulesChars + workspaceListingChars
-    val approximateTokens = approximateTokens(totalChars)
+    val toolSchemaChars = estimateToolCatalogChars(settings, webSearchAvailable)
+    val providerOverheadChars = estimateProviderRequestOverheadChars(settings, recentHistory.size)
+    val estimatedRequestChars = input.length +
+      historyChars +
+      rulesChars +
+      workspaceListingChars +
+      toolSchemaChars +
+      providerOverheadChars
+    val approximateTokens = approximateTokens(estimatedRequestChars)
     val provider = ModelProviderCatalog.findProvider(settings.provider)
     val modelContext = ModelProviderCatalog.contextFor(settings)
     val contextWindowTokens = modelContext.contextWindowTokens
@@ -241,6 +394,9 @@ class AgentRunController(
       historyChars = historyChars,
       rulesChars = rulesChars,
       workspaceListingChars = workspaceListingChars,
+      toolSchemaChars = toolSchemaChars,
+      providerOverheadChars = providerOverheadChars,
+      estimatedRequestChars = estimatedRequestChars,
       approximateTokens = approximateTokens,
       modelContextWindowTokens = contextWindowTokens,
       modelContextSource = modelContext.source,
@@ -256,6 +412,152 @@ class AgentRunController(
 
   private fun approximateTokens(chars: Int): Int {
     return ((chars + 3) / 4).coerceAtLeast(1)
+  }
+
+  private fun estimateToolCatalogChars(settings: AppSettings, webSearchAvailable: Boolean): Int {
+    var chars = 7_500
+    if (settings.networkEnabled) chars += 1_600
+    if (webSearchAvailable) chars += 1_200
+    if (settings.agentAuthorityMode != "safe") chars += 900
+    return chars
+  }
+
+  private fun estimateProviderRequestOverheadChars(settings: AppSettings, recentHistoryCount: Int): Int {
+    val providerFields = settings.provider.length + settings.model.length
+    val providerSpecific = when (settings.provider) {
+      "deepseek", "custom-openai", "openrouter", "xai", "alibaba", "moonshot", "zai" -> 900
+      "anthropic", "gemini", "bedrock" -> 1_200
+      else -> 1_000
+    }
+    return providerSpecific + providerFields + (recentHistoryCount * 36)
+  }
+
+  private fun buildInitialRunTimeline(
+    contextRecord: ContextUsageRecord,
+    input: String,
+    contextCompressed: Boolean,
+  ): List<AgentRunTimelineEvent> {
+    val events = mutableListOf(contextTimelineEvent(contextRecord))
+    if (input.startsWith(GUIDANCE_INPUT_PREFIX)) {
+      events += AgentRunTimelineEvent(
+        type = "guidance",
+        title = "Guidance queued into run",
+        detail = "This run includes guidance that was sent while the previous run was active.",
+        status = "queued",
+        compact = false,
+      )
+    }
+    if (contextCompressed) {
+      events += AgentRunTimelineEvent(
+        type = "compression",
+        title = "Context compression started",
+        detail = "The estimated request is over the configured threshold, so Flovera is preparing a handoff summary before calling the model.",
+        status = AGENT_RUN_STATUS_RUNNING,
+        compact = false,
+      )
+    } else {
+      events += thinkingTimelineEvent("Preparing the model request.")
+    }
+    return events
+  }
+
+  private fun buildCompressedRunTimeline(
+    events: List<AgentRunTimelineEvent>,
+    compressedRecord: ContextUsageRecord,
+  ): List<AgentRunTimelineEvent> {
+    return events + AgentRunTimelineEvent(
+      type = "compression",
+      title = "Context compressed",
+      detail = buildString {
+        append("summarySource=${compressedRecord.summarySource.ifBlank { "local" }}")
+        append(", approximateTokens=${compressedRecord.approximateTokens}")
+        if (compressedRecord.compressionError.isNotBlank()) {
+          append(", error=${compressedRecord.compressionError.take(TIMELINE_DETAIL_CHARS)}")
+        }
+      },
+      status = AGENT_RUN_STATUS_COMPLETED,
+      compact = false,
+    ) + thinkingTimelineEvent("Continuing the model request from the compressed handoff.")
+  }
+
+  private fun contextTimelineEvent(record: ContextUsageRecord): AgentRunTimelineEvent {
+    return AgentRunTimelineEvent(
+      type = "context_checkpoint",
+      title = "Context checkpoint",
+      detail = buildString {
+        append("provider=${record.provider.ifBlank { "unknown" }}")
+        append(", model=${record.model.ifBlank { "unknown" }}")
+        append(", estimatedRequestChars=${record.estimatedRequestChars}")
+        append(", approximateTokens=${record.approximateTokens}")
+        append(", budgetStatus=${record.contextBudgetStatus}")
+        val usage = contextUsagePercent(record)
+        if (usage.isNotBlank()) append(", usage=$usage")
+        record.compressionThresholdPercent?.let { append(", threshold=$it%") }
+      },
+      status = record.contextBudgetStatus,
+      compact = false,
+    )
+  }
+
+  private fun contextUsagePercent(record: ContextUsageRecord): String {
+    val permille = record.contextUsagePermille ?: return ""
+    val contextWindow = record.modelContextWindowTokens ?: return ""
+    val percent = String.format(Locale.US, "%.1f%%", permille / 10.0)
+    return "$percent of $contextWindow"
+  }
+
+  private fun thinkingTimelineEvent(detail: String): AgentRunTimelineEvent {
+    return AgentRunTimelineEvent(
+      type = "thinking",
+      title = "Thinking",
+      detail = detail,
+      status = AGENT_RUN_STATUS_RUNNING,
+    )
+  }
+
+  private fun finalTimelineEvent(title: String, detail: String, status: String): AgentRunTimelineEvent {
+    return AgentRunTimelineEvent(
+      type = "final_response",
+      title = title,
+      detail = detail,
+      status = status,
+      compact = false,
+    )
+  }
+
+  private fun buildToolTimelineEvents(toolEvents: List<ToolEvent>): List<AgentRunTimelineEvent> {
+    if (toolEvents.isEmpty()) return emptyList()
+    val visibleEvents = toolEvents.takeLast(TIMELINE_TOOL_EVENT_COUNT)
+    val omitted = toolEvents.size - visibleEvents.size
+    val events = mutableListOf<AgentRunTimelineEvent>()
+    if (omitted > 0) {
+      events += AgentRunTimelineEvent(
+        type = "tool_omitted",
+        title = "Earlier tool calls hidden",
+        detail = "$omitted earlier completed tool call(s) are stored in the session tool event list.",
+        status = AGENT_RUN_STATUS_COMPLETED,
+      )
+    }
+    events += visibleEvents.map { event ->
+      AgentRunTimelineEvent(
+        type = "tool_call",
+        title = "Tool: ${event.name}",
+        detail = buildString {
+          append(toolProgressLine(event))
+          if (event.args.isNotBlank()) {
+            appendLine()
+            append("args: ${event.args.take(TIMELINE_DETAIL_CHARS)}")
+          }
+          if (event.result.isNotBlank()) {
+            appendLine()
+            append("result: ${event.result.take(TIMELINE_DETAIL_CHARS)}")
+          }
+        },
+        timestampMillis = event.timestampMillis,
+        status = AGENT_RUN_STATUS_COMPLETED,
+      )
+    }
+    return events
   }
 
   private fun saveRunCheckpoint(
@@ -347,6 +649,51 @@ class AgentRunController(
     }
   }
 
+  private fun buildToolProgressNarration(toolEvents: List<ToolEvent>): String {
+    if (toolEvents.isEmpty()) return "Working..."
+    return buildString {
+      appendLine("Working...")
+      appendLine()
+      appendLine("Progress:")
+      toolEvents.takeLast(PROGRESS_NARRATION_EVENT_COUNT).forEach { event ->
+        appendLine("- ${toolProgressLine(event)}")
+      }
+      if (toolEvents.size > PROGRESS_NARRATION_EVENT_COUNT) {
+        appendLine("- ... ${toolEvents.size - PROGRESS_NARRATION_EVENT_COUNT} earlier tool call(s)")
+      }
+    }.trimEnd()
+  }
+
+  private fun toolProgressLine(event: ToolEvent): String {
+    val path = toolArg(event.args, "path")
+    return when (event.name) {
+      "list_files" -> "Listed ${path.ifBlank { "workspace" }}"
+      "workspace_search" -> {
+        val query = toolArg(event.args, "query").ifBlank { "query" }
+        "Searched ${path.ifBlank { "workspace" }} for $query"
+      }
+      "read_file" -> "Read ${path.ifBlank { "a file" }}"
+      "write_file" -> "Wrote ${path.ifBlank { "a file" }}"
+      "edit_file" -> "Edited ${path.ifBlank { "a file" }}"
+      "python_run" -> "Ran Python in ${toolArg(event.args, "cwd").ifBlank { "." }}"
+      "python_package_install" -> "Checked Python package ${toolArg(event.args, "package").ifBlank { "(unknown)" }}"
+      "artifact_inspect" -> "Inspected ${path.ifBlank { "artifact" }}"
+      "fetch_url" -> "Fetched URL"
+      "download_file" -> "Downloaded ${path.ifBlank { "file" }}"
+      "web_search" -> "Searched the web"
+      else -> "Ran ${event.name}"
+    }
+  }
+
+  private fun toolArg(args: String, name: String): String {
+    val prefix = "$name="
+    return args.split(", ")
+      .firstOrNull { it.startsWith(prefix) }
+      ?.removePrefix(prefix)
+      ?.trim()
+      .orEmpty()
+  }
+
   private fun saveErrorLog(
     error: Throwable,
     agentRunId: String,
@@ -424,6 +771,10 @@ class AgentRunController(
     private const val CHECKPOINT_RESUME_TOOL_EVENT_COUNT = 20
     private const val FAILURE_MESSAGE_TOOL_EVENT_COUNT = 8
     private const val FAILURE_MESSAGE_LINE_CHARS = 240
+    private const val PROGRESS_NARRATION_EVENT_COUNT = 8
+    private const val TIMELINE_TOOL_EVENT_COUNT = 20
+    private const val TIMELINE_DETAIL_CHARS = 360
+    private const val GUIDANCE_INPUT_PREFIX = "Guidance while the previous agent run was active:"
   }
 }
 

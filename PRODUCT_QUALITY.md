@@ -31,10 +31,12 @@ For each focused product change:
 5. For new or changed Flovera capabilities, update the app-owned system prompt
    and the settings JSON surface when affected: settings persistence,
    `.flovera/settings-view.json`, and `.flovera/capabilities.json`.
-6. Add or update an instrumented/user-journey test when the behavior can regress.
-7. Run the standard Android verifier on a real device when the change affects UI,
+6. Update the Product Backlog status when implementation changes the boundary:
+   mark what is implemented, what remains, and what verification proves it.
+7. Add or update an instrumented/user-journey test when the behavior can regress.
+8. Run the standard Android verifier on a real device when the change affects UI,
    app lifecycle, sessions, workspace files, WebView, permissions, or release output.
-8. Commit the change independently.
+9. Commit the change independently.
 
 ## Anti-Pattern Library
 
@@ -213,11 +215,40 @@ Acceptance criteria:
 These items are not committed implementation requirements yet. They are queued
 so future work can be planned without losing the product direction.
 
+Backlog maintenance rules:
+
+- Every backlog item should state its current implementation status before
+  listing future work.
+- Status is evidence-based: only mark a capability implemented when source,
+  tests, or device verification prove the behavior.
+- When code changes complete or materially change a backlog item, update this
+  document in the same change set unless the item is intentionally deferred.
+- "Baseline implemented" means the user-facing path exists and is tested, but
+  hardening, polish, or broader coverage still remains.
+
 ### Context Records And Compression
+
+Status: Baseline implemented for context usage visibility and compression
+markers. The app records context usage, displays a compact context ring and
+details dialog, includes request-overhead/tool-catalog estimate components, and
+shows compression dividers in conversation history. Remaining work is provider
+reported/tokenizer-backed accuracy, auditability, and automatic compression
+policy polish.
 
 - Track context usage for each agent run and session.
 - Show how much context has been used, what was compressed, and what summary is
   currently active.
+- Improve the context estimate so the compact ring does not create false
+  confidence. The estimate should break down system prompt, workspace rules,
+  recent history, current input, workspace listing, tool schema/catalog overhead,
+  and provider/request-wrapper overhead where Flovera can reasonably estimate
+  them.
+- Label the number as estimated unless it comes from provider-reported usage or
+  a tokenizer that matches the active model family. Do not present a precise
+  percentage for unknown context windows or unverified model metadata.
+- Add regression tests with long histories, large workspace listings, low
+  context-window overrides, and tool-heavy configurations to prove the displayed
+  percentage rises and compression thresholds trigger when expected.
 - For known models, show context usage as a percentage of the configured model
   context window. For unknown models, show only absolute usage and the estimate
   source.
@@ -235,6 +266,14 @@ so future work can be planned without losing the product direction.
 
 ### Tool Progress Narration
 
+Status: Baseline implemented. During a running agent loop, Flovera turns
+completed tool events into compact deterministic assistant draft progress lines,
+for example listing, reading, editing, Python, package, web, and inspection
+events. The progress narration remains transient UI copy, while the final
+persisted message stores bounded tool events and run timeline events. Remaining
+work is polish around longer runs and a future audit view if users need deeper
+history.
+
 - Add lightweight app-generated progress narration between tool calls so the
   user can see what the agent is doing before the final assistant answer.
 - Keep this narration deterministic and derived from tool events, for example
@@ -246,7 +285,40 @@ so future work can be planned without losing the product direction.
 - Keep the copy compact so it improves observability without crowding the
   conversation or pretending to be model reasoning.
 
+### Agent Run Timeline
+
+Status: Baseline implemented with an AgentRunEvent bus. Session messages can
+persist app-generated run timeline events for context checkpoints, compression,
+tool calls, final-answer streaming, interruptions, and final completion/failure
+status. The conversation UI renders those events inside the relevant
+assistant/error message, with compact and full views. This is observability for
+the run loop, not hidden reasoning.
+
+- Represent each agent run as a sequence of user-visible runtime events:
+  context checkpoint, optional compression, thinking/status, completed tools,
+  interruption or final response.
+- Persist the timeline with the session message so interruption and restore do
+  not erase what happened during the run.
+- Keep event details bounded and deterministic; do not expose private model
+  reasoning as timeline content.
+- Use the timeline as the future checkpoint boundary for more precise
+  compression and context accounting.
+- Route runtime state through `AgentRunEvent` so UI drafts, timeline, session
+  persistence, notifications, and future compression checks consume the same
+  run-state stream.
+- Remaining work: add tool-start/tool-running events from tool entry points and
+  connect interleaved model text when the runtime exposes a stable contract.
+
 ### Interleaved Model Conversation Streaming
+
+Status: Deferred behind runtime contract, with timeline substrate implemented.
+Flovera now has a persisted run timeline for app-generated runtime events, but
+real interleaved assistant text still needs a runtime/provider event stream
+because the current Koog `AIAgent.run` path does not yet expose a committed
+assistant delta contract in Flovera. Do not implement this as fake app narration
+or by parsing provider debug logs; the next entry point is a Koog event-stream
+spike or a narrow Flovera-owned OpenAI-compatible tool-loop adapter with
+explicit provider coverage.
 
 - Add a separate streaming conversation track where the model can emit
   assistant text before, between, and after tool calls.
@@ -265,6 +337,14 @@ so future work can be planned without losing the product direction.
 
 ### Final Assistant Response Streaming
 
+Status: Baseline implemented at the Flovera runtime boundary. `AgentRuntime`
+now has a `runStreaming` path that can emit real final-answer deltas through
+`AgentRunEvent`; those deltas update the running assistant draft and the final
+session still persists one complete assistant message. The default Koog
+`AIAgent.run` adapter still returns a completed string unless Koog/provider
+streaming is wired later, and Flovera must not fake streaming by chunking an
+already completed answer.
+
 - Stream the final assistant answer into the conversation instead of waiting for
   `AIAgent.run` to return a complete string.
 - This is distinct from tool progress narration and interleaved model
@@ -279,6 +359,11 @@ so future work can be planned without losing the product direction.
   path, evaluate a narrow runtime adapter rather than weakening tool routing.
 
 ### Workspace Search Performance
+
+Status: Baseline implemented. `workspace_search` exists as a local grep-like
+agent tool with path scoping, literal/regex modes, context lines, globs, ignore
+handling, bounded output, and debug timing/candidate diagnostics. Remaining
+work is incremental indexing, cancellation, and paged/streamed result delivery.
 
 - Improve workspace search around measured latency, result quality, and
   responsiveness before expanding it into heavier retrieval features.
@@ -297,6 +382,11 @@ so future work can be planned without losing the product direction.
 
 ### Targeted Cache Hit Rate Improvements
 
+Status: Deferred behind cache diagnostics design. Any existing caching is
+incidental to specific UI/runtime paths, not a measured product capability. The
+next safe step is a read-only diagnostics layer that reports cacheable surfaces,
+candidate keys, and invalidation inputs before introducing persistent caches.
+
 - Improve cache hit rate through specific cache keys and invalidation rules, not
   by broadening stale-cache tolerance.
 - Identify cacheable surfaces separately: workspace file metadata, search index
@@ -314,6 +404,12 @@ so future work can be planned without losing the product direction.
   local cache state.
 
 ### Agent-Controlled App Settings
+
+Status: Partially implemented. Flovera exposes `.flovera/settings-view.json`,
+`.flovera/capabilities.json`, settings proposals, Safe/Assisted/Full Authority
+mode, automatic snapshots before Full Authority settings application, and an
+audit log. Remaining work is broader high-impact settings coverage and better
+user-facing inspection of applied changes.
 
 - Treat workspace snapshots and restore as the safety floor before broad agent
   authority is enabled.
@@ -350,6 +446,13 @@ so future work can be planned without losing the product direction.
 
 ### Custom URL Routing And Request Model
 
+Status: Partially implemented for provider routing metadata. Provider profiles,
+transport metadata, request hooks, field omission/addition, and app-owned
+OpenAI-compatible routes exist. The new workspace-owned `python_http` path means
+user-created AI apps can now use ordinary HTTP/SSE without requiring app-level
+custom URL routes. Remaining work is a general app settings UI/schema for
+advanced request templates and auditable route changes.
+
 - Add a configurable URL routing model for workspace HTML and app-controlled
   internal routes.
 - Let advanced settings define request body templates and per-route behavior
@@ -369,6 +472,13 @@ so future work can be planned without losing the product direction.
 - Record route and request-template changes as auditable settings changes.
 
 ### Agent Rules And Runtime Control
+
+Status: Partially implemented. Workspace `AGENT.md` rules are injected into the
+agent prompt, users can interrupt runs, queue follow-up inputs, mark queued
+inputs as guidance, and status notifications exist for active runs. Remaining
+work is clearer UI separation between system rules and workspace rules, stronger
+cancellation coverage for active provider/tool work, and more explicit
+background lifecycle diagnostics.
 
 - Separate system rules from user/workspace rules:
   - System rules are app-owned product and safety constraints.
@@ -395,6 +505,13 @@ so future work can be planned without losing the product direction.
 
 ### System Prompt Optimization
 
+Status: Partially implemented. The app-owned prompt is split into stable
+sections, embeds stable Flovera runtime boundaries, discourages repeated
+`.flovera` rediscovery, and warns against treating mocked files or JSON handoff
+protocols as proof of interactive artifact completion. Remaining work is golden
+prompt snapshots, token-cost diagnostics, and regression checks for high-risk
+capability claims.
+
 - Audit the app-owned system prompt for duplicated rules, stale project history,
   and instructions that can be represented as structured capability metadata.
 - Split prompt construction into stable system constraints, app capability
@@ -419,6 +536,11 @@ so future work can be planned without losing the product direction.
 
 ### Web Search And Tool Expansion
 
+Status: Partially implemented for web search. Brave-backed `web_search`,
+`fetch_url`, and `download_file` tools exist behind explicit network/search
+settings. Remaining work is the proposal and approval flow for additional
+restricted tools and MCP integrations.
+
 - Add Brave Search API support as the first non-provider web search path.
 - Expose web search as an agent tool behind an explicit permission setting.
 - Let the agent propose additional restricted tools and MCP integrations.
@@ -427,6 +549,13 @@ so future work can be planned without losing the product direction.
   permission is enabled.
 
 ### Agent Capability Expansion
+
+Status: Ongoing holding backlog. Initial production surfaces now include
+workspace files, workspace search, bounded Python, artifact inspection,
+WebView/local HTTP previews, artifact jobs, and workspace-owned `python_http`
+HTTP/SSE backends. The remaining items here should be pulled into focused
+backlog entries only when they have a concrete user workflow and verification
+path.
 
 - Treat Python and HTML as the first two production surfaces, not as the whole
   capability boundary.
@@ -455,6 +584,15 @@ so future work can be planned without losing the product direction.
 
 ### Interactive Workspace Artifact Runtime
 
+Status: Baseline implemented. Flovera discovers `flovera.app.json`, validates
+schema v1, opens WebView/local HTTP previews, runs declared `python_job`
+actions, persists bounded job state under `.flovera/jobs/`, exposes legacy
+`window.Flovera.runAction/getJob/cancelJob`, seeds a portable workspace chat
+demo, and now supports workspace-owned `python_http` backends with standard
+HTTP/SSE routes and user-provided API keys. The runtime also exposes baseline
+server lifecycle status, reuse, stop, and restart controls through the artifact
+picker. Remaining work is richer artifact validation and broader UX polish.
+
 - Goal: let the agent create a portable project that can be opened, run, edited,
   and iterated inside Flovera without inventing a project-specific JSON handoff
   protocol.
@@ -465,16 +603,22 @@ so future work can be planned without losing the product direction.
   - Python, HTML, local HTTP, and future renderers are runtime adapters, not the
     product goal.
 - Implementation sequence:
-  1. define and validate `flovera.app.json` schema v1;
-  2. discover manifests in the workspace and show artifact entries;
-  3. open manifest preview entrypoints, starting with WebView paths;
-  4. add manifest actions, starting with `python_job` on top of the controlled
-     Python runtime;
-  5. persist bounded job state under `.flovera/jobs/` and mark stale running jobs
-     as `interrupted` after restart;
-  6. expose a narrow preview bridge such as `window.Flovera.runAction(id, input)`
-     for declared actions;
-  7. rebuild the current `agent-app` as the first portable validation demo.
+  1. Done: define and validate `flovera.app.json` schema v1.
+  2. Done: discover manifests in the workspace and expose artifact entries.
+  3. Done: open manifest preview entrypoints with WebView/local HTTP paths.
+  4. Done: add manifest actions, starting with `python_job` on top of the
+     controlled Python runtime.
+  5. Done: persist bounded job state under `.flovera/jobs/` and mark stale
+     running jobs as `interrupted` after restart.
+  6. Done: expose a narrow legacy preview bridge such as
+     `window.Flovera.runAction(id, input)` for declared actions.
+  7. Done: rebuild the current `agent-app` as a portable workspace chat demo.
+  8. Done: add workspace-owned `python_http` local HTTP/SSE backends so generated
+     projects can connect frontend and backend through ordinary web protocols.
+  9. Done: add python_http lifecycle controls, reuse semantics, stop/restart
+     behavior, and status diagnostics in the artifact picker.
+  10. Remaining: add render-level validation beyond the current WebView
+      visibility probe and make artifact diagnostics more user-facing.
 - Acceptance criteria:
   - generated artifacts remain understandable and runnable outside Flovera with
     README and standard commands;
@@ -485,7 +629,51 @@ so future work can be planned without losing the product direction.
   - the main flow does not rely on each project inventing its own
     `input.json`/`output.json` protocol.
 
+### WebView Artifact Runtime Hardening
+
+Status: Baseline implemented after a real failure. A generated artifact
+previously opened as a black screen on Android WebView. Flovera now injects a
+viewport helper into workspace WebView pages, publishes
+`--flovera-viewport-height`, `--flovera-viewport-width`,
+`--flovera-safe-bottom`, and `window.FloveraViewport`, runs a first-load visible
+content probe, and reports likely invisible-content causes. Remaining work is a
+user-facing artifact validator or `artifact_inspect` successor with richer DOM
+diagnostics.
+
+- Treat Android WebView layout differences as a Flovera runtime responsibility,
+  not something every generated artifact must rediscover.
+- Add a stable viewport contract for workspace web artifacts, including usable
+  height, safe-area offsets, keyboard/resize behavior, and bottom app chrome
+  avoidance.
+- Prefer an app-owned injected helper or CSS variable, such as a Flovera viewport
+  height value, so generated pages do not depend on fragile
+  `html, body { height: 100%; overflow: hidden; }` assumptions.
+- Update the app-owned system prompt and artifact generation rules to tell the
+  agent:
+  - avoid mobile WebView black-screen layout patterns;
+  - do not default to `autofocus` on first-load inputs;
+  - keep first-screen content visible in Android WebView;
+  - use Flovera-provided viewport helpers when available.
+- Extend artifact validation beyond file existence and manifest checks:
+  - load the selected artifact in real WebView or an equivalent inspection path;
+  - verify key DOM elements have non-zero size;
+  - verify the primary content is inside the visible viewport;
+  - report likely causes such as zero-height `html/body`, offscreen roots,
+    covered controls, missing local HTTP routes, or blocked resources.
+- Acceptance criteria:
+  - a generated chat-style web artifact opens visibly on a real Android device;
+  - `artifact_inspect` or its successor can distinguish "HTML parses" from
+    "WebView actually renders usable content";
+  - prompt constraints reduce repeated bad output, but runtime adaptation and
+    validation remain the primary safety net.
+
 ### Android App Permission Expansion
+
+Status: Deferred behind permission product design. Existing permissions cover
+current app needs, but no new high-impact Android capability has been designed,
+gated, or exposed as an agent tool. Do not add broad permissions speculatively;
+each new permission must start from a concrete user workflow, in-app grant UI,
+denial fallback, narrow agent tool schema, and audit record.
 
 - Inventory additional Android permissions and app capabilities that could make
   Flovera more useful, then group them by user value, privacy risk, and Android
@@ -508,11 +696,14 @@ so future work can be planned without losing the product direction.
 
 ### Controlled Python Runtime
 
-- Baseline status: the conversation-bound, blocking Python runtime is
+Status: Baseline implemented. The conversation-bound, blocking Python runtime is
   implemented as a workspace-scoped agent tool, with stdout/stderr/exit code,
   duration reporting, timeout/cancellation, workspace file boundaries, tool
   manifest support, artifact inspection, and a small production package layer
   for document, spreadsheet, PDF, Markdown, and templating workflows.
+- Workspace-owned `python_http` artifact backends are implemented as a separate
+  local HTTP/SSE adapter for interactive artifacts. This does not change the
+  core `python_run` rule: conversation Python remains bounded and blocking.
 - Keep the product boundary intact: Kotlin/Android owns permissions, secrets,
   WebView, notifications, lifecycle, timeout, and restore; Python only runs
   inside the controlled runtime.
@@ -532,6 +723,13 @@ so future work can be planned without losing the product direction.
 
 ### Rendering Coverage
 
+Status: Baseline implemented for common workspace outputs. Flovera can preview
+HTML, Markdown, plain text, code with line numbers, JSON, CSV, images, and the
+first page of PDFs, while `artifact_inspect` can inspect JSON, HTML, Office
+documents, PDFs, images, and text. Unsupported formats show a clear built-in
+preview fallback instead of pretending to render. Remaining work is richer
+Office, multi-page PDF, archives, SQLite, and media rendering.
+
 - Extend workspace rendering beyond HTML and Markdown.
 - Candidate formats: plain text, images, PDF, JSON, CSV, office documents, and
   code previews.
@@ -541,6 +739,12 @@ so future work can be planned without losing the product direction.
   format locally.
 
 ### Workspace Snapshots
+
+Status: Baseline implemented. Manual and automatic workspace snapshots exist,
+restore/delete are wired through the controller, snapshots cover workspace
+files and `.flovera` metadata, and a regression test verifies file counts after
+restore. Remaining work is stronger UX around destructive restore confirmation
+and clearer session-level restore context.
 
 - Add workspace snapshot save and restore.
 - Snapshot scope should cover workspace files, `.flovera` metadata, selected
@@ -555,6 +759,12 @@ so future work can be planned without losing the product direction.
 
 ### Main Surface HTML Quick Picker
 
+Status: Baseline implemented. The main surface exposes an `HTML` quick picker
+beside the Agent entry, opens workspace apps and HTML files without browser
+chrome, sorts pinned/recent paths first, and preserves artifact-aware
+`local_http`/`python_http` opening semantics. Remaining work is visual polish for
+very large workspaces and denser artifact metadata.
+
 - Add a quick HTML selector beside the main Agent entry.
 - The button opens a popup list of HTML files in the workspace.
 - The list supports pinning so frequently used HTML surfaces stay at the top.
@@ -562,6 +772,23 @@ so future work can be planned without losing the product direction.
   changed files.
 - Selecting an item opens it directly in the main WebView without exposing URL
   chrome.
+
+### Conversation File Path Links
+
+Status: Baseline implemented. Conversation messages conservatively detect
+existing workspace-relative file paths and expose clickable entries that open
+HTML in the main WebView or other previewable formats in the native preview
+surface. Remaining work is inline text-link polish and stale-path status copy.
+
+- Detect workspace-relative file paths in user, assistant, and error messages.
+- Make detected paths clickable without breaking text selection or Markdown
+  rendering.
+- On click, open HTML files in the main WebView and other previewable formats in
+  the existing native preview surface.
+- If the path no longer exists, report a concise status instead of navigating to
+  a blank preview.
+- Keep path detection conservative so normal prose and URLs are not treated as
+  workspace files.
 
 ## Review Checklist
 

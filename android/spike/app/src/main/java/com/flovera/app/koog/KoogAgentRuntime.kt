@@ -5,6 +5,7 @@ import ai.koog.prompt.executor.llms.MultiLLMPromptExecutor
 import ai.koog.utils.io.use
 import com.flovera.app.config.AGENT_ITERATIONS_INTERNAL_GUARD
 import com.flovera.app.config.AppSettings
+import com.flovera.app.agent.AgentRunEventSink
 import com.flovera.app.session.AgentSession
 import com.flovera.app.workspace.WorkspaceManager
 
@@ -17,6 +18,25 @@ interface AgentRuntime {
     workspace: WorkspaceManager,
     recorder: ToolEventRecorder,
   ): String
+
+  suspend fun runStreaming(
+    input: String,
+    agentRunId: String,
+    settings: AppSettings,
+    session: AgentSession,
+    workspace: WorkspaceManager,
+    recorder: ToolEventRecorder,
+    eventSink: AgentRunEventSink,
+  ): String {
+    return run(
+      input = input,
+      agentRunId = agentRunId,
+      settings = settings,
+      session = session,
+      workspace = workspace,
+      recorder = recorder,
+    )
+  }
 }
 
 class KoogAgentRuntime : AgentRuntime {

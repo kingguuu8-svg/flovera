@@ -30,6 +30,10 @@ This file defines repository-local rules for AI collaboration.
   includes `AgentPromptBuilder`, app settings persistence, `.flovera/settings-view.json`,
   and `.flovera/capabilities.json` so the agent, settings UI, and workspace view
   stay consistent.
+- When implementation changes the status or boundary of a Product Backlog item,
+  update `PRODUCT_QUALITY.md` in the same change set with the implemented
+  evidence, remaining scope, and verification gate. Do not leave completed
+  capabilities described as future-only backlog.
 
 ## Git Rules
 

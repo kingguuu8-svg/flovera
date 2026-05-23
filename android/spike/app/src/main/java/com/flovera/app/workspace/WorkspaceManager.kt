@@ -71,6 +71,8 @@ data class FloveraArtifactEntrypoint(
   val kind: String = "",
   val path: String = "",
   val command: String = "",
+  val cwd: String = ".",
+  val urlPath: String = "",
   val label: String = "",
   val fallback: String = "",
 )
@@ -105,6 +107,9 @@ data class WorkspaceArtifactEntrypoint(
   val kind: String,
   val path: String,
   val label: String,
+  val command: String = "",
+  val cwd: String = ".",
+  val urlPath: String = "",
 )
 
 data class WorkspaceArtifactAction(
@@ -194,9 +199,12 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
 
         - Keep all file paths relative to this workspace.
         - Prefer plain HTML, CSS, JavaScript, Markdown, and JSON files.
-        - Do not assume Python, npm, git, bash, or Linux tools exist on Android.
+        - Do not assume npm, git, bash, or Linux tools exist on Android.
         - Do not use emoji unless the user explicitly asks for them.
-        - For interactive HTML apps, prefer flovera.app.json preview kind `local_http` and call standard routes such as:
+        - For interactive HTML apps, prefer flovera.app.json preview kind `local_http`.
+        - When an app needs its own backend, declare a `python_http` server command and use standard fetch/SSE routes owned by that backend.
+        - Flovera WebView injects `--flovera-viewport-height`, `--flovera-viewport-width`, `--flovera-safe-bottom`, and `window.FloveraViewport`; keep first-screen content visible and avoid hidden or offscreen root layouts.
+        - Use Flovera app-owned routes only when intentionally relying on built-in provider settings:
           - GET /__flovera__/api/health
           - POST /__flovera__/api/deepseek/stream
         - Legacy Workspace HTML can call controlled Android app events through window.Flovera:
@@ -264,21 +272,21 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
       content = """
         # Flovera Workspace Chat Demo
 
-        This is a portable local web chat app. Inside Flovera, it is served through the app-owned localhost HTTP runtime and streams DeepSeek replies over standard SSE. The browser code does not call `window.Flovera` or use a project-specific bridge.
+        This is a portable local web chat app. Inside Flovera, the manifest declares a workspace-owned `python_http` backend. Flovera assigns the local port, starts `src/server.py`, and opens the backend URL in WebView. The browser code uses standard fetch/SSE and does not call `window.Flovera` or use a project-specific bridge.
 
         ## Inside Flovera
 
-        Open the `Flovera Workspace Chat Demo` artifact from the HTML picker. Flovera serves `src/web/index.html` from `http://127.0.0.1:<port>` and exposes:
+        Open the `Flovera Workspace Chat Demo` artifact from the HTML picker. Flovera starts the declared Python HTTP server and opens `http://127.0.0.1:<port>/`. The workspace backend exposes:
 
-        - `GET /__flovera__/api/health`
-        - `POST /__flovera__/api/deepseek/stream`
+        - `GET /api/health`
+        - `POST /api/chat/stream`
 
-        The DeepSeek API key comes from Flovera settings.
+        The API key may be typed into the workspace app UI, or supplied through `OPENAI_API_KEY` or `DEEPSEEK_API_KEY` when running outside Flovera. The backend is not tied to Flovera's built-in provider route.
 
         ## Outside Flovera
 
         ```text
-        set DEEPSEEK_API_KEY=your-key
+        set OPENAI_API_KEY=your-key
         python src/server.py --host 127.0.0.1 --port 8765
         ```
 
@@ -334,10 +342,14 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
             return "event: " + event + "\n" + "data: " + json.dumps(payload, ensure_ascii=False) + "\n\n"
 
 
-        def deepseek_stream(payload):
-            api_key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
+        def chat_stream(payload):
+            api_key = (
+                str(payload.get("apiKey") or "").strip()
+                or os.environ.get("OPENAI_API_KEY", "").strip()
+                or os.environ.get("DEEPSEEK_API_KEY", "").strip()
+            )
             if not api_key:
-                yield sse_event("error", {"message": "DEEPSEEK_API_KEY is not set."}).encode("utf-8")
+                yield sse_event("error", {"message": "Provide an API key in the workspace app or set OPENAI_API_KEY."}).encode("utf-8")
                 yield b"data: [DONE]\n\n"
                 return
             messages = payload.get("messages") or []
@@ -345,8 +357,14 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
                 yield sse_event("error", {"message": "Request must include a non-empty messages array."}).encode("utf-8")
                 yield b"data: [DONE]\n\n"
                 return
-            base_url = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip("/")
+            base_url = str(
+                payload.get("baseUrl")
+                or os.environ.get("OPENAI_COMPATIBLE_BASE_URL")
+                or os.environ.get("DEEPSEEK_BASE_URL")
+                or "https://api.deepseek.com"
+            ).rstrip("/")
             model = payload.get("model") or os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
+            path = "/chat/completions" if base_url.endswith("/v1") else "/v1/chat/completions"
             body = json.dumps({
                 "model": model,
                 "messages": messages,
@@ -354,7 +372,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
                 "temperature": payload.get("temperature", 0.3),
             }).encode("utf-8")
             request = urllib.request.Request(
-                base_url + "/v1/chat/completions",
+                base_url + path,
                 data=body,
                 headers={
                     "Authorization": "Bearer " + api_key,
@@ -397,8 +415,10 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
                     body = json.dumps({
                         "ok": True,
                         "runtime": "portable-python-http",
-                        "provider": "deepseek",
-                        "hasApiKey": bool(os.environ.get("DEEPSEEK_API_KEY", "").strip()),
+                        "provider": "openai-compatible",
+                        "baseUrl": os.environ.get("OPENAI_COMPATIBLE_BASE_URL", os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")),
+                        "hasServerApiKey": bool(os.environ.get("OPENAI_API_KEY", "").strip() or os.environ.get("DEEPSEEK_API_KEY", "").strip()),
+                        "acceptsRequestApiKey": True,
                     }).encode("utf-8")
                     self.send_bytes(200, "application/json; charset=utf-8", body)
                     return
@@ -420,7 +440,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
                 self.send_bytes(200, mime, target.read_bytes())
 
             def do_POST(self):
-                if self.path.split("?", 1)[0] != "/api/deepseek/stream":
+                if self.path.split("?", 1)[0] != "/api/chat/stream":
                     self.send_bytes(404, "text/plain; charset=utf-8", b"Not found")
                     return
                 length = int(self.headers.get("Content-Length") or "0")
@@ -430,7 +450,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
                 self.send_header("Access-Control-Allow-Origin", "*")
                 self.send_header("Cache-Control", "no-cache")
                 self.end_headers()
-                for chunk in deepseek_stream(payload):
+                for chunk in chat_stream(payload):
                     self.wfile.write(chunk)
                     self.wfile.flush()
 
@@ -472,14 +492,24 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
                   <p class="eyebrow">Workspace AI App</p>
                   <h1>Flovera Workspace Chat</h1>
                 </div>
-                <label class="model">
-                  <span>Model</span>
-                  <input id="model" value="deepseek-v4-pro" autocomplete="off">
-                </label>
+                <div class="settings">
+                  <label class="field">
+                    <span>Model</span>
+                    <input id="model" value="deepseek-v4-pro" autocomplete="off">
+                  </label>
+                  <label class="field">
+                    <span>Base URL</span>
+                    <input id="baseUrl" value="https://api.deepseek.com" autocomplete="off">
+                  </label>
+                  <label class="field">
+                    <span>API key</span>
+                    <input id="apiKey" type="password" placeholder="sk-..." autocomplete="off">
+                  </label>
+                </div>
               </header>
               <section id="messages" class="messages" aria-live="polite"></section>
               <form id="composer" class="composer">
-                <textarea id="prompt" placeholder="Ask DeepSeek from this workspace app"></textarea>
+                <textarea id="prompt" placeholder="Ask the model from this workspace app"></textarea>
                 <div class="composerBar">
                   <span id="status">Checking runtime...</span>
                   <div class="buttons">
@@ -557,10 +587,15 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
           font-size: 30px;
         }
 
-        .model {
+        .settings {
+          display: grid;
+          gap: 8px;
+          width: min(320px, 45vw);
+        }
+
+        .field {
           display: grid;
           gap: 6px;
-          width: min(280px, 45vw);
           color: var(--muted);
           font-size: 12px;
           font-weight: 700;
@@ -672,7 +707,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
             align-items: stretch;
           }
 
-          .model {
+          .settings {
             width: 100%;
           }
 
@@ -698,6 +733,8 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
         const clearButton = document.querySelector("#clear");
         const promptInput = document.querySelector("#prompt");
         const modelInput = document.querySelector("#model");
+        const baseUrlInput = document.querySelector("#baseUrl");
+        const apiKeyInput = document.querySelector("#apiKey");
         const statusNode = document.querySelector("#status");
         const messagesNode = document.querySelector("#messages");
 
@@ -707,21 +744,15 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
         let busy = false;
 
         function detectEndpoints() {
-          if (location.pathname.indexOf("/__flovera__/workspace/") === 0) {
-            return {
-              health: "/__flovera__/api/health",
-              stream: "/__flovera__/api/deepseek/stream"
-            };
-          }
           if (location.protocol === "file:") {
             return {
               health: "http://127.0.0.1:8765/api/health",
-              stream: "http://127.0.0.1:8765/api/deepseek/stream"
+              stream: "http://127.0.0.1:8765/api/chat/stream"
             };
           }
           return {
             health: "/api/health",
-            stream: "/api/deepseek/stream"
+            stream: "/api/chat/stream"
           };
         }
 
@@ -781,7 +812,8 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
             const response = await fetch(endpoints.health, { cache: "no-store" });
             const health = await response.json();
             modelInput.value = health.model || modelInput.value;
-            setStatus(health.hasApiKey ? "Connected" : "Missing DeepSeek API key");
+            baseUrlInput.value = health.baseUrl || baseUrlInput.value;
+            setStatus(health.hasServerApiKey ? "Connected with server API key" : "Ready - enter API key");
           } catch (error) {
             setStatus("Local HTTP runtime unavailable");
           }
@@ -817,7 +849,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
           return rest;
         }
 
-        function deltaFromDeepSeek(payload) {
+        function deltaFromOpenAiCompatible(payload) {
           if (typeof payload === "string") return payload === "[DONE]" ? "" : payload;
           const choice = payload.choices && payload.choices[0];
           const delta = choice && choice.delta;
@@ -839,6 +871,8 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
+                apiKey: apiKeyInput.value.trim(),
+                baseUrl: baseUrlInput.value.trim(),
                 model: modelInput.value.trim(),
                 messages: messages.filter(function (item) {
                   return item.role === "user" || item.role === "assistant";
@@ -862,7 +896,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
               if (chunk.done) break;
               buffer += decoder.decode(chunk.value, { stream: true });
               buffer = parseSseEvents(buffer, function (payload) {
-                const delta = deltaFromDeepSeek(payload);
+                const delta = deltaFromOpenAiCompatible(payload);
                 if (!delta) return;
                 assistantText += delta;
                 updateLastAssistant(assistantText);
@@ -914,6 +948,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
             "preview": {
               "kind": "local_http",
               "path": "src/web/index.html",
+              "urlPath": "/",
               "fallback": "python src/server.py --host 127.0.0.1 --port 8765"
             },
             "server": {
@@ -941,9 +976,17 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
       current.contains("Inspect agent-demo and improve the demo README") ||
       current.contains("\"wordCount\"") ||
       current.contains("Set DEEPSEEK_API_KEY to call DeepSeek") ||
+      current.contains("through an explicit environment grant") ||
+      current.contains("DEEPSEEK_API_KEY is not set") ||
+      current.contains("Missing DeepSeek API key") ||
+      current.contains("\"hasApiKey\"") ||
+      current.contains("health.hasApiKey") ||
+      current.contains("/__flovera__/api/deepseek/stream") ||
+      current.contains("<label class=\"model\">") ||
       current.contains("flovera-code-agent-messages") ||
       current.contains("\"id\": \"run-code-agent\"") ||
       current.contains("runAction(\"run-code-agent\"") ||
+      current.contains("app-owned localhost HTTP runtime") ||
       current.contains(".workbench") ||
       current.contains("runAction(\"summarize\"") ||
       current.contains("\"id\": \"summarize\"")
@@ -1336,6 +1379,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     val hits = mutableListOf<WorkspaceSearchHit>()
     if (!root.exists()) return "No matches for \"$normalizedQuery\"."
 
+    val startedAtMillis = System.currentTimeMillis()
     var scannedFiles = 0
     var skippedFiles = 0
     var stoppedEarly = false
@@ -1371,9 +1415,10 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     val topHits = hits
       .sortedWith(compareByDescending<WorkspaceSearchHit> { it.score }.thenBy { it.path }.thenBy { it.lineNumber })
       .take(limit)
+    val elapsedMillis = (System.currentTimeMillis() - startedAtMillis).coerceAtLeast(0)
 
     if (topHits.isEmpty()) {
-      return "No matches for \"$normalizedQuery\"${workspaceSearchHeaderSuffix(options.debug, scannedFiles, skippedFiles, stoppedEarly, maxFiles)}."
+      return "No matches for \"$normalizedQuery\"${workspaceSearchHeaderSuffix(options.debug, scannedFiles, skippedFiles, stoppedEarly, maxFiles, elapsedMillis)}."
     }
     if (output == WORKSPACE_SEARCH_OUTPUT_FILES) {
       return workspaceSearchFilesOutput(
@@ -1387,6 +1432,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
         skippedFiles = skippedFiles,
         stoppedEarly = stoppedEarly,
         maxFiles = maxFiles,
+        elapsedMillis = elapsedMillis,
         debug = options.debug,
       )
     }
@@ -1402,6 +1448,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
         skippedFiles = skippedFiles,
         stoppedEarly = stoppedEarly,
         maxFiles = maxFiles,
+        elapsedMillis = elapsedMillis,
         debug = options.debug,
       )
     }
@@ -1416,6 +1463,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
       skippedFiles = skippedFiles,
       stoppedEarly = stoppedEarly,
       maxFiles = maxFiles,
+      elapsedMillis = elapsedMillis,
       debug = options.debug,
     )
   }
@@ -1746,6 +1794,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     skippedFiles: Int,
     stoppedEarly: Boolean,
     maxFiles: Int,
+    elapsedMillis: Long,
     debug: Boolean,
   ): String {
     val allFiles = hits
@@ -1757,7 +1806,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
       appendLine(
         "Found ${allFiles.size} files for \"$query\" " +
           "(path=${relativeToRoot(requested)}, scope=$scope, mode=$mode)" +
-          workspaceSearchHeaderSuffix(debug, scannedFiles, skippedFiles, stoppedEarly, maxFiles) +
+          workspaceSearchHeaderSuffix(debug, scannedFiles, skippedFiles, stoppedEarly, maxFiles, elapsedMillis) +
           ":",
       )
       files.forEach { path -> appendLine(path) }
@@ -1775,6 +1824,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     skippedFiles: Int,
     stoppedEarly: Boolean,
     maxFiles: Int,
+    elapsedMillis: Long,
     debug: Boolean,
   ): String {
     val allCounts = hits
@@ -1787,7 +1837,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
       appendLine(
         "Found ${hits.size} matches in ${allCounts.size} files for \"$query\" " +
           "(path=${relativeToRoot(requested)}, scope=$scope, mode=$mode)" +
-          workspaceSearchHeaderSuffix(debug, scannedFiles, skippedFiles, stoppedEarly, maxFiles) +
+          workspaceSearchHeaderSuffix(debug, scannedFiles, skippedFiles, stoppedEarly, maxFiles, elapsedMillis) +
           ":",
       )
       counts.forEach { entry -> appendLine("${entry.key} count=${entry.value}") }
@@ -1888,6 +1938,19 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     diagnostics: MutableList<WorkspaceArtifactDiagnostic>,
   ): WorkspaceArtifactEntrypoint? {
     val preview = manifest.entrypoints["preview"] ?: return null
+    val rawServer = manifest.entrypoints["server"]
+    if (rawServer != null && rawServer.command.isNotBlank() && rawServer.kind !in WORKSPACE_ARTIFACT_SERVER_KINDS) {
+      diagnostics += WorkspaceArtifactDiagnostic(
+        level = "error",
+        path = "${relativeToRoot(File(artifactRoot, WORKSPACE_ARTIFACT_MANIFEST_NAME))}.entrypoints.server.kind",
+        message = "Unsupported server kind '${rawServer.kind}'. Supported server kinds: ${WORKSPACE_ARTIFACT_SERVER_KINDS.joinToString(", ")}.",
+      )
+      return null
+    }
+    val server = rawServer?.takeIf { it.kind == WORKSPACE_ARTIFACT_SERVER_PYTHON_HTTP }
+    val serverCommand = listOf(preview.command, server?.command.orEmpty(), preview.fallback)
+      .firstOrNull { it.isNotBlank() }
+      .orEmpty()
     val diagnosticPath = "${relativeToRoot(File(artifactRoot, WORKSPACE_ARTIFACT_MANIFEST_NAME))}.entrypoints.preview"
     if (preview.kind !in WORKSPACE_ARTIFACT_PREVIEW_KINDS) {
       diagnostics += WorkspaceArtifactDiagnostic(
@@ -1925,6 +1988,15 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
       kind = preview.kind,
       path = relativePath,
       label = preview.label.ifBlank { "Preview" },
+      command = serverCommand,
+      cwd = artifactRelativePathOrDiagnostic(
+        artifactRoot = artifactRoot,
+        path = server?.cwd?.ifBlank { "." } ?: preview.cwd.ifBlank { "." },
+        diagnosticPath = "${relativeToRoot(File(artifactRoot, WORKSPACE_ARTIFACT_MANIFEST_NAME))}.entrypoints.server.cwd",
+        diagnostics = diagnostics,
+        mustExist = true,
+      ).orEmpty(),
+      urlPath = preview.urlPath.ifBlank { "/" },
     )
   }
 
@@ -2104,6 +2176,8 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     const val WORKSPACE_ARTIFACT_PREVIEW_WEBVIEW = "webview"
     const val WORKSPACE_ARTIFACT_PREVIEW_LOCAL_HTTP = "local_http"
     val WORKSPACE_ARTIFACT_PREVIEW_KINDS = setOf(WORKSPACE_ARTIFACT_PREVIEW_WEBVIEW, WORKSPACE_ARTIFACT_PREVIEW_LOCAL_HTTP)
+    const val WORKSPACE_ARTIFACT_SERVER_PYTHON_HTTP = "python_http"
+    val WORKSPACE_ARTIFACT_SERVER_KINDS = setOf(WORKSPACE_ARTIFACT_SERVER_PYTHON_HTTP)
     const val WORKSPACE_ARTIFACT_ACTION_PYTHON_JOB = "python_job"
     const val MAX_WORKSPACE_ARTIFACT_MANIFESTS = 200
     const val WORKSPACE_ARTIFACT_MIN_TIMEOUT_MS = 1_000
@@ -2268,8 +2342,9 @@ private fun workspaceSearchHeaderSuffix(
   skippedFiles: Int,
   stoppedEarly: Boolean,
   maxFiles: Int,
+  elapsedMillis: Long,
 ): String {
-  if (debug) return " (${workspaceSearchSummary(scannedFiles, skippedFiles, stoppedEarly, maxFiles)})"
+  if (debug) return " (${workspaceSearchSummary(scannedFiles, skippedFiles, stoppedEarly, maxFiles)}, elapsedMs=$elapsedMillis)"
   return if (stoppedEarly) " (stoppedAfterMaxFiles=$maxFiles)" else ""
 }
 
@@ -2317,13 +2392,14 @@ private fun workspaceSearchMatchesOutput(
   skippedFiles: Int,
   stoppedEarly: Boolean,
   maxFiles: Int,
+  elapsedMillis: Long,
   debug: Boolean,
 ): String {
   return buildString {
     appendLine(
       "Found $totalMatches matches for \"$query\" " +
         "(path=$requestedPath, scope=$scope, mode=$mode)" +
-        workspaceSearchHeaderSuffix(debug, scannedFiles, skippedFiles, stoppedEarly, maxFiles) +
+        workspaceSearchHeaderSuffix(debug, scannedFiles, skippedFiles, stoppedEarly, maxFiles, elapsedMillis) +
         ":",
     )
     hits.groupBy { it.path }.forEach { (path, fileHits) ->
@@ -2462,10 +2538,22 @@ data class FloveraCapabilities(
   val workspaceArtifactPreviewKinds: List<String> = listOf("webview", "local_http"),
   val workspaceArtifactPreferredPreviewKind: String = "local_http",
   val workspaceArtifactLocalHttp: Boolean = true,
+  val workspaceArtifactPythonHttp: Boolean = true,
+  val workspaceArtifactWorkspaceOwnedHttp: Boolean = true,
+  val workspaceArtifactPythonHttpLifecycle: Boolean = true,
+  val workspaceArtifactPythonHttpDiagnostics: Boolean = true,
+  val workspaceArtifactViewportHelper: Boolean = true,
+  val workspaceArtifactViewportCssVars: List<String> = listOf(
+    "--flovera-viewport-height",
+    "--flovera-viewport-width",
+    "--flovera-safe-bottom",
+  ),
+  val workspaceArtifactVisibleContentCheck: Boolean = true,
   val workspaceArtifactLocalHttpRoutes: List<String> = listOf(
     "/__flovera__/workspace/<path>",
     "/__flovera__/api/health",
     "/__flovera__/api/deepseek/stream",
+    "artifact python_http command routes",
   ),
   val workspaceArtifactActionKinds: List<String> = listOf("python_job"),
   val workspaceArtifactPythonJobNetwork: Boolean = true,
@@ -2478,8 +2566,15 @@ data class FloveraCapabilities(
   val workspaceArtifactBridgeCalls: List<String> = listOf("runAction", "getJob", "cancelJob"),
   val workspaceArtifactJobUi: Boolean = true,
   val seededPortableArtifactDemoPath: String = "agent-demo/flovera.app.json",
+  val toolProgressNarration: Boolean = true,
+  val agentRunTimeline: Boolean = true,
+  val agentRunEventBus: Boolean = true,
+  val finalAssistantResponseStreaming: Boolean = true,
+  val finalAssistantResponseStreamingSource: String = "runtime_event_delta_when_available",
+  val mainSurfaceHtmlQuickPicker: Boolean = true,
+  val conversationPathLinks: Boolean = true,
   val webPreview: Boolean = true,
-  val previewFormats: List<String> = listOf("html", "markdown", "json", "csv", "text", "image", "pdf"),
+  val previewFormats: List<String> = listOf("html", "markdown", "json", "csv", "text", "code", "image", "pdf"),
   val snapshots: Boolean = true,
   val notifications: Boolean = true,
   val networkTools: Boolean = false,
