@@ -88,6 +88,68 @@ class FloveraDeepSeekMessagePreparerInstrumentedTest {
   }
 
   @Test
+  fun restoresReasoningFromStreamingToolCallDeltas() {
+    val model = ModelProviderCatalog.requireProvider("deepseek").createModel("deepseek-v4-pro")
+    val client = TestDeepSeekClient(
+      requestSettings = FloveraDeepSeekRequestSettings(
+        thinking = FloveraDeepSeekThinking("enabled"),
+        reasoningEffort = "high",
+      ),
+    )
+
+    client.decodeStreamChunkForTest(
+      """
+        {
+          "id":"stream-1",
+          "object":"chat.completion.chunk",
+          "created":1,
+          "model":"deepseek-v4-pro",
+          "system_fingerprint":"fp",
+          "choices":[{"index":0,"delta":{"reasoning_content":"inspect workspace"},"finish_reason":null}]
+        }
+      """.trimIndent(),
+    )
+    client.decodeStreamChunkForTest(
+      """
+        {
+          "id":"stream-1",
+          "object":"chat.completion.chunk",
+          "created":1,
+          "model":"deepseek-v4-pro",
+          "system_fingerprint":"fp",
+          "choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"list_files","arguments":"{}"}}]},"finish_reason":null}]
+        }
+      """.trimIndent(),
+    )
+    client.decodeStreamChunkForTest(
+      """
+        {
+          "id":"stream-1",
+          "object":"chat.completion.chunk",
+          "created":1,
+          "model":"deepseek-v4-pro",
+          "system_fingerprint":"fp",
+          "choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]
+        }
+      """.trimIndent(),
+    )
+
+    val request = client.serializeProviderChatRequest(
+      messages = listOf(
+        OpenAIMessage.Assistant(toolCalls = listOf(toolCall("call_1", "list_files"))),
+        OpenAIMessage.Tool(Content.Text(".flovera/"), "call_1"),
+      ),
+      model = model,
+      tools = null,
+      toolChoice = null,
+      params = LLMParams(),
+      stream = true,
+    )
+
+    assertTrue(request.contains("\"reasoning_content\":\"inspect workspace\""))
+  }
+
+  @Test
   fun serializesDeepSeekThinkingEffort() {
     val model = ModelProviderCatalog.requireProvider("deepseek").createModel("deepseek-v4-pro")
     val client = TestDeepSeekClient(
@@ -168,6 +230,10 @@ class FloveraDeepSeekMessagePreparerInstrumentedTest {
       stream: Boolean,
     ): String {
       return super.serializeProviderChatRequest(messages, model, tools, toolChoice, params, stream)
+    }
+
+    fun decodeStreamChunkForTest(data: String) {
+      super.decodeStreamingResponse(data)
     }
   }
 }

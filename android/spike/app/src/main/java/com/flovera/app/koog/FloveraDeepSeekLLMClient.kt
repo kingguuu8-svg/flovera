@@ -34,7 +34,14 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
 import kotlin.time.Clock
 
 open class FloveraDeepSeekLLMClient(
@@ -68,6 +75,7 @@ open class FloveraDeepSeekLLMClient(
   override val clientName: String = DEEPSEEK_CLIENT_NAME
 
   private val reasoningByToolCallId = mutableMapOf<String, String>()
+  private val streamingReasoningByChoiceIndex = mutableMapOf<Int, StreamingReasoningState>()
 
   override fun llmProvider(): LLMProvider = LLMProvider.DeepSeek
 
@@ -142,7 +150,9 @@ open class FloveraDeepSeekLLMClient(
   }
 
   override fun decodeStreamingResponse(data: String): DeepSeekChatCompletionStreamResponse {
-    return json.decodeFromString(data)
+    val response = json.decodeFromString<DeepSeekChatCompletionStreamResponse>(data)
+    captureDeepSeekStreamingReasoning(data)
+    return response
   }
 
   override fun decodeResponse(data: String): DeepSeekChatCompletionResponse {
@@ -226,6 +236,41 @@ open class FloveraDeepSeekLLMClient(
     }
   }
 
+  private fun captureDeepSeekStreamingReasoning(data: String) {
+    val root = runCatching { json.parseToJsonElement(data).jsonObject }.getOrNull() ?: return
+    val choices = root["choices"].asJsonArrayOrNull() ?: return
+    choices.forEach { choiceElement ->
+      val choice = choiceElement.asJsonObjectOrNull() ?: return@forEach
+      val index = choice["index"].asJsonPrimitiveOrNull()?.intOrNull ?: 0
+      val delta = choice["delta"].asJsonObjectOrNull()
+      val state = streamingReasoningByChoiceIndex.getOrPut(index) { StreamingReasoningState() }
+
+      delta?.get("reasoning_content").asJsonPrimitiveOrNull()?.contentOrNull
+        ?.takeIf { it.isNotEmpty() }
+        ?.let { state.reasoning.append(it) }
+
+      delta?.get("tool_calls").asJsonArrayOrNull()?.forEach { toolCallElement ->
+        val toolCall = toolCallElement.asJsonObjectOrNull() ?: return@forEach
+        toolCall["id"].asJsonPrimitiveOrNull()?.contentOrNull
+          ?.takeIf { it.isNotBlank() }
+          ?.let { state.toolCallIds += it }
+      }
+
+      val finishReason = choice["finish_reason"].asJsonPrimitiveOrNull()?.contentOrNull
+      if (finishReason != null) {
+        if (finishReason == "tool_calls") {
+          val reasoning = state.reasoning.toString()
+          if (reasoning.isNotBlank()) {
+            state.toolCallIds.forEach { toolCallId ->
+              reasoningByToolCallId[toolCallId] = reasoning
+            }
+          }
+        }
+        streamingReasoningByChoiceIndex.remove(index)
+      }
+    }
+  }
+
   companion object {
     private const val DEEPSEEK_CLIENT_NAME = "FloveraDeepSeekLLMClient"
     private const val DEEPSEEK_TRANSIENT_RETRY_COUNT = 2
@@ -233,6 +278,17 @@ open class FloveraDeepSeekLLMClient(
     private val staticLogger = KotlinLogging.logger { }
   }
 }
+
+private class StreamingReasoningState {
+  val reasoning: StringBuilder = StringBuilder()
+  val toolCallIds: MutableSet<String> = linkedSetOf()
+}
+
+private fun JsonElement?.asJsonObjectOrNull(): JsonObject? = this as? JsonObject
+
+private fun JsonElement?.asJsonArrayOrNull(): JsonArray? = this as? JsonArray
+
+private fun JsonElement?.asJsonPrimitiveOrNull(): JsonPrimitive? = this as? JsonPrimitive
 
 internal fun isTransientDeepSeekClientFailure(error: Throwable): Boolean {
   var current: Throwable? = error
