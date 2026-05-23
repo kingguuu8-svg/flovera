@@ -61,9 +61,18 @@ class AgentRunController(
     if (trimmed.isBlank()) return null
 
     val withUser = appendUserPrompt(session, trimmed)
+    val agentRunId = "${withUser.id}-${UUID.randomUUID()}"
+    val startedAtMillis = System.currentTimeMillis()
     val contextRecord = estimateContextUsage(trimmed, settings, withUser, workspace)
     val contextCompressed = shouldCompressContext(contextRecord)
-    var activeRunEvents = buildInitialRunTimeline(contextRecord, trimmed, contextCompressed)
+    val runStartedEvent = lifecycleRunEvent(
+      type = AgentRunEventType.RUN_STARTED,
+      title = "Run started",
+      detail = "provider=${settings.provider}, model=${settings.model}, sessionId=${withUser.id}, agentRunId=$agentRunId",
+      status = AGENT_RUN_STATUS_RUNNING,
+    )
+    var activeRunEvents = listOfNotNull(runStartedEvent.timelineEvent) +
+      buildInitialRunTimeline(contextRecord, trimmed, contextCompressed)
     val startedSession = if (contextCompressed) {
       withUser
     } else {
@@ -85,6 +94,7 @@ class AgentRunController(
       onRunEvent(event)
       runState.emit(event)
     }
+    onRunEvent(runStartedEvent)
     onStarted(startedSession, startDraft)
 
     return scope.launch {
@@ -113,8 +123,6 @@ class AgentRunController(
       } else {
         startedSession
       }
-      val agentRunId = "${preparedSession.id}-${UUID.randomUUID()}"
-      val startedAtMillis = System.currentTimeMillis()
       var latestCheckpointPath = checkpointPath(agentRunId)
       val recorder = ToolEventRecorder { events ->
         latestCheckpointPath = saveRunCheckpoint(
@@ -179,15 +187,25 @@ class AgentRunController(
           )
           val events = recorder.snapshot()
           val finalContent = runState.finalTextOr(output)
+          val runCompletedEvent = lifecycleRunEvent(
+            type = AgentRunEventType.RUN_COMPLETED,
+            title = "Run completed",
+            detail = "Completed with ${events.size} tool call(s).",
+            status = AGENT_RUN_STATUS_COMPLETED,
+          )
+          onRunEvent(runCompletedEvent)
           SessionMessage(
             role = "assistant",
             content = finalContent,
             toolEvents = events,
             runEvents = runState.persistedTimelineEvents(
-              finalTimelineEvent(
-                title = "Final response ready",
-                detail = "The assistant response was saved to the session.",
-                status = AGENT_RUN_STATUS_COMPLETED,
+              listOfNotNull(
+                finalTimelineEvent(
+                  title = "Final response ready",
+                  detail = "The assistant response was saved to the session.",
+                  status = AGENT_RUN_STATUS_COMPLETED,
+                ),
+                runCompletedEvent.timelineEvent,
               ),
             ),
           )
@@ -195,8 +213,10 @@ class AgentRunController(
         onFailure = { error ->
           val events = recorder.snapshot()
           val errorSummary = error.message ?: error.toString()
+          val errorCategory = classifyAgentRunError(error)
           val logPath = saveErrorLog(
             error = error,
+            errorCategory = errorCategory,
             agentRunId = agentRunId,
             settings = settings,
             session = preparedSession,
@@ -215,13 +235,23 @@ class AgentRunController(
             workspace = workspace,
             errorSummary = errorSummary,
             errorLogPath = logPath,
+            errorCategory = errorCategory,
           )
+          val runFailedEvent = lifecycleRunEvent(
+            type = AgentRunEventType.RUN_FAILED,
+            title = "Run failed",
+            detail = "category=$errorCategory, log=$logPath, message=${errorSummary.take(TIMELINE_DETAIL_CHARS)}",
+            status = AGENT_RUN_STATUS_FAILED,
+          )
+          onRunEvent(runFailedEvent)
           val message = buildString {
+            appendLine("Error category: $errorCategory")
+            appendLine()
             append(errorSummary)
             appendLine()
             appendLine()
             if (events.isNotEmpty()) {
-              appendLine("Run interrupted after ${events.size} completed tool call(s).")
+              appendLine("Run stopped after ${events.size} completed tool call(s).")
               appendLine("Checkpoint saved: $latestCheckpointPath")
               appendLine("Resume from this checkpoint instead of repeating completed tool calls.")
               appendLine()
@@ -236,10 +266,8 @@ class AgentRunController(
             content = message,
             toolEvents = events,
             runEvents = runState.persistedTimelineEvents(
-              finalTimelineEvent(
-                title = "Run failed",
-                detail = errorSummary.take(TIMELINE_DETAIL_CHARS),
-                status = AGENT_RUN_STATUS_FAILED,
+              listOfNotNull(
+                runFailedEvent.timelineEvent,
               ),
             ),
           )
@@ -303,11 +331,11 @@ class AgentRunController(
       return finalText.toString().ifBlank { output }
     }
 
-    fun persistedTimelineEvents(finalEvent: AgentRunTimelineEvent): List<AgentRunTimelineEvent> {
+    fun persistedTimelineEvents(finalEvents: List<AgentRunTimelineEvent>): List<AgentRunTimelineEvent> {
       return baseTimelineEvents +
         buildToolTimelineEvents(latestToolEvents) +
         listOfNotNull(finalStreamingSummaryEvent(status = AGENT_RUN_STATUS_COMPLETED)) +
-        finalEvent
+        finalEvents
     }
 
     private fun draftContent(): String {
@@ -525,6 +553,22 @@ class AgentRunController(
     )
   }
 
+  private fun lifecycleRunEvent(type: String, title: String, detail: String, status: String): AgentRunEvent {
+    return AgentRunEvent(
+      type = type,
+      title = title,
+      detail = detail,
+      status = status,
+      timelineEvent = AgentRunTimelineEvent(
+        type = type,
+        title = title,
+        detail = detail.take(TIMELINE_DETAIL_CHARS),
+        status = status,
+        compact = false,
+      ),
+    )
+  }
+
   private fun buildToolTimelineEvents(toolEvents: List<ToolEvent>): List<AgentRunTimelineEvent> {
     if (toolEvents.isEmpty()) return emptyList()
     val visibleEvents = toolEvents.takeLast(TIMELINE_TOOL_EVENT_COUNT)
@@ -571,6 +615,7 @@ class AgentRunController(
     workspace: WorkspaceManager,
     errorSummary: String = "",
     errorLogPath: String = "",
+    errorCategory: String = "",
   ): String {
     val path = checkpointPath(agentRunId)
     val checkpoint = AgentRunCheckpoint(
@@ -592,6 +637,7 @@ class AgentRunController(
       },
       errorSummary = errorSummary.take(CHECKPOINT_ERROR_CHARS),
       errorLogPath = errorLogPath,
+      errorCategory = errorCategory,
       resumePrompt = buildResumePrompt(input, toolEvents, errorSummary, errorLogPath),
     )
     val content = json.encodeToString(checkpoint)
@@ -614,7 +660,7 @@ class AgentRunController(
     errorLogPath: String,
   ): String {
     return buildString {
-      appendLine("Continue the interrupted Flovera agent run.")
+      appendLine("Continue the stopped Flovera agent run.")
       appendLine("Original user request:")
       appendLine(input.take(CHECKPOINT_INPUT_PREVIEW_CHARS))
       if (errorSummary.isNotBlank()) {
@@ -696,6 +742,7 @@ class AgentRunController(
 
   private fun saveErrorLog(
     error: Throwable,
+    errorCategory: String,
     agentRunId: String,
     settings: AppSettings,
     session: AgentSession,
@@ -716,6 +763,7 @@ class AgentRunController(
       appendLine("- contextRecords: ${session.contextRecords.size}")
       appendLine("- networkEnabled: ${settings.networkEnabled}")
       appendLine("- webSearchEnabled: ${settings.webSearchEnabled}")
+      appendLine("- errorCategory: $errorCategory")
       appendLine("- errorType: ${error.javaClass.name}")
       appendLine("- errorMessage: ${error.message ?: error.toString()}")
       appendLine()
@@ -757,10 +805,53 @@ class AgentRunController(
     return path
   }
 
+  private fun classifyAgentRunError(error: Throwable): String {
+    if (error is SecurityException) return AGENT_RUN_ERROR_PERMISSION
+    val type = error.javaClass.name.lowercase(Locale.US)
+    val message = (error.message ?: error.toString()).lowercase(Locale.US)
+    val combined = "$type\n$message"
+    return when {
+      combined.contains("permission") || combined.contains("denied") || combined.contains("unauthorized workspace") ->
+        AGENT_RUN_ERROR_PERMISSION
+      combined.contains("context length") ||
+        combined.contains("context window") ||
+        combined.contains("maximum context") ||
+        combined.contains("token limit") ||
+        combined.contains("too many tokens") ->
+        AGENT_RUN_ERROR_CONTEXT
+      combined.contains("unknownhost") ||
+        combined.contains("socket") ||
+        combined.contains("connection") ||
+        combined.contains("timeout") ||
+        combined.contains("timed out") ||
+        combined.contains("ssl") ||
+        combined.contains("network") ->
+        AGENT_RUN_ERROR_NETWORK
+      combined.contains("llmclient") ||
+        combined.contains("provider") ||
+        combined.contains("api key") ||
+        combined.contains("apikey") ||
+        combined.contains("status code") ||
+        combined.contains("error from client") ->
+        AGENT_RUN_ERROR_PROVIDER
+      combined.contains("tool") ||
+        combined.contains("python_run") ||
+        combined.contains("floverapythonruntime") ->
+        AGENT_RUN_ERROR_TOOL
+      else -> AGENT_RUN_ERROR_UNKNOWN
+    }
+  }
+
   companion object {
     private const val AGENT_RUN_STATUS_RUNNING = "running"
     private const val AGENT_RUN_STATUS_COMPLETED = "completed"
     private const val AGENT_RUN_STATUS_FAILED = "failed"
+    private const val AGENT_RUN_ERROR_PROVIDER = "provider"
+    private const val AGENT_RUN_ERROR_NETWORK = "network"
+    private const val AGENT_RUN_ERROR_TOOL = "tool"
+    private const val AGENT_RUN_ERROR_PERMISSION = "permission"
+    private const val AGENT_RUN_ERROR_CONTEXT = "context"
+    private const val AGENT_RUN_ERROR_UNKNOWN = "unknown"
     private const val AGENT_RUN_CHECKPOINT_DIR = ".flovera/runs"
     private const val AGENT_RUN_LATEST_CHECKPOINT_PATH = ".flovera/runs/latest.json"
     private const val CHECKPOINT_INPUT_PREVIEW_CHARS = 4_000
@@ -794,5 +885,6 @@ private data class AgentRunCheckpoint(
   val toolEvents: List<ToolEvent>,
   val errorSummary: String = "",
   val errorLogPath: String = "",
+  val errorCategory: String = "",
   val resumePrompt: String = "",
 )

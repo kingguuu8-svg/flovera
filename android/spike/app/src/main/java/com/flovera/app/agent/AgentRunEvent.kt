@@ -23,6 +23,7 @@ fun interface AgentRunEventSink {
 }
 
 object AgentRunEventType {
+  const val RUN_STARTED = "run_started"
   const val CONTEXT_CHECKED = "context_checked"
   const val COMPRESSION_STARTED = "compression_started"
   const val COMPRESSION_COMPLETED = "compression_completed"
@@ -30,4 +31,5 @@ object AgentRunEventType {
   const val FINAL_TEXT_DELTA = "final_text_delta"
   const val RUN_COMPLETED = "run_completed"
   const val RUN_FAILED = "run_failed"
+  const val RUN_INTERRUPTED = "run_interrupted"
 }

@@ -44,6 +44,7 @@ class AgentRunControllerInstrumentedTest {
     var startedDraft: SessionMessage? = null
     var finishedSession: AgentSession? = null
     var succeeded: Boolean? = null
+    val runEvents = mutableListOf<AgentRunEvent>()
 
     val job = controller.submit(
       input = "  create file  ",
@@ -64,6 +65,7 @@ class AgentRunControllerInstrumentedTest {
         finishedSession = updated
         succeeded = success
       },
+      onRunEvent = { event -> runEvents += event },
     )
 
     assertNotNull(job)
@@ -71,6 +73,7 @@ class AgentRunControllerInstrumentedTest {
 
     assertEquals("create file", runtime.inputSeen)
     assertEquals("Working...", startedDraft?.content)
+    assertTrue(startedDraft?.runEvents?.any { it.type == AgentRunEventType.RUN_STARTED } == true)
     assertTrue(startedDraft?.runEvents?.any { it.title == "Context checkpoint" } == true)
     assertTrue(startedDraft?.runEvents?.any { it.title == "Thinking" } == true)
     assertEquals(1, startedSession?.messages?.size)
@@ -103,6 +106,10 @@ class AgentRunControllerInstrumentedTest {
     assertEquals("assistant output", finishedSession?.messages?.last()?.content)
     assertTrue(finishedSession?.messages?.last()?.toolEvents?.any { it.name == "fake_tool" } == true)
     assertTrue(finishedSession?.messages?.last()?.runEvents?.any { it.title == "Final response ready" } == true)
+    assertTrue(finishedSession?.messages?.last()?.runEvents?.any { it.type == AgentRunEventType.RUN_COMPLETED } == true)
+    assertTrue(runEvents.any { it.type == AgentRunEventType.RUN_STARTED })
+    assertTrue(runEvents.any { it.type == AgentRunEventType.TOOL_EVENTS_CHANGED })
+    assertTrue(runEvents.any { it.type == AgentRunEventType.RUN_COMPLETED })
     val checkpoint = workspace.readFile(".flovera/runs/latest.json")
     assertTrue(checkpoint, checkpoint.contains("\"status\": \"completed\""))
     assertTrue(checkpoint, checkpoint.contains("\"fake_tool\""))
@@ -290,6 +297,7 @@ class AgentRunControllerInstrumentedTest {
     val controller = AgentRunController(runtime = FailingAgentRuntime(), scope = this)
     var finishedSession: AgentSession? = null
     var succeeded: Boolean? = null
+    val runEvents = mutableListOf<AgentRunEvent>()
 
     val job = controller.submit(
       input = "trigger failure",
@@ -307,6 +315,7 @@ class AgentRunControllerInstrumentedTest {
         finishedSession = updated
         succeeded = success
       },
+      onRunEvent = { event -> runEvents += event },
     )
 
     assertNotNull(job)
@@ -315,23 +324,65 @@ class AgentRunControllerInstrumentedTest {
     assertEquals(false, succeeded)
     val errorMessage = finishedSession?.messages?.lastOrNull()
     assertEquals("error", errorMessage?.role)
+    assertTrue(errorMessage?.content?.contains("Error category: provider") == true)
     assertTrue(errorMessage?.content?.contains("Error log saved: .flovera/logs/agent-error-") == true)
     assertTrue(errorMessage?.content?.contains("Checkpoint saved: .flovera/runs/") == true)
-    assertTrue(errorMessage?.content?.contains("Run interrupted after 1 completed tool call") == true)
+    assertTrue(errorMessage?.content?.contains("Run stopped after 1 completed tool call") == true)
     assertTrue(errorMessage?.runEvents?.any { it.title == "Tool: fake_tool_before_failure" } == true)
-    assertTrue(errorMessage?.runEvents?.any { it.title == "Run failed" } == true)
+    assertTrue(errorMessage?.runEvents?.any { it.type == AgentRunEventType.RUN_FAILED } == true)
+    assertTrue(errorMessage?.runEvents?.any { it.detail.contains("category=provider") } == true)
+    assertTrue(runEvents.any { it.type == AgentRunEventType.RUN_STARTED })
+    assertTrue(runEvents.any { it.type == AgentRunEventType.RUN_FAILED && it.detail.contains("category=provider") })
     val logs = File(workspace.root, ".flovera/logs").listFiles().orEmpty()
     assertEquals(1, logs.size)
     val logText = logs.single().readText()
     assertTrue(logText.contains("DeepSeekLLMClient"))
     assertTrue(logText.contains("fake_tool_before_failure"))
     assertTrue(logText.contains("networkEnabled: true"))
+    assertTrue(logText.contains("errorCategory: provider"))
     assertTrue(logText.contains("agentRunId: ${session.id}-"))
     assertFalse(logText.contains("secret-must-not-be-logged"))
     val checkpoint = workspace.readFile(".flovera/runs/latest.json")
     assertTrue(checkpoint, checkpoint.contains("\"status\": \"failed\""))
+    assertTrue(checkpoint, checkpoint.contains("\"errorCategory\": \"provider\""))
     assertTrue(checkpoint, checkpoint.contains("\"fake_tool_before_failure\""))
     assertTrue(checkpoint, checkpoint.contains("\"resumePrompt\""))
+  }
+
+  @Test
+  fun runControllerClassifiesNetworkFailures() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val store = AgentSessionStore(context)
+    val sessions = SessionController(store)
+    val session = store.create("Network failure ${System.currentTimeMillis()}")
+    val workspace = WorkspaceManager(context, "network-failure-${System.currentTimeMillis()}").also { it.ensureSeedFiles() }
+    val controller = AgentRunController(runtime = NetworkFailingAgentRuntime(), scope = this)
+    var finishedSession: AgentSession? = null
+
+    val job = controller.submit(
+      input = "trigger network failure",
+      settings = AppSettings(),
+      session = session,
+      workspace = workspace,
+      appendUserPrompt = sessions::appendUserPrompt,
+      appendContextRecord = sessions::appendContextRecord,
+      appendCompressionDivider = sessions::appendCompressionDivider,
+      appendMessage = sessions::appendMessage,
+      onStarted = { _, _ -> },
+      onDraft = { },
+      onSessionUpdated = { _, _ -> },
+      onFinished = { updated, _ -> finishedSession = updated },
+    )
+
+    assertNotNull(job)
+    job!!.join()
+
+    val errorMessage = finishedSession?.messages?.lastOrNull()
+    assertEquals("error", errorMessage?.role)
+    assertTrue(errorMessage?.content?.contains("Error category: network") == true)
+    assertTrue(errorMessage?.runEvents?.any { it.type == AgentRunEventType.RUN_FAILED && it.detail.contains("category=network") } == true)
+    val checkpoint = workspace.readFile(".flovera/runs/latest.json")
+    assertTrue(checkpoint, checkpoint.contains("\"errorCategory\": \"network\""))
   }
 
   @Test
@@ -463,6 +514,19 @@ class AgentRunControllerInstrumentedTest {
     ): String {
       recorder.record("fake_tool_before_failure", "{}", "ok")
       error("Error from client: DeepSeekLLMClient\nStatus code: 400\nreasoning_content must be passed back")
+    }
+  }
+
+  private class NetworkFailingAgentRuntime : AgentRuntime {
+    override suspend fun run(
+      input: String,
+      agentRunId: String,
+      settings: AppSettings,
+      session: AgentSession,
+      workspace: WorkspaceManager,
+      recorder: ToolEventRecorder,
+    ): String {
+      error("Software caused connection abort")
     }
   }
 }

@@ -6,6 +6,7 @@ import android.net.Uri
 import androidx.core.content.FileProvider
 import com.flovera.app.agent.AgentRunStatusNotifier
 import com.flovera.app.agent.AgentRunController
+import com.flovera.app.agent.AgentRunEventType
 import com.flovera.app.agent.AndroidAgentRunStatusNotifier
 import com.flovera.app.config.AppSettings
 import com.flovera.app.config.ModelSettingsDraft
@@ -726,9 +727,9 @@ class AgentController(
           content = "Run interrupted by user.",
           runEvents = listOf(
             AgentRunTimelineEvent(
-              type = "interrupted",
-              title = "Interrupted by user",
-              detail = "The active agent run was cancelled before completion.",
+              type = AgentRunEventType.RUN_INTERRUPTED,
+              title = "Run interrupted",
+              detail = "The active agent run was cancelled by the user before completion.",
               status = "interrupted",
               compact = false,
             ),
