@@ -292,9 +292,14 @@ history.
 ### Agent Run Timeline
 
 Status: Baseline implemented with an AgentRunEvent bus. Session messages can
-persist app-generated run timeline events for context checkpoints, compression,
-tool calls, final-answer streaming, interruptions, and final completion/failure
-status. The conversation UI renders those events inside the relevant
+persist app-generated run timeline events for run started/completed/failed/
+interrupted lifecycle boundaries, context checkpoints, compression, tool calls,
+and final-answer streaming. Failure events now include a bounded error category
+(`provider`, `network`, `tool`, `permission`, `context`, or `unknown`) in the
+session timeline, checkpoint, workspace error log, and user-visible error
+message, and the generated `.flovera/logs/...` and `.flovera/runs/...`
+paths are conversation links that open the underlying log/checkpoint preview.
+The conversation UI renders those events inside the relevant
 assistant/error message, with compact and full views. This is observability for
 the run loop, not hidden reasoning.
 
@@ -305,6 +310,8 @@ the run loop, not hidden reasoning.
   not erase what happened during the run.
 - Keep event details bounded and deterministic; do not expose private model
   reasoning as timeline content.
+- Keep lifecycle event types stable: `run_started`, `run_completed`,
+  `run_failed`, and `run_interrupted`.
 - Use the timeline as the future checkpoint boundary for more precise
   compression and context accounting.
 - Route runtime state through `AgentRunEvent` so UI drafts, timeline, session
@@ -782,7 +789,10 @@ very large workspaces and denser artifact metadata.
 Status: Baseline implemented. Conversation messages conservatively detect
 existing workspace-relative file paths and expose clickable entries that open
 HTML in the main WebView or other previewable formats in the native preview
-surface. Remaining work is inline text-link polish and stale-path status copy.
+surface. Agent failure messages can also open generated `.flovera/logs/...`
+and `.flovera/runs/...` diagnostics, so run failures are inspectable without
+manual file browsing. Remaining work is inline text-link polish and stale-path
+status copy.
 
 - Detect workspace-relative file paths in user, assistant, and error messages.
 - Make detected paths clickable without breaking text selection or Markdown

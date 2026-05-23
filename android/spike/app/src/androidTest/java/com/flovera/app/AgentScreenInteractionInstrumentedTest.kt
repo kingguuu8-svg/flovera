@@ -258,6 +258,55 @@ class AgentScreenInteractionInstrumentedTest {
   }
 
   @Test
+  fun conversationPathLinksOpenAgentRunLogAndCheckpointFiles() {
+    val context = composeRule.activity.applicationContext
+    val workspaceId = "conversation-run-path-${System.currentTimeMillis()}"
+    SettingsStore(context).save(AppSettings(language = "en", activeWorkspaceId = workspaceId, selectedHtmlPath = "index.html"))
+    val workspace = WorkspaceManager(context, workspaceId).also { it.ensureSeedFiles() }
+    val logPath = ".flovera/logs/agent-error-test.md"
+    val checkpointPath = ".flovera/runs/test-checkpoint.json"
+    workspace.writeFile(logPath, "# Agent Error Log\n\n- errorCategory: provider", createAutoSnapshot = false)
+    workspace.writeFile(checkpointPath, """{"status":"failed","errorCategory":"provider"}""", createAutoSnapshot = false)
+    val store = AgentSessionStore(context)
+    val session = store.appendMessage(
+      store.create("Run path link ${System.currentTimeMillis()}"),
+      SessionMessage(
+        role = "error",
+        content = """
+          Error category: provider
+
+          Checkpoint saved: $checkpointPath
+          Error log saved: $logPath
+        """.trimIndent(),
+      ),
+    )
+    val controller = AgentController(context)
+    controller.openSession(session.id)
+
+    composeRule.setContent {
+      AgentScreen(controller)
+    }
+
+    composeRule.onNodeWithText("Agent").performClick()
+    composeRule.onNodeWithContentDescription("Open conversation path $logPath").performClick()
+
+    composeRule.onNodeWithText("Agent Error Log").assertIsDisplayed()
+    composeRule.runOnIdle {
+      assertEquals(logPath, controller.state.value.selectedPreviewPath)
+      assertTrue(controller.state.value.selectedPreviewContent.contains("errorCategory: provider"))
+    }
+
+    composeRule.onNodeWithText("Agent").performClick()
+    composeRule.onNodeWithContentDescription("Open conversation path $checkpointPath").performClick()
+
+    composeRule.onNodeWithText("JSON preview").assertIsDisplayed()
+    composeRule.runOnIdle {
+      assertEquals(checkpointPath, controller.state.value.selectedPreviewPath)
+      assertTrue(controller.state.value.selectedPreviewContent.contains("\"status\": \"failed\""))
+    }
+  }
+
+  @Test
   fun runningAgentCanBeInterruptedFromConversation() {
     val context = composeRule.activity.applicationContext
     SettingsStore(context).save(AppSettings(language = "en"))
@@ -282,11 +331,11 @@ class AgentScreenInteractionInstrumentedTest {
     composeRule.waitUntil(timeoutMillis = 5_000) { !controller.state.value.isRunning }
 
     assertTrue(composeRule.onAllNodesWithText("Run interrupted by user.").fetchSemanticsNodes().isNotEmpty())
-    composeRule.onNodeWithText("Interrupted by user").assertIsDisplayed()
+    composeRule.onNodeWithText("Run interrupted").assertIsDisplayed()
     composeRule.runOnIdle {
       assertEquals("Agent loop interrupted", controller.state.value.status)
       assertEquals("Run interrupted by user.", controller.state.value.session?.messages?.lastOrNull()?.content)
-      assertTrue(controller.state.value.session?.messages?.lastOrNull()?.runEvents?.any { it.type == "interrupted" } == true)
+      assertTrue(controller.state.value.session?.messages?.lastOrNull()?.runEvents?.any { it.type == AgentRunEventType.RUN_INTERRUPTED } == true)
       assertTrue(notifier.events.contains("running:Working..."))
       assertTrue(notifier.events.contains("interrupted"))
     }
