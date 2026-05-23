@@ -33,10 +33,13 @@ For each focused product change:
    `.flovera/settings-view.json`, and `.flovera/capabilities.json`.
 6. Update the Product Backlog status when implementation changes the boundary:
    mark what is implemented, what remains, and what verification proves it.
-7. Add or update an instrumented/user-journey test when the behavior can regress.
-8. Run the standard Android verifier on a real device when the change affects UI,
+7. Apply the layered verification strategy in
+   `docs/03-flovera-testing-strategy.md`: prove deterministic protocol, state,
+   file, event, and error boundaries before relying on manual dogfood.
+8. Add or update an instrumented/user-journey test when the behavior can regress.
+9. Run the standard Android verifier on a real device when the change affects UI,
    app lifecycle, sessions, workspace files, WebView, permissions, or release output.
-9. Commit the change independently.
+10. Commit the change independently.
 
 ## Anti-Pattern Library
 
@@ -67,6 +70,7 @@ justification.
 | Config | API keys, provider choices, or workspace paths are hardcoded | Blocks sharing, open source, and user control | Store runtime config outside source and keep secrets out of git |
 | Verification | Manual visual clicking is the only way to test a path | Slow and brittle for iterative development | Prefer instrumentation, adb, semantics, and scriptable journeys |
 | Verification | Device verification freshly installs the user's main app | Resets the real usage state and may require permissions or install approval again | Update the already-installed package only; refuse fresh installs unless explicitly requested |
+| Verification | Real provider dogfood is treated as the main regression suite | Too slow, costly, and unstable for a personal developer | Cover protocol families with fake providers, then use limited live smoke and fixed manual dogfood scenarios |
 
 ## Experience Models
 
@@ -804,6 +808,7 @@ Use this checklist before calling a feature product-ready:
 - Permissions are requested only when the user reaches the relevant action.
 - Error states preserve data and explain the failed layer.
 - The agent is told about capabilities it can actually use.
+- Non-human verification covers deterministic protocol, state, file, event, and error boundaries before manual dogfood.
 - A real-device verification path exists for the behavior, or the gap is documented.
 - Real-device verification preserves the existing Flovera install, app data, and permission state.
 
