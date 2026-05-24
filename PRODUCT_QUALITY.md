@@ -611,8 +611,11 @@ demo, and now supports workspace-owned `python_http` backends with standard
 HTTP/SSE routes and user-provided API keys. The runtime also exposes baseline
 server lifecycle status, reuse, stop, and restart controls through the artifact
 picker. Local HTTP previews with a declared `python_http` backend must not
-silently fall back to static HTML when startup fails; startup waits through
-real-device Python cold-start latency and then reports a server status error.
+silently fall back to static HTML when startup fails. App startup and backend
+startup are separate phases: Flovera opens the shell first, then starts the
+selected backend asynchronously with a visible loading state and stale-result
+guard for rapid HTML switching or pinning. Startup waits through real-device
+Python cold-start latency and then reports a server status error.
 Remaining work is richer artifact validation and broader UX polish.
 
 - Goal: let the agent create a portable project that can be opened, run, edited,
@@ -641,7 +644,9 @@ Remaining work is richer artifact validation and broader UX polish.
      behavior, and status diagnostics in the artifact picker.
   10. Done: remove silent static fallback for failed python_http preview startup
       and extend startup tolerance for real-device Python cold starts.
-  11. Remaining: add render-level validation beyond the current WebView
+  11. Done: move python_http startup off app initialization into an asynchronous
+      preview-loading phase with stale-result protection.
+  12. Remaining: add render-level validation beyond the current WebView
       visibility probe and make artifact diagnostics more user-facing.
 - Acceptance criteria:
   - generated artifacts remain understandable and runnable outside Flovera with
@@ -652,6 +657,8 @@ Remaining work is richer artifact validation and broader UX polish.
     complete;
   - a declared local_http/python_http preview either opens through the backend
     URL or reports a backend startup error, never a misleading static fallback;
+  - opening Flovera, pinning HTML, or switching HTML does not synchronously wait
+    for Python startup;
   - the main flow does not rely on each project inventing its own
     `input.json`/`output.json` protocol.
 

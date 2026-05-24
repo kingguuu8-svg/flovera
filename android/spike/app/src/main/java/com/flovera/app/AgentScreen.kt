@@ -46,6 +46,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FloatingActionButton
@@ -257,6 +258,7 @@ private fun WorkspacePreview(state: AgentScreenState, controller: AgentControlle
   val mimeType = state.selectedPreviewMimeType
   val previewUri = state.selectedPreviewUri
   val htmlUrl = state.selectedHtmlUrl
+  val htmlLoading = state.selectedHtmlLoading
   val htmlError = state.selectedHtmlError
   val isImagePreview = previewPath.isNotBlank() && mimeType.startsWith("image/")
   val isPdfPreview = previewPath.isNotBlank() && isPdfPreview(previewPath, mimeType)
@@ -295,6 +297,7 @@ private fun WorkspacePreview(state: AgentScreenState, controller: AgentControlle
 
   WorkspaceWebView(
     url = htmlUrl,
+    loading = htmlLoading,
     startupError = htmlError,
     workspaceRootUrl = state.workspaceRootUrl,
     controller = controller,
@@ -527,6 +530,7 @@ private fun WorkspaceCodePreview(content: String) {
 @Composable
 private fun WorkspaceWebView(
   url: String?,
+  loading: Boolean,
   startupError: String,
   workspaceRootUrl: String,
   controller: AgentController,
@@ -542,16 +546,31 @@ private fun WorkspaceWebView(
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background,
       ) {}
-      Text(
-        text = startupError.ifBlank { EmptyWebPrompt },
-        modifier = Modifier.padding(24.dp),
-        color = if (startupError.isBlank()) {
-          MaterialTheme.colorScheme.onSurfaceVariant
-        } else {
-          MaterialTheme.colorScheme.error
-        },
-        style = MaterialTheme.typography.bodyLarge,
-      )
+      if (loading) {
+        Column(
+          modifier = Modifier.padding(24.dp),
+          horizontalAlignment = Alignment.CenterHorizontally,
+          verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+          CircularProgressIndicator()
+          Text(
+            text = "Starting workspace backend...",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodyLarge,
+          )
+        }
+      } else {
+        Text(
+          text = startupError.ifBlank { EmptyWebPrompt },
+          modifier = Modifier.padding(24.dp),
+          color = if (startupError.isBlank()) {
+            MaterialTheme.colorScheme.onSurfaceVariant
+          } else {
+            MaterialTheme.colorScheme.error
+          },
+          style = MaterialTheme.typography.bodyLarge,
+        )
+      }
     }
     return
   }

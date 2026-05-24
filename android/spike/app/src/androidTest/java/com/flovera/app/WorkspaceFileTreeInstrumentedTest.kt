@@ -26,6 +26,8 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
@@ -161,7 +163,7 @@ class WorkspaceFileTreeInstrumentedTest {
       it.selectHtmlFile("agent-demo/src/web/index.html")
     }
 
-    val selectedUrl = controller.state.value.selectedHtmlUrl.orEmpty()
+    val selectedUrl = awaitSelectedHtmlUrl(controller)
     assertTrue(selectedUrl.startsWith("http://127.0.0.1:"))
     assertFalse(selectedUrl.contains("/__flovera__/workspace/"))
 
@@ -218,8 +220,9 @@ class WorkspaceFileTreeInstrumentedTest {
       it.selectHtmlFile("broken/src/web/index.html")
     }
 
+    val selectedError = awaitSelectedHtmlError(controller)
     assertNull(controller.state.value.selectedHtmlUrl)
-    assertTrue(controller.state.value.selectedHtmlError.contains("Artifact backend failed to start"))
+    assertTrue(selectedError.contains("Artifact backend failed to start"))
     val status = controller.state.value.workspaceArtifactServerStatuses
       .single { it.manifestPath == "broken/flovera.app.json" }
     assertEquals("error", status.state)
@@ -245,7 +248,7 @@ class WorkspaceFileTreeInstrumentedTest {
         it.selectHtmlFile("agent-demo/src/web/index.html")
       }
 
-      val firstUrl = controller.state.value.selectedHtmlUrl.orEmpty()
+      val firstUrl = awaitSelectedHtmlUrl(controller)
       assertTrue(firstUrl.startsWith("http://127.0.0.1:"))
       val runningStatus = controller.state.value.workspaceArtifactServerStatuses
         .single { it.manifestPath == "agent-demo/flovera.app.json" }
@@ -265,7 +268,7 @@ class WorkspaceFileTreeInstrumentedTest {
       assertEquals("Artifact server stopped", controller.state.value.status)
 
       controller.selectHtmlFile("agent-demo/src/web/index.html")
-      val restartedUrl = controller.state.value.selectedHtmlUrl.orEmpty()
+      val restartedUrl = awaitSelectedHtmlUrl(controller)
       assertTrue(restartedUrl.startsWith("http://127.0.0.1:"))
       val restartedStatus = controller.state.value.workspaceArtifactServerStatuses
         .single { it.manifestPath == "agent-demo/flovera.app.json" }
@@ -289,7 +292,7 @@ class WorkspaceFileTreeInstrumentedTest {
       it.refreshWorkspaceFiles()
       it.selectHtmlFile("agent-demo/src/web/index.html")
     }
-    val selectedUrl = controller.state.value.selectedHtmlUrl.orEmpty()
+    val selectedUrl = awaitSelectedHtmlUrl(controller)
     assertTrue(selectedUrl.startsWith("http://127.0.0.1:"))
     val origin = selectedUrl.trimEnd('/')
 
@@ -409,7 +412,7 @@ class WorkspaceFileTreeInstrumentedTest {
       it.selectHtmlFile("own-api/src/web/index.html")
     }
 
-    val selectedUrl = controller.state.value.selectedHtmlUrl.orEmpty()
+    val selectedUrl = awaitSelectedHtmlUrl(controller)
     assertTrue(selectedUrl.startsWith("http://127.0.0.1:"))
     assertFalse(selectedUrl.contains("/__flovera__/api/"))
     assertTrue(URL(selectedUrl).readText().contains("Own API Chat"))
@@ -1565,6 +1568,22 @@ class WorkspaceFileTreeInstrumentedTest {
 
     assertEquals(3, automatic.size)
     assertEquals("three", workspace.restoreSnapshot(automatic.first().id)?.let { workspace.readFile("counter.txt") })
+  }
+
+  private fun awaitSelectedHtmlUrl(controller: AgentController): String = runBlocking {
+    withTimeout(20_000) {
+      controller.state
+        .map { it.selectedHtmlUrl.orEmpty() }
+        .first { it.startsWith("http://127.0.0.1:") }
+    }
+  }
+
+  private fun awaitSelectedHtmlError(controller: AgentController): String = runBlocking {
+    withTimeout(20_000) {
+      controller.state
+        .map { it.selectedHtmlError }
+        .first { it.isNotBlank() }
+    }
   }
 
 }

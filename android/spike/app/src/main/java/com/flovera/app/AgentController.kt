@@ -64,6 +64,7 @@ data class AgentScreenState(
   val workspaceArtifactServerStatuses: List<WorkspacePythonHttpRuntimeStatus> = emptyList(),
   val selectedHtmlPath: String = "",
   val selectedHtmlUrl: String? = null,
+  val selectedHtmlLoading: Boolean = false,
   val selectedHtmlError: String = "",
   val selectedPreviewPath: String = "",
   val selectedPreviewContent: String = "",
@@ -118,6 +119,8 @@ class AgentController(
   private var activeRunJob: Job? = null
   private val artifactJobScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
   private val artifactRunJobs = ConcurrentHashMap<String, Job>()
+  private var selectedHtmlLoadJob: Job? = null
+  @Volatile private var selectedHtmlLoadGeneration: Long = 0
   private var workspaceController: WorkspaceController
   private var workspaceLocalAppServer: WorkspaceLocalAppServer
   private var workspacePythonHttpRuntime: WorkspacePythonHttpRuntime
@@ -146,6 +149,9 @@ class AgentController(
     val initialSelectedHtmlTarget = selectedHtmlTarget(workspaceSnapshot)
     val initialWorkspaceRootUrl = workspaceRootUrl(initialSelectedHtmlTarget.url, workspaceSnapshot)
     val initialArtifactServerStatuses = workspacePythonHttpRuntime.statusesFor(workspaceSnapshot.workspaceArtifacts)
+    val initialHtmlLoading = initialSelectedHtmlTarget.requiresBackend &&
+      initialSelectedHtmlTarget.url == null &&
+      initialSelectedHtmlTarget.error.isBlank()
     _state.value = AgentScreenState(
       settings = settings,
       session = session,
@@ -166,6 +172,7 @@ class AgentController(
       workspaceArtifactServerStatuses = initialArtifactServerStatuses,
       selectedHtmlPath = workspaceSnapshot.selectedHtmlPath,
       selectedHtmlUrl = initialSelectedHtmlTarget.url,
+      selectedHtmlLoading = initialHtmlLoading,
       selectedHtmlError = initialSelectedHtmlTarget.error,
       selectedPreviewPath = workspaceSnapshot.selectedHtmlPath,
       selectedPreviewMimeType = if (workspaceSnapshot.selectedHtmlPath.isBlank()) "" else "text/html",
@@ -176,6 +183,9 @@ class AgentController(
       controlledToolProposals = workspaceSnapshot.controlledToolProposals,
       status = settingsLoad.warning ?: "Ready",
     )
+    if (initialHtmlLoading) {
+      startSelectedHtmlBackend(workspaceSnapshot.selectedHtmlPath)
+    }
   }
 
   fun updateInput(value: String) {
@@ -259,6 +269,10 @@ class AgentController(
     val selectedHtmlTarget = selectedHtmlTarget(workspaceSnapshot)
     val workspaceRootUrl = workspaceRootUrl(selectedHtmlTarget.url, workspaceSnapshot)
     val artifactServerStatuses = workspacePythonHttpRuntime.statusesFor(workspaceSnapshot.workspaceArtifacts)
+    val selectedHtmlLoading = selectedHtmlTarget.requiresBackend &&
+      selectedHtmlTarget.url == null &&
+      selectedHtmlTarget.error.isBlank() &&
+      current.selectedHtmlLoading
     _state.update {
       it.copy(
         settings = settingsWithSearch,
@@ -276,6 +290,7 @@ class AgentController(
         workspaceArtifactServerStatuses = artifactServerStatuses,
         selectedHtmlPath = workspaceSnapshot.selectedHtmlPath,
         selectedHtmlUrl = selectedHtmlTarget.url,
+        selectedHtmlLoading = selectedHtmlLoading,
         selectedHtmlError = selectedHtmlTarget.error,
         selectedPreviewPath = workspaceSnapshot.selectedHtmlPath,
         selectedPreviewContent = "",
@@ -299,7 +314,12 @@ class AgentController(
   fun selectHtmlFile(path: String) {
     val current = _state.value
     val settings = settingsController.setSelectedHtml(current.settings, path)
-    refreshWorkspaceState(settings = settings, status = "Displaying $path", resetPreviewToSelectedHtml = true)
+    refreshWorkspaceState(
+      settings = settings,
+      status = "Displaying $path",
+      resetPreviewToSelectedHtml = true,
+      startSelectedHtmlBackend = true,
+    )
   }
 
   fun selectWorkspacePreview(path: String) {
@@ -901,6 +921,7 @@ class AgentController(
     isRunning: Boolean = _state.value.isRunning,
     status: String = _state.value.status,
     resetPreviewToSelectedHtml: Boolean = false,
+    startSelectedHtmlBackend: Boolean = false,
   ) {
     val fullAuthorityResult = applyFullAuthoritySettingsProposals(settings)
     val settingsAfterAuthority = fullAuthorityResult.settings
@@ -919,7 +940,17 @@ class AgentController(
     val selectedHtmlTarget = selectedHtmlTarget(workspaceSnapshot)
     val workspaceRootUrl = workspaceRootUrl(selectedHtmlTarget.url, workspaceSnapshot)
     val artifactServerStatuses = workspacePythonHttpRuntime.statusesFor(workspaceSnapshot.workspaceArtifacts)
+    val shouldStartSelectedHtmlBackend = startSelectedHtmlBackend &&
+      selectedHtmlTarget.requiresBackend &&
+      selectedHtmlTarget.url == null
     _state.update {
+      val sameSelectedHtml = it.selectedHtmlPath == workspaceSnapshot.selectedHtmlPath
+      val selectedHtmlLoading = when {
+        shouldStartSelectedHtmlBackend -> true
+        selectedHtmlTarget.url != null || selectedHtmlTarget.error.isNotBlank() -> false
+        sameSelectedHtml -> it.selectedHtmlLoading
+        else -> false
+      }
       val previewPath = when {
         resetPreviewToSelectedHtml -> workspaceSnapshot.selectedHtmlPath
         it.selectedPreviewPath.isBlank() -> workspaceSnapshot.selectedHtmlPath
@@ -955,7 +986,8 @@ class AgentController(
         workspaceArtifactServerStatuses = artifactServerStatuses,
         selectedHtmlPath = workspaceSnapshot.selectedHtmlPath,
         selectedHtmlUrl = selectedHtmlTarget.url,
-        selectedHtmlError = selectedHtmlTarget.error,
+        selectedHtmlLoading = selectedHtmlLoading,
+        selectedHtmlError = if (shouldStartSelectedHtmlBackend) "" else selectedHtmlTarget.error,
         selectedPreviewPath = previewPath,
         selectedPreviewContent = previewContent,
         selectedPreviewMimeType = previewMimeType,
@@ -969,32 +1001,88 @@ class AgentController(
         status = statusAfterAuthority,
       )
     }
+    if (shouldStartSelectedHtmlBackend) {
+      startSelectedHtmlBackend(workspaceSnapshot.selectedHtmlPath)
+    }
+  }
+
+  private fun startSelectedHtmlBackend(path: String) {
+    val selectedPath = path.trim()
+    if (selectedPath.isBlank()) return
+    val generation = selectedHtmlLoadGeneration + 1
+    selectedHtmlLoadGeneration = generation
+    selectedHtmlLoadJob?.cancel()
+    selectedHtmlLoadJob = artifactJobScope.launch {
+      val snapshot = workspaceController.snapshot(selectedPath)
+      val artifact = selectedHtmlArtifact(snapshot, selectedPath)
+      if (artifact?.preview?.command.isNullOrBlank()) {
+        _state.update { current ->
+          if (current.selectedHtmlPath == selectedPath && selectedHtmlLoadGeneration == generation) {
+            current.copy(selectedHtmlLoading = false)
+          } else {
+            current
+          }
+        }
+        return@launch
+      }
+      val result = runCatching { workspacePythonHttpRuntime.previewUrl(artifact) }
+      val refreshedSnapshot = workspaceController.snapshot(selectedPath)
+      val statuses = workspacePythonHttpRuntime.statusesFor(refreshedSnapshot.workspaceArtifacts)
+      _state.update { current ->
+        if (current.selectedHtmlPath != selectedPath || selectedHtmlLoadGeneration != generation) {
+          current
+        } else {
+          val url = result.getOrNull()
+          val error = result.exceptionOrNull()?.let {
+            "Artifact backend failed to start: ${it.message ?: it::class.java.simpleName}"
+          }.orEmpty()
+          current.copy(
+            workspaceArtifacts = refreshedSnapshot.workspaceArtifacts,
+            workspaceArtifactServerStatuses = statuses,
+            selectedHtmlUrl = url,
+            selectedHtmlLoading = false,
+            selectedHtmlError = error,
+            workspaceRootUrl = workspaceRootUrl(url, refreshedSnapshot),
+            status = if (error.isBlank()) "Displaying $selectedPath" else error,
+          )
+        }
+      }
+    }
   }
 
   private fun selectedHtmlTarget(snapshot: WorkspaceSnapshot): SelectedHtmlTarget {
     val selectedPath = snapshot.selectedHtmlPath
     if (selectedPath.isBlank()) return SelectedHtmlTarget()
-    val localHttpArtifact = snapshot.workspaceArtifacts.firstOrNull { artifact ->
+    val localHttpArtifact = selectedHtmlArtifact(snapshot, selectedPath)
+    if (localHttpArtifact?.preview?.command?.isNotBlank() == true) {
+      return when (val status = workspacePythonHttpRuntime.statusFor(localHttpArtifact)) {
+        null -> SelectedHtmlTarget(requiresBackend = true)
+        else -> when (status.state) {
+          "running" -> SelectedHtmlTarget(url = status.url, requiresBackend = true)
+          "error" -> SelectedHtmlTarget(
+            error = "Artifact backend failed to start: ${status.detail}",
+            requiresBackend = true,
+          )
+          else -> SelectedHtmlTarget(requiresBackend = true)
+        }
+      }
+    }
+    if (localHttpArtifact != null) return SelectedHtmlTarget(url = workspaceLocalAppServer.workspaceFileUrl(selectedPath))
+    return SelectedHtmlTarget(url = snapshot.selectedHtmlUrl)
+  }
+
+  private fun selectedHtmlArtifact(snapshot: WorkspaceSnapshot, selectedPath: String): WorkspaceArtifact? {
+    return snapshot.workspaceArtifacts.firstOrNull { artifact ->
       artifact.valid &&
         artifact.preview?.path == selectedPath &&
         artifact.preview.kind == WORKSPACE_ARTIFACT_PREVIEW_LOCAL_HTTP
-    }
-    return if (localHttpArtifact?.preview?.command?.isNotBlank() == true) {
-      runCatching {
-        SelectedHtmlTarget(url = workspacePythonHttpRuntime.previewUrl(localHttpArtifact))
-      }.getOrElse { error ->
-        SelectedHtmlTarget(error = "Artifact backend failed to start: ${error.message ?: error::class.java.simpleName}")
-      }
-    } else if (localHttpArtifact != null) {
-      SelectedHtmlTarget(url = workspaceLocalAppServer.workspaceFileUrl(selectedPath))
-    } else {
-      SelectedHtmlTarget(url = snapshot.selectedHtmlUrl)
     }
   }
 
   private data class SelectedHtmlTarget(
     val url: String? = null,
     val error: String = "",
+    val requiresBackend: Boolean = false,
   )
 
   private fun workspaceRootUrl(selectedHtmlUrl: String?, snapshot: WorkspaceSnapshot): String {
