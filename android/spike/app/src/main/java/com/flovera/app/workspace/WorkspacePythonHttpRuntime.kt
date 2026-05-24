@@ -7,6 +7,7 @@ import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -123,6 +124,7 @@ class WorkspacePythonHttpRuntime(
       )
       FloveraPythonRuntime.ensureStarted(workspace)
       val url = "http://127.0.0.1:$port${preview.urlPath.normalizedUrlPath()}"
+      val startupError = AtomicReference<Throwable?>(null)
       val running = RunningServer(
         key = key,
         manifestPath = artifact.manifestPath,
@@ -137,21 +139,26 @@ class WorkspacePythonHttpRuntime(
           isDaemon = true,
           name = "FloveraWorkspacePythonHttp-$port",
         ) {
-          Python.getInstance()
-            .getModule("flovera_http_runtime")
-            .callAttr(
-              "run_script_server",
-              scriptFile.canonicalPath,
-              workspaceRoot.canonicalPath,
-              cwdFile.canonicalPath,
-              HOST,
-              port,
-              json.encodeToString(argv),
-              json.encodeToString(environment),
-            )
+          try {
+            Python.getInstance()
+              .getModule("flovera_http_runtime")
+              .callAttr(
+                "run_script_server",
+                scriptFile.canonicalPath,
+                workspaceRoot.canonicalPath,
+                cwdFile.canonicalPath,
+                HOST,
+                port,
+                json.encodeToString(argv),
+                json.encodeToString(environment),
+              )
+          } catch (error: Throwable) {
+            startupError.set(error)
+            throw error
+          }
         },
       )
-      waitUntilOpen(port)
+      waitUntilOpen(port, running.thread, startupError)
       servers[key] = running
       return running
     }
@@ -210,12 +217,18 @@ class WorkspacePythonHttpRuntime(
     }
   }
 
-  private fun waitUntilOpen(port: Int) {
+  private fun waitUntilOpen(port: Int, thread: Thread, startupError: AtomicReference<Throwable?>) {
     repeat(HTTP_START_ATTEMPTS) {
       if (canConnect(port)) return
+      startupError.get()?.let { error ->
+        throw IllegalStateException("python_http server failed before opening $HOST:$port: ${error.message ?: error::class.java.simpleName}", error)
+      }
+      if (!thread.isAlive) {
+        error("python_http server exited before opening $HOST:$port")
+      }
       Thread.sleep(HTTP_START_DELAY_MS)
     }
-    error("python_http server did not open $HOST:$port")
+    error("python_http server did not open $HOST:$port within ${HTTP_START_ATTEMPTS * HTTP_START_DELAY_MS}ms")
   }
 
   private fun canConnect(port: Int): Boolean {
@@ -304,9 +317,9 @@ class WorkspacePythonHttpRuntime(
   private companion object {
     const val HOST = "127.0.0.1"
     const val WORKSPACE_ARTIFACT_PREVIEW_LOCAL_HTTP = "local_http"
-    const val HTTP_START_ATTEMPTS = 40
-    const val HTTP_START_DELAY_MS = 50L
-    const val HTTP_CONNECT_TIMEOUT_MS = 100
+    const val HTTP_START_ATTEMPTS = 120
+    const val HTTP_START_DELAY_MS = 100L
+    const val HTTP_CONNECT_TIMEOUT_MS = 250
     const val STOP_WAIT_MS = 1_000L
     const val STOP_ATTEMPTS = 10
     const val STOP_RETRY_DELAY_MS = 50L

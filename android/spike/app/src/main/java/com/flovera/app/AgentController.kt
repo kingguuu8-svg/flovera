@@ -64,6 +64,7 @@ data class AgentScreenState(
   val workspaceArtifactServerStatuses: List<WorkspacePythonHttpRuntimeStatus> = emptyList(),
   val selectedHtmlPath: String = "",
   val selectedHtmlUrl: String? = null,
+  val selectedHtmlError: String = "",
   val selectedPreviewPath: String = "",
   val selectedPreviewContent: String = "",
   val selectedPreviewMimeType: String = "",
@@ -142,8 +143,8 @@ class AgentController(
       workspaceSnapshot = workspaceController.snapshot(settings.selectedHtmlPath)
     }
     val modelDraft = settingsController.draftFor(settings)
-    val initialSelectedHtmlUrl = selectedHtmlUrl(workspaceSnapshot)
-    val initialWorkspaceRootUrl = workspaceRootUrl(initialSelectedHtmlUrl, workspaceSnapshot)
+    val initialSelectedHtmlTarget = selectedHtmlTarget(workspaceSnapshot)
+    val initialWorkspaceRootUrl = workspaceRootUrl(initialSelectedHtmlTarget.url, workspaceSnapshot)
     val initialArtifactServerStatuses = workspacePythonHttpRuntime.statusesFor(workspaceSnapshot.workspaceArtifacts)
     _state.value = AgentScreenState(
       settings = settings,
@@ -164,7 +165,8 @@ class AgentController(
       workspaceArtifactJobs = workspaceSnapshot.workspaceArtifactJobs,
       workspaceArtifactServerStatuses = initialArtifactServerStatuses,
       selectedHtmlPath = workspaceSnapshot.selectedHtmlPath,
-      selectedHtmlUrl = initialSelectedHtmlUrl,
+      selectedHtmlUrl = initialSelectedHtmlTarget.url,
+      selectedHtmlError = initialSelectedHtmlTarget.error,
       selectedPreviewPath = workspaceSnapshot.selectedHtmlPath,
       selectedPreviewMimeType = if (workspaceSnapshot.selectedHtmlPath.isBlank()) "" else "text/html",
       selectedPreviewUri = "",
@@ -254,8 +256,8 @@ class AgentController(
     val draft = settingsController.draftFor(settingsWithSearch)
     workspaceController.syncFloveraSettings(settingsWithSearch)
     val workspaceSnapshot = workspaceController.snapshot(settingsWithSearch.selectedHtmlPath)
-    val selectedHtmlUrl = selectedHtmlUrl(workspaceSnapshot)
-    val workspaceRootUrl = workspaceRootUrl(selectedHtmlUrl, workspaceSnapshot)
+    val selectedHtmlTarget = selectedHtmlTarget(workspaceSnapshot)
+    val workspaceRootUrl = workspaceRootUrl(selectedHtmlTarget.url, workspaceSnapshot)
     val artifactServerStatuses = workspacePythonHttpRuntime.statusesFor(workspaceSnapshot.workspaceArtifacts)
     _state.update {
       it.copy(
@@ -273,7 +275,8 @@ class AgentController(
         workspaceArtifactJobs = workspaceSnapshot.workspaceArtifactJobs,
         workspaceArtifactServerStatuses = artifactServerStatuses,
         selectedHtmlPath = workspaceSnapshot.selectedHtmlPath,
-        selectedHtmlUrl = selectedHtmlUrl,
+        selectedHtmlUrl = selectedHtmlTarget.url,
+        selectedHtmlError = selectedHtmlTarget.error,
         selectedPreviewPath = workspaceSnapshot.selectedHtmlPath,
         selectedPreviewContent = "",
         selectedPreviewMimeType = if (workspaceSnapshot.selectedHtmlPath.isBlank()) "" else "text/html",
@@ -913,8 +916,8 @@ class AgentController(
       workspaceController.syncFloveraSettings(normalizedSettings)
       workspaceSnapshot = workspaceController.snapshot(normalizedSettings.selectedHtmlPath)
     }
-    val selectedHtmlUrl = selectedHtmlUrl(workspaceSnapshot)
-    val workspaceRootUrl = workspaceRootUrl(selectedHtmlUrl, workspaceSnapshot)
+    val selectedHtmlTarget = selectedHtmlTarget(workspaceSnapshot)
+    val workspaceRootUrl = workspaceRootUrl(selectedHtmlTarget.url, workspaceSnapshot)
     val artifactServerStatuses = workspacePythonHttpRuntime.statusesFor(workspaceSnapshot.workspaceArtifacts)
     _state.update {
       val previewPath = when {
@@ -951,7 +954,8 @@ class AgentController(
         workspaceArtifactJobs = workspaceSnapshot.workspaceArtifactJobs,
         workspaceArtifactServerStatuses = artifactServerStatuses,
         selectedHtmlPath = workspaceSnapshot.selectedHtmlPath,
-        selectedHtmlUrl = selectedHtmlUrl,
+        selectedHtmlUrl = selectedHtmlTarget.url,
+        selectedHtmlError = selectedHtmlTarget.error,
         selectedPreviewPath = previewPath,
         selectedPreviewContent = previewContent,
         selectedPreviewMimeType = previewMimeType,
@@ -967,23 +971,31 @@ class AgentController(
     }
   }
 
-  private fun selectedHtmlUrl(snapshot: WorkspaceSnapshot): String? {
+  private fun selectedHtmlTarget(snapshot: WorkspaceSnapshot): SelectedHtmlTarget {
     val selectedPath = snapshot.selectedHtmlPath
-    if (selectedPath.isBlank()) return null
+    if (selectedPath.isBlank()) return SelectedHtmlTarget()
     val localHttpArtifact = snapshot.workspaceArtifacts.firstOrNull { artifact ->
       artifact.valid &&
         artifact.preview?.path == selectedPath &&
         artifact.preview.kind == WORKSPACE_ARTIFACT_PREVIEW_LOCAL_HTTP
     }
     return if (localHttpArtifact?.preview?.command?.isNotBlank() == true) {
-      runCatching { workspacePythonHttpRuntime.previewUrl(localHttpArtifact) }.getOrNull()
-        ?: workspaceLocalAppServer.workspaceFileUrl(selectedPath)
+      runCatching {
+        SelectedHtmlTarget(url = workspacePythonHttpRuntime.previewUrl(localHttpArtifact))
+      }.getOrElse { error ->
+        SelectedHtmlTarget(error = "Artifact backend failed to start: ${error.message ?: error::class.java.simpleName}")
+      }
     } else if (localHttpArtifact != null) {
-      workspaceLocalAppServer.workspaceFileUrl(selectedPath)
+      SelectedHtmlTarget(url = workspaceLocalAppServer.workspaceFileUrl(selectedPath))
     } else {
-      snapshot.selectedHtmlUrl
+      SelectedHtmlTarget(url = snapshot.selectedHtmlUrl)
     }
   }
+
+  private data class SelectedHtmlTarget(
+    val url: String? = null,
+    val error: String = "",
+  )
 
   private fun workspaceRootUrl(selectedHtmlUrl: String?, snapshot: WorkspaceSnapshot): String {
     return if (selectedHtmlUrl?.startsWith("http://127.0.0.1:") == true) {

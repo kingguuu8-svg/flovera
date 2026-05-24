@@ -32,6 +32,7 @@ import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -185,6 +186,48 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(sse.contains("Provide an API key in the workspace app"))
     assertTrue(sse.contains("[DONE]"))
     controller.stopWorkspaceArtifactServer("agent-demo/flovera.app.json")
+  }
+
+  @Test
+  fun controllerDoesNotSilentlyFallbackWhenPythonHttpPreviewFails() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspaceId = "controller-local-http-fail-${System.currentTimeMillis()}"
+    val workspace = WorkspaceManager(context, workspaceId).also { it.ensureSeedFiles() }
+    workspace.writeFile("broken/src/web/index.html", "<!doctype html><title>Broken HTTP app</title>", createAutoSnapshot = false)
+    workspace.writeFile(
+      "broken/flovera.app.json",
+      """
+        {
+          "schemaVersion": 1,
+          "name": "Broken HTTP app",
+          "kind": "interactive",
+          "entrypoints": {
+            "preview": { "kind": "local_http", "path": "src/web/index.html" },
+            "server": { "kind": "python_http", "command": "python src/missing.py --host 127.0.0.1 --port 8765" }
+          }
+        }
+      """.trimIndent(),
+      createAutoSnapshot = false,
+    )
+    val settingsFile = File(context.filesDir, "$workspaceId-settings.json")
+    val settingsStore = SettingsStore(context, settingsFile).also {
+      it.save(AppSettings(activeWorkspaceId = workspaceId, provider = "", model = ""))
+    }
+    val controller = AgentController(context, settingsStore = settingsStore).also {
+      it.refreshWorkspaceFiles()
+      it.selectHtmlFile("broken/src/web/index.html")
+    }
+
+    assertNull(controller.state.value.selectedHtmlUrl)
+    assertTrue(controller.state.value.selectedHtmlError.contains("Artifact backend failed to start"))
+    val status = controller.state.value.workspaceArtifactServerStatuses
+      .single { it.manifestPath == "broken/flovera.app.json" }
+    assertEquals("error", status.state)
+    assertTrue(status.detail.contains("python_http script does not exist"))
+    assertFalse(status.detail.contains("/__flovera__/workspace/"))
+
+    settingsFile.delete()
+    File(File(context.filesDir, "workspaces"), workspaceId).deleteRecursively()
   }
 
   @Test

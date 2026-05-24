@@ -610,7 +610,10 @@ actions, persists bounded job state under `.flovera/jobs/`, exposes legacy
 demo, and now supports workspace-owned `python_http` backends with standard
 HTTP/SSE routes and user-provided API keys. The runtime also exposes baseline
 server lifecycle status, reuse, stop, and restart controls through the artifact
-picker. Remaining work is richer artifact validation and broader UX polish.
+picker. Local HTTP previews with a declared `python_http` backend must not
+silently fall back to static HTML when startup fails; startup waits through
+real-device Python cold-start latency and then reports a server status error.
+Remaining work is richer artifact validation and broader UX polish.
 
 - Goal: let the agent create a portable project that can be opened, run, edited,
   and iterated inside Flovera without inventing a project-specific JSON handoff
@@ -636,7 +639,9 @@ picker. Remaining work is richer artifact validation and broader UX polish.
      projects can connect frontend and backend through ordinary web protocols.
   9. Done: add python_http lifecycle controls, reuse semantics, stop/restart
      behavior, and status diagnostics in the artifact picker.
-  10. Remaining: add render-level validation beyond the current WebView
+  10. Done: remove silent static fallback for failed python_http preview startup
+      and extend startup tolerance for real-device Python cold starts.
+  11. Remaining: add render-level validation beyond the current WebView
       visibility probe and make artifact diagnostics more user-facing.
 - Acceptance criteria:
   - generated artifacts remain understandable and runnable outside Flovera with
@@ -645,6 +650,8 @@ picker. Remaining work is richer artifact validation and broader UX polish.
     stdout/stderr/result, inspect changed files, and ask the agent to iterate;
   - an interrupted job preserves status and output instead of pretending to be
     complete;
+  - a declared local_http/python_http preview either opens through the backend
+    URL or reports a backend startup error, never a misleading static fallback;
   - the main flow does not rely on each project inventing its own
     `input.json`/`output.json` protocol.
 

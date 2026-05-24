@@ -257,6 +257,7 @@ private fun WorkspacePreview(state: AgentScreenState, controller: AgentControlle
   val mimeType = state.selectedPreviewMimeType
   val previewUri = state.selectedPreviewUri
   val htmlUrl = state.selectedHtmlUrl
+  val htmlError = state.selectedHtmlError
   val isImagePreview = previewPath.isNotBlank() && mimeType.startsWith("image/")
   val isPdfPreview = previewPath.isNotBlank() && isPdfPreview(previewPath, mimeType)
   val isTextPreview = previewPath.isNotBlank() &&
@@ -292,7 +293,12 @@ private fun WorkspacePreview(state: AgentScreenState, controller: AgentControlle
     return
   }
 
-  WorkspaceWebView(url = htmlUrl, workspaceRootUrl = state.workspaceRootUrl, controller = controller)
+  WorkspaceWebView(
+    url = htmlUrl,
+    startupError = htmlError,
+    workspaceRootUrl = state.workspaceRootUrl,
+    controller = controller,
+  )
 }
 
 @Composable
@@ -519,7 +525,12 @@ private fun WorkspaceCodePreview(content: String) {
 }
 
 @Composable
-private fun WorkspaceWebView(url: String?, workspaceRootUrl: String, controller: AgentController) {
+private fun WorkspaceWebView(
+  url: String?,
+  startupError: String,
+  workspaceRootUrl: String,
+  controller: AgentController,
+) {
   var webError by remember(url) { mutableStateOf<String?>(null) }
 
   if (url.isNullOrBlank()) {
@@ -532,8 +543,13 @@ private fun WorkspaceWebView(url: String?, workspaceRootUrl: String, controller:
         color = MaterialTheme.colorScheme.background,
       ) {}
       Text(
-        text = EmptyWebPrompt,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        text = startupError.ifBlank { EmptyWebPrompt },
+        modifier = Modifier.padding(24.dp),
+        color = if (startupError.isBlank()) {
+          MaterialTheme.colorScheme.onSurfaceVariant
+        } else {
+          MaterialTheme.colorScheme.error
+        },
         style = MaterialTheme.typography.bodyLarge,
       )
     }
