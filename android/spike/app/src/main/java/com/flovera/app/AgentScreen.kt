@@ -24,8 +24,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -809,7 +811,11 @@ private fun ConversationDialog(
   val focusManager = LocalFocusManager.current
   val messages = state.session?.messages.orEmpty()
   val latestContextRecord = state.session?.contextRecords?.lastOrNull()
-  val visibleMessageCount = messages.size + if (state.assistantDraft == null) 0 else 1
+  val bottomAnchorIndex = if (messages.isEmpty()) {
+    1
+  } else {
+    messages.size + if (state.assistantDraft == null) 0 else 1
+  }
   val assistantDraftScrollKey = state.assistantDraft?.let { draft ->
     val lastEventTime = draft.transcriptEvents.lastOrNull()?.timestampMillis
       ?: draft.runEvents.lastOrNull()?.timestampMillis
@@ -821,27 +827,35 @@ private fun ConversationDialog(
   var sessionPickerOpen by remember { mutableStateOf(false) }
   var moreMenuOpen by remember { mutableStateOf(false) }
   var stickToConversationBottom by remember(state.session?.id) { mutableStateOf(true) }
+  var autoScrollingToConversationBottom by remember(state.session?.id) { mutableStateOf(false) }
   val isDraftSession = state.session != null && state.session.messages.isEmpty()
 
-  LaunchedEffect(listState, visibleMessageCount) {
+  suspend fun scrollToConversationBottom() {
+    autoScrollingToConversationBottom = true
+    try {
+      listState.scrollToItem(bottomAnchorIndex)
+    } finally {
+      autoScrollingToConversationBottom = false
+    }
+  }
+
+  LaunchedEffect(listState, state.session?.id) {
     snapshotFlow { listState.isScrollInProgress to listState.isNearBottom() }
       .collect { (isScrolling, isNearBottom) ->
-        if (isScrolling) {
+        if (isScrolling && !autoScrollingToConversationBottom) {
           stickToConversationBottom = isNearBottom
         }
       }
   }
 
-  LaunchedEffect(state.session?.id, visibleMessageCount) {
-    if (visibleMessageCount > 0) {
-      stickToConversationBottom = true
-      listState.scrollToItem(visibleMessageCount - 1)
-    }
+  LaunchedEffect(state.session?.id) {
+    stickToConversationBottom = true
+    scrollToConversationBottom()
   }
 
-  LaunchedEffect(visibleMessageCount, assistantDraftScrollKey, stickToConversationBottom) {
-    if (visibleMessageCount > 0 && stickToConversationBottom) {
-      listState.scrollToItem(visibleMessageCount - 1)
+  LaunchedEffect(bottomAnchorIndex, assistantDraftScrollKey, stickToConversationBottom) {
+    if (stickToConversationBottom) {
+      scrollToConversationBottom()
     }
   }
 
@@ -1059,6 +1073,9 @@ private fun ConversationDialog(
                 }
               }
             }
+          }
+          item(key = "conversation-bottom-anchor") {
+            Spacer(modifier = Modifier.fillMaxWidth().height(1.dp))
           }
         }
 

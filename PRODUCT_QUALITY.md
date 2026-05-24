@@ -128,7 +128,8 @@ Acceptance criteria:
 
 - Default open position is the latest message.
 - While the user stays at the bottom, streaming drafts keep the list pinned to
-  the newest output; manual scroll-away disables that auto-follow.
+  the newest output by scrolling to a dedicated bottom anchor rather than the
+  top of the last message; manual scroll-away disables that auto-follow.
 - Message list uses lazy rendering.
 - Tool events are collapsed by default when they are not the main answer.
 - Every message has a timestamp.
