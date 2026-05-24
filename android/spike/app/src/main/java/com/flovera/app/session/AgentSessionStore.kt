@@ -30,6 +30,7 @@ data class SessionMessage(
   val timestampMillis: Long = System.currentTimeMillis(),
   val toolEvents: List<ToolEvent> = emptyList(),
   val runEvents: List<AgentRunTimelineEvent> = emptyList(),
+  val transcriptEvents: List<ConversationTranscriptEvent> = emptyList(),
 )
 
 @Serializable
@@ -44,6 +45,18 @@ data class ToolEvent(
 data class AgentRunTimelineEvent(
   val type: String,
   val title: String,
+  val detail: String = "",
+  val timestampMillis: Long = System.currentTimeMillis(),
+  val status: String = "",
+  val compact: Boolean = true,
+)
+
+@Serializable
+data class ConversationTranscriptEvent(
+  val type: String,
+  val role: String = "",
+  val content: String = "",
+  val title: String = "",
   val detail: String = "",
   val timestampMillis: Long = System.currentTimeMillis(),
   val status: String = "",

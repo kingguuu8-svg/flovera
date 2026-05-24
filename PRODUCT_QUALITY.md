@@ -293,25 +293,29 @@ history.
 
 ### Agent Run Events
 
-Status: Baseline implemented with an AgentRunEvent bus. Session messages can
-persist app-generated run events for run started/completed/failed/
-interrupted lifecycle boundaries, context checkpoints, compression, tool calls,
-and final-answer streaming. Failure events now include a bounded error category
+Status: L2 implemented with an AgentRunEvent bus and a persisted conversation
+transcript compatibility layer. Session messages still keep `content`,
+`toolEvents`, and `runEvents` for runtime compatibility, and now also persist
+`transcriptEvents` so the conversation can render status/tool/final-answer
+entries as one chronological stream. The first covered event sources are
+thinking/compression status, completed tool calls, failure/interruption, and
+final-answer streaming. Failure events include a bounded error category
 (`provider`, `network`, `tool`, `permission`, `context`, or `unknown`) in the
 session run events, checkpoint, workspace error log, and user-visible error
 message, and the generated `.flovera/logs/...` and `.flovera/runs/...`
 paths are conversation links that open the underlying log/checkpoint preview.
-The conversation UI renders those events as lightweight chronological status
-rows before the assistant/error message instead of embedding a bulky timeline
-inside the answer bubble. Thinking rows include bounded status text so a run
-never appears idle while it is waiting on the model/runtime. This is
-observability for the run loop, not hidden reasoning.
+The conversation UI uses `transcriptEvents` when present, and falls back to
+legacy `runEvents + content` for old sessions. Thinking rows include bounded
+status text so a run never appears idle while it is waiting on the model/runtime.
+This is observability for the run loop, not hidden reasoning.
 
 - Represent each agent run as a sequence of user-visible runtime events:
   context checkpoint, optional compression, thinking/status, completed tools,
   interruption or final response.
 - Persist run events with the session message so interruption and restore do
   not erase what happened during the run.
+- Persist transcript events with the session message so new conversation UI can
+  render one time-ordered stream without losing old session compatibility.
 - Keep event details bounded and deterministic; do not expose private model
   reasoning as run-event content.
 - Keep lifecycle event types stable: `run_started`, `run_completed`,
@@ -326,14 +330,14 @@ observability for the run loop, not hidden reasoning.
 
 ### Interleaved Model Conversation Streaming
 
-Status: Deferred behind runtime contract, with run-event substrate implemented.
-Flovera now has persisted app-generated runtime events, but
-real interleaved assistant text still needs a runtime/provider event stream
-because the current Koog `AIAgent.run` path does not yet expose a committed
-assistant delta contract in Flovera. Do not implement this as fake app narration
-or by parsing provider debug logs; the next entry point is a Koog event-stream
-spike or a narrow Flovera-owned OpenAI-compatible tool-loop adapter with
-explicit provider coverage.
+Status: Partially unblocked by transcript persistence. Flovera now has a
+session-level `transcriptEvents` stream for app-generated status/tool events and
+final-answer text. Real assistant text before and between tool calls still needs
+a runtime/provider event stream because the current Koog `AIAgent.run` path does
+not yet expose a committed assistant delta contract in Flovera. Do not implement
+this as fake app narration or by parsing provider debug logs; the next entry
+point is a Koog event-stream spike or a narrow Flovera-owned OpenAI-compatible
+tool-loop adapter with explicit provider coverage.
 
 - Add a separate streaming conversation track where the model can emit
   assistant text before, between, and after tool calls.

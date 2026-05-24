@@ -10,6 +10,7 @@ import com.flovera.app.koog.ToolEventRecorder
 import com.flovera.app.session.AgentSession
 import com.flovera.app.session.AgentRunTimelineEvent
 import com.flovera.app.session.ContextUsageRecord
+import com.flovera.app.session.ConversationTranscriptEvent
 import com.flovera.app.session.RuntimeSessionHistory
 import com.flovera.app.session.SessionMessage
 import com.flovera.app.session.ToolEvent
@@ -79,15 +80,36 @@ class AgentRunController(
       appendContextRecord(withUser, contextRecord)
     }
     val startDraft = if (contextCompressed) {
-      SessionMessage(role = "assistant", content = "Compressing context...", runEvents = activeRunEvents)
+      SessionMessage(
+        role = "assistant",
+        content = "Compressing context...",
+        runEvents = activeRunEvents,
+        transcriptEvents = buildConversationTranscriptEvents(
+          timelineEvents = activeRunEvents,
+          content = "",
+          role = "assistant",
+          includeContent = false,
+        ),
+      )
     } else {
-      SessionMessage(role = "assistant", content = "Working...", runEvents = activeRunEvents)
+      SessionMessage(
+        role = "assistant",
+        content = "Working...",
+        runEvents = activeRunEvents,
+        transcriptEvents = buildConversationTranscriptEvents(
+          timelineEvents = activeRunEvents,
+          content = "",
+          role = "assistant",
+          includeContent = false,
+        ),
+      )
     }
     val runState = AgentRunEventAccumulator(
       statusContent = startDraft.content,
       baseTimelineEvents = activeRunEvents,
       buildToolProgressNarration = ::buildToolProgressNarration,
       buildToolTimelineEvents = ::buildToolTimelineEvents,
+      buildConversationTranscriptEvents = ::buildConversationTranscriptEvents,
       onDraft = onDraft,
     )
     val eventSink = AgentRunEventSink { event ->
@@ -194,19 +216,26 @@ class AgentRunController(
             status = AGENT_RUN_STATUS_COMPLETED,
           )
           onRunEvent(runCompletedEvent)
+          val persistedEvents = runState.persistedTimelineEvents(
+            listOfNotNull(
+              finalTimelineEvent(
+                title = "Final response ready",
+                detail = "The assistant response was saved to the session.",
+                status = AGENT_RUN_STATUS_COMPLETED,
+              ),
+              runCompletedEvent.timelineEvent,
+            ),
+          )
           SessionMessage(
             role = "assistant",
             content = finalContent,
             toolEvents = events,
-            runEvents = runState.persistedTimelineEvents(
-              listOfNotNull(
-                finalTimelineEvent(
-                  title = "Final response ready",
-                  detail = "The assistant response was saved to the session.",
-                  status = AGENT_RUN_STATUS_COMPLETED,
-                ),
-                runCompletedEvent.timelineEvent,
-              ),
+            runEvents = persistedEvents,
+            transcriptEvents = buildConversationTranscriptEvents(
+              timelineEvents = persistedEvents,
+              content = finalContent,
+              role = "assistant",
+              includeContent = true,
             ),
           )
         },
@@ -261,14 +290,21 @@ class AgentRunController(
             append("Error log saved: ")
             append(logPath)
           }
+          val persistedEvents = runState.persistedTimelineEvents(
+            listOfNotNull(
+              runFailedEvent.timelineEvent,
+            ),
+          )
           SessionMessage(
             role = "error",
             content = message,
             toolEvents = events,
-            runEvents = runState.persistedTimelineEvents(
-              listOfNotNull(
-                runFailedEvent.timelineEvent,
-              ),
+            runEvents = persistedEvents,
+            transcriptEvents = buildConversationTranscriptEvents(
+              timelineEvents = persistedEvents,
+              content = message,
+              role = "error",
+              includeContent = true,
             ),
           )
         },
@@ -283,6 +319,12 @@ class AgentRunController(
     baseTimelineEvents: List<AgentRunTimelineEvent>,
     private val buildToolProgressNarration: (List<ToolEvent>) -> String,
     private val buildToolTimelineEvents: (List<ToolEvent>) -> List<AgentRunTimelineEvent>,
+    private val buildConversationTranscriptEvents: (
+      timelineEvents: List<AgentRunTimelineEvent>,
+      content: String,
+      role: String,
+      includeContent: Boolean,
+    ) -> List<ConversationTranscriptEvent>,
     private val onDraft: (SessionMessage) -> Unit,
   ) {
     private var baseTimelineEvents: List<AgentRunTimelineEvent> = baseTimelineEvents
@@ -318,11 +360,19 @@ class AgentRunController(
     }
 
     fun draftMessage(): SessionMessage {
+      val timelineEvents = draftTimelineEvents()
+      val content = draftContent()
       return SessionMessage(
         role = "assistant",
-        content = draftContent(),
+        content = content,
         toolEvents = latestToolEvents,
-        runEvents = draftTimelineEvents(),
+        runEvents = timelineEvents,
+        transcriptEvents = buildConversationTranscriptEvents(
+          timelineEvents,
+          content,
+          "assistant",
+          finalStreamingStarted,
+        ),
       )
     }
 
@@ -553,6 +603,50 @@ class AgentRunController(
       status = status,
       compact = false,
     )
+  }
+
+  private fun buildConversationTranscriptEvents(
+    timelineEvents: List<AgentRunTimelineEvent>,
+    content: String,
+    role: String,
+    includeContent: Boolean,
+  ): List<ConversationTranscriptEvent> {
+    val events = timelineEvents
+      .filter(::isConversationTranscriptStatusEvent)
+      .map { event ->
+        ConversationTranscriptEvent(
+          type = event.type,
+          title = event.title,
+          detail = event.detail,
+          timestampMillis = event.timestampMillis,
+          status = event.status,
+          compact = event.compact,
+        )
+      }
+      .toMutableList()
+    if (includeContent && content.isNotBlank()) {
+      events += ConversationTranscriptEvent(
+        type = if (role == "error") "error_text" else "assistant_text",
+        role = role,
+        content = content,
+        timestampMillis = System.currentTimeMillis(),
+      )
+    }
+    return events
+  }
+
+  private fun isConversationTranscriptStatusEvent(event: AgentRunTimelineEvent): Boolean {
+    return when (event.type) {
+      "guidance",
+      "compression",
+      "thinking",
+      "tool_call",
+      "tool_omitted",
+      AgentRunEventType.RUN_FAILED,
+      AgentRunEventType.RUN_INTERRUPTED -> true
+      "final_response_streaming" -> event.status == AGENT_RUN_STATUS_RUNNING
+      else -> false
+    }
   }
 
   private fun lifecycleRunEvent(type: String, title: String, detail: String, status: String): AgentRunEvent {

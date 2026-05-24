@@ -92,6 +92,7 @@ import com.flovera.app.agent.AgentContextBudget
 import com.flovera.app.config.normalizeBraveSearchApiKey
 import com.flovera.app.koog.ModelProviderCatalog
 import com.flovera.app.session.ContextUsageRecord
+import com.flovera.app.session.ConversationTranscriptEvent
 import com.flovera.app.session.AgentRunTimelineEvent
 import com.flovera.app.session.SESSION_ROLE_COMPRESSION
 import com.flovera.app.session.SessionMessage
@@ -775,7 +776,10 @@ private fun ConversationDialog(
   val latestContextRecord = state.session?.contextRecords?.lastOrNull()
   val visibleMessageCount = messages.size + if (state.assistantDraft == null) 0 else 1
   val assistantDraftScrollKey = state.assistantDraft?.let { draft ->
-    "${draft.content.length}:${draft.runEvents.size}:${draft.toolEvents.size}:${draft.runEvents.lastOrNull()?.timestampMillis ?: 0L}"
+    val lastEventTime = draft.transcriptEvents.lastOrNull()?.timestampMillis
+      ?: draft.runEvents.lastOrNull()?.timestampMillis
+      ?: 0L
+    "${draft.content.length}:${draft.runEvents.size}:${draft.toolEvents.size}:${draft.transcriptEvents.size}:$lastEventTime"
   }.orEmpty()
   val workspaceMessagePaths = remember(state.workspaceTree) { state.workspaceTree.workspaceMessageLinkPaths() }
   var pendingRevertIndex by remember { mutableStateOf<Int?>(null) }
@@ -963,6 +967,16 @@ private fun ConversationDialog(
             ) { index, message ->
               if (message.role == SESSION_ROLE_COMPRESSION) {
                 CompressionDivider(message)
+              } else if (message.transcriptEvents.isNotEmpty()) {
+                ConversationTranscript(
+                  message = message,
+                  workspaceMessagePaths = workspaceMessagePaths,
+                  language = language,
+                  onOpenPath = {
+                    controller.selectWorkspacePreview(it)
+                    onDismiss()
+                  },
+                )
               } else {
                 ConversationRunEvents(message = message, language = language)
                 if (shouldShowConversationMessageBubble(message)) {
@@ -982,19 +996,31 @@ private fun ConversationDialog(
             }
             state.assistantDraft?.let { draft ->
               item(key = "assistant-draft") {
-                ConversationRunEvents(message = draft, language = language)
-                if (shouldShowConversationMessageBubble(draft)) {
-                  MessageBubble(
+                if (draft.transcriptEvents.isNotEmpty()) {
+                  ConversationTranscript(
                     message = draft,
-                    pathLinks = remember(draft.content, workspaceMessagePaths) {
-                      conversationPathLinks(draft.content, workspaceMessagePaths)
-                    },
+                    workspaceMessagePaths = workspaceMessagePaths,
+                    language = language,
                     onOpenPath = {
                       controller.selectWorkspacePreview(it)
                       onDismiss()
                     },
-                    onRevert = null,
                   )
+                } else {
+                  ConversationRunEvents(message = draft, language = language)
+                  if (shouldShowConversationMessageBubble(draft)) {
+                    MessageBubble(
+                      message = draft,
+                      pathLinks = remember(draft.content, workspaceMessagePaths) {
+                        conversationPathLinks(draft.content, workspaceMessagePaths)
+                      },
+                      onOpenPath = {
+                        controller.selectWorkspacePreview(it)
+                        onDismiss()
+                      },
+                      onRevert = null,
+                    )
+                  }
                 }
               }
             }
@@ -1355,6 +1381,44 @@ private fun MessageBubble(
 }
 
 @Composable
+private fun ConversationTranscript(
+  message: SessionMessage,
+  workspaceMessagePaths: List<String>,
+  language: String,
+  onOpenPath: (String) -> Unit,
+) {
+  val events = remember(message.transcriptEvents) { compactConversationTranscriptEvents(message.transcriptEvents) }
+  if (events.isEmpty()) return
+  Column(
+    modifier = Modifier.fillMaxWidth(),
+    verticalArrangement = Arrangement.spacedBy(6.dp),
+  ) {
+    events.forEach { event ->
+      if (event.type == "assistant_text" || event.type == "error_text") {
+        val role = event.role.ifBlank { if (event.type == "error_text") "error" else "assistant" }
+        MessageBubble(
+          message = message.copy(
+            role = role,
+            content = event.content,
+            timestampMillis = event.timestampMillis,
+            toolEvents = emptyList(),
+            runEvents = emptyList(),
+            transcriptEvents = emptyList(),
+          ),
+          pathLinks = remember(event.content, workspaceMessagePaths) {
+            conversationPathLinks(event.content, workspaceMessagePaths)
+          },
+          onOpenPath = onOpenPath,
+          onRevert = null,
+        )
+      } else {
+        ConversationRunEventRow(event = event.toTimelineEvent(), language = language)
+      }
+    }
+  }
+}
+
+@Composable
 private fun ConversationRunEvents(message: SessionMessage, language: String) {
   val events = remember(message.runEvents, message.toolEvents) { compactConversationRunEvents(message) }
   if (events.isEmpty()) return
@@ -1430,6 +1494,49 @@ private fun LazyListState.isNearBottom(thresholdPx: Int = 48): Boolean {
   val lastVisible = layout.visibleItemsInfo.lastOrNull() ?: return true
   if (lastVisible.index < totalItems - 1) return false
   return lastVisible.offset + lastVisible.size <= layout.viewportEndOffset + thresholdPx
+}
+
+private fun compactConversationTranscriptEvents(
+  events: List<ConversationTranscriptEvent>,
+): List<ConversationTranscriptEvent> {
+  if (events.isEmpty()) return emptyList()
+  val visible = mutableListOf<ConversationTranscriptEvent>()
+  var omittedToolCalls = 0
+  val toolEvents = events.filter { it.type == "tool_call" }
+  val toolCutoff = (toolEvents.size - 6).coerceAtLeast(0)
+  var seenToolCalls = 0
+  events.forEach { event ->
+    if (event.type == "tool_call") {
+      seenToolCalls += 1
+      if (seenToolCalls <= toolCutoff) {
+        omittedToolCalls += 1
+        return@forEach
+      }
+    }
+    visible += event
+  }
+  if (omittedToolCalls == 0) return visible
+  val insertionIndex = visible.indexOfFirst { it.type == "tool_call" }
+    .let { if (it < 0) 0 else it }
+  val omitted = ConversationTranscriptEvent(
+    type = "tool_omitted",
+    title = "Earlier tool calls hidden",
+    detail = "$omittedToolCalls earlier completed tool call(s) are stored in the session tool event list.",
+    status = "completed",
+  )
+  visible.add(insertionIndex, omitted)
+  return visible
+}
+
+private fun ConversationTranscriptEvent.toTimelineEvent(): AgentRunTimelineEvent {
+  return AgentRunTimelineEvent(
+    type = type,
+    title = title,
+    detail = detail,
+    timestampMillis = timestampMillis,
+    status = status,
+    compact = compact,
+  )
 }
 
 private fun compactConversationRunEvents(message: SessionMessage): List<AgentRunTimelineEvent> {
