@@ -130,10 +130,27 @@ Acceptance criteria:
 - While the user stays at the bottom, streaming drafts keep the list pinned to
   the newest output by scrolling to a dedicated bottom anchor rather than the
   top of the last message; manual scroll-away disables that auto-follow.
+- A completed, idle session never jumps back to the top when the user reaches
+  the bottom.
+- Streaming output remains scrollable while it grows; if the user is already at
+  the bottom, the list continues to follow the newest output.
+- Path chips shown at the bottom of a conversation message open the referenced
+  workspace file on the main surface instead of only entering text selection.
 - Message list uses lazy rendering.
 - Tool events are collapsed by default when they are not the main answer.
 - Every message has a timestamp.
 - Running state disables only actions that would corrupt the active loop.
+
+Human retest archive, 2026-05-24:
+
+- Confirmed the conversation bottom-follow behavior is materially improved
+  after switching from last-message scrolling to a dedicated bottom anchor.
+- Fixed issues from this retest must stay regression cases: no bottom bounce to
+  top in idle sessions, no lost bottom-follow during final-answer streaming, no
+  hidden running state while the agent is waiting on model or tool progress.
+- Follow-up work should treat conversation UX regressions as loop-product
+  regressions, not cosmetic polish, because they determine whether users can
+  trust a long-running agent task.
 
 ### Workspace Files
 
