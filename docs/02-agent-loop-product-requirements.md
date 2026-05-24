@@ -291,9 +291,47 @@ Flovera provider client streaming API
 - connection abort 后，draft 保留，run 标记 failed/interrupted。
 - 最终持久化时只保存一条 assistant message，不重复保存 draft 碎片。
 
-### L2: Flovera-owned OpenAI-compatible tool loop
+### L2A: Koog interleaving capability spike
 
-目标：实现一个最小但产品级的自有 loop，先覆盖 OpenAI-compatible 请求/响应族。
+目标：先确认 Koog 能否在不自研 loop 的前提下暴露 Flovera 产品所需的事件粒度。
+如果 Koog 能提供模型在 tool 前后输出自然语言的真实 streaming frame、tool call
+delta、tool lifecycle 和 failure/cancel 事件，Flovera 应继续复用 Koog 主路径。
+
+必须验证：
+
+- 同一次 LLM streaming call 内，`TextDelta` 出现在 `ToolCallDelta` 之前时，
+  Flovera 能把它作为 assistant narration 暴露给 conversation。
+- tool 执行完成后，下一次 LLM streaming call 的 `TextDelta` 能继续进入同一个 run
+  transcript，而不是被伪装成独立 final answer。
+- tool call delta、tool call complete、tool starting、tool completed/failure 事件
+  可以映射到 `AgentRunEvent`，并保持同一个 run id。
+- provider 不支持 streaming 或 Koog 事件不完整时，系统必须明确降级，而不是伪造流式。
+
+验收：
+
+- fake Koog streaming client 能稳定模拟 text-before-tool、tool call、text-after-tool。
+- Conversation transcript 能按真实时序显示 assistant text -> tool -> assistant text。
+- 如果 Koog 事件粒度足够，下一阶段继续扩展 Koog event mapping，不进入自有 loop。
+
+当前研究结论：
+
+- Koog 官方 Streaming API 暴露 `StreamFrame.TextDelta`、`ToolCallDelta`、
+  `ToolCallComplete` 和 `End`，并说明可以直接处理 frame、实时检测 tool call。
+- Koog EventHandler 暴露 `onLLMStreamingFrameReceived` 和 tool lifecycle
+  handler，理论上可以把模型文本、tool call frame 和 tool 运行状态都映射进
+  Flovera `AgentRunEvent`。
+- Flovera 当前 `KoogAgentRuntime.runStreaming` 已经使用 Koog streaming strategy，
+  并在 fake client 覆盖 tool call 后继续 streaming final text。
+- 已新增 fake interleaving 编译用例，模拟 `TextDelta -> ToolCallDelta ->
+  ToolCallComplete -> TextDelta`。这说明当前主路线应优先推进 Koog event mapping，
+  而不是直接进入 Flovera-owned loop。
+- 仍需真人/仪器化验证真实 provider 是否会按预期发出 tool 前文本；不同 provider
+  可能限制 tool call 同轮文本输出，不能只凭 fake client 推断所有模型都支持。
+
+### L2B: Flovera-owned OpenAI-compatible tool loop fallback
+
+目标：仅当 L2A 证明 Koog 不能暴露足够事件粒度时，才实现一个最小但产品级的自有 loop，
+先覆盖 OpenAI-compatible 请求/响应族。
 
 最小 loop 结构：
 
@@ -370,7 +408,7 @@ messages + tools
 
 ### L5: Provider 扩展与 Koog 去留决策
 
-目标：在自有 loop 稳定后，再决定 Koog 是保留为 fallback，还是仅作为部分能力来源。
+目标：在 L2A/L2B 的证据明确后，再决定 Koog 是主路径、fallback，还是仅作为部分能力来源。
 
 优先顺序：
 
@@ -383,7 +421,8 @@ messages + tools
 决策标准：
 
 - 如果 Koog 能暴露足够事件和 streaming hook，就继续复用 Koog。
-- 如果 Koog 只能返回 final string，Flovera 自有 loop 应成为主路径。
+- 如果 Koog 只能返回 final string，或无法暴露 tool 前后自然语言 interleaving，
+  Flovera 自有 loop 应成为主路径。
 - 不为低使用面的 provider 牺牲主路径可观察性。
 
 ## 自研 loop 的难点
@@ -419,16 +458,17 @@ loop 表面上不难，难的是产品级边界：
 2. 错误分类与日志路径点击
 3. DeepSeek/OpenAI-compatible final text delta 接入 AgentRunEvent
 4. fake streaming provider 测试
-5. 最小 OpenAI-compatible tool loop spike
-6. context 估计和压缩边界重做
-7. 中断/恢复/重试产品化
+5. Koog interleaving capability spike
+6. 最小 OpenAI-compatible tool loop fallback，仅在 Koog 证据不足时启动
+7. context 估计和压缩边界重做
+8. 中断/恢复/重试产品化
 ```
 
 这条路径的原因：
 
 - 先提升可观察性，能马上改善用户信任。
 - 再接真实 streaming，避免 UI 做假效果。
-- 最后替换 loop，避免一上来重写 Koog 带来大面积回归。
+- 最后才考虑替换 loop，避免一上来重写 Koog 带来大面积回归。
 
 ## 验收总门槛
 

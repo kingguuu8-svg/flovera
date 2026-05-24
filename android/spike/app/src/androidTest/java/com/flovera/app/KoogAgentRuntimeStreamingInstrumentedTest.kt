@@ -121,6 +121,60 @@ class KoogAgentRuntimeStreamingInstrumentedTest {
   }
 
   @Test
+  fun runStreamingExposesTextBeforeAndAfterToolCallFrames() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspaceId = "streaming-interleaved-${System.currentTimeMillis()}"
+    val workspace = WorkspaceManager(context, workspaceId).also { it.ensureSeedFiles() }
+    val session = AgentSessionStore(context).create("Streaming interleaved tool loop")
+    val fakeClient = FakeStreamingClient(
+      streams = listOf(
+        listOf(
+          StreamFrame.TextDelta("I will create it. "),
+          StreamFrame.ToolCallDelta(
+            id = "call_write_file",
+            name = "write_file",
+            content = """{"path":"interleaved-tool.txt","content":"OK"}""",
+          ),
+          StreamFrame.ToolCallComplete(
+            id = "call_write_file",
+            name = "write_file",
+            content = """{"path":"interleaved-tool.txt","content":"OK"}""",
+          ),
+          StreamFrame.End("tool_calls"),
+        ),
+        listOf(
+          StreamFrame.TextDelta("Created interleaved-tool.txt."),
+          StreamFrame.End("stop"),
+        ),
+      ),
+      fallbackText = "fallback should not be used",
+    )
+    val runtime = KoogAgentRuntime(clientFactory = { _, _, _ -> fakeClient })
+    val recorder = ToolEventRecorder()
+    val events = mutableListOf<AgentRunEvent>()
+
+    val output = runtime.runStreaming(
+      input = "Create interleaved-tool.txt with OK.",
+      agentRunId = "${session.id}-streaming-interleaved",
+      settings = AppSettings(apiKey = "fake-key", activeWorkspaceId = workspaceId, activeSessionId = session.id),
+      session = session,
+      workspace = workspace,
+      recorder = recorder,
+      eventSink = AgentRunEventSink { event -> events += event },
+    )
+
+    assertEquals("I will create it. \nCreated interleaved-tool.txt.", output)
+    assertEquals("OK", File(workspace.root, "interleaved-tool.txt").readText())
+    assertTrue(recorder.snapshot().any { it.name == "write_file" })
+    assertEquals(
+      listOf("I will create it. ", "Created interleaved-tool.txt."),
+      events.filter { it.type == AgentRunEventType.FINAL_TEXT_DELTA }.map { it.finalTextDelta },
+    )
+    assertEquals(2, fakeClient.streamingCallCount)
+    assertEquals(0, fakeClient.nonStreamingChoiceCallCount)
+  }
+
+  @Test
   fun runStreamingFallsBackToNonStreamingWhenClientDoesNotSupportStreaming() = runBlocking {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val workspaceId = "streaming-fallback-${System.currentTimeMillis()}"

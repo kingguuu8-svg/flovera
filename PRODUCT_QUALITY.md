@@ -354,8 +354,10 @@ final-answer text. Real assistant text before and between tool calls still needs
 a runtime/provider event stream because the current Koog `AIAgent.run` path does
 not yet expose a committed assistant delta contract in Flovera. Do not implement
 this as fake app narration or by parsing provider debug logs; the next entry
-point is a Koog event-stream spike or a narrow Flovera-owned OpenAI-compatible
-tool-loop adapter with explicit provider coverage.
+point is a Koog event-stream/interleaving spike. A narrow Flovera-owned
+OpenAI-compatible tool-loop adapter is only a fallback if Koog cannot expose
+tool-before/tool-after assistant text, tool-call frames, and tool lifecycle
+events with enough fidelity.
 
 - Add a separate streaming conversation track where the model can emit
   assistant text before, between, and after tool calls.
@@ -365,9 +367,16 @@ tool-loop adapter with explicit provider coverage.
 - Investigate whether Koog exposes a stable event, trace, or streaming API for
   assistant deltas around tool calls before replacing the current `AIAgent.run`
   flow.
-- If Koog cannot expose the needed events, consider a controlled
-  OpenAI-compatible tool loop owned by Flovera for providers that support
-  interleaved assistant messages.
+- Keep Koog as the main route if fake and real-provider evidence shows
+  assistant text before a tool call, tool-call frames, and assistant text after
+  tool results all flow through stable Koog events.
+- If Koog cannot expose the needed events, use a controlled OpenAI-compatible
+  tool loop owned by Flovera only for providers that need interleaved assistant
+  messages.
+- Current evidence favors a Koog-first path: Koog exposes typed streaming frames
+  and event handlers, and Flovera's Koog streaming strategy can compile a fake
+  interleaving case with text before a tool call and text after the tool result.
+  Real-provider behavior still needs validation before marking this complete.
 - Persist only user-meaningful assistant text in session history; keep raw
   trace details expandable and bounded so long tool runs do not flood the
   conversation.
