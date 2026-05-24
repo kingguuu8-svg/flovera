@@ -17,8 +17,8 @@ import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -64,13 +64,13 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
@@ -774,14 +774,34 @@ private fun ConversationDialog(
   val messages = state.session?.messages.orEmpty()
   val latestContextRecord = state.session?.contextRecords?.lastOrNull()
   val visibleMessageCount = messages.size + if (state.assistantDraft == null) 0 else 1
+  val assistantDraftScrollKey = state.assistantDraft?.let { draft ->
+    "${draft.content.length}:${draft.runEvents.size}:${draft.toolEvents.size}:${draft.runEvents.lastOrNull()?.timestampMillis ?: 0L}"
+  }.orEmpty()
   val workspaceMessagePaths = remember(state.workspaceTree) { state.workspaceTree.workspaceMessageLinkPaths() }
   var pendingRevertIndex by remember { mutableStateOf<Int?>(null) }
   var sessionPickerOpen by remember { mutableStateOf(false) }
   var moreMenuOpen by remember { mutableStateOf(false) }
+  var stickToConversationBottom by remember(state.session?.id) { mutableStateOf(true) }
   val isDraftSession = state.session != null && state.session.messages.isEmpty()
+
+  LaunchedEffect(listState, visibleMessageCount) {
+    snapshotFlow { listState.isScrollInProgress to listState.isNearBottom() }
+      .collect { (isScrolling, isNearBottom) ->
+        if (isScrolling) {
+          stickToConversationBottom = isNearBottom
+        }
+      }
+  }
 
   LaunchedEffect(state.session?.id, visibleMessageCount) {
     if (visibleMessageCount > 0) {
+      stickToConversationBottom = true
+      listState.scrollToItem(visibleMessageCount - 1)
+    }
+  }
+
+  LaunchedEffect(visibleMessageCount, assistantDraftScrollKey, stickToConversationBottom) {
+    if (visibleMessageCount > 0 && stickToConversationBottom) {
       listState.scrollToItem(visibleMessageCount - 1)
     }
   }
@@ -1257,15 +1277,7 @@ private fun MessageBubble(
     else -> FloveraAssistantBubbleBorder
   }
   var selectionEnabled by remember(message.timestampMillis, message.role, message.content) { mutableStateOf(false) }
-  val surfaceModifier = if (selectionEnabled) {
-    Modifier.fillMaxWidth(0.84f)
-  } else {
-    Modifier
-      .fillMaxWidth(0.84f)
-      .pointerInput(message.timestampMillis, message.role, message.content) {
-        detectTapGestures(onLongPress = { selectionEnabled = true })
-      }
-  }
+  val surfaceModifier = Modifier.fillMaxWidth(0.84f)
 
   Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = horizontal) {
     Surface(
@@ -1411,6 +1423,15 @@ private fun shouldShowConversationMessageBubble(message: SessionMessage): Boolea
     !content.startsWith("Working...\n\nProgress:")
 }
 
+private fun LazyListState.isNearBottom(thresholdPx: Int = 48): Boolean {
+  val layout = layoutInfo
+  val totalItems = layout.totalItemsCount
+  if (totalItems == 0) return true
+  val lastVisible = layout.visibleItemsInfo.lastOrNull() ?: return true
+  if (lastVisible.index < totalItems - 1) return false
+  return lastVisible.offset + lastVisible.size <= layout.viewportEndOffset + thresholdPx
+}
+
 private fun compactConversationRunEvents(message: SessionMessage): List<AgentRunTimelineEvent> {
   val filtered = message.runEvents.filter { event ->
     when (event.type) {
@@ -1456,7 +1477,10 @@ private fun compactRunEventTitle(event: AgentRunTimelineEvent, language: String)
 
 private fun compactRunEventDetail(event: AgentRunTimelineEvent): String? {
   if (event.type == "tool_call") return event.detail.lineSequence().firstOrNull()?.takeIf { it.isNotBlank() }
-  if (event.type == "thinking") return null
+  if (event.type == "thinking") {
+    return event.detail.takeIf { it.isNotBlank() }
+      ?: if (event.status == "running") "Waiting for the next step." else null
+  }
   return event.detail.takeIf { it.isNotBlank() }
 }
 

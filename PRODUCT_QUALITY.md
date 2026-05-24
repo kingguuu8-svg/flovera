@@ -127,6 +127,8 @@ Counter-paths:
 Acceptance criteria:
 
 - Default open position is the latest message.
+- While the user stays at the bottom, streaming drafts keep the list pinned to
+  the newest output; manual scroll-away disables that auto-follow.
 - Message list uses lazy rendering.
 - Tool events are collapsed by default when they are not the main answer.
 - Every message has a timestamp.
@@ -299,9 +301,11 @@ and final-answer streaming. Failure events now include a bounded error category
 session run events, checkpoint, workspace error log, and user-visible error
 message, and the generated `.flovera/logs/...` and `.flovera/runs/...`
 paths are conversation links that open the underlying log/checkpoint preview.
-The conversation UI renders those events as lightweight status rows before the
-assistant/error message instead of embedding a bulky timeline inside the answer
-bubble. This is observability for the run loop, not hidden reasoning.
+The conversation UI renders those events as lightweight chronological status
+rows before the assistant/error message instead of embedding a bulky timeline
+inside the answer bubble. Thinking rows include bounded status text so a run
+never appears idle while it is waiting on the model/runtime. This is
+observability for the run loop, not hidden reasoning.
 
 - Represent each agent run as a sequence of user-visible runtime events:
   context checkpoint, optional compression, thinking/status, completed tools,
@@ -787,12 +791,14 @@ very large workspaces and denser artifact metadata.
 ### Conversation File Path Links
 
 Status: Baseline implemented. Conversation messages conservatively detect
-existing workspace-relative file paths and expose clickable entries that open
-HTML in the main WebView or other previewable formats in the native preview
-surface. Agent failure messages can also open generated `.flovera/logs/...`
-and `.flovera/runs/...` diagnostics, so run failures are inspectable without
-manual file browsing. Remaining work is inline text-link polish and stale-path
-status copy.
+existing workspace-relative file paths and expose clickable bottom entries that
+close the conversation and open HTML in the main WebView or other previewable
+formats in the native preview surface. Agent failure messages can also open
+generated `.flovera/logs/...` and `.flovera/runs/...` diagnostics, so run
+failures are inspectable without manual file browsing. The parent bubble must
+not own a tap/long-press gesture that steals those bottom path clicks. Remaining
+work is inline text-link polish, text-selection polish, and stale-path status
+copy.
 
 - Detect workspace-relative file paths in user, assistant, and error messages.
 - Make detected paths clickable without breaking text selection or Markdown
