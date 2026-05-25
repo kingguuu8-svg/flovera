@@ -329,8 +329,8 @@ class AgentRunController(
   ) {
     private var baseTimelineEvents: List<AgentRunTimelineEvent> = baseTimelineEvents
     private var latestToolEvents: List<ToolEvent> = emptyList()
-    private val finalText = StringBuilder()
-    private var finalStreamingStarted: Boolean = false
+    private val modelText = StringBuilder()
+    private var modelTextStreamingStarted: Boolean = false
 
     fun replaceBaseTimeline(events: List<AgentRunTimelineEvent>, statusContent: String) {
       this.baseTimelineEvents = events
@@ -343,10 +343,12 @@ class AgentRunController(
           latestToolEvents = event.toolEvents
         }
 
+        AgentRunEventType.MODEL_TEXT_DELTA,
         AgentRunEventType.FINAL_TEXT_DELTA -> {
-          if (event.finalTextDelta.isNotEmpty()) {
-            finalStreamingStarted = true
-            finalText.append(event.finalTextDelta)
+          val delta = event.modelTextDelta.ifEmpty { event.finalTextDelta }
+          if (delta.isNotEmpty()) {
+            modelTextStreamingStarted = true
+            modelText.append(delta)
           }
         }
 
@@ -371,14 +373,14 @@ class AgentRunController(
           timelineEvents,
           content,
           "assistant",
-          finalStreamingStarted,
+          modelTextStreamingStarted,
         ),
       )
     }
 
     fun finalTextOr(output: String): String {
-      if (!finalStreamingStarted) return output
-      val streamed = finalText.toString()
+      if (!modelTextStreamingStarted) return output
+      val streamed = modelText.toString()
       if (output.isNotBlank() && output.length >= streamed.length) return output
       return streamed.ifBlank { output }
     }
@@ -392,7 +394,7 @@ class AgentRunController(
 
     private fun draftContent(): String {
       return when {
-        finalStreamingStarted -> finalText.toString().ifBlank { "Writing final response..." }
+        modelTextStreamingStarted -> modelText.toString().ifBlank { "Writing assistant response..." }
         latestToolEvents.isNotEmpty() -> buildToolProgressNarration(latestToolEvents)
         else -> statusContent
       }
@@ -401,7 +403,7 @@ class AgentRunController(
     private fun draftTimelineEvents(): List<AgentRunTimelineEvent> {
       return baseTimelineEvents +
         buildToolTimelineEvents(latestToolEvents) +
-        if (finalStreamingStarted) {
+        if (modelTextStreamingStarted) {
           listOfNotNull(finalStreamingSummaryEvent(status = AGENT_RUN_STATUS_RUNNING))
         } else if (latestToolEvents.isNotEmpty()) {
           listOf(
@@ -418,12 +420,22 @@ class AgentRunController(
     }
 
     private fun finalStreamingSummaryEvent(status: String): AgentRunTimelineEvent? {
-      if (!finalStreamingStarted) return null
-      val chars = finalText.length
+      if (!modelTextStreamingStarted) return null
+      val chars = modelText.length
+      val hasTools = latestToolEvents.isNotEmpty()
       return AgentRunTimelineEvent(
-        type = "final_response_streaming",
-        title = if (status == AGENT_RUN_STATUS_COMPLETED) "Final response streamed" else "Final response streaming",
-        detail = "Received $chars streamed final-answer character(s) from the runtime.",
+        type = if (hasTools) "assistant_text_streaming" else "final_response_streaming",
+        title = when {
+          hasTools && status == AGENT_RUN_STATUS_COMPLETED -> "Assistant text streamed"
+          hasTools -> "Assistant text streaming"
+          status == AGENT_RUN_STATUS_COMPLETED -> "Final response streamed"
+          else -> "Final response streaming"
+        },
+        detail = if (hasTools) {
+          "Received $chars streamed assistant character(s) around tool activity from the runtime."
+        } else {
+          "Received $chars streamed final-answer character(s) from the runtime."
+        },
         status = status,
         compact = false,
       )
@@ -644,6 +656,7 @@ class AgentRunController(
       "tool_omitted",
       AgentRunEventType.RUN_FAILED,
       AgentRunEventType.RUN_INTERRUPTED -> true
+      "assistant_text_streaming" -> event.status == AGENT_RUN_STATUS_RUNNING
       "final_response_streaming" -> event.status == AGENT_RUN_STATUS_RUNNING
       else -> false
     }

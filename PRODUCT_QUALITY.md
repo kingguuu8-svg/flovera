@@ -376,7 +376,12 @@ events with enough fidelity.
 - Current evidence favors a Koog-first path: Koog exposes typed streaming frames
   and event handlers, and Flovera's Koog streaming strategy can compile a fake
   interleaving case with text before a tool call and text after the tool result.
-  Real-provider behavior still needs validation before marking this complete.
+  Real-device fake-provider instrumentation shows those text deltas reach
+  `AgentRunEvent`, while Koog's final output string may only contain the
+  post-tool assistant message. Flovera must therefore preserve interleaved model
+  text through `MODEL_TEXT_DELTA` transcript events, not by relying on final
+  output alone. Real-provider behavior still needs validation before marking
+  this complete.
 - Persist only user-meaningful assistant text in session history; keep raw
   trace details expandable and bounded so long tool runs do not flood the
   conversation.
@@ -386,15 +391,15 @@ events with enough fidelity.
 Status: L1 implemented. `KoogAgentRuntime.runStreaming` now uses a
 Flovera-owned Koog streaming strategy that keeps the single-run workspace tool
 loop but routes provider `StreamFrame.TextDelta` events through
-`AgentRunEvent(FINAL_TEXT_DELTA)`. Providers without streaming support fall
+`AgentRunEvent(MODEL_TEXT_DELTA)`. Providers without streaming support fall
 back to the original non-streaming `run()` path before any final delta is
 emitted, and the final session still persists one complete assistant message.
 
 - Stream the final assistant answer into the conversation instead of waiting for
   `AIAgent.run` to return a complete string.
-- This is distinct from tool progress narration and interleaved model
-  conversation: it only concerns the final natural-language answer after the
-  agent has enough information to respond.
+- This is distinct from tool progress narration: model text deltas are optional
+  real provider output and may appear before, between, or after tool calls
+  depending on provider/model behavior.
 - Update the running assistant draft incrementally so long responses start
   reading immediately and can show provider latency or stalls clearly.
 - Keep the persisted session message as one final assistant message after the

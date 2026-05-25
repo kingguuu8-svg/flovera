@@ -36,7 +36,7 @@ loop 不是单纯的 `while(model asks tool) run tool`，而是用户能信任�
 - `AgentRunEvent` 事件总线入口。
 - `AgentRunTimelineEvent` 会话持久化。
 - 工具调用进度可以进入会话 timeline。
-- final assistant draft 可以通过 `FINAL_TEXT_DELTA` 事件逐步更新。
+- assistant draft 可以通过真实模型文本 delta 事件逐步更新。
 - Koog runtime 接口上已经有 `runStreaming(...)` 扩展点。
 - workspace artifact 已经有 local HTTP / Python HTTP runtime 基座。
 
@@ -267,14 +267,14 @@ Agent run
 ```text
 Flovera provider client streaming API
   -> StreamFrame / delta
-  -> AgentRunEvent(FINAL_TEXT_DELTA)
+  -> AgentRunEvent(MODEL_TEXT_DELTA)
   -> AgentRunController draft
   -> Compose conversation surface
 ```
 
 要求：
 
-- 只在 provider/runtime 真实给出 delta 时发 `FINAL_TEXT_DELTA`。
+- 只在 provider/runtime 真实给出 delta 时发 `MODEL_TEXT_DELTA`。
 - 对不支持 streaming 的 provider，仍然走最终字符串。
 - DeepSeek/OpenAI-compatible 优先，因为普通 API provider 覆盖面最大。
 - 不在 UI 层猜测 chunk。
@@ -282,7 +282,7 @@ Flovera provider client streaming API
 当前实现：
 
 - `KoogAgentRuntime.runStreaming` 使用 Flovera 专用 Koog streaming strategy，保留单轮 workspace tool loop。
-- Koog `EventHandler.onLLMStreamingFrameReceived` 将真实 `StreamFrame.TextDelta` 转为 `AgentRunEvent(FINAL_TEXT_DELTA)`。
+- Koog `EventHandler.onLLMStreamingFrameReceived` 将真实 `StreamFrame.TextDelta` 转为 `AgentRunEvent(MODEL_TEXT_DELTA)`。
 - fake provider 覆盖纯 final text、tool_call 后 final text、streaming unsupported fallback 三条路径。
 
 验收：
@@ -325,6 +325,10 @@ delta、tool lifecycle 和 failure/cancel 事件，Flovera 应继续复用 Koog 
 - 已新增 fake interleaving 编译用例，模拟 `TextDelta -> ToolCallDelta ->
   ToolCallComplete -> TextDelta`。这说明当前主路线应优先推进 Koog event mapping，
   而不是直接进入 Flovera-owned loop。
+- 真机 instrumentation 证明 Koog streaming event handler 会收到 tool 前后的
+  `TextDelta`；但 Koog strategy 最终返回的 output 字符串只包含 tool 后 assistant
+  message。因此 Flovera 必须把真实模型文本 delta 作为 `MODEL_TEXT_DELTA` 写入
+  transcript，不能只依赖最终 output 字符串保存 interleaved 文本。
 - 仍需真人/仪器化验证真实 provider 是否会按预期发出 tool 前文本；不同 provider
   可能限制 tool call 同轮文本输出，不能只凭 fake client 推断所有模型都支持。
 

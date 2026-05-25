@@ -508,9 +508,9 @@ class AgentRunControllerInstrumentedTest {
       recorder: ToolEventRecorder,
       eventSink: AgentRunEventSink,
     ): String {
-      eventSink.emit(AgentRunEvent(type = AgentRunEventType.FINAL_TEXT_DELTA, finalTextDelta = "assistant "))
-      eventSink.emit(AgentRunEvent(type = AgentRunEventType.FINAL_TEXT_DELTA, finalTextDelta = "streamed "))
-      eventSink.emit(AgentRunEvent(type = AgentRunEventType.FINAL_TEXT_DELTA, finalTextDelta = "output"))
+      eventSink.emit(AgentRunEvent(type = AgentRunEventType.MODEL_TEXT_DELTA, modelTextDelta = "assistant "))
+      eventSink.emit(AgentRunEvent(type = AgentRunEventType.MODEL_TEXT_DELTA, modelTextDelta = "streamed "))
+      eventSink.emit(AgentRunEvent(type = AgentRunEventType.MODEL_TEXT_DELTA, modelTextDelta = "output"))
       return "assistant streamed output"
     }
   }

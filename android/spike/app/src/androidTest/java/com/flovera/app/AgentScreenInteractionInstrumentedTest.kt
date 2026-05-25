@@ -826,10 +826,10 @@ class AgentScreenInteractionInstrumentedTest {
       recorder: ToolEventRecorder,
       eventSink: AgentRunEventSink,
     ): String {
-      eventSink.emit(AgentRunEvent(type = AgentRunEventType.FINAL_TEXT_DELTA, finalTextDelta = "partial "))
-      eventSink.emit(AgentRunEvent(type = AgentRunEventType.FINAL_TEXT_DELTA, finalTextDelta = "final"))
+      eventSink.emit(AgentRunEvent(type = AgentRunEventType.MODEL_TEXT_DELTA, modelTextDelta = "partial "))
+      eventSink.emit(AgentRunEvent(type = AgentRunEventType.MODEL_TEXT_DELTA, modelTextDelta = "final"))
       completion.await()
-      eventSink.emit(AgentRunEvent(type = AgentRunEventType.FINAL_TEXT_DELTA, finalTextDelta = " answer"))
+      eventSink.emit(AgentRunEvent(type = AgentRunEventType.MODEL_TEXT_DELTA, modelTextDelta = " answer"))
       return "partial final answer"
     }
   }

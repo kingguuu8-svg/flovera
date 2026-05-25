@@ -1404,6 +1404,8 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"agentRunTimeline\": true"))
     assertTrue(capabilities.contains("\"agentRunEventBus\": true"))
     assertTrue(capabilities.contains("\"finalAssistantResponseStreaming\": true"))
+    assertTrue(capabilities.contains("\"modelTextDeltaStreaming\": true"))
+    assertTrue(capabilities.contains("\"modelTextDeltaPolicy\": \"optional_model_output_not_required\""))
     assertTrue(capabilities.contains("\"koog_stream_frame_event_handler\""))
     assertTrue(capabilities.contains("\"mainSurfaceHtmlQuickPicker\": true"))
     assertTrue(capabilities.contains("\"conversationPathLinks\": true"))

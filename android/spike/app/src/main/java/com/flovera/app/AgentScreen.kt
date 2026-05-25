@@ -1601,6 +1601,7 @@ private fun compactConversationRunEvents(message: SessionMessage): List<AgentRun
       "tool_omitted",
       "run_failed",
       "run_interrupted" -> true
+      "assistant_text_streaming" -> event.status == "running"
       "final_response_streaming" -> event.status == "running"
       else -> false
     }
@@ -1625,6 +1626,7 @@ private fun compactRunEventTitle(event: AgentRunTimelineEvent, language: String)
       t(language, "Tool: $toolName", "\u5de5\u5177\uff1a$toolName")
     }
     "tool_omitted" -> t(language, event.title, "\u5df2\u9690\u85cf\u66f4\u65e9\u5de5\u5177\u8c03\u7528")
+    "assistant_text_streaming" -> t(language, "Writing update", "\u6b63\u5728\u8f93\u51fa\u8fdb\u5c55")
     "final_response_streaming" -> t(language, "Writing answer", "\u6b63\u5728\u8f93\u51fa\u56de\u7b54")
     "run_failed" -> t(language, "Run failed", "\u8fd0\u884c\u5931\u8d25")
     "run_interrupted" -> t(language, "Run interrupted", "\u8fd0\u884c\u5df2\u4e2d\u65ad")

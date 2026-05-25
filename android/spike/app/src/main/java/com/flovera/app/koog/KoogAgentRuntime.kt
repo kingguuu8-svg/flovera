@@ -106,7 +106,7 @@ class KoogAgentRuntime(
     } catch (error: CancellationException) {
       throw error
     } catch (error: Throwable) {
-      if (frameForwarder.finalTextDeltaCount == 0 && isStreamingUnsupported(error)) {
+      if (frameForwarder.modelTextDeltaCount == 0 && isStreamingUnsupported(error)) {
         run(
           input = input,
           agentRunId = agentRunId,
@@ -198,16 +198,16 @@ class KoogAgentRuntime(
 private class AgentRunStreamFrameForwarder(
   private val delegate: AgentRunEventSink,
 ) {
-  var finalTextDeltaCount: Int = 0
+  var modelTextDeltaCount: Int = 0
     private set
 
   fun emitStreamFrame(frame: StreamFrame) {
     if (frame is StreamFrame.TextDelta && frame.text.isNotEmpty()) {
-      finalTextDeltaCount += 1
+      modelTextDeltaCount += 1
       delegate.emit(
         AgentRunEvent(
-          type = AgentRunEventType.FINAL_TEXT_DELTA,
-          finalTextDelta = frame.text,
+          type = AgentRunEventType.MODEL_TEXT_DELTA,
+          modelTextDelta = frame.text,
         ),
       )
     }

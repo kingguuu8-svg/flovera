@@ -60,7 +60,7 @@ class KoogAgentRuntimeStreamingInstrumentedTest {
     assertEquals("hello world", output)
     assertEquals(
       listOf("hello ", "world"),
-      events.filter { it.type == AgentRunEventType.FINAL_TEXT_DELTA }.map { it.finalTextDelta },
+      events.filter { it.type == AgentRunEventType.MODEL_TEXT_DELTA }.map { it.modelTextDelta },
     )
     assertEquals(1, fakeClient.streamingCallCount)
     assertEquals(0, fakeClient.nonStreamingChoiceCallCount)
@@ -114,7 +114,7 @@ class KoogAgentRuntimeStreamingInstrumentedTest {
     assertTrue(recorder.snapshot().any { it.name == "write_file" })
     assertEquals(
       listOf("created ", "file"),
-      events.filter { it.type == AgentRunEventType.FINAL_TEXT_DELTA }.map { it.finalTextDelta },
+      events.filter { it.type == AgentRunEventType.MODEL_TEXT_DELTA }.map { it.modelTextDelta },
     )
     assertEquals(2, fakeClient.streamingCallCount)
     assertEquals(0, fakeClient.nonStreamingChoiceCallCount)
@@ -163,12 +163,12 @@ class KoogAgentRuntimeStreamingInstrumentedTest {
       eventSink = AgentRunEventSink { event -> events += event },
     )
 
-    assertEquals("I will create it. \nCreated interleaved-tool.txt.", output)
+    assertEquals("Created interleaved-tool.txt.", output)
     assertEquals("OK", File(workspace.root, "interleaved-tool.txt").readText())
     assertTrue(recorder.snapshot().any { it.name == "write_file" })
     assertEquals(
       listOf("I will create it. ", "Created interleaved-tool.txt."),
-      events.filter { it.type == AgentRunEventType.FINAL_TEXT_DELTA }.map { it.finalTextDelta },
+      events.filter { it.type == AgentRunEventType.MODEL_TEXT_DELTA }.map { it.modelTextDelta },
     )
     assertEquals(2, fakeClient.streamingCallCount)
     assertEquals(0, fakeClient.nonStreamingChoiceCallCount)
@@ -199,7 +199,7 @@ class KoogAgentRuntimeStreamingInstrumentedTest {
     )
 
     assertEquals("non-streaming fallback", output)
-    assertTrue(events.none { it.type == AgentRunEventType.FINAL_TEXT_DELTA })
+    assertTrue(events.none { it.type == AgentRunEventType.MODEL_TEXT_DELTA })
     assertEquals(1, fakeClient.streamingCallCount)
     assertEquals(1, fakeClient.nonStreamingCallCount)
   }
