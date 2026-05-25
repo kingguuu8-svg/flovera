@@ -350,7 +350,8 @@ This is observability for the run loop, not hidden reasoning.
   connect interleaved model text when the runtime exposes a stable contract.
   The chrono buffer in `AgentRunEventAccumulator` now correctly interleaves
   MODEL_TEXT_DELTA segments and tool-completion events in runtime arrival order,
-  with adjacent text deltas coalesced across tool boundaries.
+  with adjacent text deltas coalesced only within the same contiguous text
+  segment, never across tool boundaries.
 
 
 ### Interleaved Model Conversation Streaming

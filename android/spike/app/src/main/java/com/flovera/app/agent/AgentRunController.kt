@@ -231,7 +231,7 @@ class AgentRunController(
             content = finalContent,
             toolEvents = events,
             runEvents = persistedEvents,
-            transcriptEvents = runState.finalTranscriptEvents(finalContent, "assistant"),
+            transcriptEvents = runState.finalTranscriptEvents(persistedEvents, finalContent, "assistant"),
           )
         },
         onFailure = { error ->
@@ -295,7 +295,7 @@ class AgentRunController(
             content = message,
             toolEvents = events,
             runEvents = persistedEvents,
-            transcriptEvents = runState.finalTranscriptEvents(message, "error"),
+            transcriptEvents = runState.finalTranscriptEvents(persistedEvents, message, "error"),
           )
         },
       )
@@ -371,7 +371,7 @@ class AgentRunController(
         content = content,
         toolEvents = latestToolEvents,
         runEvents = timelineEvents,
-        transcriptEvents = buildTranscriptEvents("assistant"),
+        transcriptEvents = buildTranscriptEvents(role = "assistant", timelineEvents = timelineEvents),
       )
     }
 
@@ -440,15 +440,18 @@ class AgentRunController(
 
     fun buildTranscriptEvents(
       role: String,
+      timelineEvents: List<AgentRunTimelineEvent>,
       finalContent: String = "",
       includeFallbackContent: Boolean = false,
     ): List<ConversationTranscriptEvent> {
-      val events = buildConversationTranscriptEvents(
-        timelineEvents = baseTimelineEvents,
-        content = "",
+      val baseEvents = buildTranscriptStatusEvents(baseTimelineEvents, role)
+      val dynamicEvents = buildTranscriptStatusEvents(
+        timelineEvents = timelineEvents.drop(baseTimelineEvents.size),
         role = role,
-        includeContent = false,
-      ).toMutableList()
+      )
+      val runningStreamingEvents = dynamicEvents.filter { it.isRunningStreamingStatus() }
+      val trailingStatusEvents = dynamicEvents.filterNot { it.isRunningStreamingStatus() }
+      val events = baseEvents.toMutableList()
 
       var pendingText = StringBuilder()
       for (entry in chronoEntries) {
@@ -476,6 +479,7 @@ class AgentRunController(
         }
       }
 
+      events += runningStreamingEvents
       if (pendingText.isNotEmpty()) {
         events += ConversationTranscriptEvent(
           type = "assistant_text",
@@ -483,7 +487,10 @@ class AgentRunController(
           content = pendingText.toString(),
           timestampMillis = System.currentTimeMillis(),
         )
-      } else if (includeFallbackContent && finalContent.isNotBlank()) {
+      }
+      events += trailingStatusEvents
+
+      if ((includeFallbackContent || role == "error") && finalContent.isNotBlank()) {
         events += ConversationTranscriptEvent(
           type = if (role == "error") "error_text" else "assistant_text",
           role = role,
@@ -495,9 +502,35 @@ class AgentRunController(
       return events
     }
 
-    fun finalTranscriptEvents(finalContent: String, role: String): List<ConversationTranscriptEvent> {
+    private fun buildTranscriptStatusEvents(
+      timelineEvents: List<AgentRunTimelineEvent>,
+      role: String,
+    ): List<ConversationTranscriptEvent> {
+      return buildConversationTranscriptEvents(
+        timelineEvents = timelineEvents.filterNot { it.isChronoOwnedToolStatus() },
+        content = "",
+        role = role,
+        includeContent = false,
+      )
+    }
+
+    private fun AgentRunTimelineEvent.isChronoOwnedToolStatus(): Boolean {
+      return type == "tool_call" || type == "tool_omitted"
+    }
+
+    private fun ConversationTranscriptEvent.isRunningStreamingStatus(): Boolean {
+      return (type == "assistant_text_streaming" || type == "final_response_streaming") &&
+        status == AGENT_RUN_STATUS_RUNNING
+    }
+
+    fun finalTranscriptEvents(
+      timelineEvents: List<AgentRunTimelineEvent>,
+      finalContent: String,
+      role: String,
+    ): List<ConversationTranscriptEvent> {
       return buildTranscriptEvents(
         role = role,
+        timelineEvents = timelineEvents,
         finalContent = finalContent,
         includeFallbackContent = !modelTextStreamingStarted,
       )

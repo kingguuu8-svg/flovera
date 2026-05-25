@@ -343,6 +343,10 @@ class AgentRunControllerInstrumentedTest {
     assertTrue(errorMessage?.runEvents?.any { it.title == "Tool: fake_tool_before_failure" } == true)
     assertTrue(errorMessage?.runEvents?.any { it.type == AgentRunEventType.RUN_FAILED } == true)
     assertTrue(errorMessage?.runEvents?.any { it.detail.contains("category=provider") } == true)
+    assertTrue(errorMessage?.transcriptEvents?.any { it.type == AgentRunEventType.RUN_FAILED } == true)
+    assertTrue(errorMessage?.transcriptEvents?.any {
+      it.type == "error_text" && it.content.contains("Error category: provider")
+    } == true)
     assertTrue(runEvents.any { it.type == AgentRunEventType.RUN_STARTED })
     assertTrue(runEvents.any { it.type == AgentRunEventType.RUN_FAILED && it.detail.contains("category=provider") })
     val logs = File(workspace.root, ".flovera/logs").listFiles().orEmpty()
@@ -726,6 +730,44 @@ class AgentRunControllerInstrumentedTest {
     assertTrue("in draft, text should appear before tool", draftTextIdx < draftToolIdx)
   }
 
+  @Test
+  fun transcriptEventsKeepsFailureStatusAndErrorTextAfterStreamingStarted() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val store = AgentSessionStore(context)
+    val sessions = SessionController(store)
+    val session = store.create("Streaming failure ${System.currentTimeMillis()}")
+    val workspace = WorkspaceManager(context, "streaming-failure-${System.currentTimeMillis()}").also { it.ensureSeedFiles() }
+    val controller = AgentRunController(runtime = StreamingThenFailingAgentRuntime(), scope = this)
+    var finishedSession: AgentSession? = null
+
+    val job = controller.submit(
+      input = "stream then fail",
+      settings = AppSettings(),
+      session = session,
+      workspace = workspace,
+      appendUserPrompt = sessions::appendUserPrompt,
+      appendContextRecord = sessions::appendContextRecord,
+      appendCompressionDivider = sessions::appendCompressionDivider,
+      appendMessage = sessions::appendMessage,
+      onStarted = { _, _ -> },
+      onDraft = { },
+      onSessionUpdated = { _, _ -> },
+      onFinished = { updated, _ -> finishedSession = updated },
+    )
+
+    assertNotNull(job)
+    job!!.join()
+
+    val transcript = finishedSession?.messages?.lastOrNull()?.transcriptEvents.orEmpty()
+    val textIdx = transcript.indexOfFirst { it.type == "assistant_text" && it.content.contains("partial streamed text") }
+    val failedIdx = transcript.indexOfFirst { it.type == AgentRunEventType.RUN_FAILED }
+    val errorIdx = transcript.indexOfFirst { it.type == "error_text" && it.content.contains("stream failed after text") }
+
+    assertTrue("streamed assistant text should be kept", textIdx >= 0)
+    assertTrue("run_failed should be kept after streaming text", failedIdx > textIdx)
+    assertTrue("error_text should be kept after run_failed", errorIdx > failedIdx)
+  }
+
   private class InterleavedStreamingAgentRuntime : AgentRuntime {
     override suspend fun run(
       input: String,
@@ -786,6 +828,32 @@ class AgentRunControllerInstrumentedTest {
       recorder.record("write_file", """{"path":"out.txt","content":"result"}""", "wrote out.txt")
       eventSink.emit(AgentRunEvent(type = AgentRunEventType.MODEL_TEXT_DELTA, modelTextDelta = "post"))
       return "post"
+    }
+  }
+
+  private class StreamingThenFailingAgentRuntime : AgentRuntime {
+    override suspend fun run(
+      input: String,
+      agentRunId: String,
+      settings: AppSettings,
+      session: AgentSession,
+      workspace: WorkspaceManager,
+      recorder: ToolEventRecorder,
+    ): String {
+      return "fallback"
+    }
+
+    override suspend fun runStreaming(
+      input: String,
+      agentRunId: String,
+      settings: AppSettings,
+      session: AgentSession,
+      workspace: WorkspaceManager,
+      recorder: ToolEventRecorder,
+      eventSink: AgentRunEventSink,
+    ): String {
+      eventSink.emit(AgentRunEvent(type = AgentRunEventType.MODEL_TEXT_DELTA, modelTextDelta = "partial streamed text"))
+      error("stream failed after text")
     }
   }
 }
