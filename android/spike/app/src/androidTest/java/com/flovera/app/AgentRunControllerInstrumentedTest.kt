@@ -541,4 +541,251 @@ class AgentRunControllerInstrumentedTest {
       error("Software caused connection abort")
     }
   }
+
+  @Test
+  fun transcriptEventsOrdersTextBeforeToolAndCoalescesAdjacentDeltas() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val store = AgentSessionStore(context)
+    val sessions = SessionController(store)
+    val session = store.create("Chrono text-tool ${System.currentTimeMillis()}")
+    val workspace = WorkspaceManager(context, "chrono-text-tool-${System.currentTimeMillis()}").also { it.ensureSeedFiles() }
+    val controller = AgentRunController(runtime = InterleavedStreamingAgentRuntime(), scope = this)
+    val drafts = mutableListOf<SessionMessage>()
+    var finishedSession: AgentSession? = null
+
+    val job = controller.submit(
+      input = "interleaved test",
+      settings = AppSettings(),
+      session = session,
+      workspace = workspace,
+      appendUserPrompt = sessions::appendUserPrompt,
+      appendContextRecord = sessions::appendContextRecord,
+      appendCompressionDivider = sessions::appendCompressionDivider,
+      appendMessage = sessions::appendMessage,
+      onStarted = { _, _ -> },
+      onDraft = { drafts += it },
+      onSessionUpdated = { _, _ -> },
+      onFinished = { updated, _ -> finishedSession = updated },
+    )
+
+    assertNotNull(job)
+    job!!.join()
+
+    // Verify the final persisted transcript has correct order:
+    // text "I will " -> tool write_file -> text "created file"
+    val transcript = finishedSession?.messages?.lastOrNull()?.transcriptEvents.orEmpty()
+    assertTrue("transcript should have assistant_text before tool",
+      transcript.any { it.type == "assistant_text" && it.content.contains("I will") })
+    val toolIdx = transcript.indexOfFirst { it.type == "tool_call" }
+    assertTrue("transcript should have a tool_call event", toolIdx >= 0)
+    val textBeforeIdx = transcript.indexOfFirst { it.type == "assistant_text" && it.content.contains("I will") }
+    val textAfterIdx = transcript.indexOfFirst { it.type == "assistant_text" && it.content.contains("created") }
+    assertTrue("first text should be before tool", textBeforeIdx < toolIdx)
+    assertTrue("second text should be after tool", textAfterIdx > toolIdx)
+    assertEquals("Tool: write_file", transcript[toolIdx].title)
+
+    // Verify adjacent text deltas before the tool are coalesced
+    assertEquals(2, transcript.count { it.type == "assistant_text" })
+    assertTrue(transcript.any { it.content.contains("I will create it.") })
+
+    // Legacy backward compatibility
+    assertTrue(finishedSession?.messages?.lastOrNull()?.toolEvents?.any { it.name == "write_file" } == true)
+    assertTrue(finishedSession?.messages?.lastOrNull()?.runEvents?.any { it.title == "Tool: write_file" } == true)
+  }
+
+  @Test
+  fun transcriptEventsPreservesTwoToolTwoTextInterleaving() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val store = AgentSessionStore(context)
+    val sessions = SessionController(store)
+    val session = store.create("Chrono double ${System.currentTimeMillis()}")
+    val workspace = WorkspaceManager(context, "chrono-double-${System.currentTimeMillis()}").also { it.ensureSeedFiles() }
+    val controller = AgentRunController(runtime = DoubleToolInterleavedAgentRuntime(), scope = this)
+    var finishedSession: AgentSession? = null
+
+    val job = controller.submit(
+      input = "double tool test",
+      settings = AppSettings(),
+      session = session,
+      workspace = workspace,
+      appendUserPrompt = sessions::appendUserPrompt,
+      appendContextRecord = sessions::appendContextRecord,
+      appendCompressionDivider = sessions::appendCompressionDivider,
+      appendMessage = sessions::appendMessage,
+      onStarted = { _, _ -> },
+      onDraft = { },
+      onSessionUpdated = { _, _ -> },
+      onFinished = { updated, _ -> finishedSession = updated },
+    )
+
+    assertNotNull(job)
+    job!!.join()
+
+    val transcript = finishedSession?.messages?.lastOrNull()?.transcriptEvents.orEmpty()
+    // Expected order: thinking, text "pre ", tool read_file, text "mid ", tool write_file, text "post"
+
+    val types = transcript.map { it.type }
+    val textContents = transcript.filter { it.type == "assistant_text" }.map { it.content }
+    val toolTitles = transcript.filter { it.type == "tool_call" }.map { it.title }
+
+    assertTrue("should have at least 3 assistant_text entries", textContents.size >= 3)
+    assertTrue("should have 2 tool_call entries", toolTitles.size == 2)
+
+    // Verify interleaving: text before first tool, text between tools, text after last tool
+    val idxPre = transcript.indexOfFirst { it.type == "assistant_text" && it.content.contains("pre") }
+    val idxRead = transcript.indexOfFirst { it.type == "tool_call" && it.title.contains("read_file") }
+    val idxMid = transcript.indexOfFirst { it.type == "assistant_text" && it.content.contains("mid") }
+    val idxWrite = transcript.indexOfFirst { it.type == "tool_call" && it.title.contains("write_file") }
+    val idxPost = transcript.indexOfFirst { it.type == "assistant_text" && it.content.contains("post") }
+
+    assertTrue("pre text before read_file tool", idxPre < idxRead)
+    assertTrue("read_file tool before mid text", idxRead < idxMid)
+    assertTrue("mid text before write_file tool", idxMid < idxWrite)
+    assertTrue("write_file tool before post text", idxWrite < idxPost)
+
+    // Legacy backward compatibility
+    assertEquals(2, finishedSession?.messages?.lastOrNull()?.toolEvents?.size)
+  }
+
+  @Test
+  fun transcriptEventsKeepsNonStreamingOrderWithToolThenText() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val store = AgentSessionStore(context)
+    val sessions = SessionController(store)
+    val session = store.create("Non-streaming ${System.currentTimeMillis()}")
+    val workspace = WorkspaceManager(context, "non-streaming-${System.currentTimeMillis()}").also { it.ensureSeedFiles() }
+    val controller = AgentRunController(runtime = FakeAgentRuntime(), scope = this)
+    var finishedSession: AgentSession? = null
+
+    val job = controller.submit(
+      input = "non streaming test",
+      settings = AppSettings(),
+      session = session,
+      workspace = workspace,
+      appendUserPrompt = sessions::appendUserPrompt,
+      appendContextRecord = sessions::appendContextRecord,
+      appendCompressionDivider = sessions::appendCompressionDivider,
+      appendMessage = sessions::appendMessage,
+      onStarted = { _, _ -> },
+      onDraft = { },
+      onSessionUpdated = { _, _ -> },
+      onFinished = { updated, _ -> finishedSession = updated },
+    )
+
+    assertNotNull(job)
+    job!!.join()
+
+    val transcript = finishedSession?.messages?.lastOrNull()?.transcriptEvents.orEmpty()
+    val types = transcript.map { it.type }
+
+    // Tool should appear before the final assistant_text
+    val toolIdx = transcript.indexOfFirst { it.type == "tool_call" }
+    val textIdx = transcript.indexOfLast { it.type == "assistant_text" }
+    assertTrue("tool_call should be before assistant_text in non-streaming", toolIdx < textIdx)
+    assertEquals("assistant output", transcript[textIdx].content)
+  }
+
+  @Test
+  fun transcriptEventsDraftReflectsChronologicalOrderDuringStreaming() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val store = AgentSessionStore(context)
+    val sessions = SessionController(store)
+    val session = store.create("Draft chrono ${System.currentTimeMillis()}")
+    val workspace = WorkspaceManager(context, "draft-chrono-${System.currentTimeMillis()}").also { it.ensureSeedFiles() }
+    val controller = AgentRunController(runtime = InterleavedStreamingAgentRuntime(), scope = this)
+    val drafts = mutableListOf<SessionMessage>()
+
+    val job = controller.submit(
+      input = "draft order test",
+      settings = AppSettings(),
+      session = session,
+      workspace = workspace,
+      appendUserPrompt = sessions::appendUserPrompt,
+      appendContextRecord = sessions::appendContextRecord,
+      appendCompressionDivider = sessions::appendCompressionDivider,
+      appendMessage = sessions::appendMessage,
+      onStarted = { _, _ -> },
+      onDraft = { drafts += it },
+      onSessionUpdated = { _, _ -> },
+      onFinished = { _, _ -> },
+    )
+
+    assertNotNull(job)
+    job!!.join()
+
+    // At least one draft should show tool event in transcript after text started
+    val draftWithTool = drafts.firstOrNull { draft ->
+      draft.transcriptEvents.any { it.type == "tool_call" } &&
+      draft.transcriptEvents.any { it.type == "assistant_text" }
+    }
+    assertNotNull("should have a draft with both tool and assistant_text", draftWithTool)
+
+    val draftTranscript = draftWithTool!!.transcriptEvents
+    val draftTextIdx = draftTranscript.indexOfFirst { it.type == "assistant_text" }
+    val draftToolIdx = draftTranscript.indexOfFirst { it.type == "tool_call" }
+    assertTrue("in draft, text should appear before tool", draftTextIdx < draftToolIdx)
+  }
+
+  private class InterleavedStreamingAgentRuntime : AgentRuntime {
+    override suspend fun run(
+      input: String,
+      agentRunId: String,
+      settings: AppSettings,
+      session: AgentSession,
+      workspace: WorkspaceManager,
+      recorder: ToolEventRecorder,
+    ): String {
+      return "fallback"
+    }
+
+    override suspend fun runStreaming(
+      input: String,
+      agentRunId: String,
+      settings: AppSettings,
+      session: AgentSession,
+      workspace: WorkspaceManager,
+      recorder: ToolEventRecorder,
+      eventSink: AgentRunEventSink,
+    ): String {
+      // Simulate: text "I will " -> tool completes -> text "created file"
+      eventSink.emit(AgentRunEvent(type = AgentRunEventType.MODEL_TEXT_DELTA, modelTextDelta = "I will "))
+      eventSink.emit(AgentRunEvent(type = AgentRunEventType.MODEL_TEXT_DELTA, modelTextDelta = "create it."))
+      recorder.record("write_file", """{"path":"test.txt","content":"OK"}""", "wrote test.txt")
+      // The recorder triggers TOOL_EVENTS_CHANGED through the controller
+      eventSink.emit(AgentRunEvent(type = AgentRunEventType.MODEL_TEXT_DELTA, modelTextDelta = "created "))
+      eventSink.emit(AgentRunEvent(type = AgentRunEventType.MODEL_TEXT_DELTA, modelTextDelta = "file"))
+      return "created file"
+    }
+  }
+
+  private class DoubleToolInterleavedAgentRuntime : AgentRuntime {
+    override suspend fun run(
+      input: String,
+      agentRunId: String,
+      settings: AppSettings,
+      session: AgentSession,
+      workspace: WorkspaceManager,
+      recorder: ToolEventRecorder,
+    ): String {
+      return "fallback"
+    }
+
+    override suspend fun runStreaming(
+      input: String,
+      agentRunId: String,
+      settings: AppSettings,
+      session: AgentSession,
+      workspace: WorkspaceManager,
+      recorder: ToolEventRecorder,
+      eventSink: AgentRunEventSink,
+    ): String {
+      // Simulate: text "pre " -> tool1 read_file -> text "mid " -> tool2 write_file -> text "post"
+      eventSink.emit(AgentRunEvent(type = AgentRunEventType.MODEL_TEXT_DELTA, modelTextDelta = "pre "))
+      recorder.record("read_file", """{"path":"source.txt"}""", "content from source")
+      eventSink.emit(AgentRunEvent(type = AgentRunEventType.MODEL_TEXT_DELTA, modelTextDelta = "mid "))
+      recorder.record("write_file", """{"path":"out.txt","content":"result"}""", "wrote out.txt")
+      eventSink.emit(AgentRunEvent(type = AgentRunEventType.MODEL_TEXT_DELTA, modelTextDelta = "post"))
+      return "post"
+    }
+  }
 }

@@ -315,7 +315,10 @@ Status: L2 implemented with an AgentRunEvent bus and a persisted conversation
 transcript compatibility layer. Session messages still keep `content`,
 `toolEvents`, and `runEvents` for runtime compatibility, and now also persist
 `transcriptEvents` so the conversation can render status/tool/final-answer
-entries as one chronological stream. The first covered event sources are
+entries as one chronological stream, with an `AgentRunEventAccumulator` chrono
+buffer that preserves runtime event order (MODEL_TEXT_DELTA segments and
+newly completed tool events are appended in arrival order, not grouped by type).
+The first covered event sources are
 thinking/compression status, completed tool calls, failure/interruption, and
 final-answer streaming. Failure events include a bounded error category
 (`provider`, `network`, `tool`, `permission`, `context`, or `unknown`) in the
@@ -345,13 +348,19 @@ This is observability for the run loop, not hidden reasoning.
   run-state stream.
 - Remaining work: add tool-start/tool-running events from tool entry points and
   connect interleaved model text when the runtime exposes a stable contract.
+  The chrono buffer in `AgentRunEventAccumulator` now correctly interleaves
+  MODEL_TEXT_DELTA segments and tool-completion events in runtime arrival order,
+  with adjacent text deltas coalesced across tool boundaries.
+
 
 ### Interleaved Model Conversation Streaming
 
-Status: Partially unblocked by transcript persistence. Flovera now has a
-session-level `transcriptEvents` stream for app-generated status/tool events and
-final-answer text. Real assistant text before and between tool calls still needs
-a runtime/provider event stream because the current Koog `AIAgent.run` path does
+Status: Partially implemented. Flovera has a session-level `transcriptEvents`
+stream where the `AgentRunEventAccumulator` chrono buffer preserves runtime
+arrival order of MODEL_TEXT_DELTA segments and completed tool events.
+Text-before-tool, text-between-tools, and text-after-tools ordering is correct
+in `transcriptEvents`. Real assistant text before and between tool calls still
+needs a runtime/provider event stream because the current Koog `AIAgent.run` path does
 not yet expose a committed assistant delta contract in Flovera. Do not implement
 this as fake app narration or by parsing provider debug logs; the next entry
 point is a Koog event-stream/interleaving spike. A narrow Flovera-owned

@@ -231,12 +231,7 @@ class AgentRunController(
             content = finalContent,
             toolEvents = events,
             runEvents = persistedEvents,
-            transcriptEvents = buildConversationTranscriptEvents(
-              timelineEvents = persistedEvents,
-              content = finalContent,
-              role = "assistant",
-              includeContent = true,
-            ),
+            transcriptEvents = runState.finalTranscriptEvents(finalContent, "assistant"),
           )
         },
         onFailure = { error ->
@@ -300,12 +295,7 @@ class AgentRunController(
             content = message,
             toolEvents = events,
             runEvents = persistedEvents,
-            transcriptEvents = buildConversationTranscriptEvents(
-              timelineEvents = persistedEvents,
-              content = message,
-              role = "error",
-              includeContent = true,
-            ),
+            transcriptEvents = runState.finalTranscriptEvents(message, "error"),
           )
         },
       )
@@ -331,6 +321,12 @@ class AgentRunController(
     private var latestToolEvents: List<ToolEvent> = emptyList()
     private val modelText = StringBuilder()
     private var modelTextStreamingStarted: Boolean = false
+    private data class ChronoEntry(
+      val text: String = "",
+      val tool: ToolEvent? = null,
+    )
+    private val chronoEntries = mutableListOf<ChronoEntry>()
+    private var previousToolSnapshotSize: Int = 0
 
     fun replaceBaseTimeline(events: List<AgentRunTimelineEvent>, statusContent: String) {
       this.baseTimelineEvents = events
@@ -340,7 +336,12 @@ class AgentRunController(
     fun emit(event: AgentRunEvent) {
       when (event.type) {
         AgentRunEventType.TOOL_EVENTS_CHANGED -> {
+          val newTools = event.toolEvents.drop(previousToolSnapshotSize)
           latestToolEvents = event.toolEvents
+          for (tool in newTools) {
+            chronoEntries += ChronoEntry(tool = tool)
+          }
+          previousToolSnapshotSize = event.toolEvents.size
         }
 
         AgentRunEventType.MODEL_TEXT_DELTA,
@@ -349,6 +350,7 @@ class AgentRunController(
           if (delta.isNotEmpty()) {
             modelTextStreamingStarted = true
             modelText.append(delta)
+            chronoEntries += ChronoEntry(text = delta)
           }
         }
 
@@ -369,12 +371,7 @@ class AgentRunController(
         content = content,
         toolEvents = latestToolEvents,
         runEvents = timelineEvents,
-        transcriptEvents = buildConversationTranscriptEvents(
-          timelineEvents,
-          content,
-          "assistant",
-          modelTextStreamingStarted,
-        ),
+        transcriptEvents = buildTranscriptEvents("assistant"),
       )
     }
 
@@ -438,6 +435,71 @@ class AgentRunController(
         },
         status = status,
         compact = false,
+      )
+    }
+
+    fun buildTranscriptEvents(
+      role: String,
+      finalContent: String = "",
+      includeFallbackContent: Boolean = false,
+    ): List<ConversationTranscriptEvent> {
+      val events = buildConversationTranscriptEvents(
+        timelineEvents = baseTimelineEvents,
+        content = "",
+        role = role,
+        includeContent = false,
+      ).toMutableList()
+
+      var pendingText = StringBuilder()
+      for (entry in chronoEntries) {
+        if (entry.tool != null) {
+          if (pendingText.isNotEmpty()) {
+            events += ConversationTranscriptEvent(
+              type = "assistant_text",
+              role = role,
+              content = pendingText.toString(),
+              timestampMillis = entry.tool.timestampMillis,
+            )
+            pendingText = StringBuilder()
+          }
+          val toolTimeline = buildToolTimelineEvents(listOf(entry.tool))
+          val toolDetail = toolTimeline.firstOrNull()?.detail ?: "Tool: ${entry.tool.name}"
+          events += ConversationTranscriptEvent(
+            type = "tool_call",
+            title = "Tool: ${entry.tool.name}",
+            detail = toolDetail,
+            timestampMillis = entry.tool.timestampMillis,
+            status = AGENT_RUN_STATUS_COMPLETED,
+          )
+        } else if (entry.text.isNotEmpty()) {
+          pendingText.append(entry.text)
+        }
+      }
+
+      if (pendingText.isNotEmpty()) {
+        events += ConversationTranscriptEvent(
+          type = "assistant_text",
+          role = role,
+          content = pendingText.toString(),
+          timestampMillis = System.currentTimeMillis(),
+        )
+      } else if (includeFallbackContent && finalContent.isNotBlank()) {
+        events += ConversationTranscriptEvent(
+          type = if (role == "error") "error_text" else "assistant_text",
+          role = role,
+          content = finalContent,
+          timestampMillis = System.currentTimeMillis(),
+        )
+      }
+
+      return events
+    }
+
+    fun finalTranscriptEvents(finalContent: String, role: String): List<ConversationTranscriptEvent> {
+      return buildTranscriptEvents(
+        role = role,
+        finalContent = finalContent,
+        includeFallbackContent = !modelTextStreamingStarted,
       )
     }
   }
