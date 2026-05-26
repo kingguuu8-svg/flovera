@@ -7,12 +7,10 @@ import ai.koog.agents.core.annotation.InternalAgentsApi
 import ai.koog.agents.core.dsl.builder.node
 import ai.koog.agents.core.dsl.builder.strategy
 import ai.koog.agents.core.dsl.extension.nodeExecuteMultipleTools
-import ai.koog.agents.core.dsl.extension.nodeLLMRequestStreamingAndSendResults
 import ai.koog.agents.core.dsl.extension.onMultipleAssistantMessages
 import ai.koog.agents.core.dsl.extension.onMultipleToolCalls
 import ai.koog.agents.core.environment.ReceivedToolResult
 import ai.koog.agents.core.environment.result
-import ai.koog.agents.features.eventHandler.feature.handleEvents
 import ai.koog.prompt.executor.clients.LLMClient
 import ai.koog.prompt.executor.llms.MultiLLMPromptExecutor
 import ai.koog.prompt.message.Message
@@ -142,7 +140,7 @@ class KoogAgentRuntime(
     val agent = AIAgent(
       promptExecutor = MultiLLMPromptExecutor(client),
       llmModel = provider.createModel(settings.model, modelContext),
-      strategy = if (streaming) floveraStreamingSingleRunStrategy() else singleRunStrategy(),
+      strategy = if (streaming) floveraStreamingSingleRunStrategy(frameForwarder) else singleRunStrategy(),
       toolRegistry = workspaceToolRegistry(
         workspace = workspace,
         recorder = recorder,
@@ -156,15 +154,6 @@ class KoogAgentRuntime(
         authorityMode = settings.agentAuthorityMode,
       ),
       maxIterations = AGENT_ITERATIONS_INTERNAL_GUARD,
-      installFeatures = {
-        if (streaming) {
-          handleEvents {
-            onLLMStreamingFrameReceived { eventContext ->
-              frameForwarder?.emitStreamFrame(eventContext.streamFrame)
-            }
-          }
-        }
-      },
     )
 
     return agent.use {
@@ -215,7 +204,9 @@ private class AgentRunStreamFrameForwarder(
 }
 
 @OptIn(InternalAgentsApi::class)
-private fun floveraStreamingSingleRunStrategy(): AIAgentGraphStrategy<String, String> =
+private fun floveraStreamingSingleRunStrategy(
+  frameForwarder: AgentRunStreamFrameForwarder?,
+): AIAgentGraphStrategy<String, String> =
   strategy("flovera_streaming_single_run") {
     val nodeAppendUser by node<String, String>("append_user") { message ->
       llm.writeSession {
@@ -225,9 +216,9 @@ private fun floveraStreamingSingleRunStrategy(): AIAgentGraphStrategy<String, St
       }
       message
     }
-    val nodeCallLLM by nodeLLMRequestStreamingAndSendResults<String>("stream_llm")
+    val nodeCallLLM by nodeLLMRequestStreamingAndSendResults("stream_llm", frameForwarder)
     val nodeExecuteTool by nodeExecuteMultipleTools(parallelTools = false)
-    val nodeSendToolResult by nodeLLMSendMultipleToolResultsStreaming("stream_after_tools")
+    val nodeSendToolResult by nodeLLMSendMultipleToolResultsStreaming("stream_after_tools", frameForwarder)
 
     edge(nodeStart forwardTo nodeAppendUser)
     edge(nodeAppendUser forwardTo nodeCallLLM)
@@ -248,8 +239,27 @@ private fun floveraStreamingSingleRunStrategy(): AIAgentGraphStrategy<String, St
   }
 
 @OptIn(InternalAgentsApi::class)
+private fun nodeLLMRequestStreamingAndSendResults(
+  name: String? = null,
+  frameForwarder: AgentRunStreamFrameForwarder?,
+) = node<String, List<Message.Response>>(name) {
+  val frames = llm.writeSession {
+    requestLLMStreaming().toList()
+  }
+  frames.forEach { frameForwarder?.emitStreamFrame(it) }
+  val responses = frames.toMessageResponses()
+  llm.writeSession {
+    appendPrompt {
+      messages(responses)
+    }
+  }
+  responses
+}
+
+@OptIn(InternalAgentsApi::class)
 private fun nodeLLMSendMultipleToolResultsStreaming(
   name: String? = null,
+  frameForwarder: AgentRunStreamFrameForwarder?,
 ) = node<List<ReceivedToolResult>, List<Message.Response>>(name) { results ->
   val frames = llm.writeSession {
     appendPrompt {
@@ -259,6 +269,7 @@ private fun nodeLLMSendMultipleToolResultsStreaming(
     }
     requestLLMStreaming().toList()
   }
+  frames.forEach { frameForwarder?.emitStreamFrame(it) }
   val responses = frames.toMessageResponses()
   llm.writeSession {
     appendPrompt {

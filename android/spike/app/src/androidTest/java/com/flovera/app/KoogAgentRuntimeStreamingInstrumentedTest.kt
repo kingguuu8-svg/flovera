@@ -96,7 +96,10 @@ class KoogAgentRuntimeStreamingInstrumentedTest {
       fallbackText = "fallback should not be used",
     )
     val runtime = KoogAgentRuntime(clientFactory = { _, _, _ -> fakeClient })
-    val recorder = ToolEventRecorder()
+    val eventOrder = mutableListOf<String>()
+    val recorder = ToolEventRecorder { toolEvents ->
+      eventOrder += "tool:${toolEvents.last().name}"
+    }
     val events = mutableListOf<AgentRunEvent>()
 
     val output = runtime.runStreaming(
@@ -106,7 +109,12 @@ class KoogAgentRuntimeStreamingInstrumentedTest {
       session = session,
       workspace = workspace,
       recorder = recorder,
-      eventSink = AgentRunEventSink { event -> events += event },
+      eventSink = AgentRunEventSink { event ->
+        events += event
+        if (event.type == AgentRunEventType.MODEL_TEXT_DELTA) {
+          eventOrder += "text:${event.modelTextDelta}"
+        }
+      },
     )
 
     assertEquals("created file", output)
@@ -169,6 +177,10 @@ class KoogAgentRuntimeStreamingInstrumentedTest {
     assertEquals(
       listOf("I will create it. ", "Created interleaved-tool.txt."),
       events.filter { it.type == AgentRunEventType.MODEL_TEXT_DELTA }.map { it.modelTextDelta },
+    )
+    assertEquals(
+      listOf("text:I will create it. ", "tool:write_file", "text:Created interleaved-tool.txt."),
+      eventOrder,
     )
     assertEquals(2, fakeClient.streamingCallCount)
     assertEquals(0, fakeClient.nonStreamingChoiceCallCount)
