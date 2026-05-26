@@ -6,6 +6,7 @@ import com.flovera.app.agent.AgentRunEvent
 import com.flovera.app.agent.AgentRunController
 import com.flovera.app.agent.AgentRunEventSink
 import com.flovera.app.agent.AgentRunEventType
+import com.flovera.app.agent.AgentRunGuidanceProvider
 import com.flovera.app.agent.HANDOFF_SOURCE_LLM
 import com.flovera.app.agent.SessionHandoffCompression
 import com.flovera.app.agent.SessionHandoffCompressor
@@ -89,6 +90,7 @@ class AgentRunControllerInstrumentedTest {
     assertEquals("deepseek-v4-pro", contextRecord?.model)
     assertEquals(1_000_000, contextRecord?.modelContextWindowTokens)
     assertEquals("deepseek_catalog", contextRecord?.modelContextSource)
+    assertTrue(contextRecord?.tokenUsageSource?.startsWith("tokenizer_jtokkit_") == true)
     assertTrue(contextRecord?.toolSchemaChars ?: 0 > 0)
     assertTrue(contextRecord?.providerOverheadChars ?: 0 > 0)
     assertEquals(
@@ -515,6 +517,7 @@ class AgentRunControllerInstrumentedTest {
       workspace: WorkspaceManager,
       recorder: ToolEventRecorder,
       eventSink: AgentRunEventSink,
+      guidanceProvider: AgentRunGuidanceProvider,
     ): String {
       eventSink.emit(AgentRunEvent(type = AgentRunEventType.MODEL_TEXT_DELTA, modelTextDelta = "assistant "))
       eventSink.emit(AgentRunEvent(type = AgentRunEventType.MODEL_TEXT_DELTA, modelTextDelta = "streamed "))
@@ -912,6 +915,7 @@ class AgentRunControllerInstrumentedTest {
       workspace: WorkspaceManager,
       recorder: ToolEventRecorder,
       eventSink: AgentRunEventSink,
+      guidanceProvider: AgentRunGuidanceProvider,
     ): String {
       // Simulate: text "I will " -> tool completes -> text "created file"
       eventSink.emit(AgentRunEvent(type = AgentRunEventType.MODEL_TEXT_DELTA, modelTextDelta = "I will "))
@@ -944,6 +948,7 @@ class AgentRunControllerInstrumentedTest {
       workspace: WorkspaceManager,
       recorder: ToolEventRecorder,
       eventSink: AgentRunEventSink,
+      guidanceProvider: AgentRunGuidanceProvider,
     ): String {
       // Simulate: text "pre " -> tool1 read_file -> text "mid " -> tool2 write_file -> text "post"
       eventSink.emit(AgentRunEvent(type = AgentRunEventType.MODEL_TEXT_DELTA, modelTextDelta = "pre "))
@@ -975,6 +980,7 @@ class AgentRunControllerInstrumentedTest {
       workspace: WorkspaceManager,
       recorder: ToolEventRecorder,
       eventSink: AgentRunEventSink,
+      guidanceProvider: AgentRunGuidanceProvider,
     ): String {
       val baseTime = System.currentTimeMillis()
       val firstTool = ToolEvent(
@@ -1027,6 +1033,7 @@ class AgentRunControllerInstrumentedTest {
       workspace: WorkspaceManager,
       recorder: ToolEventRecorder,
       eventSink: AgentRunEventSink,
+      guidanceProvider: AgentRunGuidanceProvider,
     ): String {
       eventSink.emit(AgentRunEvent(type = AgentRunEventType.MODEL_TEXT_DELTA, modelTextDelta = "partial streamed text"))
       error("stream failed after text")

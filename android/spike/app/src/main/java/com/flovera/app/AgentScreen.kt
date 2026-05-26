@@ -1626,7 +1626,11 @@ private fun compactRunEventTitle(event: AgentRunTimelineEvent, language: String)
     "run_failed" -> t(language, "Run failed", "\u8fd0\u884c\u5931\u8d25")
     "run_interrupted" -> t(language, "Run interrupted", "\u8fd0\u884c\u5df2\u4e2d\u65ad")
     "compression" -> t(language, event.title, event.title)
-    "guidance" -> t(language, "Guidance queued", "\u5df2\u52a0\u5165\u5f15\u5bfc")
+    "guidance" -> if (event.status == "applied") {
+      t(language, "Guidance applied", "\u5df2\u5e94\u7528\u5f15\u5bfc")
+    } else {
+      t(language, "Guidance queued", "\u5df2\u52a0\u5165\u5f15\u5bfc")
+    }
     else -> event.title
   }
 }
@@ -1858,10 +1862,16 @@ private fun formatContextUsageDetails(record: ContextUsageRecord, language: Stri
   val total = window?.let(::formatTokenCount) ?: t(language, "unknown", "\u672a\u77e5")
   val requestChars = record.estimatedRequestChars.takeIf { it > 0 }
     ?: (record.inputChars + record.historyChars + record.rulesChars + record.workspaceListingChars)
-  val estimateLabel = if (isEstimatedContextRecord(record)) {
-    t(language, "Estimated from request characters.", "\u57fa\u4e8e\u8bf7\u6c42\u5b57\u7b26\u6570\u4f30\u7b97\u3002")
-  } else {
-    t(language, "Reported by provider or tokenizer.", "\u6765\u81ea provider \u6216 tokenizer \u62a5\u544a\u3002")
+  val estimateLabel = when {
+    isTokenizerContextRecord(record) -> {
+      t(language, "Tokenized from the request payload.", "\u57fa\u4e8e\u8bf7\u6c42 payload \u5206\u8bcd\u7edf\u8ba1\u3002")
+    }
+    isEstimatedContextRecord(record) -> {
+      t(language, "Estimated from request characters.", "\u57fa\u4e8e\u8bf7\u6c42\u5b57\u7b26\u6570\u4f30\u7b97\u3002")
+    }
+    else -> {
+      t(language, "Reported by provider.", "\u6765\u81ea provider \u62a5\u544a\u3002")
+    }
   }
   return buildString {
     appendLine(
@@ -1886,12 +1896,14 @@ private fun formatContextUsageDetails(record: ContextUsageRecord, language: Stri
     appendLine("- workspaceListingChars=${record.workspaceListingChars}")
     appendLine("- toolSchemaChars=${record.toolSchemaChars}")
     appendLine("- providerOverheadChars=${record.providerOverheadChars}")
+    appendLine("- tokenUsageSource=${record.tokenUsageSource}")
     append("- estimatedRequestChars=$requestChars")
   }
 }
 
 private fun formatContextPercent(record: ContextUsageRecord, language: String): String {
   val permille = effectiveContextPermille(record) ?: return t(language, "estimate", "\u4f30\u7b97")
+  if (permille in 1..99) return String.format(Locale.US, "%.1f%%", permille / 10.0)
   val value = ((permille + 5) / 10).coerceIn(0, 100)
   if (value == 0 && record.approximateTokens > 0) return t(language, "<1%", "<1%")
   return "$value%"
@@ -1914,7 +1926,12 @@ private fun effectiveContextPermille(record: ContextUsageRecord): Int? {
 private fun isEstimatedContextRecord(record: ContextUsageRecord): Boolean {
   return !record.tokenUsageSource.equals("provider", ignoreCase = true) &&
     !record.tokenUsageSource.equals("provider_reported", ignoreCase = true) &&
-    !record.tokenUsageSource.equals("tokenizer", ignoreCase = true)
+    !isTokenizerContextRecord(record)
+}
+
+private fun isTokenizerContextRecord(record: ContextUsageRecord): Boolean {
+  return record.tokenUsageSource.equals("tokenizer", ignoreCase = true) ||
+    record.tokenUsageSource.startsWith("tokenizer_", ignoreCase = true)
 }
 
 private fun formatTokenCount(tokens: Int): String {

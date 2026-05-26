@@ -32,6 +32,8 @@ class AgentPromptBuilderInstrumentedTest {
 
     assertTrue(systemPrompt.contains("System rules in this prompt have the highest priority"))
     assertTrue(systemPrompt.contains("Workspace user rules from AGENT.md"))
+    assertTrue(systemPrompt.contains("AGENT.md is user-owned workspace guidance"))
+    assertTrue(systemPrompt.contains("If the user asks in Chinese, answer in Chinese"))
     assertTrue(systemPrompt.contains("Core boundaries:"))
     assertTrue(systemPrompt.contains("Stable Flovera runtime boundary:"))
     assertTrue(systemPrompt.contains("Tool routing:"))
@@ -67,6 +69,10 @@ class AgentPromptBuilderInstrumentedTest {
     assertTrue(systemPrompt.contains("preferred kind local_http"))
     assertTrue(systemPrompt.contains("Default generated artifact layout"))
     assertTrue(systemPrompt.contains("README.md, flovera.app.json"))
+    assertTrue(systemPrompt.contains("agent-demo/flovera.app.json"))
+    assertTrue(systemPrompt.contains("entrypoints.preview"))
+    assertTrue(systemPrompt.contains("do not cancel `touchstart`"))
+    assertTrue(systemPrompt.contains("touch-action: manipulation"))
     assertTrue(systemPrompt.contains("Do not invent project-specific JSON handoff protocols"))
     assertTrue(systemPrompt.contains("avoid zero-height/offscreen root containers"))
     assertTrue(systemPrompt.contains("not proof of an end-to-end interactive loop"))
@@ -113,6 +119,6 @@ class AgentPromptBuilderInstrumentedTest {
     )
     assertTrue(safePrompt.contains("authorityMode=safe"))
     assertTrue(fullPrompt.contains("authorityMode=full"))
-    assertTrue("safePrompt length=${safePrompt.length}", safePrompt.length < 9_000)
+    assertTrue("safePrompt length=${safePrompt.length}", safePrompt.length < 30_000)
   }
 }

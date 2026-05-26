@@ -91,6 +91,7 @@ dependencies {
   implementation(libs.androidx.activity.compose)
   implementation(libs.koog.agents)
   implementation(libs.kotlinx.serialization.json)
+  implementation(libs.jtokkit)
 
   // Arch Components
   implementation(libs.androidx.lifecycle.runtime.compose)

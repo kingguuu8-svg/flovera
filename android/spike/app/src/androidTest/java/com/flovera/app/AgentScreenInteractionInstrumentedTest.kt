@@ -19,6 +19,7 @@ import com.flovera.app.config.SettingsStore
 import com.flovera.app.agent.AgentRunEvent
 import com.flovera.app.agent.AgentRunController
 import com.flovera.app.agent.AgentRunEventSink
+import com.flovera.app.agent.AgentRunGuidanceProvider
 import com.flovera.app.agent.AgentRunStatusNotifier
 import com.flovera.app.agent.AgentRunEventType
 import com.flovera.app.koog.AgentRuntime
@@ -411,31 +412,26 @@ class AgentScreenInteractionInstrumentedTest {
     composeRule.onNodeWithContentDescription("Send message").performClick()
     composeRule.onNodeWithContentDescription("Guide queued message").performClick()
 
-    assertTrue(composeRule.onAllNodesWithText("Guidance").fetchSemanticsNodes().isNotEmpty())
-    composeRule.onNodeWithText("keep the UI compact").assertIsDisplayed()
     composeRule.runOnIdle {
-      assertEquals(listOf(QUEUED_INPUT_GUIDANCE), controller.state.value.queuedInputs.map { it.mode })
-    }
-
-    runtime.finishNext()
-    composeRule.waitUntil(timeoutMillis = 5_000) { runtime.inputCount() == 2 }
-    composeRule.runOnIdle {
-      val guidedInput = runtime.inputsSnapshot().last()
-      assertTrue(guidedInput.contains("Guidance while the previous agent run was active"))
-      assertTrue(guidedInput.contains("keep the UI compact"))
-      val firstAssistant = controller.state.value.session?.messages
-        ?.firstOrNull { it.role == "assistant" && it.content == "assistant output for first task" }
-      val transcript = firstAssistant?.transcriptEvents.orEmpty()
-      val guidanceBubble = transcript.indexOfFirst { it.type == "user_guidance" && it.content == "keep the UI compact" }
-      val guidanceStatus = transcript.indexOfFirst { it.type == "guidance" && it.title == "Guidance queued" }
-      val assistantText = transcript.indexOfFirst { it.type == "assistant_text" && it.content == "assistant output for first task" }
-      assertTrue("guidance should be persisted as a transcript user bubble", guidanceBubble >= 0)
-      assertTrue("guidance queued status should follow the guidance bubble", guidanceStatus > guidanceBubble)
-      assertTrue("assistant output should remain after the guidance events", assistantText > guidanceStatus)
+      assertTrue(controller.state.value.queuedInputs.isEmpty())
+      assertEquals("Guidance waiting for next tool result", controller.state.value.status)
     }
 
     runtime.finishNext()
     composeRule.waitUntil(timeoutMillis = 5_000) { !controller.state.value.isRunning }
+    composeRule.runOnIdle {
+      assertEquals(listOf("first task"), runtime.inputsSnapshot())
+      assertEquals(listOf("keep the UI compact"), runtime.guidanceSnapshot())
+      val firstAssistant = controller.state.value.session?.messages
+        ?.firstOrNull { it.role == "assistant" && it.content == "assistant output for first task" }
+      val transcript = firstAssistant?.transcriptEvents.orEmpty()
+      val guidanceBubble = transcript.indexOfFirst { it.type == "user_guidance" && it.content == "keep the UI compact" }
+      val guidanceStatus = transcript.indexOfFirst { it.type == "guidance" && it.title == "Guidance applied" }
+      val assistantText = transcript.indexOfFirst { it.type == "assistant_text" && it.content == "assistant output for first task" }
+      assertTrue("guidance should be persisted as a transcript user bubble", guidanceBubble >= 0)
+      assertTrue("guidance applied status should follow the guidance bubble", guidanceStatus > guidanceBubble)
+      assertTrue("assistant output should remain after the guidance events", assistantText > guidanceStatus)
+    }
   }
 
   @Test
@@ -759,10 +755,13 @@ class AgentScreenInteractionInstrumentedTest {
   private class QueueingAgentRuntime : AgentRuntime {
     private val inputs = Collections.synchronizedList(mutableListOf<String>())
     private val completions = Collections.synchronizedList(mutableListOf<CompletableDeferred<Unit>>())
+    private val guidance = Collections.synchronizedList(mutableListOf<String>())
 
     fun inputCount(): Int = synchronized(inputs) { inputs.size }
 
     fun inputsSnapshot(): List<String> = synchronized(inputs) { inputs.toList() }
+
+    fun guidanceSnapshot(): List<String> = synchronized(guidance) { guidance.toList() }
 
     fun finishNext() {
       synchronized(completions) {
@@ -782,6 +781,24 @@ class AgentScreenInteractionInstrumentedTest {
       synchronized(inputs) { inputs += input }
       synchronized(completions) { completions += completion }
       completion.await()
+      return "assistant output for $input"
+    }
+
+    override suspend fun runStreaming(
+      input: String,
+      agentRunId: String,
+      settings: AppSettings,
+      session: AgentSession,
+      workspace: WorkspaceManager,
+      recorder: ToolEventRecorder,
+      eventSink: AgentRunEventSink,
+      guidanceProvider: AgentRunGuidanceProvider,
+    ): String {
+      val completion = CompletableDeferred<Unit>()
+      synchronized(inputs) { inputs += input }
+      synchronized(completions) { completions += completion }
+      completion.await()
+      synchronized(guidance) { guidance += guidanceProvider.consumePendingGuidance() }
       return "assistant output for $input"
     }
   }
@@ -834,6 +851,7 @@ class AgentScreenInteractionInstrumentedTest {
       workspace: WorkspaceManager,
       recorder: ToolEventRecorder,
       eventSink: AgentRunEventSink,
+      guidanceProvider: AgentRunGuidanceProvider,
     ): String {
       eventSink.emit(AgentRunEvent(type = AgentRunEventType.MODEL_TEXT_DELTA, modelTextDelta = "partial "))
       eventSink.emit(AgentRunEvent(type = AgentRunEventType.MODEL_TEXT_DELTA, modelTextDelta = "final"))

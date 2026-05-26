@@ -7,6 +7,7 @@ import com.flovera.app.agent.AgentRunController
 import com.flovera.app.agent.AgentRunEvent
 import com.flovera.app.agent.AgentRunEventSink
 import com.flovera.app.agent.AgentRunEventType
+import com.flovera.app.agent.AgentRunGuidanceProvider
 import com.flovera.app.config.AppSettings
 import com.flovera.app.koog.AgentRuntime
 import com.flovera.app.koog.ToolEventRecorder
@@ -90,17 +91,17 @@ class ConversationTimelineDebugReceiver : BroadcastReceiver() {
     val assistant = updated.messages.lastOrNull()
     val transcript = assistant?.transcriptEvents.orEmpty()
     val textBefore = transcript.indexOfFirst { it.type == "assistant_text" && it.content.contains("before guidance") }
-    val guidanceBubble = transcript.indexOfFirst { it.type == "user_guidance" && it.content == GUIDANCE_TEXT }
+    val tool = transcript.indexOfFirstAfter(textBefore) { it.type == "tool_call" }
+    val guidanceBubble = transcript.indexOfFirstAfter(tool) { it.type == "user_guidance" && it.content == GUIDANCE_TEXT }
     val guidanceStatus = transcript.indexOfFirstAfter(guidanceBubble) { it.type == "guidance" }
-    val tool = transcript.indexOfFirstAfter(guidanceStatus) { it.type == "tool_call" }
-    val textAfter = transcript.indexOfFirstAfter(tool) { it.type == "assistant_text" && it.content.contains("after tool") }
+    val textAfter = transcript.indexOfFirstAfter(guidanceStatus) { it.type == "assistant_text" && it.content.contains("after tool") }
     val pass = succeeded &&
       appendPreservedLatest &&
       textBefore >= 0 &&
-      guidanceBubble > textBefore &&
+      tool > textBefore &&
+      guidanceBubble > tool &&
       guidanceStatus > guidanceBubble &&
-      tool > guidanceStatus &&
-      textAfter > tool
+      textAfter > guidanceStatus
 
     writeResult(
       context,
@@ -154,8 +155,10 @@ class ConversationTimelineDebugReceiver : BroadcastReceiver() {
       workspace: WorkspaceManager,
       recorder: ToolEventRecorder,
       eventSink: AgentRunEventSink,
+      guidanceProvider: AgentRunGuidanceProvider,
     ): String {
       eventSink.emit(AgentRunEvent(type = AgentRunEventType.MODEL_TEXT_DELTA, modelTextDelta = "before guidance "))
+      recorder.record("read_file", "path=README.md", "# Android Agent Workspace")
       val now = System.currentTimeMillis()
       extraTranscriptEvents += ConversationTranscriptEvent(
         type = "user_guidance",
@@ -165,12 +168,11 @@ class ConversationTimelineDebugReceiver : BroadcastReceiver() {
       )
       extraTranscriptEvents += ConversationTranscriptEvent(
         type = "guidance",
-        title = "Guidance queued",
-        detail = "This guidance will be applied after the active run finishes.",
+        title = "Guidance applied",
+        detail = "This guidance was inserted after the completed tool result and before the next model request.",
         timestampMillis = now,
-        status = "queued",
+        status = "applied",
       )
-      recorder.record("read_file", "path=README.md", "# Android Agent Workspace")
       eventSink.emit(AgentRunEvent(type = AgentRunEventType.MODEL_TEXT_DELTA, modelTextDelta = "after tool"))
       return "before guidance after tool"
     }

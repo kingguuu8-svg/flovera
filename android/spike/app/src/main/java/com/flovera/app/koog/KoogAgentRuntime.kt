@@ -18,6 +18,7 @@ import ai.koog.prompt.streaming.StreamFrame
 import ai.koog.prompt.streaming.toMessageResponses
 import ai.koog.utils.io.use
 import com.flovera.app.agent.AgentRunEvent
+import com.flovera.app.agent.AgentRunGuidanceProvider
 import com.flovera.app.agent.AgentRunEventSink
 import com.flovera.app.agent.AgentRunEventType
 import com.flovera.app.config.AGENT_ITERATIONS_INTERNAL_GUARD
@@ -45,6 +46,7 @@ interface AgentRuntime {
     workspace: WorkspaceManager,
     recorder: ToolEventRecorder,
     eventSink: AgentRunEventSink,
+    guidanceProvider: AgentRunGuidanceProvider = AgentRunGuidanceProvider.None,
   ): String {
     return run(
       input = input,
@@ -88,6 +90,7 @@ class KoogAgentRuntime(
     workspace: WorkspaceManager,
     recorder: ToolEventRecorder,
     eventSink: AgentRunEventSink,
+    guidanceProvider: AgentRunGuidanceProvider,
   ): String {
     val frameForwarder = AgentRunStreamFrameForwarder(eventSink)
     return try {
@@ -99,6 +102,7 @@ class KoogAgentRuntime(
         workspace = workspace,
         recorder = recorder,
         frameForwarder = frameForwarder,
+        guidanceProvider = guidanceProvider,
         streaming = true,
       )
     } catch (error: CancellationException) {
@@ -127,6 +131,7 @@ class KoogAgentRuntime(
     workspace: WorkspaceManager,
     recorder: ToolEventRecorder,
     frameForwarder: AgentRunStreamFrameForwarder?,
+    guidanceProvider: AgentRunGuidanceProvider = AgentRunGuidanceProvider.None,
     streaming: Boolean,
   ): String {
     val provider = ModelProviderCatalog.requireProvider(settings.provider)
@@ -140,7 +145,11 @@ class KoogAgentRuntime(
     val agent = AIAgent(
       promptExecutor = MultiLLMPromptExecutor(client),
       llmModel = provider.createModel(settings.model, modelContext),
-      strategy = if (streaming) floveraStreamingSingleRunStrategy(frameForwarder) else singleRunStrategy(),
+      strategy = if (streaming) {
+        floveraStreamingSingleRunStrategy(frameForwarder, guidanceProvider)
+      } else {
+        singleRunStrategy()
+      },
       toolRegistry = workspaceToolRegistry(
         workspace = workspace,
         recorder = recorder,
@@ -228,6 +237,7 @@ private class AgentRunStreamFrameForwarder(
 @OptIn(InternalAgentsApi::class)
 private fun floveraStreamingSingleRunStrategy(
   frameForwarder: AgentRunStreamFrameForwarder?,
+  guidanceProvider: AgentRunGuidanceProvider,
 ): AIAgentGraphStrategy<String, String> =
   strategy("flovera_streaming_single_run") {
     val nodeAppendUser by node<String, String>("append_user") { message ->
@@ -240,7 +250,11 @@ private fun floveraStreamingSingleRunStrategy(
     }
     val nodeCallLLM by nodeLLMRequestStreamingAndSendResults("stream_llm", frameForwarder)
     val nodeExecuteTool by nodeExecuteMultipleTools(parallelTools = false)
-    val nodeSendToolResult by nodeLLMSendMultipleToolResultsStreaming("stream_after_tools", frameForwarder)
+    val nodeSendToolResult by nodeLLMSendMultipleToolResultsStreaming(
+      name = "stream_after_tools",
+      frameForwarder = frameForwarder,
+      guidanceProvider = guidanceProvider,
+    )
 
     edge(nodeStart forwardTo nodeAppendUser)
     edge(nodeAppendUser forwardTo nodeCallLLM)
@@ -283,11 +297,16 @@ private fun nodeLLMRequestStreamingAndSendResults(
 private fun nodeLLMSendMultipleToolResultsStreaming(
   name: String? = null,
   frameForwarder: AgentRunStreamFrameForwarder?,
+  guidanceProvider: AgentRunGuidanceProvider,
 ) = node<List<ReceivedToolResult>, List<Message.Response>>(name) { results ->
+  val guidance = guidanceProvider.consumePendingGuidance()
   val frames = llm.writeSession {
     appendPrompt {
       tool {
         results.forEach { result(it) }
+      }
+      if (guidance.isNotEmpty()) {
+        user(guidance.toModelGuidanceMessage())
       }
     }
     requestLLMStreaming().toList()
@@ -301,4 +320,15 @@ private fun nodeLLMSendMultipleToolResultsStreaming(
     }
   }
   responses
+}
+
+private fun List<String>.toModelGuidanceMessage(): String {
+  return joinToString(separator = "\n\n") { guidance ->
+    """
+      User guidance received while this run was active:
+      $guidance
+
+      Apply this guidance now, after the tool result above, while continuing the current task. Do not wait for a separate follow-up run.
+    """.trimIndent()
+  }
 }

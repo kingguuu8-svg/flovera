@@ -129,8 +129,8 @@ private fun conversationTranscriptEventComparator(): Comparator<ConversationTran
         "assistant_text",
         "error_text",
         "user_guidance",
-        "user_text" -> 0
-        "guidance" -> 1
+        "user_text",
+        "guidance" -> 0
         "tool_call" -> 2
         else -> 3
       }
@@ -153,6 +153,8 @@ class AgentController(
   private var selectedHtmlLoadJob: Job? = null
   @Volatile private var selectedHtmlLoadGeneration: Long = 0
   private var activeRunTranscriptEvents: MutableList<ConversationTranscriptEvent>? = null
+  private val activeRunGuidanceLock = Any()
+  private val activeRunPendingGuidance = mutableListOf<String>()
   private var workspaceController: WorkspaceController
   private var workspaceLocalAppServer: WorkspaceLocalAppServer
   private var workspacePythonHttpRuntime: WorkspacePythonHttpRuntime
@@ -662,19 +664,33 @@ class AgentController(
     val current = _state.value
     val trimmed = current.input.trim()
     if (!current.isRunning || trimmed.isBlank()) return
-    enqueueInput(trimmed, QUEUED_INPUT_GUIDANCE, "Guidance queued")
-    recordGuidanceForActiveRun(trimmed)
+    queueGuidanceForActiveRun(trimmed)
+    _state.update {
+      it.copy(
+        input = "",
+        status = "Guidance waiting for next tool result",
+      )
+    }
   }
 
   fun markQueuedInputAsGuidance(index: Int) {
     val guidance = _state.value.queuedInputs.getOrNull(index)?.content ?: return
+    if (_state.value.isRunning) {
+      queueGuidanceForActiveRun(guidance)
+      _state.update {
+        it.copy(
+          queuedInputs = it.queuedInputs.filterIndexed { itemIndex, _ -> itemIndex != index },
+          status = "Guidance waiting for next tool result",
+        )
+      }
+      return
+    }
     _state.update {
       val updated = it.queuedInputs.mapIndexed { itemIndex, input ->
         if (itemIndex == index) input.copy(mode = QUEUED_INPUT_GUIDANCE) else input
       }
       it.copy(queuedInputs = updated, status = "Guidance queued")
     }
-    recordGuidanceForActiveRun(guidance)
   }
 
   fun removeQueuedInput(index: Int) {
@@ -698,6 +714,7 @@ class AgentController(
 
   private fun startAgentRun(input: String, session: AgentSession) {
     val current = _state.value
+    clearPendingActiveRunGuidance()
     val runTranscriptEvents = mutableListOf<ConversationTranscriptEvent>()
     activeRunTranscriptEvents = runTranscriptEvents
     activeRunJob = agentRunController.submit(
@@ -710,6 +727,7 @@ class AgentController(
       appendCompressionDivider = sessionController::appendCompressionDivider,
       appendMessage = sessionController::appendMessage,
       additionalTranscriptEvents = { runTranscriptEvents.toList() },
+      guidanceProvider = { consumeGuidanceForActiveRun() },
       onStarted = { withUser, draft ->
         val settings = settingsController.setActiveSession(current.settings, withUser.id)
         agentRunStatusNotifier.running(draft.content)
@@ -743,11 +761,17 @@ class AgentController(
       },
       onFinished = { updated, succeeded ->
         activeRunJob = null
+        val unappliedGuidance = drainPendingActiveRunGuidance()
         if (activeRunTranscriptEvents === runTranscriptEvents) {
           activeRunTranscriptEvents = null
         }
         val status = if (succeeded) "Agent loop completed" else "Agent loop failed"
-        val nextInput = _state.value.queuedInputs.firstOrNull()
+        val queuedInputs = _state.value.queuedInputs
+        val nextInput = if (unappliedGuidance.isNotEmpty()) {
+          QueuedAgentInput(content = unappliedGuidance.joinToString("\n\n"), mode = QUEUED_INPUT_GUIDANCE)
+        } else {
+          queuedInputs.firstOrNull()
+        }
         if (nextInput == null) {
           agentRunStatusNotifier.finished(succeeded)
           refreshWorkspaceState(
@@ -756,7 +780,11 @@ class AgentController(
             status = status,
           )
         } else {
-          _state.update { it.copy(queuedInputs = it.queuedInputs.drop(1)) }
+          _state.update {
+            it.copy(
+              queuedInputs = if (unappliedGuidance.isNotEmpty()) it.queuedInputs else it.queuedInputs.drop(1),
+            )
+          }
           agentRunStatusNotifier.running("Running queued message...")
           refreshWorkspaceState(
             session = updated,
@@ -769,26 +797,56 @@ class AgentController(
     )
   }
 
-  private fun recordGuidanceForActiveRun(guidance: String) {
+  private fun queueGuidanceForActiveRun(guidance: String) {
+    synchronized(activeRunGuidanceLock) {
+      activeRunPendingGuidance += guidance
+    }
+  }
+
+  private fun clearPendingActiveRunGuidance() {
+    synchronized(activeRunGuidanceLock) {
+      activeRunPendingGuidance.clear()
+    }
+  }
+
+  private fun drainPendingActiveRunGuidance(): List<String> {
+    return synchronized(activeRunGuidanceLock) {
+      val pending = activeRunPendingGuidance.toList()
+      activeRunPendingGuidance.clear()
+      pending
+    }
+  }
+
+  private fun consumeGuidanceForActiveRun(): List<String> {
+    val guidance = drainPendingActiveRunGuidance()
+    if (guidance.isNotEmpty()) {
+      recordGuidanceAppliedForActiveRun(guidance)
+    }
+    return guidance
+  }
+
+  private fun recordGuidanceAppliedForActiveRun(guidanceItems: List<String>) {
     val events = activeRunTranscriptEvents ?: return
     val now = System.currentTimeMillis()
-    events += ConversationTranscriptEvent(
-      type = "user_guidance",
-      role = "user",
-      content = guidance,
-      timestampMillis = now,
-    )
-    events += ConversationTranscriptEvent(
-      type = "guidance",
-      title = "Guidance queued",
-      detail = "This guidance will be applied after the active run finishes.",
-      timestampMillis = now,
-      status = "queued",
-    )
+    guidanceItems.forEach { guidance ->
+      events += ConversationTranscriptEvent(
+        type = "user_guidance",
+        role = "user",
+        content = guidance,
+        timestampMillis = now,
+      )
+      events += ConversationTranscriptEvent(
+        type = "guidance",
+        title = "Guidance applied",
+        detail = "This guidance was inserted after the completed tool result and before the next model request.",
+        timestampMillis = now,
+        status = "applied",
+      )
+    }
     _state.update {
       it.copy(
         assistantDraft = it.assistantDraft?.withMergedTranscriptEvents(events),
-        status = "Guidance queued",
+        status = "Guidance applied",
       )
     }
   }
@@ -807,6 +865,7 @@ class AgentController(
     if (!current.isRunning) return
     activeRunJob?.cancel()
     activeRunJob = null
+    clearPendingActiveRunGuidance()
     val now = System.currentTimeMillis()
     val interruptTimelineEvent = AgentRunTimelineEvent(
       type = AgentRunEventType.RUN_INTERRUPTED,

@@ -163,6 +163,29 @@ private data class WorkspaceIgnoreRule(
   val negated: Boolean,
 )
 
+private val LEGACY_SEED_AGENT_RULES = """
+  # Agent Rules
+
+  - Keep all file paths relative to this workspace.
+  - Prefer plain HTML, CSS, JavaScript, Markdown, and JSON files.
+  - Do not assume npm, git, bash, or Linux tools exist on Android.
+  - Do not use emoji unless the user explicitly asks for them.
+  - For interactive HTML apps, prefer flovera.app.json preview kind `local_http`.
+  - When an app needs its own backend, declare a `python_http` server command and use standard fetch/SSE routes owned by that backend.
+  - Flovera WebView injects `--flovera-viewport-height`, `--flovera-viewport-width`, `--flovera-safe-bottom`, and `window.FloveraViewport`; keep first-screen content visible and avoid hidden or offscreen root layouts.
+  - Use Flovera app-owned routes only when intentionally relying on built-in provider settings:
+    - GET /__flovera__/api/health
+    - POST /__flovera__/api/deepseek/stream
+  - Legacy Workspace HTML can call controlled Android app events through window.Flovera:
+    - window.Flovera.toast("message")
+    - window.Flovera.notify(JSON.stringify({ title: "Title", body: "Body" }))
+    - window.Flovera.postEvent(JSON.stringify({ type: "notification", title: "Title", body: "Body" }))
+    - window.Flovera.runAction("action-id", JSON.stringify({ input: "..." }))
+    - window.Flovera.getJob("job-id")
+    - window.Flovera.cancelJob("job-id")
+  - Always check window.Flovera exists before calling legacy bridge methods.
+""".trimIndent()
+
 class WorkspaceManager(context: Context, workspaceId: String = "default") {
   private val appContext = context.applicationContext
   private val workspacesRoot = File(context.filesDir, "workspaces")
@@ -194,31 +217,11 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     )
     writeFile(
       path = "AGENT.md",
-      content = """
-        # Agent Rules
-
-        - Keep all file paths relative to this workspace.
-        - Prefer plain HTML, CSS, JavaScript, Markdown, and JSON files.
-        - Do not assume npm, git, bash, or Linux tools exist on Android.
-        - Do not use emoji unless the user explicitly asks for them.
-        - For interactive HTML apps, prefer flovera.app.json preview kind `local_http`.
-        - When an app needs its own backend, declare a `python_http` server command and use standard fetch/SSE routes owned by that backend.
-        - Flovera WebView injects `--flovera-viewport-height`, `--flovera-viewport-width`, `--flovera-safe-bottom`, and `window.FloveraViewport`; keep first-screen content visible and avoid hidden or offscreen root layouts.
-        - Use Flovera app-owned routes only when intentionally relying on built-in provider settings:
-          - GET /__flovera__/api/health
-          - POST /__flovera__/api/deepseek/stream
-        - Legacy Workspace HTML can call controlled Android app events through window.Flovera:
-          - window.Flovera.toast("message")
-          - window.Flovera.notify(JSON.stringify({ title: "Title", body: "Body" }))
-          - window.Flovera.postEvent(JSON.stringify({ type: "notification", title: "Title", body: "Body" }))
-          - window.Flovera.runAction("action-id", JSON.stringify({ input: "..." }))
-          - window.Flovera.getJob("job-id")
-          - window.Flovera.cancelJob("job-id")
-        - Always check window.Flovera exists before calling legacy bridge methods.
-      """.trimIndent(),
+      content = "",
       overwrite = false,
       createAutoSnapshot = false,
     )
+    clearLegacySeedAgentRules()
     writeFile(
       path = "index.html",
       content = """
@@ -960,7 +963,19 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
           "outputs": []
         }
       """.trimIndent(),
-    )
+      )
+  }
+
+  private fun clearLegacySeedAgentRules() {
+    val current = runCatching { readFile("AGENT.md") }.getOrDefault("")
+    if (current.trim() == LEGACY_SEED_AGENT_RULES.trim()) {
+      writeFile(
+        path = "AGENT.md",
+        content = "",
+        overwrite = true,
+        createAutoSnapshot = false,
+      )
+    }
   }
 
   private fun writeWorkspaceArtifactDemoFile(path: String, content: String) {

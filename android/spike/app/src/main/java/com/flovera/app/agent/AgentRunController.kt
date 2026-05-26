@@ -1,7 +1,8 @@
 package com.flovera.app.agent
 
 import com.flovera.app.config.AppSettings
-import com.flovera.app.koog.AgentPromptBuilder
+import com.flovera.app.koog.AgentPayloadTokenEstimator
+import com.flovera.app.koog.AgentRequestFootprintBuilder
 import com.flovera.app.koog.AgentRuntime
 import com.flovera.app.koog.KoogAgentRuntime
 import com.flovera.app.koog.KoogSessionHandoffCompressor
@@ -57,6 +58,7 @@ class AgentRunController(
     onSessionUpdated: (AgentSession, SessionMessage) -> Unit,
     onFinished: (AgentSession, Boolean) -> Unit,
     onRunEvent: (AgentRunEvent) -> Unit = {},
+    guidanceProvider: AgentRunGuidanceProvider = AgentRunGuidanceProvider.None,
     additionalTranscriptEvents: () -> List<ConversationTranscriptEvent> = { emptyList() },
   ): Job? {
     val trimmed = input.trim()
@@ -189,6 +191,7 @@ class AgentRunController(
             workspace = workspace,
             recorder = recorder,
             eventSink = eventSink,
+            guidanceProvider = guidanceProvider,
           ),
         )
       } catch (error: CancellationException) {
@@ -531,8 +534,8 @@ class AgentRunController(
         "assistant_text",
         "error_text",
         "user_guidance",
-        "user_text" -> 0
-        "guidance" -> 1
+        "user_text",
+        "guidance" -> 0
         "tool_call" -> 2
         else -> 3
       }
@@ -590,27 +593,30 @@ class AgentRunController(
     val historyChars = recentHistory.sumOf { message ->
       message.role.length + message.content.length + 2
     }
-    val webSearchAvailable = settings.networkEnabled && settings.webSearchEnabled && settings.braveSearchApiKey.isNotBlank()
-    val rulesChars = AgentPromptBuilder.systemPrompt(
-      networkEnabled = settings.networkEnabled,
-      webSearchAvailable = webSearchAvailable,
-      authorityMode = settings.agentAuthorityMode,
-    ).length + workspace.readAgentRules().length
-    val workspaceListingChars = workspace.listFiles(".").length
-    val toolSchemaChars = estimateToolCatalogChars(settings, webSearchAvailable)
-    val providerOverheadChars = estimateProviderRequestOverheadChars(settings, recentHistory.size)
-    val estimatedRequestChars = input.length +
-      historyChars +
-      rulesChars +
-      workspaceListingChars +
-      toolSchemaChars +
-      providerOverheadChars
-    val approximateTokens = approximateTokens(estimatedRequestChars)
+    val footprint = AgentRequestFootprintBuilder.build(
+      input = input,
+      settings = settings,
+      session = session,
+      workspace = workspace,
+    )
+    val estimatedRequestChars = footprint.requestChars
+    val providerOverheadChars = (
+      estimatedRequestChars -
+        input.length -
+        historyChars -
+        footprint.rulesChars -
+        footprint.toolSchemaChars
+      ).coerceAtLeast(0)
+    val tokenEstimate = AgentPayloadTokenEstimator.estimate(
+      payloadJson = footprint.payloadJson,
+      transportOverheadChars = footprint.transportOverheadChars,
+      model = settings.model,
+    )
     val provider = ModelProviderCatalog.findProvider(settings.provider)
     val modelContext = ModelProviderCatalog.contextFor(settings)
     val contextWindowTokens = modelContext.contextWindowTokens
     val budget = AgentContextBudget.evaluate(
-      tokens = approximateTokens,
+      tokens = tokenEstimate.tokens,
       contextWindowTokens = contextWindowTokens,
       compressionThresholdPercent = modelContext.compressionThresholdPercent,
     )
@@ -622,15 +628,15 @@ class AgentRunController(
       messageCount = session.messages.size,
       inputChars = input.length,
       historyChars = historyChars,
-      rulesChars = rulesChars,
-      workspaceListingChars = workspaceListingChars,
-      toolSchemaChars = toolSchemaChars,
+      rulesChars = footprint.rulesChars,
+      workspaceListingChars = 0,
+      toolSchemaChars = footprint.toolSchemaChars,
       providerOverheadChars = providerOverheadChars,
       estimatedRequestChars = estimatedRequestChars,
-      approximateTokens = approximateTokens,
+      approximateTokens = tokenEstimate.tokens,
       modelContextWindowTokens = contextWindowTokens,
       modelContextSource = modelContext.source,
-      tokenUsageSource = modelContext.usageSource,
+      tokenUsageSource = tokenEstimate.source,
       contextUsagePermille = budget.usagePermille,
       compressionThresholdPercent = modelContext.compressionThresholdPercent,
       contextBudgetStatus = budget.status,
@@ -638,28 +644,6 @@ class AgentRunController(
       compressed = false,
       summary = "No compression was applied for this run.",
     )
-  }
-
-  private fun approximateTokens(chars: Int): Int {
-    return ((chars + 3) / 4).coerceAtLeast(1)
-  }
-
-  private fun estimateToolCatalogChars(settings: AppSettings, webSearchAvailable: Boolean): Int {
-    var chars = 7_500
-    if (settings.networkEnabled) chars += 1_600
-    if (webSearchAvailable) chars += 1_200
-    if (settings.agentAuthorityMode != "safe") chars += 900
-    return chars
-  }
-
-  private fun estimateProviderRequestOverheadChars(settings: AppSettings, recentHistoryCount: Int): Int {
-    val providerFields = settings.provider.length + settings.model.length
-    val providerSpecific = when (settings.provider) {
-      "deepseek", "custom-openai", "openrouter", "xai", "alibaba", "moonshot", "zai" -> 900
-      "anthropic", "gemini", "bedrock" -> 1_200
-      else -> 1_000
-    }
-    return providerSpecific + providerFields + (recentHistoryCount * 36)
   }
 
   private fun buildInitialRunTimeline(
