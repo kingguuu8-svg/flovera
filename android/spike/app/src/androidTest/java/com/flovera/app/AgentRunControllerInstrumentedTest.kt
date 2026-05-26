@@ -7,7 +7,10 @@ import com.flovera.app.agent.AgentRunController
 import com.flovera.app.agent.AgentRunEventSink
 import com.flovera.app.agent.AgentRunEventType
 import com.flovera.app.agent.AgentRunGuidanceProvider
+import com.flovera.app.agent.ContextOverflowDetection
+import com.flovera.app.agent.ContextOverflowDetector
 import com.flovera.app.agent.HANDOFF_SOURCE_LLM
+import com.flovera.app.agent.InterruptedRunHandoff
 import com.flovera.app.agent.SessionHandoffCompression
 import com.flovera.app.agent.SessionHandoffCompressor
 import com.flovera.app.config.AppSettings
@@ -187,6 +190,66 @@ class AgentRunControllerInstrumentedTest {
     assertEquals(HANDOFF_SOURCE_LLM, runtime.sessionSeen?.contextRecords?.lastOrNull()?.summarySource)
     assertEquals(true, runtime.sessionSeen?.contextRecords?.lastOrNull()?.compressed)
     assertEquals("assistant", finishedSession?.messages?.last()?.role)
+  }
+
+  @Test
+  fun runControllerCompressesInterruptedRunAndRetriesOnceAfterContextOverflow() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val store = AgentSessionStore(context)
+    val sessions = SessionController(store)
+    val session = store.create("Overflow recovery ${System.currentTimeMillis()}")
+    val workspace = WorkspaceManager(context, "overflow-recovery-${System.currentTimeMillis()}").also { it.ensureSeedFiles() }
+    val runtime = OverflowThenSuccessRuntime()
+    val compressor = FakeHandoffCompressor("Recovered handoff summary")
+    val controller = AgentRunController(
+      runtime = runtime,
+      handoffCompressor = compressor,
+      contextOverflowDetector = FakeContextOverflowDetector(isOverflow = true),
+      scope = this,
+    )
+    var preparedSession: AgentSession? = null
+    var preparedDraft: SessionMessage? = null
+    var finishedSession: AgentSession? = null
+    var succeeded: Boolean? = null
+
+    val job = controller.submit(
+      input = "recover from overflow",
+      settings = AppSettings(),
+      session = session,
+      workspace = workspace,
+      appendUserPrompt = sessions::appendUserPrompt,
+      appendContextRecord = sessions::appendContextRecord,
+      appendCompressionDivider = sessions::appendCompressionDivider,
+      appendMessage = sessions::appendMessage,
+      onStarted = { _, _ -> },
+      onDraft = { },
+      onSessionUpdated = { updated, draft ->
+        preparedSession = updated
+        preparedDraft = draft
+      },
+      onFinished = { updated, success ->
+        finishedSession = updated
+        succeeded = success
+      },
+    )
+
+    assertNotNull(job)
+    job!!.join()
+
+    assertEquals(2, runtime.attempts)
+    assertEquals(true, succeeded)
+    assertTrue(compressor.called)
+    assertEquals("recover from overflow", compressor.interruptedRunSeen?.originalInput)
+    assertTrue(compressor.interruptedRunSeen?.assistantDraft?.contains("partial before overflow") == true)
+    assertTrue(compressor.interruptedRunSeen?.toolEvents?.any { it.name == "read_file" } == true)
+    assertTrue(preparedSession?.messages?.any { it.role == SESSION_ROLE_COMPRESSION } == true)
+    assertTrue(preparedDraft?.runEvents?.any { it.title == "Context overflow compressed" } == true)
+    val finalMessage = finishedSession?.messages?.lastOrNull()
+    assertEquals("assistant", finalMessage?.role)
+    assertEquals("retry output", finalMessage?.content)
+    assertTrue(finalMessage?.toolEvents?.any { it.name == "retry_tool" } == true)
+    assertTrue(finishedSession?.contextRecords?.any { it.source == "agent_run_overflow_recovery" && it.compressed } == true)
+    assertTrue(finishedSession?.messages?.any { it.role == SESSION_ROLE_COMPRESSION && it.content.contains("Recovered handoff summary") } == true)
   }
 
   @Test
@@ -463,17 +526,30 @@ class AgentRunControllerInstrumentedTest {
 
   private class FakeHandoffCompressor(private val summary: String) : SessionHandoffCompressor {
     var called: Boolean = false
+    var interruptedRunSeen: InterruptedRunHandoff? = null
 
     override suspend fun compress(
       settings: AppSettings,
       session: AgentSession,
       record: ContextUsageRecord,
       workspace: WorkspaceManager,
+      interruptedRun: InterruptedRunHandoff?,
     ): SessionHandoffCompression {
       called = true
+      interruptedRunSeen = interruptedRun
       return SessionHandoffCompression(
         summary = summary,
         source = HANDOFF_SOURCE_LLM,
+      )
+    }
+  }
+
+  private class FakeContextOverflowDetector(private val isOverflow: Boolean) : ContextOverflowDetector {
+    override suspend fun detect(settings: AppSettings, error: Throwable): ContextOverflowDetection {
+      return ContextOverflowDetection(
+        isOverflow = isOverflow,
+        source = "fake",
+        reason = error.message ?: error.toString(),
       )
     }
   }
@@ -550,6 +626,43 @@ class AgentRunControllerInstrumentedTest {
       recorder: ToolEventRecorder,
     ): String {
       error("Software caused connection abort")
+    }
+  }
+
+  private class OverflowThenSuccessRuntime : AgentRuntime {
+    var attempts: Int = 0
+
+    override suspend fun run(
+      input: String,
+      agentRunId: String,
+      settings: AppSettings,
+      session: AgentSession,
+      workspace: WorkspaceManager,
+      recorder: ToolEventRecorder,
+    ): String {
+      return "fallback"
+    }
+
+    override suspend fun runStreaming(
+      input: String,
+      agentRunId: String,
+      settings: AppSettings,
+      session: AgentSession,
+      workspace: WorkspaceManager,
+      recorder: ToolEventRecorder,
+      eventSink: AgentRunEventSink,
+      guidanceProvider: AgentRunGuidanceProvider,
+    ): String {
+      attempts += 1
+      return if (attempts == 1) {
+        eventSink.emit(AgentRunEvent(type = AgentRunEventType.MODEL_TEXT_DELTA, modelTextDelta = "partial before overflow"))
+        recorder.record("read_file", "path=large.txt", "large tool result")
+        error("context length exceeded: maximum number of tokens reached")
+      } else {
+        assertTrue(session.messages.any { it.role == SESSION_ROLE_COMPRESSION })
+        recorder.record("retry_tool", "{}", "ok")
+        "retry output"
+      }
     }
   }
 
