@@ -322,11 +322,14 @@ class AgentRunController(
     private val modelText = StringBuilder()
     private var modelTextStreamingStarted: Boolean = false
     private data class ChronoEntry(
+      val timestampMillis: Long,
+      val sequence: Long,
       val text: String = "",
       val tool: ToolEvent? = null,
     )
     private val chronoEntries = mutableListOf<ChronoEntry>()
     private var previousToolSnapshotSize: Int = 0
+    private var nextChronoSequence: Long = 0
 
     fun replaceBaseTimeline(events: List<AgentRunTimelineEvent>, statusContent: String) {
       this.baseTimelineEvents = events
@@ -339,7 +342,11 @@ class AgentRunController(
           val newTools = event.toolEvents.drop(previousToolSnapshotSize)
           latestToolEvents = event.toolEvents
           for (tool in newTools) {
-            chronoEntries += ChronoEntry(tool = tool)
+            chronoEntries += ChronoEntry(
+              timestampMillis = tool.timestampMillis,
+              sequence = nextChronoSequence++,
+              tool = tool,
+            )
           }
           previousToolSnapshotSize = event.toolEvents.size
         }
@@ -350,7 +357,11 @@ class AgentRunController(
           if (delta.isNotEmpty()) {
             modelTextStreamingStarted = true
             modelText.append(delta)
-            chronoEntries += ChronoEntry(text = delta)
+            chronoEntries += ChronoEntry(
+              timestampMillis = event.timestampMillis,
+              sequence = nextChronoSequence++,
+              text = delta,
+            )
           }
         }
 
@@ -454,16 +465,18 @@ class AgentRunController(
       val events = baseEvents.toMutableList()
 
       var pendingText = StringBuilder()
-      for (entry in chronoEntries) {
+      var pendingTextTimestampMillis: Long? = null
+      for (entry in orderedChronoEntries()) {
         if (entry.tool != null) {
           if (pendingText.isNotEmpty()) {
             events += ConversationTranscriptEvent(
               type = "assistant_text",
               role = role,
               content = pendingText.toString(),
-              timestampMillis = entry.tool.timestampMillis,
+              timestampMillis = pendingTextTimestampMillis ?: entry.timestampMillis,
             )
             pendingText = StringBuilder()
+            pendingTextTimestampMillis = null
           }
           val toolTimeline = buildToolTimelineEvents(listOf(entry.tool))
           val toolDetail = toolTimeline.firstOrNull()?.detail ?: "Tool: ${entry.tool.name}"
@@ -475,6 +488,9 @@ class AgentRunController(
             status = AGENT_RUN_STATUS_COMPLETED,
           )
         } else if (entry.text.isNotEmpty()) {
+          if (pendingTextTimestampMillis == null) {
+            pendingTextTimestampMillis = entry.timestampMillis
+          }
           pendingText.append(entry.text)
         }
       }
@@ -485,7 +501,7 @@ class AgentRunController(
           type = "assistant_text",
           role = role,
           content = pendingText.toString(),
-          timestampMillis = System.currentTimeMillis(),
+          timestampMillis = pendingTextTimestampMillis ?: System.currentTimeMillis(),
         )
       }
       events += trailingStatusEvents
@@ -502,15 +518,22 @@ class AgentRunController(
       return events
     }
 
+    private fun orderedChronoEntries(): List<ChronoEntry> {
+      return chronoEntries.sortedWith(
+        compareBy<ChronoEntry> { it.timestampMillis }
+          .thenBy { it.sequence },
+      )
+    }
+
     private fun buildTranscriptStatusEvents(
       timelineEvents: List<AgentRunTimelineEvent>,
       role: String,
     ): List<ConversationTranscriptEvent> {
       return buildConversationTranscriptEvents(
-        timelineEvents = timelineEvents.filterNot { it.isChronoOwnedToolStatus() },
-        content = "",
-        role = role,
-        includeContent = false,
+        timelineEvents.filterNot { it.isChronoOwnedToolStatus() },
+        "",
+        role,
+        false,
       )
     }
 

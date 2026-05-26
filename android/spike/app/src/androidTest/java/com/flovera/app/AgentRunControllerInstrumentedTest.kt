@@ -10,7 +10,9 @@ import com.flovera.app.agent.HANDOFF_SOURCE_LLM
 import com.flovera.app.agent.SessionHandoffCompression
 import com.flovera.app.agent.SessionHandoffCompressor
 import com.flovera.app.config.AppSettings
+import com.flovera.app.config.SettingsStore
 import com.flovera.app.koog.AgentRuntime
+import com.flovera.app.koog.KoogAgentRuntime
 import com.flovera.app.koog.ToolEventRecorder
 import com.flovera.app.session.AgentSession
 import com.flovera.app.session.AgentSessionStore
@@ -18,6 +20,7 @@ import com.flovera.app.session.ContextUsageRecord
 import com.flovera.app.session.SESSION_ROLE_COMPRESSION
 import com.flovera.app.session.SessionController
 import com.flovera.app.session.SessionMessage
+import com.flovera.app.session.ToolEvent
 import com.flovera.app.workspace.WorkspaceManager
 import java.io.File
 import kotlinx.coroutines.CompletableDeferred
@@ -27,6 +30,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 
 class AgentRunControllerInstrumentedTest {
@@ -652,6 +656,126 @@ class AgentRunControllerInstrumentedTest {
   }
 
   @Test
+  fun transcriptEventsUseEventTimestampsWhenCallbacksArriveOutOfOrder() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val store = AgentSessionStore(context)
+    val sessions = SessionController(store)
+    val session = store.create("Chrono timestamps ${System.currentTimeMillis()}")
+    val workspace = WorkspaceManager(context, "chrono-timestamps-${System.currentTimeMillis()}").also { it.ensureSeedFiles() }
+    val controller = AgentRunController(runtime = OutOfOrderTimestampStreamingAgentRuntime(), scope = this)
+    var finishedSession: AgentSession? = null
+
+    val job = controller.submit(
+      input = "timestamp order test",
+      settings = AppSettings(),
+      session = session,
+      workspace = workspace,
+      appendUserPrompt = sessions::appendUserPrompt,
+      appendContextRecord = sessions::appendContextRecord,
+      appendCompressionDivider = sessions::appendCompressionDivider,
+      appendMessage = sessions::appendMessage,
+      onStarted = { _, _ -> },
+      onDraft = { },
+      onSessionUpdated = { _, _ -> },
+      onFinished = { updated, _ -> finishedSession = updated },
+    )
+
+    assertNotNull(job)
+    job!!.join()
+
+    val transcript = finishedSession?.messages?.lastOrNull()?.transcriptEvents.orEmpty()
+    val firstToolIdx = transcript.indexOfFirst { it.type == "tool_call" && it.title.contains("first_tool") }
+    val textIdx = transcript.indexOfFirst { it.type == "assistant_text" && it.content.contains("middle text") }
+    val secondToolIdx = transcript.indexOfFirst { it.type == "tool_call" && it.title.contains("second_tool") }
+
+    assertTrue("first tool should be present", firstToolIdx >= 0)
+    assertTrue("middle text should be present", textIdx >= 0)
+    assertTrue("second tool should be present", secondToolIdx >= 0)
+    assertTrue("timestamp order should place text after first tool", firstToolIdx < textIdx)
+    assertTrue("timestamp order should place text before second tool", textIdx < secondToolIdx)
+  }
+
+  @Test
+  fun liveDeepSeekFixedPromptPersistsChronologicalTranscript() = runBlocking {
+    val arguments = InstrumentationRegistry.getArguments()
+    assumeTrue(
+      "Pass -e chronologicalTranscriptLive true to run the fixed live chronological transcript prompt.",
+      arguments.getString("chronologicalTranscriptLive").orEmpty().equals("true", ignoreCase = true),
+    )
+
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val settingsFromApp = SettingsStore(context).load()
+    val apiKey = arguments.getString("deepseekApiKey").orEmpty()
+      .ifBlank { settingsFromApp.apiKeyFor("deepseek") }
+    assumeTrue("Configure a DeepSeek API key in app settings or pass -e deepseekApiKey.", apiKey.isNotBlank())
+
+    val store = AgentSessionStore(context)
+    val sessions = SessionController(store)
+    val workspaceId = "chrono-live-${System.currentTimeMillis()}"
+    val workspace = WorkspaceManager(context, workspaceId).also { it.ensureSeedFiles() }
+    workspace.writeFile(
+      path = "AGENT.md",
+      content = """
+        # Agent Rules
+
+        - For this verification, call workspace tools multiple times.
+        - Write visible assistant text between tool calls.
+        - Keep the final answer concise.
+      """.trimIndent(),
+      createAutoSnapshot = false,
+    )
+    val session = store.create("Chronological transcript live ${System.currentTimeMillis()}")
+    val settings = settingsFromApp.copy(
+      provider = "deepseek",
+      apiKey = apiKey,
+      providerApiKeys = settingsFromApp.providerApiKeys + ("deepseek" to apiKey),
+      activeWorkspaceId = workspaceId,
+      activeSessionId = session.id,
+      maxAgentIterations = 12,
+    )
+    val controller = AgentRunController(runtime = KoogAgentRuntime(), scope = this)
+    var finishedSession: AgentSession? = null
+    val prompt = "尝试多次调用工具，并在调用工具之间输出文本"
+
+    val job = controller.submit(
+      input = prompt,
+      settings = settings,
+      session = session,
+      workspace = workspace,
+      appendUserPrompt = sessions::appendUserPrompt,
+      appendContextRecord = sessions::appendContextRecord,
+      appendCompressionDivider = sessions::appendCompressionDivider,
+      appendMessage = sessions::appendMessage,
+      onStarted = { _, _ -> },
+      onDraft = { },
+      onSessionUpdated = { _, _ -> },
+      onFinished = { updated, _ -> finishedSession = updated },
+    )
+
+    assertNotNull(job)
+    job!!.join()
+
+    val assistant = finishedSession?.messages?.lastOrNull()
+    assertNotNull("live run should persist an assistant message", assistant)
+    val transcript = assistant!!.transcriptEvents
+    val firstText = transcript.indexOfFirst { it.type == "assistant_text" && it.content.isNotBlank() }
+    val firstTool = transcript.indexOfFirst { it.type == "tool_call" }
+    val textAfterTool = transcript.indexOfFirstAfter(firstTool) {
+      it.type == "assistant_text" && it.content.isNotBlank()
+    }
+    val toolAfterText = transcript.indexOfFirstAfter(textAfterTool) {
+      it.type == "tool_call"
+    }
+
+    assertTrue("live transcript should include tool calls", firstTool >= 0)
+    assertTrue("live transcript should include assistant text", firstText >= 0)
+    assertTrue(
+      "live transcript should preserve text between tool calls; transcript=${transcript.map { it.type }}",
+      textAfterTool >= 0 && toolAfterText > textAfterTool,
+    )
+  }
+
+  @Test
   fun transcriptEventsKeepsNonStreamingOrderWithToolThenText() = runBlocking {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val store = AgentSessionStore(context)
@@ -831,6 +955,58 @@ class AgentRunControllerInstrumentedTest {
     }
   }
 
+  private class OutOfOrderTimestampStreamingAgentRuntime : AgentRuntime {
+    override suspend fun run(
+      input: String,
+      agentRunId: String,
+      settings: AppSettings,
+      session: AgentSession,
+      workspace: WorkspaceManager,
+      recorder: ToolEventRecorder,
+    ): String {
+      return "fallback"
+    }
+
+    override suspend fun runStreaming(
+      input: String,
+      agentRunId: String,
+      settings: AppSettings,
+      session: AgentSession,
+      workspace: WorkspaceManager,
+      recorder: ToolEventRecorder,
+      eventSink: AgentRunEventSink,
+    ): String {
+      val baseTime = System.currentTimeMillis()
+      val firstTool = ToolEvent(
+        name = "first_tool",
+        args = "{}",
+        result = "first result",
+        timestampMillis = baseTime + 100,
+      )
+      val secondTool = ToolEvent(
+        name = "second_tool",
+        args = "{}",
+        result = "second result",
+        timestampMillis = baseTime + 300,
+      )
+      eventSink.emit(
+        AgentRunEvent(
+          type = AgentRunEventType.TOOL_EVENTS_CHANGED,
+          toolEvents = listOf(firstTool, secondTool),
+          timestampMillis = baseTime + 400,
+        ),
+      )
+      eventSink.emit(
+        AgentRunEvent(
+          type = AgentRunEventType.MODEL_TEXT_DELTA,
+          modelTextDelta = "middle text",
+          timestampMillis = baseTime + 200,
+        ),
+      )
+      return "middle text"
+    }
+  }
+
   private class StreamingThenFailingAgentRuntime : AgentRuntime {
     override suspend fun run(
       input: String,
@@ -856,4 +1032,12 @@ class AgentRunControllerInstrumentedTest {
       error("stream failed after text")
     }
   }
+}
+
+private inline fun <T> List<T>.indexOfFirstAfter(startIndex: Int, predicate: (T) -> Boolean): Int {
+  if (startIndex < 0) return -1
+  for (index in (startIndex + 1)..lastIndex) {
+    if (predicate(this[index])) return index
+  }
+  return -1
 }

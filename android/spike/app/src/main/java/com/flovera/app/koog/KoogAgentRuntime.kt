@@ -201,6 +201,28 @@ private class AgentRunStreamFrameForwarder(
       )
     }
   }
+
+  fun emitMissingResponseText(frames: List<StreamFrame>, responses: List<Message.Response>) {
+    if (frames.any { it is StreamFrame.ToolCallDelta || it is StreamFrame.ToolCallComplete }) return
+    val frameText = frames.filterIsInstance<StreamFrame.TextDelta>().joinToString("") { it.text }
+    val responseText = responses.joinToString("\n") { it.content }.trimEnd()
+    if (responseText.isBlank() || responseText == frameText) return
+    val missingText = if (frameText.isNotBlank() && responseText.startsWith(frameText)) {
+      responseText.removePrefix(frameText)
+    } else if (frameText.isBlank()) {
+      responseText
+    } else {
+      return
+    }
+    if (missingText.isBlank()) return
+    modelTextDeltaCount += 1
+    delegate.emit(
+      AgentRunEvent(
+        type = AgentRunEventType.MODEL_TEXT_DELTA,
+        modelTextDelta = missingText,
+      ),
+    )
+  }
 }
 
 @OptIn(InternalAgentsApi::class)
@@ -248,6 +270,7 @@ private fun nodeLLMRequestStreamingAndSendResults(
   }
   frames.forEach { frameForwarder?.emitStreamFrame(it) }
   val responses = frames.toMessageResponses()
+  frameForwarder?.emitMissingResponseText(frames, responses)
   llm.writeSession {
     appendPrompt {
       messages(responses)
@@ -271,6 +294,7 @@ private fun nodeLLMSendMultipleToolResultsStreaming(
   }
   frames.forEach { frameForwarder?.emitStreamFrame(it) }
   val responses = frames.toMessageResponses()
+  frameForwarder?.emitMissingResponseText(frames, responses)
   llm.writeSession {
     appendPrompt {
       messages(responses)

@@ -158,7 +158,10 @@ class KoogAgentRuntimeStreamingInstrumentedTest {
       fallbackText = "fallback should not be used",
     )
     val runtime = KoogAgentRuntime(clientFactory = { _, _, _ -> fakeClient })
-    val recorder = ToolEventRecorder()
+    val eventOrder = mutableListOf<String>()
+    val recorder = ToolEventRecorder { toolEvents ->
+      eventOrder += "tool:${toolEvents.last().name}"
+    }
     val events = mutableListOf<AgentRunEvent>()
 
     val output = runtime.runStreaming(
@@ -168,7 +171,12 @@ class KoogAgentRuntimeStreamingInstrumentedTest {
       session = session,
       workspace = workspace,
       recorder = recorder,
-      eventSink = AgentRunEventSink { event -> events += event },
+      eventSink = AgentRunEventSink { event ->
+        events += event
+        if (event.type == AgentRunEventType.MODEL_TEXT_DELTA) {
+          eventOrder += "text:${event.modelTextDelta}"
+        }
+      },
     )
 
     assertEquals("Created interleaved-tool.txt.", output)
