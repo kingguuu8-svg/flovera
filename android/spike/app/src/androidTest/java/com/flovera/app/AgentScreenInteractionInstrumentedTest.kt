@@ -330,12 +330,12 @@ class AgentScreenInteractionInstrumentedTest {
     composeRule.onNodeWithContentDescription("Interrupt agent").performClick()
     composeRule.waitUntil(timeoutMillis = 5_000) { !controller.state.value.isRunning }
 
-    assertTrue(composeRule.onAllNodesWithText("Run interrupted by user.").fetchSemanticsNodes().isNotEmpty())
     composeRule.onNodeWithText("Run interrupted").assertIsDisplayed()
     composeRule.runOnIdle {
       assertEquals("Agent loop interrupted", controller.state.value.status)
-      assertEquals("Run interrupted by user.", controller.state.value.session?.messages?.lastOrNull()?.content)
+      assertEquals("", controller.state.value.session?.messages?.lastOrNull()?.content)
       assertTrue(controller.state.value.session?.messages?.lastOrNull()?.runEvents?.any { it.type == AgentRunEventType.RUN_INTERRUPTED } == true)
+      assertTrue(controller.state.value.session?.messages?.lastOrNull()?.transcriptEvents?.any { it.type == AgentRunEventType.RUN_INTERRUPTED } == true)
       assertTrue(notifier.events.contains("running:Working..."))
       assertTrue(notifier.events.contains("interrupted"))
     }
@@ -423,6 +423,15 @@ class AgentScreenInteractionInstrumentedTest {
       val guidedInput = runtime.inputsSnapshot().last()
       assertTrue(guidedInput.contains("Guidance while the previous agent run was active"))
       assertTrue(guidedInput.contains("keep the UI compact"))
+      val firstAssistant = controller.state.value.session?.messages
+        ?.firstOrNull { it.role == "assistant" && it.content == "assistant output for first task" }
+      val transcript = firstAssistant?.transcriptEvents.orEmpty()
+      val guidanceBubble = transcript.indexOfFirst { it.type == "user_guidance" && it.content == "keep the UI compact" }
+      val guidanceStatus = transcript.indexOfFirst { it.type == "guidance" && it.title == "Guidance queued" }
+      val assistantText = transcript.indexOfFirst { it.type == "assistant_text" && it.content == "assistant output for first task" }
+      assertTrue("guidance should be persisted as a transcript user bubble", guidanceBubble >= 0)
+      assertTrue("guidance queued status should follow the guidance bubble", guidanceStatus > guidanceBubble)
+      assertTrue("assistant output should remain after the guidance events", assistantText > guidanceStatus)
     }
 
     runtime.finishNext()

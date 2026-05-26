@@ -16,6 +16,7 @@ object RuntimeSessionHistory {
     maxMessages: Int = DEFAULT_MAX_MESSAGES,
   ): List<RuntimeHistoryEntry> {
     val messages = withoutCurrentInput(session.messages, currentInput)
+      .filter { it.role == SESSION_ROLE_COMPRESSION || it.content.isNotBlank() }
     val dividerIndex = messages.indexOfLast { it.role == SESSION_ROLE_COMPRESSION }
     if (dividerIndex < 0) {
       return messages

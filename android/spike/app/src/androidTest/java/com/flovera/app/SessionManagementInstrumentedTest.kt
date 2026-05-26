@@ -355,6 +355,25 @@ class SessionManagementInstrumentedTest {
   }
 
   @Test
+  fun appendMessagePreservesMessagesAddedAfterCallerSnapshot() {
+    val store = isolatedSessionStore("append-latest").store
+    val session = store.create("Append latest ${System.currentTimeMillis()}")
+    val first = store.appendMessage(session, SessionMessage(role = "user", content = "first"))
+    store.appendMessage(first, SessionMessage(role = "user", content = "inserted while run was active"))
+
+    val updated = store.appendMessage(first, SessionMessage(role = "assistant", content = "final answer"))
+
+    assertEquals(
+      listOf("first", "inserted while run was active", "final answer"),
+      updated.messages.map { it.content },
+    )
+    assertEquals(
+      listOf("first", "inserted while run was active", "final answer"),
+      store.load(session.id)?.messages?.map { it.content },
+    )
+  }
+
+  @Test
   fun runtimeHistoryUsesLatestCompressionDividerAsHandoffBoundary() {
     val store = isolatedSessionStore("runtime-history-compressed").store
     val session = store.create("Runtime history ${System.currentTimeMillis()}")
@@ -389,6 +408,19 @@ class SessionManagementInstrumentedTest {
     val entries = RuntimeSessionHistory.entries(three, currentInput = "three", maxMessages = 12)
 
     assertEquals(listOf("one", "two"), entries.map { it.content })
+  }
+
+  @Test
+  fun runtimeHistorySkipsStatusOnlyMessages() {
+    val store = isolatedSessionStore("runtime-history-status").store
+    val session = store.create("Runtime history status ${System.currentTimeMillis()}")
+    val one = store.appendMessage(session, SessionMessage(role = "user", content = "task"))
+    val status = store.appendMessage(one, SessionMessage(role = "assistant", content = ""))
+    val two = store.appendMessage(status, SessionMessage(role = "assistant", content = "answer"))
+
+    val entries = RuntimeSessionHistory.entries(two)
+
+    assertEquals(listOf("task", "answer"), entries.map { it.content })
   }
 
   private fun isolatedSessionStore(name: String): SessionStoreHarness {

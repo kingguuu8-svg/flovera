@@ -320,7 +320,10 @@ buffer that preserves runtime event order (MODEL_TEXT_DELTA segments and
 newly completed tool events are appended in arrival order, not grouped by type).
 The first covered event sources are
 thinking/compression status, completed tool calls, failure/interruption, and
-final-answer streaming. Failure events include a bounded error category
+final-answer streaming. Running-run guidance is now recorded as a
+`user_guidance` transcript bubble followed by a lightweight `guidance` status,
+so steering text stays visible at the time it was sent without becoming a fake
+assistant message. Failure events include a bounded error category
 (`provider`, `network`, `tool`, `permission`, `context`, or `unknown`) in the
 session run events, checkpoint, workspace error log, and user-visible error
 message, and the generated `.flovera/logs/...` and `.flovera/runs/...`
@@ -346,28 +349,25 @@ This is observability for the run loop, not hidden reasoning.
 - Route runtime state through `AgentRunEvent` so UI drafts, run events, session
   persistence, notifications, and future compression checks consume the same
   run-state stream.
-- Remaining work: add tool-start/tool-running events from tool entry points and
-  connect interleaved model text when the runtime exposes a stable contract.
+- Remaining work: add tool-start/tool-running events from tool entry points.
   The chrono buffer in `AgentRunEventAccumulator` now correctly interleaves
-  MODEL_TEXT_DELTA segments and tool-completion events in runtime arrival order,
-  with adjacent text deltas coalesced only within the same contiguous text
-  segment, never across tool boundaries.
+  MODEL_TEXT_DELTA segments, user guidance transcript events, guidance status,
+  and tool-completion events in timestamp order, with adjacent text deltas
+  coalesced only within the same contiguous text segment, never across tool or
+  guidance boundaries.
 
 
 ### Interleaved Model Conversation Streaming
 
-Status: Partially implemented. Flovera has a session-level `transcriptEvents`
-stream where the `AgentRunEventAccumulator` chrono buffer preserves runtime
-arrival order of MODEL_TEXT_DELTA segments and completed tool events.
-Text-before-tool, text-between-tools, and text-after-tools ordering is correct
-in `transcriptEvents`. Real assistant text before and between tool calls still
-needs a runtime/provider event stream because the current Koog `AIAgent.run` path does
-not yet expose a committed assistant delta contract in Flovera. Do not implement
-this as fake app narration or by parsing provider debug logs; the next entry
-point is a Koog event-stream/interleaving spike. A narrow Flovera-owned
-OpenAI-compatible tool-loop adapter is only a fallback if Koog cannot expose
-tool-before/tool-after assistant text, tool-call frames, and tool lifecycle
-events with enough fidelity.
+Status: L2 implemented for persisted transcript order. Flovera has a
+session-level `transcriptEvents` stream where the `AgentRunEventAccumulator`
+chrono buffer preserves MODEL_TEXT_DELTA segments, user guidance events, and
+completed tool events in chronological order. Text-before-tool,
+text-between-tools, and text-after-tools ordering is correct in
+`transcriptEvents`; real-device debug verification also covers guidance inserted
+between model text and a tool call. Remaining work is richer tool lifecycle
+coverage and handling provider-specific streaming finish anomalies without
+losing the partial transcript.
 
 - Add a separate streaming conversation track where the model can emit
   assistant text before, between, and after tool calls.
@@ -386,12 +386,12 @@ events with enough fidelity.
 - Current evidence favors a Koog-first path: Koog exposes typed streaming frames
   and event handlers, and Flovera's Koog streaming strategy can compile a fake
   interleaving case with text before a tool call and text after the tool result.
-  Real-device fake-provider instrumentation shows those text deltas reach
-  `AgentRunEvent`, while Koog's final output string may only contain the
-  post-tool assistant message. Flovera must therefore preserve interleaved model
-  text through `MODEL_TEXT_DELTA` transcript events, not by relying on final
-  output alone. Real-provider behavior still needs validation before marking
-  this complete.
+  Real-device debug verification shows those text deltas reach
+  `AgentRunEvent`, and a live DeepSeek run produced the expected
+  `assistant_text -> tool_call -> assistant_text -> tool_call` transcript shape
+  even though the provider stream ended without a finish reason. Flovera must
+  therefore preserve interleaved model text through `MODEL_TEXT_DELTA`
+  transcript events, not by relying on final output alone.
 - Persist only user-meaningful assistant text in session history; keep raw
   trace details expandable and bounded so long tool runs do not flood the
   conversation.
@@ -536,10 +536,13 @@ advanced request templates and auditable route changes.
 
 Status: Partially implemented. Workspace `AGENT.md` rules are injected into the
 agent prompt, users can interrupt runs, queue follow-up inputs, mark queued
-inputs as guidance, and status notifications exist for active runs. Remaining
-work is clearer UI separation between system rules and workspace rules, stronger
-cancellation coverage for active provider/tool work, and more explicit
-background lifecycle diagnostics.
+inputs as guidance, and status notifications exist for active runs. Guidance
+sent while a run is active is visible in the conversation as a user bubble in
+the active run transcript, followed by a lightweight queued status. Interrupts
+persist the active draft transcript plus a lightweight `run_interrupted` status
+instead of a full assistant bubble. Remaining work is clearer UI separation
+between system rules and workspace rules, stronger cancellation coverage for
+active provider/tool work, and more explicit background lifecycle diagnostics.
 
 - Separate system rules from user/workspace rules:
   - System rules are app-owned product and safety constraints.

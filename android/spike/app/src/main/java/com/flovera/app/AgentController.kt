@@ -17,6 +17,7 @@ import com.flovera.app.koog.ModelProviderCatalog
 import com.flovera.app.session.AgentSession
 import com.flovera.app.session.AgentRunTimelineEvent
 import com.flovera.app.session.AgentSessionStore
+import com.flovera.app.session.ConversationTranscriptEvent
 import com.flovera.app.session.SessionController
 import com.flovera.app.session.SessionMessage
 import com.flovera.app.workspace.WorkspaceArtifact
@@ -106,6 +107,36 @@ private fun QueuedAgentInput.toRunInput(): String {
   """.trimIndent()
 }
 
+private fun SessionMessage.withMergedTranscriptEvents(
+  extraEvents: List<ConversationTranscriptEvent>,
+): SessionMessage {
+  if (extraEvents.isEmpty()) return this
+  return copy(
+    transcriptEvents = (transcriptEvents + extraEvents)
+      .distinctBy { it.transcriptIdentityKey() }
+      .sortedWith(conversationTranscriptEventComparator()),
+  )
+}
+
+private fun ConversationTranscriptEvent.transcriptIdentityKey(): String {
+  return listOf(type, role, content, title, detail, timestampMillis.toString(), status).joinToString("|")
+}
+
+private fun conversationTranscriptEventComparator(): Comparator<ConversationTranscriptEvent> {
+  return compareBy<ConversationTranscriptEvent> { it.timestampMillis }
+    .thenBy { event ->
+      when (event.type) {
+        "assistant_text",
+        "error_text",
+        "user_guidance",
+        "user_text" -> 0
+        "guidance" -> 1
+        "tool_call" -> 2
+        else -> 3
+      }
+    }
+}
+
 class AgentController(
   context: Context,
   settingsStore: SettingsStore = SettingsStore(context.applicationContext),
@@ -121,6 +152,7 @@ class AgentController(
   private val artifactRunJobs = ConcurrentHashMap<String, Job>()
   private var selectedHtmlLoadJob: Job? = null
   @Volatile private var selectedHtmlLoadGeneration: Long = 0
+  private var activeRunTranscriptEvents: MutableList<ConversationTranscriptEvent>? = null
   private var workspaceController: WorkspaceController
   private var workspaceLocalAppServer: WorkspaceLocalAppServer
   private var workspacePythonHttpRuntime: WorkspacePythonHttpRuntime
@@ -631,15 +663,18 @@ class AgentController(
     val trimmed = current.input.trim()
     if (!current.isRunning || trimmed.isBlank()) return
     enqueueInput(trimmed, QUEUED_INPUT_GUIDANCE, "Guidance queued")
+    recordGuidanceForActiveRun(trimmed)
   }
 
   fun markQueuedInputAsGuidance(index: Int) {
+    val guidance = _state.value.queuedInputs.getOrNull(index)?.content ?: return
     _state.update {
       val updated = it.queuedInputs.mapIndexed { itemIndex, input ->
         if (itemIndex == index) input.copy(mode = QUEUED_INPUT_GUIDANCE) else input
       }
       it.copy(queuedInputs = updated, status = "Guidance queued")
     }
+    recordGuidanceForActiveRun(guidance)
   }
 
   fun removeQueuedInput(index: Int) {
@@ -663,6 +698,8 @@ class AgentController(
 
   private fun startAgentRun(input: String, session: AgentSession) {
     val current = _state.value
+    val runTranscriptEvents = mutableListOf<ConversationTranscriptEvent>()
+    activeRunTranscriptEvents = runTranscriptEvents
     activeRunJob = agentRunController.submit(
       input = input,
       settings = current.settings,
@@ -672,6 +709,7 @@ class AgentController(
       appendContextRecord = sessionController::appendContextRecord,
       appendCompressionDivider = sessionController::appendCompressionDivider,
       appendMessage = sessionController::appendMessage,
+      additionalTranscriptEvents = { runTranscriptEvents.toList() },
       onStarted = { withUser, draft ->
         val settings = settingsController.setActiveSession(current.settings, withUser.id)
         agentRunStatusNotifier.running(draft.content)
@@ -705,6 +743,9 @@ class AgentController(
       },
       onFinished = { updated, succeeded ->
         activeRunJob = null
+        if (activeRunTranscriptEvents === runTranscriptEvents) {
+          activeRunTranscriptEvents = null
+        }
         val status = if (succeeded) "Agent loop completed" else "Agent loop failed"
         val nextInput = _state.value.queuedInputs.firstOrNull()
         if (nextInput == null) {
@@ -728,6 +769,30 @@ class AgentController(
     )
   }
 
+  private fun recordGuidanceForActiveRun(guidance: String) {
+    val events = activeRunTranscriptEvents ?: return
+    val now = System.currentTimeMillis()
+    events += ConversationTranscriptEvent(
+      type = "user_guidance",
+      role = "user",
+      content = guidance,
+      timestampMillis = now,
+    )
+    events += ConversationTranscriptEvent(
+      type = "guidance",
+      title = "Guidance queued",
+      detail = "This guidance will be applied after the active run finishes.",
+      timestampMillis = now,
+      status = "queued",
+    )
+    _state.update {
+      it.copy(
+        assistantDraft = it.assistantDraft?.withMergedTranscriptEvents(events),
+        status = "Guidance queued",
+      )
+    }
+  }
+
   fun clearQueuedInputs() {
     _state.update {
       it.copy(
@@ -742,21 +807,38 @@ class AgentController(
     if (!current.isRunning) return
     activeRunJob?.cancel()
     activeRunJob = null
+    val now = System.currentTimeMillis()
+    val interruptTimelineEvent = AgentRunTimelineEvent(
+      type = AgentRunEventType.RUN_INTERRUPTED,
+      title = "Run interrupted",
+      detail = "The active agent run was cancelled by the user before completion.",
+      status = "interrupted",
+      compact = false,
+    )
+    val interruptTranscriptEvent = ConversationTranscriptEvent(
+      type = AgentRunEventType.RUN_INTERRUPTED,
+      title = "Run interrupted",
+      detail = "The active agent run was cancelled by the user before completion.",
+      timestampMillis = now,
+      status = "interrupted",
+      compact = false,
+    )
+    val activeTranscriptEvents = activeRunTranscriptEvents?.toList().orEmpty()
+    activeRunTranscriptEvents = null
+    val interruptedTranscriptEvents = (current.assistantDraft?.transcriptEvents.orEmpty() +
+      activeTranscriptEvents +
+      interruptTranscriptEvent)
+      .distinctBy { it.transcriptIdentityKey() }
+      .sortedWith(conversationTranscriptEventComparator())
     val interrupted = current.session?.let { session ->
       sessionController.appendMessage(
         session,
         SessionMessage(
           role = "assistant",
-          content = "Run interrupted by user.",
-          runEvents = listOf(
-            AgentRunTimelineEvent(
-              type = AgentRunEventType.RUN_INTERRUPTED,
-              title = "Run interrupted",
-              detail = "The active agent run was cancelled by the user before completion.",
-              status = "interrupted",
-              compact = false,
-            ),
-          ),
+          content = "",
+          toolEvents = current.assistantDraft?.toolEvents.orEmpty(),
+          runEvents = current.assistantDraft?.runEvents.orEmpty() + interruptTimelineEvent,
+          transcriptEvents = interruptedTranscriptEvents.ifEmpty { listOf(interruptTranscriptEvent) },
         ),
       )
     }

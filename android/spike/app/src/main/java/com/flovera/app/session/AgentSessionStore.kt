@@ -201,18 +201,20 @@ class AgentSessionStore(
   }
 
   fun appendMessage(session: AgentSession, message: SessionMessage): AgentSession {
-    val updated = session.copy(
+    val latest = load(session.id) ?: session
+    val updated = latest.copy(
       updatedAtMillis = System.currentTimeMillis(),
-      messages = session.messages + message,
+      messages = latest.messages + message,
     )
     save(updated)
     return updated
   }
 
   fun appendContextRecord(session: AgentSession, record: ContextUsageRecord): AgentSession {
-    val updated = session.copy(
+    val latest = load(session.id) ?: session
+    val updated = latest.copy(
       updatedAtMillis = System.currentTimeMillis(),
-      contextRecords = (session.contextRecords + record).takeLast(CONTEXT_RECORD_LIMIT),
+      contextRecords = (latest.contextRecords + record).takeLast(CONTEXT_RECORD_LIMIT),
     )
     save(updated)
     return updated

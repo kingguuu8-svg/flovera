@@ -57,6 +57,7 @@ class AgentRunController(
     onSessionUpdated: (AgentSession, SessionMessage) -> Unit,
     onFinished: (AgentSession, Boolean) -> Unit,
     onRunEvent: (AgentRunEvent) -> Unit = {},
+    additionalTranscriptEvents: () -> List<ConversationTranscriptEvent> = { emptyList() },
   ): Job? {
     val trimmed = input.trim()
     if (trimmed.isBlank()) return null
@@ -110,6 +111,7 @@ class AgentRunController(
       buildToolProgressNarration = ::buildToolProgressNarration,
       buildToolTimelineEvents = ::buildToolTimelineEvents,
       buildConversationTranscriptEvents = ::buildConversationTranscriptEvents,
+      additionalTranscriptEvents = additionalTranscriptEvents,
       onDraft = onDraft,
     )
     val eventSink = AgentRunEventSink { event ->
@@ -315,6 +317,7 @@ class AgentRunController(
       role: String,
       includeContent: Boolean,
     ) -> List<ConversationTranscriptEvent>,
+    private val additionalTranscriptEvents: () -> List<ConversationTranscriptEvent>,
     private val onDraft: (SessionMessage) -> Unit,
   ) {
     private var baseTimelineEvents: List<AgentRunTimelineEvent> = baseTimelineEvents
@@ -463,13 +466,14 @@ class AgentRunController(
       val runningStreamingEvents = dynamicEvents.filter { it.isRunningStreamingStatus() }
       val trailingStatusEvents = dynamicEvents.filterNot { it.isRunningStreamingStatus() }
       val events = baseEvents.toMutableList()
+      val chronologicalEvents = additionalTranscriptEvents().toMutableList()
 
       var pendingText = StringBuilder()
       var pendingTextTimestampMillis: Long? = null
       for (entry in orderedChronoEntries()) {
         if (entry.tool != null) {
           if (pendingText.isNotEmpty()) {
-            events += ConversationTranscriptEvent(
+            chronologicalEvents += ConversationTranscriptEvent(
               type = "assistant_text",
               role = role,
               content = pendingText.toString(),
@@ -480,7 +484,7 @@ class AgentRunController(
           }
           val toolTimeline = buildToolTimelineEvents(listOf(entry.tool))
           val toolDetail = toolTimeline.firstOrNull()?.detail ?: "Tool: ${entry.tool.name}"
-          events += ConversationTranscriptEvent(
+          chronologicalEvents += ConversationTranscriptEvent(
             type = "tool_call",
             title = "Tool: ${entry.tool.name}",
             detail = toolDetail,
@@ -495,15 +499,19 @@ class AgentRunController(
         }
       }
 
-      events += runningStreamingEvents
       if (pendingText.isNotEmpty()) {
-        events += ConversationTranscriptEvent(
+        chronologicalEvents += ConversationTranscriptEvent(
           type = "assistant_text",
           role = role,
           content = pendingText.toString(),
           timestampMillis = pendingTextTimestampMillis ?: System.currentTimeMillis(),
         )
       }
+      events += chronologicalEvents.sortedWith(
+        compareBy<ConversationTranscriptEvent> { it.timestampMillis }
+          .thenBy { transcriptEventSortRank(it) },
+      )
+      events += runningStreamingEvents
       events += trailingStatusEvents
 
       if ((includeFallbackContent || role == "error") && finalContent.isNotBlank()) {
@@ -516,6 +524,18 @@ class AgentRunController(
       }
 
       return events
+    }
+
+    private fun transcriptEventSortRank(event: ConversationTranscriptEvent): Int {
+      return when (event.type) {
+        "assistant_text",
+        "error_text",
+        "user_guidance",
+        "user_text" -> 0
+        "guidance" -> 1
+        "tool_call" -> 2
+        else -> 3
+      }
     }
 
     private fun orderedChronoEntries(): List<ChronoEntry> {

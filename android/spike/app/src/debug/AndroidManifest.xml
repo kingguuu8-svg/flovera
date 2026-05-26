@@ -4,5 +4,8 @@
         <receiver
             android:name="com.flovera.app.debug.ChronologicalTranscriptDebugReceiver"
             android:exported="true" />
+        <receiver
+            android:name="com.flovera.app.debug.ConversationTimelineDebugReceiver"
+            android:exported="true" />
     </application>
 </manifest>

@@ -1015,7 +1015,7 @@ private fun ConversationDialog(
               key = { index, message -> "${message.timestampMillis}-${message.role}-$index" },
             ) { index, message ->
               if (message.role == SESSION_ROLE_COMPRESSION) {
-                CompressionDivider(message)
+                CompressionDivider(message, language)
               } else if (message.transcriptEvents.isNotEmpty()) {
                 ConversationTranscript(
                   message = message,
@@ -1199,51 +1199,43 @@ private fun ConversationDialog(
 }
 
 @Composable
-private fun CompressionDivider(message: SessionMessage) {
+private fun CompressionDivider(message: SessionMessage, language: String) {
   var expanded by remember(message.timestampMillis, message.content) { mutableStateOf(false) }
-  Surface(
-    modifier = Modifier.fillMaxWidth(),
-    shape = FloveraSmallShape,
-    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.42f),
-    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.44f)),
-    tonalElevation = 0.dp,
+  Column(
+    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+    verticalArrangement = Arrangement.spacedBy(4.dp),
   ) {
-    Column(
-      modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-      horizontalAlignment = Alignment.CenterHorizontally,
-      verticalArrangement = Arrangement.spacedBy(4.dp),
+    ConversationRunEventRow(
+      event = AgentRunTimelineEvent(
+        type = "compression",
+        title = "Context compressed",
+        detail = formatMessageTime(message.timestampMillis),
+        timestampMillis = message.timestampMillis,
+        status = "completed",
+      ),
+      language = language,
+    )
+    TextButton(
+      onClick = { expanded = !expanded },
+      modifier = Modifier.align(Alignment.CenterHorizontally),
     ) {
       Text(
-        text = "Context compressed",
-        color = MaterialTheme.colorScheme.onPrimaryContainer,
-        style = MaterialTheme.typography.labelMedium,
-        fontWeight = FontWeight.SemiBold,
-      )
-      Text(
-        text = formatMessageTime(message.timestampMillis),
-        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.68f),
+        text = if (expanded) "Hide handoff summary" else "Show handoff summary",
         style = MaterialTheme.typography.labelSmall,
       )
-      TextButton(onClick = { expanded = !expanded }) {
-        Text(
-          text = if (expanded) "Hide handoff summary" else "Show handoff summary",
-          color = MaterialTheme.colorScheme.onPrimaryContainer,
-          style = MaterialTheme.typography.labelSmall,
-        )
-      }
-      if (expanded) {
-        Surface(
-          modifier = Modifier.fillMaxWidth(),
-          shape = FloveraSmallShape,
-          color = MaterialTheme.colorScheme.background.copy(alpha = 0.78f),
-          border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        ) {
-          Box(modifier = Modifier.padding(10.dp)) {
-            MarkdownMessageText(
-              content = message.content,
-              color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-          }
+    }
+    if (expanded) {
+      Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = FloveraSmallShape,
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.34f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.58f)),
+      ) {
+        Box(modifier = Modifier.padding(10.dp)) {
+          MarkdownMessageText(
+            content = message.content,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+          )
         }
       }
     }
@@ -1446,8 +1438,20 @@ private fun ConversationTranscript(
     verticalArrangement = Arrangement.spacedBy(6.dp),
   ) {
     events.forEach { event ->
-      if (event.type == "assistant_text" || event.type == "error_text") {
-        val role = event.role.ifBlank { if (event.type == "error_text") "error" else "assistant" }
+      if (
+        event.type == "assistant_text" ||
+        event.type == "error_text" ||
+        event.type == "user_guidance" ||
+        event.type == "user_text"
+      ) {
+        val role = event.role.ifBlank {
+          when (event.type) {
+            "error_text" -> "error"
+            "user_guidance",
+            "user_text" -> "user"
+            else -> "assistant"
+          }
+        }
         MessageBubble(
           message = message.copy(
             role = role,
@@ -1487,44 +1491,35 @@ private fun ConversationRunEvents(message: SessionMessage, language: String) {
 @Composable
 private fun ConversationRunEventRow(event: AgentRunTimelineEvent, language: String) {
   val color = MaterialTheme.colorScheme.onSurfaceVariant
-  Surface(
-    modifier = Modifier.fillMaxWidth(0.86f),
-    shape = FloveraSmallShape,
-    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f),
-    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
-    tonalElevation = 0.dp,
+  Row(
+    modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 3.dp),
+    horizontalArrangement = Arrangement.spacedBy(7.dp),
+    verticalAlignment = Alignment.Top,
   ) {
-    Row(
-      modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
-      horizontalArrangement = Arrangement.spacedBy(8.dp),
-      verticalAlignment = Alignment.Top,
+    Text(
+      text = "\u203A",
+      color = color.copy(alpha = 0.54f),
+      style = MaterialTheme.typography.bodySmall,
+    )
+    Column(
+      modifier = Modifier.weight(1f),
+      verticalArrangement = Arrangement.spacedBy(1.dp),
     ) {
       Text(
-        text = "\u25B9",
-        color = color.copy(alpha = 0.72f),
+        text = compactRunEventTitle(event, language),
+        color = color.copy(alpha = 0.86f),
         style = MaterialTheme.typography.bodySmall,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
       )
-      Column(
-        modifier = Modifier.weight(1f),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
-      ) {
+      compactRunEventDetail(event)?.let { detail ->
         Text(
-          text = compactRunEventTitle(event, language),
-          color = color,
-          style = MaterialTheme.typography.bodySmall,
-          fontWeight = FontWeight.SemiBold,
+          text = detail,
+          color = color.copy(alpha = 0.62f),
+          style = MaterialTheme.typography.labelSmall,
           maxLines = 1,
           overflow = TextOverflow.Ellipsis,
         )
-        compactRunEventDetail(event)?.let { detail ->
-          Text(
-            text = detail,
-            color = color.copy(alpha = 0.72f),
-            style = MaterialTheme.typography.labelSmall,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-          )
-        }
       }
     }
   }
