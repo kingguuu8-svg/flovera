@@ -10,6 +10,19 @@ import org.junit.Test
 
 class AgentPromptBuilderInstrumentedTest {
   @Test
+  fun conversationMarkdownNormalizationRemovesUnsafeControlCharacters() {
+    val normalized = normalizeConversationMarkdownContent("alpha\u0000\r\n1. beta\u0085\n\tgamma\uFEFF")
+
+    assertFalse(normalized.contains('\u0000'))
+    assertFalse(normalized.contains('\u0085'))
+    assertFalse(normalized.contains('\uFEFF'))
+    assertTrue(normalized.contains("alpha"))
+    assertTrue(normalized.contains("1. beta"))
+    assertEquals("beta", stripMarkdownListMarker("1. beta"))
+    assertEquals("beta", stripMarkdownListMarker("- beta"))
+  }
+
+  @Test
   fun systemPromptKeepsWorkspaceRulesOutOfSystemLayer() {
     val workspaceRule = "Prefer compact UI labels."
     val systemPrompt = AgentPromptBuilder.systemPrompt(networkEnabled = true, webSearchAvailable = true)

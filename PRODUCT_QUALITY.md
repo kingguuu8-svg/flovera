@@ -709,12 +709,16 @@ Remaining work is richer artifact validation and broader UX polish.
 
 ### Conversation Rendering And Markdown Fidelity
 
-Status: Backlog. Conversation rendering is usable for plain text and basic
-Markdown, but real dogfood still exposes malformed Markdown, mojibake-like
-garbling, and edge cases where generated text does not render as the model
-intended. Treat this as conversation product quality, not a cosmetic renderer
-detail, because unclear output can change user decisions during agent work.
+Status: Partially implemented. Conversation rendering is usable for plain text
+and basic Markdown, and the display layer now normalizes unsafe control
+characters/newlines and handles numbered list markers as list items. Real
+dogfood still exposes malformed Markdown, mojibake-like garbling, and edge
+cases where generated text does not render as the model intended. Treat this as
+conversation product quality, not a cosmetic renderer detail, because unclear
+output can change user decisions during agent work.
 
+- Done: add a low-risk display normalization layer for control characters,
+  mixed newlines, BOM characters, and numbered list markers.
 - Improve Markdown parsing/rendering for mixed Chinese/English, code fences,
   lists, inline paths, tables, escaped characters, and streaming updates.
 - Add regression examples from real broken conversation output instead of only

@@ -2014,7 +2014,7 @@ private fun parseMarkdownBlocks(content: String): List<MarkdownBlock> {
     paragraph.clear()
   }
 
-  content.lines().forEach { rawLine ->
+  normalizeConversationMarkdownContent(content).lines().forEach { rawLine ->
     val line = rawLine.trimEnd()
     if (line.trimStart().startsWith("```")) {
       if (inCode) {
@@ -2040,9 +2040,9 @@ private fun parseMarkdownBlocks(content: String): List<MarkdownBlock> {
         val level = trimmed.takeWhile { it == '#' }.length.coerceIn(1, 3)
         blocks += MarkdownBlock.Heading(level, trimmed.drop(level).trim())
       }
-      trimmed.startsWith("- ") || trimmed.startsWith("* ") -> {
+      stripMarkdownListMarker(line) != null -> {
         flushParagraph()
-        blocks += MarkdownBlock.Bullet(trimmed.drop(2).trim())
+        blocks += MarkdownBlock.Bullet(stripMarkdownListMarker(line).orEmpty())
       }
       trimmed.startsWith("> ") -> {
         flushParagraph()
