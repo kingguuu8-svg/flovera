@@ -15,6 +15,7 @@ koog = "0.8.0"
 kotlinxSerializationJson = "1.9.0"
 chaquopy = "17.0.0"
 jtokkit = "1.1.0"
+markwon = "4.6.2"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "androidxCore" }
@@ -38,6 +39,8 @@ kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-t
 koog-agents = { module = "ai.koog:koog-agents", version.ref = "koog" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinxSerializationJson" }
 jtokkit = { module = "com.knuddels:jtokkit", version.ref = "jtokkit" }
+markwon-core = { module = "io.noties.markwon:core", version.ref = "markwon" }
+markwon-ext-tables = { module = "io.noties.markwon:ext-tables", version.ref = "markwon" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "androidGradlePlugin" }

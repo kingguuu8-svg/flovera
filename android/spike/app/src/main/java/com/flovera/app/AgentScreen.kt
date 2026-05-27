@@ -12,8 +12,10 @@ import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.TextView
 import android.widget.ImageView
 import android.widget.Toast
+import android.text.method.LinkMovementMethod
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
@@ -64,6 +66,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -72,6 +75,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
@@ -88,6 +92,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import io.noties.markwon.Markwon
+import io.noties.markwon.ext.tables.TablePlugin
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -109,6 +115,7 @@ import com.flovera.app.workspace.WorkspaceSnapshotRecord
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.delay
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -820,7 +827,8 @@ private fun ConversationDialog(
     val lastEventTime = draft.transcriptEvents.lastOrNull()?.timestampMillis
       ?: draft.runEvents.lastOrNull()?.timestampMillis
       ?: 0L
-    "${draft.content.length}:${draft.runEvents.size}:${draft.toolEvents.size}:${draft.transcriptEvents.size}:$lastEventTime"
+    val contentBucket = draft.content.length / 120
+    "$contentBucket:${draft.runEvents.size}:${draft.toolEvents.size}:${draft.transcriptEvents.size}:$lastEventTime"
   }.orEmpty()
   val workspaceMessagePaths = remember(state.workspaceTree) { state.workspaceTree.workspaceMessageLinkPaths() }
   var pendingRevertIndex by remember { mutableStateOf<Int?>(null) }
@@ -854,7 +862,7 @@ private fun ConversationDialog(
   }
 
   LaunchedEffect(bottomAnchorIndex, assistantDraftScrollKey, stickToConversationBottom) {
-    if (stickToConversationBottom) {
+    if (stickToConversationBottom && !listState.isScrollInProgress) {
       scrollToConversationBottom()
     }
   }
@@ -1021,6 +1029,7 @@ private fun ConversationDialog(
                   message = message,
                   workspaceMessagePaths = workspaceMessagePaths,
                   language = language,
+                  streaming = false,
                   onOpenPath = {
                     controller.selectWorkspacePreview(it)
                     onDismiss()
@@ -1034,6 +1043,7 @@ private fun ConversationDialog(
                     pathLinks = remember(message.content, workspaceMessagePaths) {
                       conversationPathLinks(message.content, workspaceMessagePaths)
                     },
+                    streaming = false,
                     onOpenPath = {
                       controller.selectWorkspacePreview(it)
                       onDismiss()
@@ -1050,6 +1060,7 @@ private fun ConversationDialog(
                     message = draft,
                     workspaceMessagePaths = workspaceMessagePaths,
                     language = language,
+                    streaming = true,
                     onOpenPath = {
                       controller.selectWorkspacePreview(it)
                       onDismiss()
@@ -1063,6 +1074,7 @@ private fun ConversationDialog(
                       pathLinks = remember(draft.content, workspaceMessagePaths) {
                         conversationPathLinks(draft.content, workspaceMessagePaths)
                       },
+                      streaming = true,
                       onOpenPath = {
                         controller.selectWorkspacePreview(it)
                         onDismiss()
@@ -1325,6 +1337,7 @@ private fun QueuedMessageRow(
 private fun MessageBubble(
   message: SessionMessage,
   pathLinks: List<String> = emptyList(),
+  streaming: Boolean = false,
   onOpenPath: (String) -> Unit = {},
   onRevert: (() -> Unit)?,
 ) {
@@ -1401,7 +1414,7 @@ private fun MessageBubble(
               }
             }
           }
-          MarkdownMessageText(content = message.content, color = textColor)
+          MarkdownMessageText(content = message.content, color = textColor, streaming = streaming)
           if (!selectionEnabled && pathLinks.isNotEmpty()) {
             ConversationPathLinks(
               paths = pathLinks,
@@ -1429,6 +1442,7 @@ private fun ConversationTranscript(
   message: SessionMessage,
   workspaceMessagePaths: List<String>,
   language: String,
+  streaming: Boolean = false,
   onOpenPath: (String) -> Unit,
 ) {
   val events = remember(message.transcriptEvents) { compactConversationTranscriptEvents(message.transcriptEvents) }
@@ -1464,6 +1478,7 @@ private fun ConversationTranscript(
           pathLinks = remember(event.content, workspaceMessagePaths) {
             conversationPathLinks(event.content, workspaceMessagePaths)
           },
+          streaming = streaming && event.type == "assistant_text",
           onOpenPath = onOpenPath,
           onRevert = null,
         )
@@ -1710,7 +1725,63 @@ private fun MessageBubbleContent(
 }
 
 @Composable
-private fun MarkdownMessageText(content: String, color: Color) {
+private fun MarkdownMessageText(content: String, color: Color, streaming: Boolean = false) {
+  val normalized = remember(content) { normalizeConversationMarkdownContent(content) }
+  if (streaming) {
+    StreamingPlainMessageText(content = normalized, color = color)
+  } else {
+    MarkwonMessageText(content = normalized, color = color)
+  }
+}
+
+@Composable
+private fun StreamingPlainMessageText(content: String, color: Color) {
+  var displayed by remember { mutableStateOf(content) }
+  LaunchedEffect(content) {
+    delay(120)
+    displayed = content
+  }
+  Text(
+    text = displayed,
+    color = color,
+    style = MaterialTheme.typography.bodyMedium,
+  )
+}
+
+@Composable
+private fun MarkwonMessageText(content: String, color: Color) {
+  val context = LocalContext.current
+  val markwon = remember(context) {
+    Markwon.builder(context)
+      .usePlugin(TablePlugin.create(context))
+      .build()
+  }
+  val textColor = color.toArgb()
+  AndroidView(
+    modifier = Modifier.fillMaxWidth(),
+    factory = { viewContext ->
+      TextView(viewContext).apply {
+        setTextColor(textColor)
+        textSize = 14f
+        includeFontPadding = true
+        movementMethod = LinkMovementMethod.getInstance()
+        linksClickable = true
+      }
+    },
+    update = { textView ->
+      textView.setTextColor(textColor)
+      textView.textSize = 14f
+      runCatching {
+        markwon.setMarkdown(textView, content)
+      }.onFailure {
+        textView.text = content
+      }
+    },
+  )
+}
+
+@Composable
+private fun LegacyMarkdownMessageText(content: String, color: Color) {
   val blocks = remember(content) { parseMarkdownBlocks(content) }
   Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
     blocks.forEach { block ->

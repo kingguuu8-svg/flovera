@@ -92,6 +92,8 @@ dependencies {
   implementation(libs.koog.agents)
   implementation(libs.kotlinx.serialization.json)
   implementation(libs.jtokkit)
+  implementation(libs.markwon.core)
+  implementation(libs.markwon.ext.tables)
 
   // Arch Components
   implementation(libs.androidx.lifecycle.runtime.compose)
