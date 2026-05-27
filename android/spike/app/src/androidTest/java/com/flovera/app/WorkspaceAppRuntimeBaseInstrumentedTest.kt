@@ -170,6 +170,9 @@ class WorkspaceAppRuntimeBaseInstrumentedTest {
 
     assertFalse("Hidden content should not be accepted as visible: $result", WorkspaceWebViewHardening.isVisibleResult(result))
     assertTrue("Hidden content result should include visibility diagnostics: $result", result.contains("visible"))
+    assertTrue(
+      WorkspaceWebViewHardening.visibilityFailureMessage(result).contains("No visible main content"),
+    )
   }
 
   @Test
