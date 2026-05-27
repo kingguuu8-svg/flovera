@@ -571,8 +571,34 @@ work, and more explicit background lifecycle diagnostics.
   Android lifecycle limits.
 - Show ongoing background status in the Android notification shade, including
   current run state, interruption action, and failure/success outcome.
+- Explore a stronger opt-in keep-alive mode for long-running local work,
+  including whether a small overlay/floating-window affordance can lawfully and
+  usefully keep Flovera foreground-adjacent on Android. This must be gated by
+  explicit user permission, clear visible state, and a fallback path when the
+  overlay permission is denied or the OEM background policy still stops work.
 - Background execution must preserve existing settings, session persistence,
   error logs, and notification permission boundaries.
+
+### Slash Commands And Input Modes
+
+Status: Deferred. Flovera does not currently parse slash commands in the
+conversation composer. Input modes are exposed through normal send, queue,
+guide, and stop controls. The backlog target is lightweight command shortcuts
+that improve repeat workflows without turning the composer into a hidden shell.
+
+- Add slash commands for common conversation modes, starting with commands such
+  as `/plan` and `/compose` when their semantics are stable.
+- Slash commands should map to app-owned modes or prompt wrappers with visible
+  state, not to arbitrary hidden instructions that users cannot inspect.
+- Commands must be discoverable from the composer or settings and should degrade
+  to ordinary text when not recognized.
+- Keep command output in the normal conversation transcript so mode changes are
+  visible and reversible.
+- Acceptance criteria before implementation:
+  - `/plan` and `/compose` have precise product semantics and tests;
+  - unknown slash commands do not silently change agent behavior;
+  - localized Chinese UI and prompt behavior remain natural when the command is
+    used in a Chinese conversation.
 
 ### System Prompt Optimization
 
@@ -614,6 +640,11 @@ restricted tools and MCP integrations.
 
 - Add Brave Search API support as the first non-provider web search path.
 - Expose web search as an agent tool behind an explicit permission setting.
+- Revisit the default network posture for release: make network-enabled
+  workflows available by default when the user has configured the needed
+  provider/search credentials, but move the switch into Settings instead of
+  keeping it as a prominent conversation control. The UI must still make the
+  current network/tool permission state inspectable.
 - Let the agent propose additional restricted tools and MCP integrations.
 - Add a user approval flow before proposed tools or MCP entries become active.
 - Keep tool availability visible to the agent only when the corresponding user
