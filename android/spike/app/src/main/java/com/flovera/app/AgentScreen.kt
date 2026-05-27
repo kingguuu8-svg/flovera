@@ -767,7 +767,7 @@ private class FloveraWorkspaceWebViewClient(
       {
         view.evaluateJavascript(WorkspaceWebViewHardening.visibleContentCheckJs) { result ->
           if (!WorkspaceWebViewHardening.isVisibleResult(result)) {
-            onError("WebView content may be invisible. Check viewport height, offscreen roots, blocked resources, or missing local HTTP routes.")
+            onError(WorkspaceWebViewHardening.visibilityFailureMessage(result))
           }
         }
       },
@@ -1732,8 +1732,8 @@ private fun MarkdownMessageText(content: String, color: Color) {
           style = MaterialTheme.typography.bodyMedium,
         )
 
-        is MarkdownBlock.Bullet -> InlineMarkdownText(
-          text = "- ${block.text}",
+        is MarkdownBlock.ListItem -> InlineMarkdownText(
+          text = "${block.marker} ${block.text}",
           color = color,
           style = MaterialTheme.typography.bodyMedium,
         )
@@ -1997,7 +1997,7 @@ private fun Char?.isWorkspacePathBoundary(): Boolean {
 private sealed interface MarkdownBlock {
   data class Heading(val level: Int, val text: String) : MarkdownBlock
   data class Paragraph(val text: String) : MarkdownBlock
-  data class Bullet(val text: String) : MarkdownBlock
+  data class ListItem(val marker: String, val text: String) : MarkdownBlock
   data class Quote(val text: String) : MarkdownBlock
   data class Code(val text: String) : MarkdownBlock
 }
@@ -2016,7 +2016,7 @@ private fun parseMarkdownBlocks(content: String): List<MarkdownBlock> {
 
   normalizeConversationMarkdownContent(content).lines().forEach { rawLine ->
     val line = rawLine.trimEnd()
-    if (line.trimStart().startsWith("```")) {
+    if (line.trimStart().startsWith("```") || line.trimStart().startsWith("~~~")) {
       if (inCode) {
         blocks += MarkdownBlock.Code(code.toString().trimEnd())
         code.clear()
@@ -2040,9 +2040,10 @@ private fun parseMarkdownBlocks(content: String): List<MarkdownBlock> {
         val level = trimmed.takeWhile { it == '#' }.length.coerceIn(1, 3)
         blocks += MarkdownBlock.Heading(level, trimmed.drop(level).trim())
       }
-      stripMarkdownListMarker(line) != null -> {
+      parseMarkdownListItem(line) != null -> {
         flushParagraph()
-        blocks += MarkdownBlock.Bullet(stripMarkdownListMarker(line).orEmpty())
+        val listItem = parseMarkdownListItem(line)
+        blocks += MarkdownBlock.ListItem(listItem?.marker.orEmpty(), listItem?.text.orEmpty())
       }
       trimmed.startsWith("> ") -> {
         flushParagraph()
@@ -2171,11 +2172,24 @@ private fun HtmlFilesDialog(
 }
 
 object WorkspaceWebViewHardening {
-  const val visibleCheckDelayMs = 180L
+  const val visibleCheckDelayMs = 500L
 
   fun isVisibleResult(result: String?): Boolean {
     val raw = result.orEmpty()
     return raw.contains("\\\"visible\\\":true") || raw.contains("\"visible\":true")
+  }
+
+  fun visibilityFailureMessage(result: String?): String {
+    val raw = result.orEmpty().replace("\\\"", "\"")
+    val reason = Regex(""""reason"\s*:\s*"([^"]+)"""").find(raw)?.groupValues?.getOrNull(1).orEmpty()
+    val suffix = when (reason) {
+      "no-body" -> "No document body was available after load."
+      "zero-viewport" -> "The WebView reported a zero viewport."
+      "empty-body" -> "The document body has no measurable content."
+      "no-visible-candidates" -> "No visible main content, controls, media, or text nodes were inside the viewport."
+      else -> "Check viewport height, offscreen roots, blocked resources, or missing local HTTP routes."
+    }
+    return "WebView content may be invisible. $suffix"
   }
 
   val viewportHelperJs = """
@@ -2204,6 +2218,14 @@ object WorkspaceWebViewHardening {
       var viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
       var body = document.body;
       if (!body) return JSON.stringify({ visible: false, reason: 'no-body' });
+      if (viewportHeight <= 0 || viewportWidth <= 0) {
+        return JSON.stringify({ visible: false, reason: 'zero-viewport', viewportHeight: viewportHeight, viewportWidth: viewportWidth });
+      }
+      var bodyHeight = body.scrollHeight || body.offsetHeight || 0;
+      var bodyText = (body.innerText || body.textContent || '').trim();
+      if (bodyHeight <= 0 && bodyText.length === 0 && body.children.length === 0) {
+        return JSON.stringify({ visible: false, reason: 'empty-body', viewportHeight: viewportHeight, viewportWidth: viewportWidth, bodyHeight: bodyHeight });
+      }
       var candidates = Array.prototype.slice.call(body.querySelectorAll('main, [role="main"], section, article, form, button, input, textarea, canvas, svg, img, video, h1, h2, p, div'))
         .filter(function (node) {
           var style = window.getComputedStyle(node);
@@ -2213,9 +2235,11 @@ object WorkspaceWebViewHardening {
         });
       return JSON.stringify({
         visible: candidates.length > 0,
+        reason: candidates.length > 0 ? 'visible-candidates' : 'no-visible-candidates',
         viewportHeight: viewportHeight,
         viewportWidth: viewportWidth,
-        bodyHeight: body.scrollHeight || body.offsetHeight || 0,
+        bodyHeight: bodyHeight,
+        bodyTextLength: bodyText.length,
         visibleCandidates: candidates.length
       });
     })();

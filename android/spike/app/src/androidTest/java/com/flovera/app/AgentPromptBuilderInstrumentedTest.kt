@@ -20,6 +20,16 @@ class AgentPromptBuilderInstrumentedTest {
     assertTrue(normalized.contains("1. beta"))
     assertEquals("beta", stripMarkdownListMarker("1. beta"))
     assertEquals("beta", stripMarkdownListMarker("- beta"))
+    assertEquals("1.", parseMarkdownListItem("1. beta")?.marker)
+    assertEquals("-", parseMarkdownListItem("- beta")?.marker)
+  }
+
+  @Test
+  fun conversationMarkdownNormalizationRepairsCommonUtf8Mojibake() {
+    val normalized = normalizeConversationMarkdownContent("ä½ å¥½ï¼ŒFlovera")
+
+    assertTrue(normalized.contains("你好"))
+    assertFalse(normalized.contains("ä½"))
   }
 
   @Test
