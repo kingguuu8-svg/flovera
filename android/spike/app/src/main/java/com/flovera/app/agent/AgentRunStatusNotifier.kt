@@ -51,7 +51,7 @@ class AndroidAgentRunStatusNotifier(context: Context) : AgentRunStatusNotifier {
 
   override fun interrupted() {
     val title = "Flovera agent interrupted"
-    val body = "The active agent run was stopped."
+    val body = "The active agent run was stopped. Partial transcript and tool history were saved."
     val stopped = runCatching {
       appContext.startService(AgentRunForegroundService.interruptedIntent(appContext, title, body))
     }.isSuccess

@@ -665,6 +665,7 @@ class AgentController(
     val trimmed = current.input.trim()
     if (!current.isRunning || trimmed.isBlank()) return
     queueGuidanceForActiveRun(trimmed)
+    agentRunStatusNotifier.running("Guidance queued; waiting for the next tool result.")
     _state.update {
       it.copy(
         input = "",
@@ -677,6 +678,7 @@ class AgentController(
     val guidance = _state.value.queuedInputs.getOrNull(index)?.content ?: return
     if (_state.value.isRunning) {
       queueGuidanceForActiveRun(guidance)
+      agentRunStatusNotifier.running("Guidance queued; waiting for the next tool result.")
       _state.update {
         it.copy(
           queuedInputs = it.queuedInputs.filterIndexed { itemIndex, _ -> itemIndex != index },
@@ -801,6 +803,7 @@ class AgentController(
     synchronized(activeRunGuidanceLock) {
       activeRunPendingGuidance += guidance
     }
+    recordGuidanceQueuedForActiveRun()
   }
 
   private fun clearPendingActiveRunGuidance() {
@@ -838,7 +841,7 @@ class AgentController(
       events += ConversationTranscriptEvent(
         type = "guidance",
         title = "Guidance applied",
-        detail = "This guidance was inserted after the completed tool result and before the next model request.",
+        detail = "Inserted after a completed tool result and before the next model request.",
         timestampMillis = now,
         status = "applied",
       )
@@ -847,6 +850,25 @@ class AgentController(
       it.copy(
         assistantDraft = it.assistantDraft?.withMergedTranscriptEvents(events),
         status = "Guidance applied",
+      )
+    }
+  }
+
+  private fun recordGuidanceQueuedForActiveRun() {
+    val events = activeRunTranscriptEvents ?: return
+    val now = System.currentTimeMillis()
+    events += ConversationTranscriptEvent(
+      type = "guidance",
+      title = "Guidance waiting",
+      detail = "Will be inserted after the next completed tool result.",
+      timestampMillis = now,
+      status = "queued",
+      compact = true,
+    )
+    _state.update {
+      it.copy(
+        assistantDraft = it.assistantDraft?.withMergedTranscriptEvents(events),
+        status = "Guidance waiting for next tool result",
       )
     }
   }
@@ -870,14 +892,14 @@ class AgentController(
     val interruptTimelineEvent = AgentRunTimelineEvent(
       type = AgentRunEventType.RUN_INTERRUPTED,
       title = "Run interrupted",
-      detail = "The active agent run was cancelled by the user before completion.",
+      detail = "The active agent run was cancelled by the user; partial transcript and tool history were saved.",
       status = "interrupted",
       compact = false,
     )
     val interruptTranscriptEvent = ConversationTranscriptEvent(
       type = AgentRunEventType.RUN_INTERRUPTED,
       title = "Run interrupted",
-      detail = "The active agent run was cancelled by the user before completion.",
+      detail = "The active agent run was cancelled by the user; partial transcript and tool history were saved.",
       timestampMillis = now,
       status = "interrupted",
       compact = false,
