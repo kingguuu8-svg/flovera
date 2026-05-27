@@ -754,9 +754,10 @@ including richer list, code, link, quote, and table handling through the Android
 TextView/Spannable path. The display layer still normalizes unsafe control
 characters/newlines and repairs common UTF-8 mojibake when it is clearly safer
 than the original text. Streaming draft messages deliberately use a lightweight
-plain-text path while the runtime throttles draft updates and coalesces
-adjacent text deltas, so token-by-token output does not block conversation
-scrolling; finalized messages then re-render with the full Markdown renderer.
+plain-text path that renders each runtime-throttled draft immediately while the
+runtime coalesces adjacent text deltas, so token-by-token output stays visible
+without blocking conversation scrolling; finalized messages then re-render with
+the full Markdown renderer.
 Remaining work is inline workspace-path links inside the rendered Markdown
 surface, richer code-block styling, math/scientific formula rendering, and
 regression examples from real malformed provider output.

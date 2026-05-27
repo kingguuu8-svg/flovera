@@ -66,7 +66,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -115,7 +114,6 @@ import com.flovera.app.workspace.WorkspaceSnapshotRecord
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import kotlinx.coroutines.delay
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -1736,13 +1734,8 @@ private fun MarkdownMessageText(content: String, color: Color, streaming: Boolea
 
 @Composable
 private fun StreamingPlainMessageText(content: String, color: Color) {
-  var displayed by remember { mutableStateOf(content) }
-  LaunchedEffect(content) {
-    delay(120)
-    displayed = content
-  }
   Text(
-    text = displayed,
+    text = content,
     color = color,
     style = MaterialTheme.typography.bodyMedium,
   )

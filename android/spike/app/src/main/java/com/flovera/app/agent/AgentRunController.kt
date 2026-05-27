@@ -31,8 +31,8 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
-private const val STREAMING_DRAFT_MIN_INTERVAL_MS = 250L
-private const val STREAMING_DRAFT_MIN_CHAR_DELTA = 240
+private const val STREAMING_DRAFT_MIN_INTERVAL_MS = 120L
+private const val STREAMING_DRAFT_MIN_CHAR_DELTA = 96
 
 class AgentRunController(
   private val runtime: AgentRuntime = KoogAgentRuntime(),
