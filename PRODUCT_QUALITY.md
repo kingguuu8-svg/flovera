@@ -365,9 +365,11 @@ chrono buffer preserves MODEL_TEXT_DELTA segments, user guidance events, and
 completed tool events in chronological order. Text-before-tool,
 text-between-tools, and text-after-tools ordering is correct in
 `transcriptEvents`; real-device debug verification also covers guidance inserted
-between model text and a tool call. Remaining work is richer tool lifecycle
-coverage and handling provider-specific streaming finish anomalies without
-losing the partial transcript.
+between model text and a tool call. Rapid model text deltas are coalesced into
+contiguous chrono text segments and draft UI updates are throttled so streaming
+output does not rebuild the full transcript on every token. Remaining work is
+richer tool lifecycle coverage and handling provider-specific streaming finish
+anomalies without losing the partial transcript.
 
 - Add a separate streaming conversation track where the model can emit
   assistant text before, between, and after tool calls.
@@ -752,18 +754,20 @@ including richer list, code, link, quote, and table handling through the Android
 TextView/Spannable path. The display layer still normalizes unsafe control
 characters/newlines and repairs common UTF-8 mojibake when it is clearly safer
 than the original text. Streaming draft messages deliberately use a lightweight
-plain-text path with throttled updates so token-by-token output does not block
-conversation scrolling; finalized messages then re-render with the full
-Markdown renderer. Remaining work is inline workspace-path links inside the
-rendered Markdown surface, richer code-block styling, and regression examples
-from real malformed provider output.
+plain-text path while the runtime throttles draft updates and coalesces
+adjacent text deltas, so token-by-token output does not block conversation
+scrolling; finalized messages then re-render with the full Markdown renderer.
+Remaining work is inline workspace-path links inside the rendered Markdown
+surface, richer code-block styling, math/scientific formula rendering, and
+regression examples from real malformed provider output.
 
 - Done: add a low-risk display normalization layer for control characters,
   mixed newlines, BOM characters, and common UTF-8 mojibake.
 - Done: render finalized Markdown through Markwon instead of Flovera's small
   hand-rolled Markdown parser.
-- Done: keep streaming drafts on a lightweight plain-text path to preserve
-  scroll responsiveness during provider token output.
+- Done: keep streaming drafts on a lightweight plain-text path and throttle
+  runtime draft updates to preserve scroll responsiveness during provider token
+  output.
 - Improve Markdown parsing/rendering for mixed Chinese/English, code fences,
   lists, inline paths, tables, escaped characters, and streaming updates.
 - Add regression examples from real broken conversation output instead of only

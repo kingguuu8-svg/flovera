@@ -94,6 +94,7 @@ private data class FullAuthoritySettingsApplyResult(
 const val QUEUED_INPUT_REQUEST = "request"
 const val QUEUED_INPUT_GUIDANCE = "guidance"
 
+private const val RUN_NOTIFICATION_MIN_INTERVAL_MS = 1_500L
 private const val WORKSPACE_ARTIFACT_ACTION_PYTHON_JOB = "python_job"
 private const val WORKSPACE_ARTIFACT_PREVIEW_LOCAL_HTTP = "local_http"
 
@@ -155,6 +156,8 @@ class AgentController(
   private var activeRunTranscriptEvents: MutableList<ConversationTranscriptEvent>? = null
   private val activeRunGuidanceLock = Any()
   private val activeRunPendingGuidance = mutableListOf<String>()
+  private var lastRunNotificationAtMillis: Long = 0
+  private var lastRunNotificationBody: String = ""
   private var workspaceController: WorkspaceController
   private var workspaceLocalAppServer: WorkspaceLocalAppServer
   private var workspacePythonHttpRuntime: WorkspacePythonHttpRuntime
@@ -732,7 +735,7 @@ class AgentController(
       guidanceProvider = { consumeGuidanceForActiveRun() },
       onStarted = { withUser, draft ->
         val settings = settingsController.setActiveSession(current.settings, withUser.id)
-        agentRunStatusNotifier.running(draft.content)
+        notifyAgentRunRunning(draft.content, force = true)
         _state.update {
           it.copy(
             settings = settings,
@@ -746,13 +749,13 @@ class AgentController(
         }
       },
       onDraft = { draft ->
-        agentRunStatusNotifier.running(draft.content.lineSequence().firstOrNull().orEmpty().ifBlank { "Working..." })
+        notifyAgentRunRunning(draft.content.lineSequence().firstOrNull().orEmpty().ifBlank { "Working..." })
         _state.update {
           it.copy(assistantDraft = draft)
         }
       },
       onSessionUpdated = { updatedSession, draft ->
-        agentRunStatusNotifier.running(draft.content)
+        notifyAgentRunRunning(draft.content)
         _state.update {
           it.copy(
             session = updatedSession,
@@ -775,6 +778,7 @@ class AgentController(
           queuedInputs.firstOrNull()
         }
         if (nextInput == null) {
+          resetAgentRunNotificationThrottle()
           agentRunStatusNotifier.finished(succeeded)
           refreshWorkspaceState(
             session = updated,
@@ -787,7 +791,7 @@ class AgentController(
               queuedInputs = if (unappliedGuidance.isNotEmpty()) it.queuedInputs else it.queuedInputs.drop(1),
             )
           }
-          agentRunStatusNotifier.running("Running queued message...")
+          notifyAgentRunRunning("Running queued message...", force = true)
           refreshWorkspaceState(
             session = updated,
             isRunning = false,
@@ -804,6 +808,28 @@ class AgentController(
       activeRunPendingGuidance += guidance
     }
     recordGuidanceQueuedForActiveRun()
+  }
+
+  private fun notifyAgentRunRunning(message: String, force: Boolean = false) {
+    val body = message.ifBlank { "Working..." }
+    val now = System.currentTimeMillis()
+    if (!force &&
+      body == lastRunNotificationBody &&
+      now - lastRunNotificationAtMillis < RUN_NOTIFICATION_MIN_INTERVAL_MS
+    ) {
+      return
+    }
+    if (!force && now - lastRunNotificationAtMillis < RUN_NOTIFICATION_MIN_INTERVAL_MS) {
+      return
+    }
+    lastRunNotificationBody = body
+    lastRunNotificationAtMillis = now
+    agentRunStatusNotifier.running(body)
+  }
+
+  private fun resetAgentRunNotificationThrottle() {
+    lastRunNotificationAtMillis = 0
+    lastRunNotificationBody = ""
   }
 
   private fun clearPendingActiveRunGuidance() {
@@ -888,6 +914,7 @@ class AgentController(
     activeRunJob?.cancel()
     activeRunJob = null
     clearPendingActiveRunGuidance()
+    resetAgentRunNotificationThrottle()
     val now = System.currentTimeMillis()
     val interruptTimelineEvent = AgentRunTimelineEvent(
       type = AgentRunEventType.RUN_INTERRUPTED,

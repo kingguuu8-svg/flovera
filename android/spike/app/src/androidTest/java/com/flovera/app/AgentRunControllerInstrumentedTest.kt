@@ -311,13 +311,10 @@ class AgentRunControllerInstrumentedTest {
     assertNotNull(job)
     job!!.join()
 
-    assertTrue(drafts.any { it.content == "assistant " })
-    assertTrue(drafts.any { it.content == "assistant streamed " })
-    assertTrue(drafts.any { it.content == "assistant streamed output" })
+    assertTrue(drafts.isNotEmpty())
+    assertEquals("assistant ", drafts.first().content)
     assertTrue(drafts.last().runEvents.any { it.title == "Final response streaming" })
     assertTrue(drafts.last().transcriptEvents.any { it.type == "final_response_streaming" })
-    assertEquals("assistant_text", drafts.last().transcriptEvents.last().type)
-    assertEquals("assistant streamed output", drafts.last().transcriptEvents.last().content)
     assertEquals(2, finishedSession?.messages?.size)
     val assistantMessage = finishedSession?.messages?.lastOrNull()
     assertEquals("assistant", assistantMessage?.role)
@@ -326,6 +323,43 @@ class AgentRunControllerInstrumentedTest {
     assertTrue(assistantMessage?.runEvents?.any { it.title == "Final response ready" } == true)
     assertEquals("assistant_text", assistantMessage?.transcriptEvents?.lastOrNull()?.type)
     assertEquals("assistant streamed output", assistantMessage?.transcriptEvents?.lastOrNull()?.content)
+  }
+
+  @Test
+  fun runControllerThrottlesRapidStreamingDraftsAndPersistsFullTranscript() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val store = AgentSessionStore(context)
+    val sessions = SessionController(store)
+    val session = store.create("Rapid stream ${System.currentTimeMillis()}")
+    val workspace = WorkspaceManager(context, "rapid-stream-${System.currentTimeMillis()}").also { it.ensureSeedFiles() }
+    val controller = AgentRunController(runtime = RapidStreamingAgentRuntime(), scope = this)
+    val drafts = mutableListOf<SessionMessage>()
+    var finishedSession: AgentSession? = null
+
+    val job = controller.submit(
+      input = "rapid stream",
+      settings = AppSettings(),
+      session = session,
+      workspace = workspace,
+      appendUserPrompt = sessions::appendUserPrompt,
+      appendContextRecord = sessions::appendContextRecord,
+      appendCompressionDivider = sessions::appendCompressionDivider,
+      appendMessage = sessions::appendMessage,
+      onStarted = { _, _ -> },
+      onDraft = { drafts += it },
+      onSessionUpdated = { _, _ -> },
+      onFinished = { updated, _ -> finishedSession = updated },
+    )
+
+    assertNotNull(job)
+    job!!.join()
+
+    assertTrue("drafts=${drafts.size}", drafts.size in 2..12)
+    val assistantMessage = finishedSession?.messages?.lastOrNull()
+    assertEquals(RapidStreamingAgentRuntime.expectedOutput, assistantMessage?.content)
+    val assistantTextEvents = assistantMessage?.transcriptEvents.orEmpty().filter { it.type == "assistant_text" }
+    assertEquals(1, assistantTextEvents.size)
+    assertEquals(RapidStreamingAgentRuntime.expectedOutput, assistantTextEvents.single().content)
   }
 
   @Test
@@ -599,6 +633,39 @@ class AgentRunControllerInstrumentedTest {
       eventSink.emit(AgentRunEvent(type = AgentRunEventType.MODEL_TEXT_DELTA, modelTextDelta = "streamed "))
       eventSink.emit(AgentRunEvent(type = AgentRunEventType.MODEL_TEXT_DELTA, modelTextDelta = "output"))
       return "assistant streamed output"
+    }
+  }
+
+  private class RapidStreamingAgentRuntime : AgentRuntime {
+    override suspend fun run(
+      input: String,
+      agentRunId: String,
+      settings: AppSettings,
+      session: AgentSession,
+      workspace: WorkspaceManager,
+      recorder: ToolEventRecorder,
+    ): String {
+      return "fallback output"
+    }
+
+    override suspend fun runStreaming(
+      input: String,
+      agentRunId: String,
+      settings: AppSettings,
+      session: AgentSession,
+      workspace: WorkspaceManager,
+      recorder: ToolEventRecorder,
+      eventSink: AgentRunEventSink,
+      guidanceProvider: AgentRunGuidanceProvider,
+    ): String {
+      repeat(100) { index ->
+        eventSink.emit(AgentRunEvent(type = AgentRunEventType.MODEL_TEXT_DELTA, modelTextDelta = "chunk$index "))
+      }
+      return expectedOutput
+    }
+
+    companion object {
+      val expectedOutput: String = (0 until 100).joinToString(separator = "") { "chunk$it " }
     }
   }
 

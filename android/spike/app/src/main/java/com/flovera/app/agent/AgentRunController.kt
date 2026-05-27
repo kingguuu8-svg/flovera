@@ -31,6 +31,9 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
+private const val STREAMING_DRAFT_MIN_INTERVAL_MS = 250L
+private const val STREAMING_DRAFT_MIN_CHAR_DELTA = 240
+
 class AgentRunController(
   private val runtime: AgentRuntime = KoogAgentRuntime(),
   private val handoffCompressor: SessionHandoffCompressor = KoogSessionHandoffCompressor(),
@@ -427,13 +430,17 @@ class AgentRunController(
     private val chronoEntries = mutableListOf<ChronoEntry>()
     private var previousToolSnapshotSize: Int = 0
     private var nextChronoSequence: Long = 0
+    private var lastDraftEmittedAtMillis: Long = 0
+    private var lastDraftEmittedCharCount: Int = 0
 
     fun replaceBaseTimeline(events: List<AgentRunTimelineEvent>, statusContent: String) {
       this.baseTimelineEvents = events
       this.statusContent = statusContent
+      emitDraft(force = true)
     }
 
     fun emit(event: AgentRunEvent) {
+      var forceDraft = false
       when (event.type) {
         AgentRunEventType.TOOL_EVENTS_CHANGED -> {
           val newTools = event.toolEvents.drop(previousToolSnapshotSize)
@@ -446,28 +453,59 @@ class AgentRunController(
             )
           }
           previousToolSnapshotSize = event.toolEvents.size
+          forceDraft = true
         }
 
         AgentRunEventType.MODEL_TEXT_DELTA,
         AgentRunEventType.FINAL_TEXT_DELTA -> {
           val delta = event.modelTextDelta.ifEmpty { event.finalTextDelta }
           if (delta.isNotEmpty()) {
+            val wasStreaming = modelTextStreamingStarted
             modelTextStreamingStarted = true
             modelText.append(delta)
-            chronoEntries += ChronoEntry(
-              timestampMillis = event.timestampMillis,
-              sequence = nextChronoSequence++,
-              text = delta,
-            )
+            appendChronoText(delta, event.timestampMillis)
+            forceDraft = !wasStreaming
           }
         }
 
         else -> {
           event.timelineEvent?.let { timelineEvent ->
             baseTimelineEvents = baseTimelineEvents + timelineEvent
+            forceDraft = true
           }
         }
       }
+      if (forceDraft || shouldEmitStreamingDraft()) {
+        emitDraft(force = forceDraft)
+      }
+    }
+
+    private fun appendChronoText(delta: String, timestampMillis: Long) {
+      val lastIndex = chronoEntries.lastIndex
+      val last = chronoEntries.getOrNull(lastIndex)
+      if (last != null && last.tool == null && last.text.isNotEmpty()) {
+        chronoEntries[lastIndex] = last.copy(text = last.text + delta)
+      } else {
+        chronoEntries += ChronoEntry(
+          timestampMillis = timestampMillis,
+          sequence = nextChronoSequence++,
+          text = delta,
+        )
+      }
+    }
+
+    private fun shouldEmitStreamingDraft(): Boolean {
+      if (!modelTextStreamingStarted) return true
+      val now = System.currentTimeMillis()
+      val charsSinceLastDraft = modelText.length - lastDraftEmittedCharCount
+      return charsSinceLastDraft >= STREAMING_DRAFT_MIN_CHAR_DELTA ||
+        now - lastDraftEmittedAtMillis >= STREAMING_DRAFT_MIN_INTERVAL_MS
+    }
+
+    private fun emitDraft(force: Boolean = false) {
+      if (!force && !shouldEmitStreamingDraft()) return
+      lastDraftEmittedAtMillis = System.currentTimeMillis()
+      lastDraftEmittedCharCount = modelText.length
       onDraft(draftMessage())
     }
 
@@ -513,6 +551,8 @@ class AgentRunController(
       chronoEntries.clear()
       previousToolSnapshotSize = 0
       nextChronoSequence = 0
+      lastDraftEmittedAtMillis = 0
+      lastDraftEmittedCharCount = 0
     }
 
     fun finalTextOr(output: String): String {
