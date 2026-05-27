@@ -257,7 +257,8 @@ markers. The app records context usage, displays a compact context ring and
 details dialog, includes request-overhead/tool-catalog estimate components, and
 shows compression dividers in conversation history. Remaining work is provider
 reported/tokenizer-backed accuracy, auditability, and automatic compression
-policy polish.
+policy polish, including proactive compression that is not limited to threshold
+or provider-error recovery.
 
 - Track context usage for each agent run and session.
 - Show how much context has been used, what was compressed, and what summary is
@@ -284,6 +285,13 @@ policy polish.
 - When context is close to full, run a session handoff/compression skill,
   continue the conversation from the compressed state, and insert a visible
   conversation divider after the compressed summary.
+- Add proactive compression as an explicit user/app action. The user should be
+  able to request compression before the next run, and Flovera may suggest or
+  trigger it when session history is large even if the provider has not failed
+  yet. The compressed handoff must be visible in conversation history,
+  reversible through existing session/workspace recovery paths where possible,
+  and must not silently discard recent interrupted-run transcript or tool
+  history.
 - Persist compression records so the user can understand why an old detail was
   retained, summarized, or dropped.
 - Treat compression as part of session history, not as invisible runtime state.
