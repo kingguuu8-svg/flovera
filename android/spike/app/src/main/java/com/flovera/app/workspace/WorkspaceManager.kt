@@ -1212,7 +1212,11 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
       .toList()
   }
 
-  fun diagnoseWorkspaceArtifact(manifestPath: String = "", previewPath: String = ""): String {
+  fun diagnoseWorkspaceArtifact(
+    manifestPath: String = "",
+    previewPath: String = "",
+    includeReference: Boolean = false,
+  ): String {
     val normalizedManifest = manifestPath.trim().replace('\\', '/')
     val normalizedPreview = previewPath.trim().replace('\\', '/')
     val artifacts = listWorkspaceArtifacts()
@@ -1225,6 +1229,10 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
       appendLine("- discoveredManifests=${artifacts.size}")
       if (normalizedManifest.isNotBlank()) appendLine("- requestedManifest=$normalizedManifest")
       if (normalizedPreview.isNotBlank()) appendLine("- requestedPreview=$normalizedPreview")
+      if (includeReference) {
+        appendLine()
+        appendLine(referenceWorkspaceArtifactDemo())
+      }
       if (matches.isEmpty()) {
         appendLine("- status=missing")
         appendLine()
@@ -1263,6 +1271,53 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
       }
       if (matches.size > 20) appendLine("\n... ${matches.size - 20} additional matching artifact(s) omitted.")
     }.trimEnd()
+  }
+
+  fun referenceWorkspaceArtifactDemo(): String {
+    return """
+      Hidden reference app demo
+      - visibility=app-owned reference only; not discovered by the workspace picker
+      - purpose=compare generated artifacts against a known-good mobile WebView + python_http shape
+
+      Expected files:
+      - README.md
+      - flovera.app.json
+      - src/server.py
+      - src/web/index.html
+      - src/web/app.js
+      - src/web/styles.css
+
+      Reference flovera.app.json:
+      {
+        "schema": "https://flovera.local/schemas/workspace-artifact-v1.json",
+        "schemaVersion": 1,
+        "name": "Reference Mobile Chat Demo",
+        "kind": "app",
+        "entrypoints": {
+          "preview": {
+            "kind": "local_http",
+            "path": "src/web/index.html",
+            "label": "Open",
+            "urlPath": "/",
+            "fallback": "src/web/index.html"
+          },
+          "server": {
+            "kind": "python_http",
+            "command": "python src/server.py --host 127.0.0.1 --port ${'$'}{PORT}",
+            "cwd": "."
+          }
+        },
+        "actions": [],
+        "outputs": []
+      }
+
+      Frontend/backend contract:
+      - index.html loads app.js and styles.css with relative paths.
+      - app.js calls fetch('/api/health') for readiness.
+      - app.js consumes POST /api/chat/stream as text/event-stream.
+      - server.py binds HOST/PORT from CLI args, serves /, /src/web/*, /api/health, and /api/chat/stream.
+      - HTML is mobile-first: uses viewport CSS variables, readable tap targets, safe bottom padding, and no autofocus.
+    """.trimIndent()
   }
 
   fun resolveWorkspaceArtifactAction(previewPath: String, actionId: String): WorkspaceArtifactActionTarget? {

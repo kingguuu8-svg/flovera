@@ -48,6 +48,8 @@ class ArtifactDiagnoseTool(
     val manifestPath: String = "",
     @property:LLMDescription("Optional workspace-relative HTML preview path to match, for example agent-demo/src/web/index.html.")
     val previewPath: String = "",
+    @property:LLMDescription("Set true to include Flovera's hidden reference app shape for comparison without exposing a user-visible demo.")
+    val includeReference: Boolean = false,
   )
 
   override suspend fun execute(args: Args): String {
@@ -55,9 +57,10 @@ class ArtifactDiagnoseTool(
       workspace.diagnoseWorkspaceArtifact(
         manifestPath = args.manifestPath,
         previewPath = args.previewPath,
+        includeReference = args.includeReference,
       )
     }.getOrElse { it.message ?: it.toString() }
-    recorder.record(name, "manifestPath=${args.manifestPath}, previewPath=${args.previewPath}", result)
+    recorder.record(name, "manifestPath=${args.manifestPath}, previewPath=${args.previewPath}, includeReference=${args.includeReference}", result)
     return result
   }
 }

@@ -172,6 +172,14 @@ class WorkspaceFileTreeInstrumentedTest {
     )
     assertTrue(missing, missing.contains("status=missing"))
     assertTrue(missing, missing.contains("Discovered manifests:"))
+
+    val reference = tool.execute(
+      ArtifactDiagnoseTool.Args(includeReference = true),
+    )
+    assertTrue(reference, reference.contains("Hidden reference app demo"))
+    assertTrue(reference, reference.contains("Reference Mobile Chat Demo"))
+    assertTrue(reference, reference.contains("python src/server.py --host 127.0.0.1 --port"))
+    assertTrue(reference, reference.contains("POST /api/chat/stream"))
   }
 
   @Test

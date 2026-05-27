@@ -72,6 +72,8 @@ class AgentPromptBuilderInstrumentedTest {
     assertTrue(systemPrompt.contains("Default generated artifact layout"))
     assertTrue(systemPrompt.contains("README.md, flovera.app.json"))
     assertTrue(systemPrompt.contains("agent-demo/flovera.app.json"))
+    assertTrue(systemPrompt.contains("includeReference=true"))
+    assertTrue(systemPrompt.contains("hidden reference app shape"))
     assertTrue(systemPrompt.contains("entrypoints.preview"))
     assertTrue(systemPrompt.contains("Android/mobile WebView first"))
     assertTrue(systemPrompt.contains("readable touch targets"))

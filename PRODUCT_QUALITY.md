@@ -731,14 +731,15 @@ detail, because unclear output can change user decisions during agent work.
 
 ### Hidden Reference Demo And Artifact Registration Diagnostics
 
-Status: Partially implemented. Flovera seeds a visible portable workspace demo
-and now exposes an agent-facing `artifact_diagnose` tool that reports whether a
+Status: Baseline implemented. Flovera seeds a visible portable workspace demo,
+exposes an agent-facing `artifact_diagnose` tool that reports whether a
 workspace app manifest was discovered, registered, or rejected with validation
-diagnostics. Remaining work is an app-owned hidden reference demo the agent can
-inspect as a concrete comparison without exposing the reference project to
-ordinary users.
+diagnostics, and can include an app-owned hidden reference demo shape for
+comparison without exposing a second demo in the user's normal workspace.
+Remaining work is richer registration UI diagnostics and broader artifact
+validation.
 
-- Keep a known-good reference demo aligned with the original workspace shape.
+- Done: keep a known-good reference demo aligned with the original workspace shape.
   It should be invisible in normal user browsing, but available to Flovera
   internals and agent guidance as a concrete comparison for manifest shape,
   frontend/backend connection, local HTTP/SSE routes, actions, outputs, and
