@@ -394,6 +394,9 @@ anomalies without losing the partial transcript.
   even though the provider stream ended without a finish reason. Flovera must
   therefore preserve interleaved model text through `MODEL_TEXT_DELTA`
   transcript events, not by relying on final output alone.
+- Streaming frames must be forwarded to `AgentRunEvent` as the provider flow is
+  collected. Do not call `toList()` before forwarding frames, because that
+  makes the UI receive text only after the provider stream has already ended.
 - Persist only user-meaningful assistant text in session history; keep raw
   trace details expandable and bounded so long tool runs do not flood the
   conversation.

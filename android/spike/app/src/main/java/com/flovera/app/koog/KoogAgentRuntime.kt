@@ -26,7 +26,7 @@ import com.flovera.app.config.AppSettings
 import com.flovera.app.session.AgentSession
 import com.flovera.app.workspace.WorkspaceManager
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.flow.collect
 
 interface AgentRuntime {
   suspend fun run(
@@ -280,9 +280,13 @@ private fun nodeLLMRequestStreamingAndSendResults(
   frameForwarder: AgentRunStreamFrameForwarder?,
 ) = node<String, List<Message.Response>>(name) {
   val frames = llm.writeSession {
-    requestLLMStreaming().toList()
+    val collected = mutableListOf<StreamFrame>()
+    requestLLMStreaming().collect { frame ->
+      collected += frame
+      frameForwarder?.emitStreamFrame(frame)
+    }
+    collected
   }
-  frames.forEach { frameForwarder?.emitStreamFrame(it) }
   val responses = frames.toMessageResponses()
   frameForwarder?.emitMissingResponseText(frames, responses)
   llm.writeSession {
@@ -309,9 +313,13 @@ private fun nodeLLMSendMultipleToolResultsStreaming(
         user(guidance.toModelGuidanceMessage())
       }
     }
-    requestLLMStreaming().toList()
+    val collected = mutableListOf<StreamFrame>()
+    requestLLMStreaming().collect { frame ->
+      collected += frame
+      frameForwarder?.emitStreamFrame(frame)
+    }
+    collected
   }
-  frames.forEach { frameForwarder?.emitStreamFrame(it) }
   val responses = frames.toMessageResponses()
   frameForwarder?.emitMissingResponseText(frames, responses)
   llm.writeSession {

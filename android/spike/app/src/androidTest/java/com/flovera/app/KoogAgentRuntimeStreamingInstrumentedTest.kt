@@ -20,14 +20,60 @@ import com.flovera.app.koog.ToolEventRecorder
 import com.flovera.app.session.AgentSessionStore
 import com.flovera.app.workspace.WorkspaceManager
 import java.io.File
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class KoogAgentRuntimeStreamingInstrumentedTest {
+  @Test
+  fun runStreamingForwardsTextDeltasBeforeProviderStreamCompletes() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspaceId = "streaming-live-forward-${System.currentTimeMillis()}"
+    val workspace = WorkspaceManager(context, workspaceId).also { it.ensureSeedFiles() }
+    val session = AgentSessionStore(context).create("Streaming live forward")
+    val fakeClient = FakeStreamingClient(
+      streams = listOf(
+        listOf(
+          StreamFrame.TextDelta("early "),
+          StreamFrame.TextDelta("late"),
+          StreamFrame.End("stop"),
+        ),
+      ),
+      fallbackText = "fallback should not be used",
+      delayAfterFirstFrameMillis = 350,
+    )
+    val runtime = KoogAgentRuntime(clientFactory = { _, _, _ -> fakeClient })
+    val firstDelta = CompletableDeferred<String>()
+
+    val output = async {
+      runtime.runStreaming(
+        input = "Say early late.",
+        agentRunId = "${session.id}-streaming-live-forward",
+        settings = AppSettings(apiKey = "fake-key", activeWorkspaceId = workspaceId, activeSessionId = session.id),
+        session = session,
+        workspace = workspace,
+        recorder = ToolEventRecorder(),
+        eventSink = AgentRunEventSink { event ->
+          if (event.type == AgentRunEventType.MODEL_TEXT_DELTA && !firstDelta.isCompleted) {
+            firstDelta.complete(event.modelTextDelta)
+          }
+        },
+      )
+    }
+
+    assertEquals("early ", withTimeout(1_000) { firstDelta.await() })
+    assertFalse("runtime should still be waiting for later stream frames", output.isCompleted)
+    assertEquals("early late", output.await())
+  }
+
   @Test
   fun runStreamingEmitsProviderTextDeltasThroughAgentRunEvents() = runBlocking {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
@@ -229,6 +275,7 @@ private class FakeStreamingClient(
   private val streams: List<List<StreamFrame>>,
   private val fallbackText: String,
   private val streamingUnsupported: Boolean = false,
+  private val delayAfterFirstFrameMillis: Long = 0,
 ) : LLMClient() {
   var streamingCallCount: Int = 0
     private set
@@ -272,7 +319,12 @@ private class FakeStreamingClient(
     val frames = streams.getOrElse(streamingCallCount - 1) {
       error("No fake streaming frames configured for call $streamingCallCount")
     }
-    frames.forEach { emit(it) }
+    frames.forEachIndexed { index, frame ->
+      emit(frame)
+      if (index == 0 && delayAfterFirstFrameMillis > 0) {
+        delay(delayAfterFirstFrameMillis)
+      }
+    }
   }
 
   override suspend fun moderate(prompt: Prompt, model: LLModel): ModerationResult {
