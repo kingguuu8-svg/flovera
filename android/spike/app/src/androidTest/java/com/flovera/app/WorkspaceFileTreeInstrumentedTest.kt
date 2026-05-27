@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.core.content.FileProvider
 import androidx.test.platform.app.InstrumentationRegistry
 import com.flovera.app.koog.ArtifactInspectTool
+import com.flovera.app.koog.ArtifactDiagnoseTool
 import com.flovera.app.koog.FloveraPythonRuntime
 import com.flovera.app.koog.PythonRunTool
 import com.flovera.app.koog.PythonPackageInstallTool
@@ -149,6 +150,28 @@ class WorkspaceFileTreeInstrumentedTest {
 
     assertEquals(0, outsideResult.exitCode)
     assertTrue(outsideResult.stdout.contains("portable-python-http ok"))
+  }
+
+  @Test
+  fun artifactDiagnoseToolReportsRegistrationState() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "artifact-diagnose-${System.currentTimeMillis()}").also { it.ensureSeedFiles() }
+    val tool = ArtifactDiagnoseTool(workspace, ToolEventRecorder())
+
+    val registered = tool.execute(
+      ArtifactDiagnoseTool.Args(manifestPath = "agent-demo/flovera.app.json"),
+    )
+    assertTrue(registered, registered.contains("status=registered"))
+    assertTrue(registered, registered.contains("manifestPath=agent-demo/flovera.app.json"))
+    assertTrue(registered, registered.contains("preview=agent-demo/src/web/index.html"))
+    assertTrue(registered, registered.contains("serverCommand=python src/server.py"))
+    assertTrue(registered, registered.contains("diagnostics=(none)"))
+
+    val missing = tool.execute(
+      ArtifactDiagnoseTool.Args(manifestPath = "missing/flovera.app.json"),
+    )
+    assertTrue(missing, missing.contains("status=missing"))
+    assertTrue(missing, missing.contains("Discovered manifests:"))
   }
 
   @Test

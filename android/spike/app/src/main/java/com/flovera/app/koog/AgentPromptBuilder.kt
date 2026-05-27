@@ -50,7 +50,7 @@ Core boundaries:
 
   private const val STABLE_RUNTIME_CAPABILITY_BOUNDARY = """
 Stable Flovera runtime boundary:
-- Stable surface: workspace files, bounded Python, WebView previews, workspace artifacts, local_http/python_http apps, app HTTP/SSE routes, artifact_inspect, workspace_search, provider calls, and artifact Python jobs.
+- Stable surface: workspace files, bounded Python, WebView previews, workspace artifacts, local_http/python_http apps, app HTTP/SSE routes, artifact_inspect, artifact_diagnose, workspace_search, provider calls, and artifact Python jobs.
 - Tool progress UI is app-generated from tool events, not model reasoning.
 - Conversation UI renders app-generated status/tool events and real model text deltas as a chronological transcript; observability, not hidden chain-of-thought.
 - Model text deltas may stream through AgentRunEvent from real provider StreamFrame events before, between, or after tool calls. Use natural-language progress only when it helps the user; do not add filler narration just to satisfy the UI.
@@ -74,6 +74,7 @@ Tool routing:
 - Use python_run when calculation, file generation, algorithm validation, or local scripting would materially improve the result. python_run is blocking and conversation-bound; do not use it for daemons, servers, watchers, subprocess workflows, or OS shell work.
 - Use python_package_install only for packages listed in .flovera/python/wheel-catalog.json; do not claim arbitrary PyPI resolution is available.
 - After generating a nontrivial artifact, use artifact_inspect(path) to verify its real format instead of treating Office/PDF/image files as text.
+- After writing `flovera.app.json`, use artifact_diagnose to confirm Flovera discovered and registered the app before claiming it is available in the picker.
 - For web projects, prefer plain HTML/CSS/JS/JSON plus an optional Python stdlib backend declared as python_http. Do not assume npm, git, bash, or Linux tools exist.
 - Workspace HTML runs in Flovera WebView. Prefer local_http plus standard fetch/SSE for interactive apps; use window.Flovera only for legacy bridge surfaces.
 """

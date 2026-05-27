@@ -21,6 +21,7 @@ fun workspaceToolRegistry(
   tool(PythonRunTool(workspace, recorder, networkEnabled))
   tool(PythonPackageInstallTool(workspace, recorder, networkEnabled))
   tool(ArtifactInspectTool(workspace, recorder))
+  tool(ArtifactDiagnoseTool(workspace, recorder))
   tool(ReadFileTool(workspace, recorder))
   tool(WriteFileTool(workspace, recorder))
   tool(EditFileTool(workspace, recorder))
@@ -30,6 +31,34 @@ fun workspaceToolRegistry(
     if (webSearchEnabled && braveSearchApiKey.isNotBlank()) {
       tool(WebSearchTool(braveSearchApiKey, recorder))
     }
+  }
+}
+
+class ArtifactDiagnoseTool(
+  private val workspace: WorkspaceManager,
+  private val recorder: ToolEventRecorder,
+) : SimpleTool<ArtifactDiagnoseTool.Args>(
+  argsType = typeToken<Args>(),
+  name = "artifact_diagnose",
+  description = "Diagnose Flovera app registration for workspace artifacts. Use after writing flovera.app.json to confirm discovery, schema validity, preview path, python_http backend command, actions, outputs, and validation diagnostics before claiming the app is registered.",
+) {
+  @Serializable
+  data class Args(
+    @property:LLMDescription("Optional workspace-relative flovera.app.json path to diagnose, for example agent-demo/flovera.app.json. Leave blank to list all discovered artifacts.")
+    val manifestPath: String = "",
+    @property:LLMDescription("Optional workspace-relative HTML preview path to match, for example agent-demo/src/web/index.html.")
+    val previewPath: String = "",
+  )
+
+  override suspend fun execute(args: Args): String {
+    val result = runCatching {
+      workspace.diagnoseWorkspaceArtifact(
+        manifestPath = args.manifestPath,
+        previewPath = args.previewPath,
+      )
+    }.getOrElse { it.message ?: it.toString() }
+    recorder.record(name, "manifestPath=${args.manifestPath}, previewPath=${args.previewPath}", result)
+    return result
   }
 }
 

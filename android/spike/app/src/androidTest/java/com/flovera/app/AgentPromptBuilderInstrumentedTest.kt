@@ -63,6 +63,8 @@ class AgentPromptBuilderInstrumentedTest {
     assertTrue(systemPrompt.contains("window.Flovera.getJob"))
     assertTrue(systemPrompt.contains("workspaceArtifacts=available"))
     assertTrue(systemPrompt.contains("agentRunTimeline=available"))
+    assertTrue(systemPrompt.contains("artifact_diagnose"))
+    assertTrue(systemPrompt.contains("confirm Flovera discovered and registered the app"))
     assertTrue(systemPrompt.contains("flovera.app.json"))
     assertTrue(systemPrompt.contains("explicit networkEnabled"))
     assertTrue(systemPrompt.contains("environment refs"))

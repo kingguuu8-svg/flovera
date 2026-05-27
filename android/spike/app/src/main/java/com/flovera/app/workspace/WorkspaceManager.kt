@@ -1212,6 +1212,59 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
       .toList()
   }
 
+  fun diagnoseWorkspaceArtifact(manifestPath: String = "", previewPath: String = ""): String {
+    val normalizedManifest = manifestPath.trim().replace('\\', '/')
+    val normalizedPreview = previewPath.trim().replace('\\', '/')
+    val artifacts = listWorkspaceArtifacts()
+    val matches = artifacts.filter { artifact ->
+      (normalizedManifest.isBlank() || artifact.manifestPath == normalizedManifest) &&
+        (normalizedPreview.isBlank() || artifact.preview?.path == normalizedPreview)
+    }
+    return buildString {
+      appendLine("Workspace artifact registration diagnostics")
+      appendLine("- discoveredManifests=${artifacts.size}")
+      if (normalizedManifest.isNotBlank()) appendLine("- requestedManifest=$normalizedManifest")
+      if (normalizedPreview.isNotBlank()) appendLine("- requestedPreview=$normalizedPreview")
+      if (matches.isEmpty()) {
+        appendLine("- status=missing")
+        appendLine()
+        appendLine("No discovered artifact matched the request.")
+        if (artifacts.isNotEmpty()) {
+          appendLine()
+          appendLine("Discovered manifests:")
+          artifacts.take(20).forEach { artifact ->
+            appendLine("- ${artifact.manifestPath} valid=${artifact.valid} preview=${artifact.preview?.path ?: "(none)"}")
+          }
+        }
+        return@buildString
+      }
+      matches.take(20).forEach { artifact ->
+        appendLine()
+        appendLine("Artifact: ${artifact.name}")
+        appendLine("- status=${if (artifact.valid) "registered" else "invalid"}")
+        appendLine("- manifestPath=${artifact.manifestPath}")
+        appendLine("- rootPath=${artifact.rootPath}")
+        appendLine("- kind=${artifact.kind}")
+        appendLine("- preview=${artifact.preview?.path ?: "(none)"}")
+        appendLine("- previewKind=${artifact.preview?.kind ?: "(none)"}")
+        appendLine("- serverCommand=${artifact.preview?.command?.ifBlank { "(none)" } ?: "(none)"}")
+        appendLine("- serverCwd=${artifact.preview?.cwd ?: "(none)"}")
+        appendLine("- urlPath=${artifact.preview?.urlPath?.ifBlank { "/" } ?: "(none)"}")
+        appendLine("- actions=${artifact.actions.joinToString(", ") { "${it.id}:${it.kind}" }.ifBlank { "(none)" }}")
+        appendLine("- outputs=${artifact.outputs.joinToString(", ").ifBlank { "(none)" }}")
+        if (artifact.diagnostics.isEmpty()) {
+          appendLine("- diagnostics=(none)")
+        } else {
+          appendLine("Diagnostics:")
+          artifact.diagnostics.forEach { diagnostic ->
+            appendLine("- ${diagnostic.level} ${diagnostic.path}: ${diagnostic.message}")
+          }
+        }
+      }
+      if (matches.size > 20) appendLine("\n... ${matches.size - 20} additional matching artifact(s) omitted.")
+    }.trimEnd()
+  }
+
   fun resolveWorkspaceArtifactAction(previewPath: String, actionId: String): WorkspaceArtifactActionTarget? {
     val artifacts = listWorkspaceArtifacts().filter { it.valid }
     val scopedMatches = artifacts

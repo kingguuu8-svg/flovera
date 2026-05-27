@@ -731,18 +731,19 @@ detail, because unclear output can change user decisions during agent work.
 
 ### Hidden Reference Demo And Artifact Registration Diagnostics
 
-Status: Backlog. Flovera seeds a visible portable workspace demo, but the agent
-still sometimes fails to mirror the supported registration shape or cannot tell
-whether a generated app was registered successfully. The next improvement is an
-app-owned hidden reference demo and a diagnostic surface the agent can inspect
-without exposing the reference project to ordinary users.
+Status: Partially implemented. Flovera seeds a visible portable workspace demo
+and now exposes an agent-facing `artifact_diagnose` tool that reports whether a
+workspace app manifest was discovered, registered, or rejected with validation
+diagnostics. Remaining work is an app-owned hidden reference demo the agent can
+inspect as a concrete comparison without exposing the reference project to
+ordinary users.
 
 - Keep a known-good reference demo aligned with the original workspace shape.
   It should be invisible in normal user browsing, but available to Flovera
   internals and agent guidance as a concrete comparison for manifest shape,
   frontend/backend connection, local HTTP/SSE routes, actions, outputs, and
   registration expectations.
-- Add or expose an app registration diagnostic tool that reports whether a
+- Done: expose an app registration diagnostic tool that reports whether a
   generated app was discovered, whether `flovera.app.json` parsed, which fields
   were accepted/rejected, which preview/backend entrypoints resolved, and why
   an app is absent from the picker.
