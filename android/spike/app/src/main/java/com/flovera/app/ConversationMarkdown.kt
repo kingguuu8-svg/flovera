@@ -10,11 +10,13 @@ internal data class MarkdownListItem(val marker: String, val text: String)
 
 internal fun normalizeConversationMarkdownContent(content: String): String {
   if (content.isEmpty()) return content
-  val cleaned = buildString(content.length) {
+  val lineNormalized = repairLikelyUtf8Mojibake(
     content
       .replace("\r\n", "\n")
-      .replace('\r', '\n')
-      .forEach { char ->
+      .replace('\r', '\n'),
+  )
+  return buildString(lineNormalized.length) {
+    lineNormalized.forEach { char ->
         when {
           char == '\uFEFF' -> Unit
           char == '\u0000' -> Unit
@@ -25,7 +27,6 @@ internal fun normalizeConversationMarkdownContent(content: String): String {
         }
       }
   }.replace(Regex("[ \\t]+\\n"), "\n")
-  return repairLikelyUtf8Mojibake(cleaned)
 }
 
 internal fun stripMarkdownListMarker(line: String): String? {

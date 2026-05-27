@@ -26,10 +26,12 @@ class AgentPromptBuilderInstrumentedTest {
 
   @Test
   fun conversationMarkdownNormalizationRepairsCommonUtf8Mojibake() {
-    val normalized = normalizeConversationMarkdownContent("ä½ å¥½ï¼ŒFlovera")
+    val normalized = normalizeConversationMarkdownContent(
+      "\u00E4\u00BD\u00A0\u00E5\u00A5\u00BD\u00EF\u00BC\u008CFlovera",
+    )
 
-    assertTrue(normalized.contains("你好"))
-    assertFalse(normalized.contains("ä½"))
+    assertTrue(normalized.contains("\u4F60\u597D"))
+    assertFalse(normalized.contains("\u00E4\u00BD"))
   }
 
   @Test

@@ -1,5 +1,6 @@
 package com.flovera.app
 
+import android.os.SystemClock
 import android.webkit.JavascriptInterface
 import android.view.View
 import android.webkit.WebView
@@ -263,7 +264,7 @@ class WorkspaceAppRuntimeBaseInstrumentedTest {
         it.refreshWorkspaceFiles()
         it.selectHtmlFile("own-api/src/web/index.html")
       }
-      val selectedUrl = controller.state.value.selectedHtmlUrl.orEmpty()
+      val selectedUrl = waitForSelectedHtmlUrl(controller)
       assertTrue(selectedUrl.startsWith("http://127.0.0.1:"))
       assertFalse(selectedUrl.contains("/__flovera__/"))
 
@@ -359,5 +360,17 @@ class WorkspaceAppRuntimeBaseInstrumentedTest {
         webViewRef.getAndSet(null)?.destroy()
       }
     }
+  }
+
+  private fun waitForSelectedHtmlUrl(controller: AgentController, timeoutMillis: Long = 20_000): String {
+    val deadline = SystemClock.elapsedRealtime() + timeoutMillis
+    while (SystemClock.elapsedRealtime() < deadline) {
+      val url = controller.state.value.selectedHtmlUrl.orEmpty()
+      if (url.isNotBlank()) return url
+      val error = controller.state.value.selectedHtmlError
+      if (error.isNotBlank()) error("Selected HTML failed: $error")
+      SystemClock.sleep(50)
+    }
+    error("Timed out waiting for selectedHtmlUrl; state=${controller.state.value.status}")
   }
 }
