@@ -538,11 +538,13 @@ Status: Partially implemented. Workspace `AGENT.md` rules are injected into the
 agent prompt, users can interrupt runs, queue follow-up inputs, mark queued
 inputs as guidance, and status notifications exist for active runs. Guidance
 sent while a run is active is visible in the conversation as a user bubble in
-the active run transcript, followed by a lightweight queued status. Interrupts
-persist the active draft transcript plus a lightweight `run_interrupted` status
-instead of a full assistant bubble. Remaining work is clearer UI separation
-between system rules and workspace rules, stronger cancellation coverage for
-active provider/tool work, and more explicit background lifecycle diagnostics.
+the active run transcript after the next completed tool result, with a
+lightweight waiting status while it is pending. Interrupts persist the active
+draft transcript plus a lightweight `run_interrupted` status instead of a full
+assistant bubble, and notification copy now says partial transcript/tool
+history was saved. Remaining work is clearer UI separation between system rules
+and workspace rules, stronger cancellation coverage for active provider/tool
+work, and more explicit background lifecycle diagnostics.
 
 - Separate system rules from user/workspace rules:
   - System rules are app-owned product and safety constraints.
@@ -611,6 +613,41 @@ restricted tools and MCP integrations.
 - Add a user approval flow before proposed tools or MCP entries become active.
 - Keep tool availability visible to the agent only when the corresponding user
   permission is enabled.
+
+### Workspace Shell And JGit
+
+Status: Deferred behind release stability. Flovera has not added a general
+workspace shell or embedded JGit runtime. The current release boundary remains
+workspace files, search, bounded Python, WebView/artifacts, and explicit
+app-owned tools. Git support is valuable, especially `diff`, status, branch,
+and commit workflows, but it should not be rushed into the demo-workbench
+release while conversation, artifact, and runtime control quality are still the
+main product risk.
+
+- Target shape: expose a workspace-scoped shell surface for selected command
+  runtimes, starting with Python when shell-style execution is more natural than
+  tool calls, and later add Git through JGit or another Android-compatible
+  implementation.
+- Keep ordinary file operations as app-owned tools (`read`, `edit`, `search`,
+  artifact diagnostics) because those are safer, more inspectable, and easier
+  for the UI to connect to workspace state.
+- Treat Git as a CLI-like workspace capability from the agent's point of view,
+  not as a long list of narrow UI buttons. The first useful subset should be
+  `git status`, `git diff`, branch inspection, commit creation, and log viewing.
+- If JGit is adopted, wrap it in a small command-compatible adapter with
+  workspace path boundaries, output limits, timeouts, audit events, and clear
+  unsupported-command errors instead of exposing unrestricted library internals.
+- Do not add repository mutation such as checkout, reset, clean, rebase, or
+  force operations until restore/snapshot behavior and user confirmation
+  boundaries are explicit.
+- Acceptance criteria before implementation:
+  - the agent can inspect diffs and repository state inside the Android
+    workspace without leaving the workspace boundary;
+  - large diffs are paged or bounded instead of flooding conversation context;
+  - mutation commands are auditable and recoverable through snapshots or an
+    equivalent rollback path;
+  - unsupported Git behavior fails with a precise explanation rather than a
+    misleading partial result.
 
 ### Agent Capability Expansion
 
@@ -711,14 +748,16 @@ Remaining work is richer artifact validation and broader UX polish.
 
 Status: Partially implemented. Conversation rendering is usable for plain text
 and basic Markdown, and the display layer now normalizes unsafe control
-characters/newlines and handles numbered list markers as list items. Real
-dogfood still exposes malformed Markdown, mojibake-like garbling, and edge
-cases where generated text does not render as the model intended. Treat this as
-conversation product quality, not a cosmetic renderer detail, because unclear
-output can change user decisions during agent work.
+characters/newlines, repairs common UTF-8 mojibake when it is clearly safer
+than the original text, and preserves ordered/unordered list markers. Real
+dogfood may still expose malformed Markdown and edge cases where generated text
+does not render as the model intended. Treat this as conversation product
+quality, not a cosmetic renderer detail, because unclear output can change user
+decisions during agent work.
 
 - Done: add a low-risk display normalization layer for control characters,
-  mixed newlines, BOM characters, and numbered list markers.
+  mixed newlines, BOM characters, common UTF-8 mojibake, and ordered/unordered
+  list markers.
 - Improve Markdown parsing/rendering for mixed Chinese/English, code fences,
   lists, inline paths, tables, escaped characters, and streaming updates.
 - Add regression examples from real broken conversation output instead of only
@@ -772,9 +811,10 @@ previously opened as a black screen on Android WebView. Flovera now injects a
 viewport helper into workspace WebView pages, publishes
 `--flovera-viewport-height`, `--flovera-viewport-width`,
 `--flovera-safe-bottom`, and `window.FloveraViewport`, runs a first-load visible
-content probe, and reports likely invisible-content causes. Remaining work is a
-user-facing artifact validator or `artifact_inspect` successor with richer DOM
-diagnostics.
+content probe after dynamic-page startup has a short grace period, and reports
+specific likely invisible-content causes such as missing body, zero viewport,
+empty body, or no visible candidates. Remaining work is a user-facing artifact
+validator or `artifact_inspect` successor with richer DOM diagnostics.
 
 - Treat Android WebView layout differences as a Flovera runtime responsibility,
   not something every generated artifact must rediscover.
