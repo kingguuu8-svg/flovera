@@ -86,6 +86,11 @@ data class QueuedAgentInput(
   val mode: String = QUEUED_INPUT_REQUEST,
 )
 
+private data class AgentRunInput(
+  val modelInput: String,
+  val visibleInput: String = modelInput,
+)
+
 private data class FullAuthoritySettingsApplyResult(
   val settings: AppSettings,
   val appliedCount: Int = 0,
@@ -98,14 +103,15 @@ private const val RUN_NOTIFICATION_MIN_INTERVAL_MS = 1_500L
 private const val WORKSPACE_ARTIFACT_ACTION_PYTHON_JOB = "python_job"
 private const val WORKSPACE_ARTIFACT_PREVIEW_LOCAL_HTTP = "local_http"
 
-private fun QueuedAgentInput.toRunInput(): String {
-  if (mode != QUEUED_INPUT_GUIDANCE) return content
-  return """
+private fun QueuedAgentInput.toRunInput(): AgentRunInput {
+  if (mode != QUEUED_INPUT_GUIDANCE) return AgentRunInput(modelInput = content)
+  val modelInput = """
     Guidance while the previous agent run was active:
     $content
 
     Continue the current task using this guidance. If the task was already completed, revise or continue only when useful.
   """.trimIndent()
+  return AgentRunInput(modelInput = modelInput, visibleInput = content)
 }
 
 private fun SessionMessage.withMergedTranscriptEvents(
@@ -660,7 +666,7 @@ class AgentController(
       enqueueInput(trimmed, QUEUED_INPUT_REQUEST, "Message queued")
       return
     }
-    startAgentRun(trimmed, current.session ?: sessionController.createSession())
+    startAgentRun(AgentRunInput(modelInput = trimmed), current.session ?: sessionController.createSession())
   }
 
   fun guideAgentRun() {
@@ -717,13 +723,14 @@ class AgentController(
     }
   }
 
-  private fun startAgentRun(input: String, session: AgentSession) {
+  private fun startAgentRun(input: AgentRunInput, session: AgentSession) {
     val current = _state.value
     clearPendingActiveRunGuidance()
     val runTranscriptEvents = mutableListOf<ConversationTranscriptEvent>()
     activeRunTranscriptEvents = runTranscriptEvents
     activeRunJob = agentRunController.submit(
-      input = input,
+      input = input.modelInput,
+      visibleInput = input.visibleInput,
       settings = current.settings,
       session = session,
       workspace = workspaceController.runtimeWorkspace(),

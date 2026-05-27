@@ -51,6 +51,7 @@ class AgentRunController(
 
   fun submit(
     input: String,
+    visibleInput: String = input,
     settings: AppSettings,
     session: AgentSession,
     workspace: WorkspaceManager,
@@ -67,12 +68,13 @@ class AgentRunController(
     additionalTranscriptEvents: () -> List<ConversationTranscriptEvent> = { emptyList() },
   ): Job? {
     val trimmed = input.trim()
+    val visibleTrimmed = visibleInput.trim().ifBlank { trimmed }
     if (trimmed.isBlank()) return null
 
-    val withUser = appendUserPrompt(session, trimmed)
+    val withUser = appendUserPrompt(session, visibleTrimmed)
     val agentRunId = "${withUser.id}-${UUID.randomUUID()}"
     val startedAtMillis = System.currentTimeMillis()
-    val contextRecord = estimateContextUsage(trimmed, settings, withUser, workspace)
+    val contextRecord = estimateContextUsage(trimmed, visibleTrimmed, settings, withUser, workspace)
     val contextCompressed = shouldCompressContext(contextRecord)
     val runStartedEvent = lifecycleRunEvent(
       type = AgentRunEventType.RUN_STARTED,
@@ -247,7 +249,7 @@ class AgentRunController(
           )
           onRunEvent(compressionStartedEvent)
           runState.emit(compressionStartedEvent)
-          val recoveryRecord = estimateContextUsage(trimmed, settings, currentSession, workspace).copy(
+          val recoveryRecord = estimateContextUsage(trimmed, visibleTrimmed, settings, currentSession, workspace).copy(
             id = UUID.randomUUID().toString(),
             source = "agent_run_overflow_recovery",
             contextBudgetStatus = AgentContextBudget.STATUS_COMPRESSION_RECOMMENDED,
@@ -748,16 +750,22 @@ class AgentRunController(
 
   private fun estimateContextUsage(
     input: String,
+    visibleInput: String,
     settings: AppSettings,
     session: AgentSession,
     workspace: WorkspaceManager,
   ): ContextUsageRecord {
-    val recentHistory = RuntimeSessionHistory.entries(session = session, currentInput = input)
+    val recentHistory = RuntimeSessionHistory.entries(
+      session = session,
+      currentInput = input,
+      currentVisibleInput = visibleInput,
+    )
     val historyChars = recentHistory.sumOf { message ->
       message.role.length + message.content.length + 2
     }
     val footprint = AgentRequestFootprintBuilder.build(
       input = input,
+      currentVisibleInput = visibleInput,
       settings = settings,
       session = session,
       workspace = workspace,

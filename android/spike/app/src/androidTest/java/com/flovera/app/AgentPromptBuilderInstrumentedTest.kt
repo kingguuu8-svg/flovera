@@ -130,6 +130,38 @@ class AgentPromptBuilderInstrumentedTest {
   }
 
   @Test
+  fun userInputOmitsVisibleCurrentGuidanceFromRecentHistory() {
+    val visibleInput = "我在测试markdown渲染功能"
+    val modelInput = """
+      Guidance while the previous agent run was active:
+      $visibleInput
+
+      Continue the current task using this guidance. If the task was already completed, revise or continue only when useful.
+    """.trimIndent()
+
+    val userInput = AgentPromptBuilder.userInput(
+      input = modelInput,
+      session = AgentSession(
+        id = "guidance-history-test",
+        title = "Guidance history test",
+        createdAtMillis = 1L,
+        updatedAtMillis = 1L,
+        messages = listOf(
+          SessionMessage(role = "assistant", content = "previous answer"),
+          SessionMessage(role = "user", content = visibleInput),
+        ),
+      ),
+      workspaceUserRules = "",
+    )
+
+    assertTrue(userInput.contains("assistant: previous answer"))
+    assertTrue(userInput.contains("Current user request:"))
+    assertTrue(userInput.contains("Guidance while the previous agent run was active"))
+    assertTrue(userInput.contains(visibleInput))
+    assertFalse(userInput.contains("user: $visibleInput"))
+  }
+
+  @Test
   fun systemPromptUsesStablePrefixAndShortRunFacts() {
     val safePrompt = AgentPromptBuilder.systemPrompt(
       networkEnabled = false,

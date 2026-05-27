@@ -18,8 +18,17 @@ object AgentPromptBuilder {
     ).joinToString("\n\n")
   }
 
-  fun userInput(input: String, session: AgentSession, workspaceUserRules: String): String {
-    val history = RuntimeSessionHistory.promptText(session = session, currentInput = input)
+  fun userInput(
+    input: String,
+    session: AgentSession,
+    workspaceUserRules: String,
+    currentVisibleInput: String = input,
+  ): String {
+    val history = RuntimeSessionHistory.promptText(
+      session = session,
+      currentInput = input,
+      currentVisibleInput = currentVisibleInput,
+    )
     return """
       Workspace user rules from AGENT.md:
       ${workspaceUserRules.ifBlank { "(empty)" }}

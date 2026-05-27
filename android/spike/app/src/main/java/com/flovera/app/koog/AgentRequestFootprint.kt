@@ -29,6 +29,7 @@ data class AgentRequestFootprint(
 object AgentRequestFootprintBuilder {
   fun build(
     input: String,
+    currentVisibleInput: String = input,
     settings: AppSettings,
     session: AgentSession,
     workspace: WorkspaceManager,
@@ -46,6 +47,7 @@ object AgentRequestFootprintBuilder {
       input = input,
       session = session,
       workspaceUserRules = workspaceUserRules,
+      currentVisibleInput = currentVisibleInput,
     )
     val toolDescriptors = workspaceToolRegistry(
       workspace = workspace,

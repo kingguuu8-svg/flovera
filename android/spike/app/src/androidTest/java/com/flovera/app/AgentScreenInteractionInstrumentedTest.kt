@@ -352,13 +352,14 @@ class AgentScreenInteractionInstrumentedTest {
       agentRunController = AgentRunController(runtime = runtime),
       agentRunStatusNotifier = FakeAgentRunStatusNotifier(),
     )
+    val firstTask = "first queued task ${System.currentTimeMillis()}"
 
     composeRule.setContent {
       AgentScreen(controller)
     }
 
     composeRule.onNodeWithText("Agent").performClick()
-    composeRule.onAllNodes(hasSetTextAction())[0].performTextInput("first task")
+    composeRule.onAllNodes(hasSetTextAction())[0].performTextInput(firstTask)
     composeRule.onNodeWithContentDescription("Send message").performClick()
 
     composeRule.waitUntil(timeoutMillis = 5_000) { runtime.inputCount() == 1 && controller.state.value.isRunning }
@@ -381,9 +382,9 @@ class AgentScreenInteractionInstrumentedTest {
     composeRule.waitUntil(timeoutMillis = 5_000) { !controller.state.value.isRunning }
     composeRule.runOnIdle {
       val contents = controller.state.value.session?.messages?.map { it.content }.orEmpty()
-      assertTrue(contents.contains("first task"))
+      assertTrue(contents.contains(firstTask))
       assertTrue(contents.contains("second task"))
-      assertTrue(contents.contains("assistant output for first task"))
+      assertTrue(contents.contains("assistant output for $firstTask"))
       assertTrue(contents.contains("assistant output for second task"))
     }
   }
@@ -398,13 +399,14 @@ class AgentScreenInteractionInstrumentedTest {
       agentRunController = AgentRunController(runtime = runtime),
       agentRunStatusNotifier = FakeAgentRunStatusNotifier(),
     )
+    val firstTask = "first guidance task ${System.currentTimeMillis()}"
 
     composeRule.setContent {
       AgentScreen(controller)
     }
 
     composeRule.onNodeWithText("Agent").performClick()
-    composeRule.onAllNodes(hasSetTextAction())[0].performTextInput("first task")
+    composeRule.onAllNodes(hasSetTextAction())[0].performTextInput(firstTask)
     composeRule.onNodeWithContentDescription("Send message").performClick()
 
     composeRule.waitUntil(timeoutMillis = 5_000) { runtime.inputCount() == 1 && controller.state.value.isRunning }
@@ -420,18 +422,66 @@ class AgentScreenInteractionInstrumentedTest {
     runtime.finishNext()
     composeRule.waitUntil(timeoutMillis = 5_000) { !controller.state.value.isRunning }
     composeRule.runOnIdle {
-      assertEquals(listOf("first task"), runtime.inputsSnapshot())
+      assertEquals(listOf(firstTask), runtime.inputsSnapshot())
       assertEquals(listOf("keep the UI compact"), runtime.guidanceSnapshot())
       val firstAssistant = controller.state.value.session?.messages
-        ?.firstOrNull { it.role == "assistant" && it.content == "assistant output for first task" }
+        ?.lastOrNull { it.role == "assistant" && it.content == "assistant output for $firstTask" }
       val transcript = firstAssistant?.transcriptEvents.orEmpty()
       val guidanceBubble = transcript.indexOfFirst { it.type == "user_guidance" && it.content == "keep the UI compact" }
       val guidanceStatus = transcript.indexOfFirst { it.type == "guidance" && it.title == "Guidance applied" }
-      val assistantText = transcript.indexOfFirst { it.type == "assistant_text" && it.content == "assistant output for first task" }
+      val assistantText = transcript.indexOfFirst { it.type == "assistant_text" && it.content == "assistant output for $firstTask" }
       assertTrue("guidance should be persisted as a transcript user bubble", guidanceBubble >= 0)
       assertTrue("guidance applied status should follow the guidance bubble", guidanceStatus > guidanceBubble)
       assertTrue("assistant output should remain after the guidance events", assistantText > guidanceStatus)
     }
+  }
+
+  @Test
+  fun unappliedGuidanceRunShowsOnlyUserTextInConversation() {
+    val context = composeRule.activity.applicationContext
+    SettingsStore(context).save(AppSettings(language = "en"))
+    val runtime = QueueingAgentRuntime(consumeGuidanceOnCompletion = false)
+    val controller = AgentController(
+      context,
+      agentRunController = AgentRunController(runtime = runtime),
+      agentRunStatusNotifier = FakeAgentRunStatusNotifier(),
+    )
+    val firstTask = "first unapplied guidance task ${System.currentTimeMillis()}"
+    val guidance = "\u6211\u5728\u6D4B\u8BD5markdown\u6E32\u67D3\u529F\u80FD"
+
+    composeRule.setContent {
+      AgentScreen(controller)
+    }
+
+    composeRule.onNodeWithText("Agent").performClick()
+    composeRule.onAllNodes(hasSetTextAction())[0].performTextInput(firstTask)
+    composeRule.onNodeWithContentDescription("Send message").performClick()
+
+    composeRule.waitUntil(timeoutMillis = 5_000) { runtime.inputCount() == 1 && controller.state.value.isRunning }
+    composeRule.onAllNodes(hasSetTextAction())[0].performTextInput(guidance)
+    composeRule.onNodeWithContentDescription("Send message").performClick()
+    composeRule.onNodeWithContentDescription("Guide queued message").performClick()
+
+    runtime.finishNext()
+    composeRule.waitUntil(timeoutMillis = 5_000) { runtime.inputCount() == 2 && controller.state.value.isRunning }
+
+    composeRule.runOnIdle {
+      val modelInput = runtime.inputsSnapshot().last()
+      assertTrue(modelInput.startsWith("Guidance while the previous agent run was active:"))
+      assertTrue(modelInput.contains(guidance))
+      assertTrue(modelInput.contains("Continue the current task using this guidance"))
+
+      val userMessages = controller.state.value.session?.messages
+        ?.filter { it.role == "user" }
+        ?.map { it.content }
+        .orEmpty()
+      assertTrue(userMessages.contains(guidance))
+      assertFalse(userMessages.any { it.contains("Guidance while the previous agent run was active") })
+      assertFalse(userMessages.any { it.contains("Continue the current task using this guidance") })
+    }
+
+    runtime.finishNext()
+    composeRule.waitUntil(timeoutMillis = 5_000) { !controller.state.value.isRunning }
   }
 
   @Test
@@ -752,7 +802,9 @@ class AgentScreenInteractionInstrumentedTest {
     }
   }
 
-  private class QueueingAgentRuntime : AgentRuntime {
+  private class QueueingAgentRuntime(
+    private val consumeGuidanceOnCompletion: Boolean = true,
+  ) : AgentRuntime {
     private val inputs = Collections.synchronizedList(mutableListOf<String>())
     private val completions = Collections.synchronizedList(mutableListOf<CompletableDeferred<Unit>>())
     private val guidance = Collections.synchronizedList(mutableListOf<String>())
@@ -798,7 +850,9 @@ class AgentScreenInteractionInstrumentedTest {
       synchronized(inputs) { inputs += input }
       synchronized(completions) { completions += completion }
       completion.await()
-      synchronized(guidance) { guidance += guidanceProvider.consumePendingGuidance() }
+      if (consumeGuidanceOnCompletion) {
+        synchronized(guidance) { guidance += guidanceProvider.consumePendingGuidance() }
+      }
       return "assistant output for $input"
     }
   }

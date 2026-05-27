@@ -132,6 +132,57 @@ class AgentRunControllerInstrumentedTest {
   }
 
   @Test
+  fun runControllerPersistsVisibleInputSeparatelyFromGuidanceModelInput() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val store = AgentSessionStore(context)
+    val sessions = SessionController(store)
+    val session = store.create("Visible guidance ${System.currentTimeMillis()}")
+    val workspace = WorkspaceManager(context, "visible-guidance-${System.currentTimeMillis()}").also { it.ensureSeedFiles() }
+    val runtime = FakeAgentRuntime()
+    val controller = AgentRunController(runtime = runtime, scope = this)
+    var startedSession: AgentSession? = null
+    var startedDraft: SessionMessage? = null
+    var finishedSession: AgentSession? = null
+    val visibleInput = "我在测试markdown渲染功能"
+    val modelInput = """
+      Guidance while the previous agent run was active:
+      $visibleInput
+
+      Continue the current task using this guidance. If the task was already completed, revise or continue only when useful.
+    """.trimIndent()
+
+    val job = controller.submit(
+      input = modelInput,
+      visibleInput = visibleInput,
+      settings = AppSettings(),
+      session = session,
+      workspace = workspace,
+      appendUserPrompt = sessions::appendUserPrompt,
+      appendContextRecord = sessions::appendContextRecord,
+      appendCompressionDivider = sessions::appendCompressionDivider,
+      appendMessage = sessions::appendMessage,
+      onStarted = { withUser, draft ->
+        startedSession = withUser
+        startedDraft = draft
+      },
+      onDraft = {},
+      onSessionUpdated = { _, _ -> },
+      onFinished = { updated, _ -> finishedSession = updated },
+    )
+
+    assertNotNull(job)
+    job!!.join()
+
+    assertEquals(modelInput, runtime.inputSeen)
+    assertEquals("user", startedSession?.messages?.single()?.role)
+    assertEquals(visibleInput, startedSession?.messages?.single()?.content)
+    assertFalse(startedSession?.messages?.single()?.content?.contains("Continue the current task") == true)
+    assertTrue(startedDraft?.runEvents?.any { it.title == "Guidance queued into run" } == true)
+    val userMessages = finishedSession?.messages.orEmpty().filter { it.role == "user" }.map { it.content }
+    assertEquals(listOf(visibleInput), userMessages)
+  }
+
+  @Test
   fun runControllerShowsCompressionDraftAndAddsDividerWhenBudgetRequiresIt() = runBlocking {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val store = AgentSessionStore(context)

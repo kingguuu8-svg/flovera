@@ -13,9 +13,10 @@ object RuntimeSessionHistory {
   fun entries(
     session: AgentSession,
     currentInput: String = "",
+    currentVisibleInput: String = currentInput,
     maxMessages: Int = DEFAULT_MAX_MESSAGES,
   ): List<RuntimeHistoryEntry> {
-    val messages = withoutCurrentInput(session.messages, currentInput)
+    val messages = withoutCurrentInput(session.messages, currentInput, currentVisibleInput)
       .filter { it.role == SESSION_ROLE_COMPRESSION || it.content.isNotBlank() }
     val dividerIndex = messages.indexOfLast { it.role == SESSION_ROLE_COMPRESSION }
     if (dividerIndex < 0) {
@@ -42,23 +43,40 @@ object RuntimeSessionHistory {
   fun promptText(
     session: AgentSession,
     currentInput: String = "",
+    currentVisibleInput: String = currentInput,
     maxMessages: Int = DEFAULT_MAX_MESSAGES,
   ): String {
     return entries(
       session = session,
       currentInput = currentInput,
+      currentVisibleInput = currentVisibleInput,
       maxMessages = maxMessages,
     ).joinToString("\n") { entry ->
       "${entry.role}: ${entry.content}"
     }
   }
 
-  private fun withoutCurrentInput(messages: List<SessionMessage>, currentInput: String): List<SessionMessage> {
+  private fun withoutCurrentInput(
+    messages: List<SessionMessage>,
+    currentInput: String,
+    currentVisibleInput: String,
+  ): List<SessionMessage> {
     val normalizedInput = currentInput.trim()
-    if (normalizedInput.isBlank()) return messages
+    val normalizedVisibleInput = currentVisibleInput.trim()
+    if (normalizedInput.isBlank() && normalizedVisibleInput.isBlank()) return messages
     val last = messages.lastOrNull() ?: return messages
     if (last.role != "user") return messages
-    return if (last.content.trim() == normalizedInput) messages.dropLast(1) else messages
+    val lastContent = last.content.trim()
+    // Wrapped guidance model inputs include the visible guidance inside an internal instruction block.
+    return if (
+      lastContent == normalizedInput ||
+      lastContent == normalizedVisibleInput ||
+      (lastContent.isNotBlank() && normalizedInput.contains(lastContent))
+    ) {
+      messages.dropLast(1)
+    } else {
+      messages
+    }
   }
 
   private fun SessionMessage.toRuntimeEntry(): RuntimeHistoryEntry {
