@@ -7,6 +7,7 @@ $ErrorActionPreference = "Stop"
 $allowed = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 @(
   "README.md",
+  "README.zh-CN.md",
   "CHANGELOG.md",
   "CONTRIBUTING.md",
   "SECURITY.md",
