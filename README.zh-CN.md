@@ -5,7 +5,7 @@
     </td>
     <td>
       <h1>Flovera</h1>
-      <p>运行在 Android 本地的 workspace agent，用来在手机上创建和预览小型 demo。</p>
+      <p>运行在 Android 上的轻量 agent 工作区，用来在手机上创造和预览小应用、文档和原型。</p>
       <p>
         <a href="README.md"><img src="docs/assets/badges/lang-en.svg" alt="English README"></a>
         <a href="LICENSE"><img src="docs/assets/badges/license-mit.svg" alt="MIT License"></a>
@@ -17,57 +17,71 @@
   </tr>
 </table>
 
-Flovera 是一个运行在 Android 本地的 workspace agent 应用。
+Flovera 是一个基于 Android 端的轻量 agent 工作区程序。
 
-它会在手机上维护一个受控工作区，让 AI agent 在其中创建、读取、修改和检查文件，并用 Android WebView 打开生成的 HTML / Web 产物。第一个公开版本定位为 **Flovera Preview**：一个轻量的本地 demo 工作台，用来在手机上创建、预览和迭代可运行的小产物。
+它会在手机上提供一个本地工作区。你可以和 agent 对话，让它创建和修改文件，并直接在应用里预览结果。当前的 **Flovera Preview** 重点放在一个短闭环上：提出想法，生成文件，查看结果，然后继续修改。
 
-Flovera 不是 VPS 替代品，也不是通用手机自动化框架，更不承诺稳定的长期后台运行。它当前最有价值的部分，是把对话、文件、验证和预览放在同一台 Android 设备里，形成一个很短的闭环。
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <img src="docs/assets/flovera-flow-en.gif" alt="Flovera English workflow preview" width="320">
+      <br>
+      <sub>English workflow preview</sub>
+    </td>
+    <td width="50%" align="center">
+      <img src="docs/assets/flovera-flow-zh-cn.gif" alt="Flovera Chinese workflow preview" width="320">
+      <br>
+      <sub>中文工作流预览</sub>
+    </td>
+  </tr>
+</table>
 
 ## 可以用来做什么
 
-- 生成面向移动端的 HTML demo，并直接在 Android WebView 中打开。
-- 创建小游戏、仪表盘、计算器、报告和交互原型。
-- 生成和预览 Markdown、JSON、CSV、文本、代码、图片、PDF 等本地工作区产物。
+- 自由创造属于自己的小应用。
+- 把一个灵感初步实现成可运行的原型。
+- 制作交互式 HTML 页面、工具、dashboard 和小游戏。
+- 写文档、笔记、报告和 PPT 草稿。
+- 生成并预览 Markdown、JSON、CSV、文本、代码、图片和 PDF 等工作区产物。
 - 在需要脚本、计算或结构化文件生成时，使用受控 Python runtime 辅助完成。
 
 ## 工作方式
 
 1. 在 Android 上打开 Flovera。
-2. 告诉 agent 你想创建什么小产物。
+2. 告诉 agent 你想创建什么。
 3. agent 在受控 workspace 内读取、写入、搜索和编辑文件。
 4. Flovera 检查生成的 app manifest 和预览入口是否可用。
-5. 在应用内 WebView 或文件预览中打开结果。
+5. 在应用内预览结果。
 6. 继续对话，让 agent 修改和完善产物。
 
 核心循环是：
 
 ```text
-对话 -> workspace 文件 -> 诊断 -> WebView 预览 -> 继续修改
+对话 -> workspace 文件 -> 诊断 -> 应用内预览 -> 继续修改
 ```
 
 ## 当前 Preview 能力
 
 - 持久化 session 和对话历史。
-- 按时间顺序渲染对话，并用更轻量的形式展示工具和状态事件。
+- 按时间顺序渲染对话，并用较轻量的形式展示工具和状态事件。
 - workspace 文件读取、写入、编辑、列表和搜索工具。
 - workspace 快照，用于更安全地迭代。
-- HTML / WebView 预览，以及 workspace local HTTP 预览。
+- HTML 预览和 workspace-local HTTP 预览。
 - 使用 `flovera.app.json` 描述生成的 workspace app。
 - 使用 `artifact_diagnose` 检查生成的 Flovera app 是否成功注册。
 - 受控 Python runtime，用于本地生成、计算和验证。
 - 支持预览 HTML、Markdown、JSON、CSV、文本、代码、图片和 PDF。
-- 模型 provider 配置保存在应用设置里，不写入源码。
+- provider 配置保存在应用设置里，不写入源码。
 - network 工具默认开启，并保留设置入口。
 - 配置 Brave Search API key 后支持 Web Search。
 
-## 边界
+## Preview 说明
 
+- 当前 preview 主要针对 DeepSeek 的正常使用做测试和支持。
 - Android 后台行为仍受系统和厂商策略影响。
-- 生成的 demo 仍可能需要多轮迭代。
-- Android WebView 和桌面浏览器存在兼容差异。
+- Android WebView 和桌面浏览器存在差异，生成页面应在设备上检查。
 - provider API key 和应用权限属于 Flovera app 设置，不是 workspace 源码文件。
-- Preview 阶段的大多数测试在官方 DeepSeek API 条件下进行。虽然 Flovera 提供其它 provider 配置选项，但当前不保证这些 provider 的功能一定正常。
-- MCP、Git 和通用 shell 风格的 workspace 工具不属于第一个 Preview 版本边界。
+- MCP、Git 和更完整的 shell 风格 workspace 工具仍在后续规划中。
 
 ## 仓库结构
 
@@ -77,9 +91,9 @@ Flovera 不是 VPS 替代品，也不是通用手机自动化框架，更不承�
 |-- docs/                          项目和发布文档
 |-- examples/                      示例材料
 |-- scripts/                       仓库脚本
-|-- PRODUCT_QUALITY.md             产品质量模型和内部 backlog
-|-- CHANGELOG.md                   面向用户的变更记录
-|-- THIRD_PARTY_NOTICES.md         依赖说明摘要
+|-- PRODUCT_QUALITY.md             产品质量模型和 backlog
+|-- CHANGELOG.md                   用户可读的变更记录
+|-- THIRD_PARTY_NOTICES.md         依赖说明
 `-- LICENSE                        MIT license
 ```
 

@@ -17,16 +17,29 @@
   </tr>
 </table>
 
-Flovera is an Android-local workspace agent app.
+Flovera is a local Android workspace for building small, phone-first demos with
+an agent.
 
-It gives an AI agent a scoped workspace on your phone, lets the agent create and
-modify files there, and opens generated HTML/web artifacts inside Android
-WebView. The first public version is positioned as **Flovera Preview**: a small,
-local demo workbench for creating and iterating on phone-readable artifacts.
+The app gives the agent a scoped workspace on your phone, keeps the conversation
+and files together, and opens generated HTML/web artifacts in Android WebView.
+The first public version, **Flovera Preview**, focuses on a fast loop: describe
+an idea, let the agent create the files, inspect the result, then revise it in
+the same place.
 
-Flovera is not a VPS replacement, a general phone automation framework, or an
-always-on background worker. Its current value is the tight loop between chat,
-files, verification, and preview on one Android device.
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <img src="docs/assets/flovera-flow-en.gif" alt="Flovera English workflow preview" width="320">
+      <br>
+      <sub>English workflow preview</sub>
+    </td>
+    <td width="50%" align="center">
+      <img src="docs/assets/flovera-flow-zh-cn.gif" alt="Flovera Chinese workflow preview" width="320">
+      <br>
+      <sub>中文工作流预览</sub>
+    </td>
+  </tr>
+</table>
 
 ## What You Can Build
 
@@ -34,8 +47,8 @@ files, verification, and preview on one Android device.
 - Small games, dashboards, calculators, reports, and interactive prototypes.
 - Local workspace artifacts such as Markdown, JSON, CSV, text, code, images,
   and PDFs.
-- Bounded Python-generated outputs when a task needs scripting, calculation, or
-  structured file generation.
+- Python-generated outputs for scripting, calculation, and structured file
+  generation.
 
 ## How It Works
 
@@ -68,18 +81,17 @@ chat -> workspace files -> diagnostics -> WebView preview -> revision
 - Network tools enabled by default, with settings controls.
 - Brave Search support when a Brave Search API key is configured.
 
-## Boundaries
+## Preview Notes
 
+- Flovera Preview is tuned for small demos and local artifacts.
 - Android background behavior still depends on OS and device vendor policy.
-- Generated demos can still require more than one iteration.
-- Android WebView behavior can differ from desktop browsers.
-- Provider API keys and app permissions belong to Flovera app settings, not the
+- Android WebView can differ from desktop browsers, so generated pages should be
+  checked on-device.
+- Provider API keys and app permissions live in Flovera app settings, not in the
   workspace source tree.
-- Most Preview-stage testing is done with the official DeepSeek API. Other
-  provider configuration options exist, but Flovera does not currently guarantee
-  that they work correctly.
-- MCP, Git, and general shell-style workspace tooling are not part of the first
-  Preview boundary.
+- DeepSeek is the primary tested provider for the first preview. OpenAI-style,
+  Anthropic-style, and other provider routes are being expanded.
+- MCP, Git, and broader shell-style workspace tooling are on the roadmap.
 
 ## Repository Layout
 
