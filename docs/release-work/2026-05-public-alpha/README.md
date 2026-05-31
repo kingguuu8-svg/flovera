@@ -13,6 +13,7 @@ Required outputs for this pass:
   decisions.
 - `github-showcase-draft.md`: draft GitHub showcase README copy, not yet applied
   to the public README.
+- `github-showcase-draft.zh-CN.md`: Chinese draft of the GitHub showcase page.
 - `social-copy-examples.md`: multi-angle social copy examples.
 
 Working positioning:
