@@ -56,6 +56,32 @@ class ProviderKtorRouteTest {
   }
 
   @Test
+  fun missingVersionSegmentGetsFallbackCandidate() {
+    val routes = providerKtorRouteCandidates(
+      profile(
+        baseUrl = "https://api.openai.com",
+        chatCompletionsPath = "chat/completions",
+      ),
+    )
+
+    assertEquals("chat/completions", routes.first().chatCompletionsPath)
+    assertTrue(routes.any { it.chatCompletionsPath == "v1/chat/completions" })
+  }
+
+  @Test
+  fun accidentalBasePathPrefixGetsBareRequestFallbackCandidate() {
+    val routes = providerKtorRouteCandidates(
+      profile(
+        baseUrl = "https://api.example.com/bad-prefix",
+        chatCompletionsPath = "/v1/chat/completions",
+      ),
+    )
+
+    assertEquals("bad-prefix/v1/chat/completions", routes.first().chatCompletionsPath)
+    assertTrue(routes.any { it.chatCompletionsPath == "v1/chat/completions" })
+  }
+
+  @Test
   fun responsesAndAnthropicMessagesPreserveBasePathPrefixes() {
     val responses = providerKtorRoute(
       profile(

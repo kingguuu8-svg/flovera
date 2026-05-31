@@ -101,12 +101,35 @@ fun providerKtorRouteCandidates(runtimeProfile: ProviderRuntimeProfile): List<Pr
 }
 
 private fun routePathCandidates(basePath: String, requestPath: String): List<String> {
-  val trimmedRequest = requestPath.trim().trimStart('/')
-  val candidates = mutableListOf(combineProviderPath(basePath, trimmedRequest))
-  if (basePath.isNotBlank() && trimmedRequest.startsWith("v1/")) {
-    candidates += combineProviderPath(basePath, trimmedRequest.removePrefix("v1/"))
+  val base = basePath.trim().trim('/')
+  val request = requestPath.trim().trimStart('/')
+  val candidates = mutableListOf<String>()
+  fun add(path: String) {
+    if (path.isNotBlank() && path !in candidates) candidates += path
   }
-  return candidates.distinct()
+
+  add(combineProviderPath(base, request))
+
+  val requestWithoutVersion = request.removeLeadingVersionSegment()
+  val requestStartsWithVersion = requestWithoutVersion != request
+  val baseHasVersion = base.split('/').any { it.isVersionSegment() }
+
+  if (requestStartsWithVersion) {
+    add(combineProviderPath(base, requestWithoutVersion))
+  } else if (!baseHasVersion) {
+    add(combineProviderPath(base, "v1/$request"))
+  }
+
+  if (base.isNotBlank()) {
+    add(request)
+    if (requestStartsWithVersion) {
+      add(requestWithoutVersion)
+    } else {
+      add("v1/$request")
+    }
+  }
+
+  return candidates
 }
 
 private fun combineProviderPath(basePath: String, requestPath: String): String {
@@ -121,6 +144,16 @@ private fun combineProviderPath(basePath: String, requestPath: String): String {
       baseSegments.takeLast(size) == requestSegments.take(size)
     } ?: 0
   return (baseSegments + requestSegments.drop(overlap)).joinToString("/")
+}
+
+private fun String.removeLeadingVersionSegment(): String {
+  val segments = split('/').filter { it.isNotBlank() }
+  if (segments.firstOrNull()?.isVersionSegment() != true) return this
+  return segments.drop(1).joinToString("/")
+}
+
+private fun String.isVersionSegment(): Boolean {
+  return matches(Regex("v\\d+(?:\\.\\d+)?", RegexOption.IGNORE_CASE))
 }
 
 object ProviderTransportFactory {
@@ -337,7 +370,11 @@ private class ProviderRouteFallbackLLMClient(
     return clients.first().moderate(prompt, model)
   }
 
-  override suspend fun models(): List<LLModel> = clients.first().models()
+  override suspend fun models(): List<LLModel> {
+    return retryRoute404 { client ->
+      client.models()
+    }
+  }
 
   override fun close() {
     clients.forEach { it.close() }
