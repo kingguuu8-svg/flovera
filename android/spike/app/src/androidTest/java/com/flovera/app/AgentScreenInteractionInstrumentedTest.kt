@@ -30,6 +30,7 @@ import com.flovera.app.session.ContextUsageRecord
 import com.flovera.app.session.SessionMessage
 import com.flovera.app.workspace.WorkspaceManager
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.util.Collections
 import kotlinx.coroutines.CompletableDeferred
 import org.junit.Assert.assertEquals
@@ -59,7 +60,44 @@ class AgentScreenInteractionInstrumentedTest {
       AgentScreen(controller)
     }
 
-    composeRule.onNodeWithText("\u548c Flovera \u5bf9\u8bdd\u6765\u521b\u5efa\u9879\u76ee").assertIsDisplayed()
+    composeRule.onNodeWithText("No preview \u00b7 choose display").assertIsDisplayed()
+    composeRule.onNodeWithText("\u505a\u4e00\u4e2a\u79d1\u5b66\u8ba1\u7b97\u5668").assertIsDisplayed()
+    composeRule.onNodeWithContentDescription("Open conversation").assertIsDisplayed()
+  }
+
+  @Test
+  fun firstOpenConfigurationStartsEmptyAndUnselected() {
+    val context = composeRule.activity.applicationContext
+    val root = File(context.cacheDir, "first-open-${System.currentTimeMillis()}").apply {
+      deleteRecursively()
+      mkdirs()
+    }
+    val missingSettingsStore = SettingsStore(context, File(root, "missing-settings.json"))
+    assertEquals(AppSettings(), missingSettingsStore.load())
+
+    val workspaceId = "first-open-${System.currentTimeMillis()}"
+    val settingsStore = SettingsStore(context, File(root, "settings.json"))
+    settingsStore.save(AppSettings(activeWorkspaceId = workspaceId))
+    val sessionStore = AgentSessionStore(context, File(root, "sessions"))
+    val controller = AgentController(context, settingsStore, sessionStore)
+
+    composeRule.setContent {
+      AgentScreen(controller)
+    }
+
+    composeRule.onNodeWithText("No preview \u00b7 choose display").assertIsDisplayed()
+    composeRule.onNodeWithText("\u505a\u4e00\u4e2a\u79d1\u5b66\u8ba1\u7b97\u5668").assertIsDisplayed()
+    composeRule.onNodeWithContentDescription("Open settings to configure model API").assertIsDisplayed()
+    composeRule.runOnIdle {
+      val state = controller.state.value
+      assertEquals(null, state.session)
+      assertTrue(state.sessions.isEmpty())
+      assertEquals("", state.settings.selectedHtmlPath)
+      assertEquals("", state.selectedHtmlPath)
+      assertEquals("", state.selectedPreviewPath)
+      assertEquals(null, state.selectedHtmlUrl)
+      assertTrue(state.htmlFiles.contains("index.html"))
+    }
   }
 
   @Test

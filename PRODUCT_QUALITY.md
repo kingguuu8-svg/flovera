@@ -217,10 +217,15 @@ Implementation note, 2026-05-31:
 
 - Promoted the design-lane bottom command bar and visual system into the
   `flovera` flavor by enabling `design_frontend_style_enabled` for the main app.
+- Aligned the `flovera` launcher resources with the promoted design lane so the
+  production package no longer presents the older launcher identity.
+- First-open configuration should remain visibly clean: no active session, no
+  selected display target, no auto-opened seed HTML, and the empty main display
+  remains the first surface even though seed files are present in the workspace.
 - Verification gate: `BottomCommandBarInstrumentedTest`,
   `AgentScreenInteractionInstrumentedTest#mainSurfaceExposesAgentAndHtmlQuickPickerWhileConversationOwnsSecondaryEntries`,
-  and
-  `AgentScreenInteractionInstrumentedTest#htmlQuickPickerOpensWorkspaceHtmlFromMainSurface`
+  `AgentScreenInteractionInstrumentedTest#htmlQuickPickerOpensWorkspaceHtmlFromMainSurface`,
+  and `AgentScreenInteractionInstrumentedTest#firstOpenConfigurationStartsEmptyAndUnselected`
   must pass on an update-only real-device APK.
 
 ### Provider And Configuration
