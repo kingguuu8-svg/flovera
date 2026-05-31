@@ -325,6 +325,15 @@ class ProviderConfigInstrumentedTest {
     assertEquals("/v1/chat/completions", profile.chatCompletionsPath)
     assertEquals("generic", profile.requestProfile.compatibilityMode)
     assertFalse(profile.requestProfile.injectOllamaNumCtx)
+
+    val zai = ModelProviderCatalog.requireProvider("zai")
+    val zaiProfile = ModelProviderCatalog.runtimeProfileFor(
+      zai,
+      AppSettings(provider = "zai", model = "glm-5"),
+    )
+    assertEquals("https://api.z.ai/api/paas/v4", zaiProfile.baseUrl)
+    assertEquals("/chat/completions", zaiProfile.chatCompletionsPath)
+
     assertEquals(LLMProvider.OpenRouter, openRouter.llmProvider)
     assertEquals(ProviderTransport.FloveraOpenAICompatibleChatCompletions, openRouter.transport)
     assertEquals(
