@@ -41,6 +41,7 @@ data class AppSettings(
   val maxAgentIterations: Int = AGENT_ITERATIONS_UNLIMITED,
   val networkEnabled: Boolean = false,
   val webSearchEnabled: Boolean = false,
+  val backgroundKeepAliveEnabled: Boolean = false,
   val braveSearchApiKey: String = "",
   val language: String = "en",
   val themeMode: String = "light",

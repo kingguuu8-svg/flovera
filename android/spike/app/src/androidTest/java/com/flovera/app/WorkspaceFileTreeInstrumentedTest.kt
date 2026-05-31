@@ -1363,6 +1363,7 @@ class WorkspaceFileTreeInstrumentedTest {
           activeWorkspaceId = workspaceId,
           networkEnabled = true,
           webSearchEnabled = true,
+          backgroundKeepAliveEnabled = true,
           agentAuthorityMode = "assisted",
         ),
       )
@@ -1444,6 +1445,9 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"workspaceSearchScopes\""))
     assertTrue(capabilities.contains("\"workspace_app_metadata\""))
     assertTrue(capabilities.contains("\"webSearch\": true"))
+    assertTrue(capabilities.contains("\"foregroundAgentRunService\": true"))
+    assertTrue(capabilities.contains("\"backgroundKeepAlive\": true"))
+    assertTrue(capabilities.contains("\"backgroundKeepAliveEnabled\": true"))
     assertTrue(capabilities.contains("\"previewFormats\""))
     assertTrue(capabilities.contains("\"json\""))
     assertTrue(capabilities.contains("\"csv\""))
@@ -1549,6 +1553,7 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(settingsView.contains("\"providerSupportsHealthCheck\""))
     assertTrue(settingsView.contains("\"customOpenAICompatibilityMode\""))
     assertTrue(settingsView.contains("\"reasoningEffort\""))
+    assertTrue(settingsView.contains("\"backgroundKeepAliveEnabled\": true"))
     assertTrue(settingsView.contains("\"openRouterProviderPreferences\""))
     assertTrue(settingsView.contains("\"openRouterMinCodingScore\""))
     assertTrue(settingsView.contains("\"providerInjectsOllamaNumCtx\""))

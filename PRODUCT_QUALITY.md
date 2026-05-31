@@ -568,15 +568,19 @@ advanced request templates and auditable route changes.
 
 Status: Partially implemented. Workspace `AGENT.md` rules are injected into the
 agent prompt, users can interrupt runs, queue follow-up inputs, mark queued
-inputs as guidance, and status notifications exist for active runs. Guidance
-sent while a run is active is visible in the conversation as a user bubble in
-the active run transcript after the next completed tool result, with a
-lightweight waiting status while it is pending. Interrupts persist the active
-draft transcript plus a lightweight `run_interrupted` status instead of a full
-assistant bubble, and notification copy now says partial transcript/tool
-history was saved. Remaining work is clearer UI separation between system rules
+inputs as guidance, and active runs use an Android foreground service with
+status notifications. Guidance sent while a run is active is visible in the
+conversation as a user bubble in the active run transcript after the next
+completed tool result, with a lightweight waiting status while it is pending.
+Interrupts persist the active draft transcript plus a lightweight
+`run_interrupted` status instead of a full assistant bubble, and notification
+copy now says partial transcript/tool history was saved. Settings include an
+explicit opt-in background keep-alive mode that keeps Flovera foreground-service
+visible for long workspace work and restores from the persisted setting after a
+service restart. Remaining work is clearer UI separation between system rules
 and workspace rules, stronger cancellation coverage for active provider/tool
-work, and more explicit background lifecycle diagnostics.
+work, notification actions, overlay/floating-window research, and more explicit
+background lifecycle diagnostics.
 
 - Separate system rules from user/workspace rules:
   - System rules are app-owned product and safety constraints.
@@ -595,14 +599,18 @@ work, and more explicit background lifecycle diagnostics.
 - Keep queued or steering messages visible in the conversation so the user can
   see what will happen next and cancel pending input before it runs.
 - Let the agent continue background work when Flovera is not focused, within
-  Android lifecycle limits.
+  Android lifecycle limits. Baseline implemented through
+  `AgentRunForegroundService` for active runs.
 - Show ongoing background status in the Android notification shade, including
-  current run state, interruption action, and failure/success outcome.
-- Explore a stronger opt-in keep-alive mode for long-running local work,
-  including whether a small overlay/floating-window affordance can lawfully and
-  usefully keep Flovera foreground-adjacent on Android. This must be gated by
-  explicit user permission, clear visible state, and a fallback path when the
-  overlay permission is denied or the OEM background policy still stops work.
+  current run state and failure/success outcome. Remaining work: notification
+  actions such as interrupt/resume.
+- Offer a stronger opt-in keep-alive mode for long-running local work. Baseline
+  implemented as a settings-controlled foreground-service notification.
+  Remaining work: evaluate whether a small overlay/floating-window affordance
+  can lawfully and usefully keep Flovera foreground-adjacent on Android. This
+  must be gated by explicit user permission, clear visible state, and a
+  fallback path when the overlay permission is denied or the OEM background
+  policy still stops work.
 - Background execution must preserve existing settings, session persistence,
   error logs, and notification permission boundaries.
 

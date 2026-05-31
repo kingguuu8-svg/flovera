@@ -4600,6 +4600,9 @@ private fun SettingsDialog(
   }
   var webSearchEnabledDraft by remember(state.settings.webSearchEnabled) { mutableStateOf(state.settings.webSearchEnabled) }
   var braveSearchApiKeyDraft by remember(state.settings.braveSearchApiKey) { mutableStateOf(state.settings.braveSearchApiKey) }
+  var backgroundKeepAliveDraft by remember(state.settings.backgroundKeepAliveEnabled) {
+    mutableStateOf(state.settings.backgroundKeepAliveEnabled)
+  }
   val selectedProvider = ModelProviderCatalog.findProvider(providerDraft) ?: ModelProviderCatalog.defaultProvider
   var providerMenuOpen by remember { mutableStateOf(false) }
   var modelMenuOpen by remember { mutableStateOf(false) }
@@ -4769,6 +4772,30 @@ private fun SettingsDialog(
           singleLine = true,
           modifier = Modifier.fillMaxWidth(),
         )
+        Text(t(language, "Background", "\u540e\u53f0"), style = MaterialTheme.typography.titleSmall)
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Column(modifier = Modifier.weight(1f)) {
+            Text(t(language, "Keep Flovera active", "\u4fdd\u6301 Flovera \u6d3b\u8dc3"), style = MaterialTheme.typography.bodyMedium)
+            Text(
+              t(
+                language,
+                "Shows an ongoing notification so Android is less likely to stop long workspace work.",
+                "\u663e\u793a\u5e38\u9a7b\u901a\u77e5\uff0c\u964d\u4f4e Android \u505c\u6b62\u957f\u65f6\u95f4 workspace \u4efb\u52a1\u7684\u6982\u7387\u3002",
+              ),
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+              style = MaterialTheme.typography.bodySmall,
+            )
+          }
+          Switch(
+            checked = backgroundKeepAliveDraft,
+            onCheckedChange = { backgroundKeepAliveDraft = it },
+            modifier = Modifier.semantics { contentDescription = "Background keep-alive switch" },
+          )
+        }
         Box {
           OutlinedButton(onClick = { languageMenuOpen = true }, modifier = Modifier.fillMaxWidth()) {
             Text(t(language, "Language: ${languageLabel(languageDraft)}", "\u8bed\u8a00\uff1a${languageLabel(languageDraft)}"))
@@ -4912,6 +4939,7 @@ private fun SettingsDialog(
             deepSeekThinkingEffort = deepSeekThinkingEffortDraft,
             webSearchEnabled = webSearchEnabledDraft,
             braveSearchApiKey = braveSearchApiKeyDraft,
+            backgroundKeepAliveEnabled = backgroundKeepAliveDraft,
           )
           onDismiss()
         },

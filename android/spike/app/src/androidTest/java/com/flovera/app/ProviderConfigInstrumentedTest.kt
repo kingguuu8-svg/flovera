@@ -1489,6 +1489,7 @@ class ProviderConfigInstrumentedTest {
   fun networkToolsDefaultToDisabled() {
     assertFalse(AppSettings().networkEnabled)
     assertFalse(AppSettings().webSearchEnabled)
+    assertFalse(AppSettings().backgroundKeepAliveEnabled)
     assertTrue(AppSettings(networkEnabled = true).networkEnabled)
   }
 
@@ -1567,6 +1568,7 @@ class ProviderConfigInstrumentedTest {
           themeColor = "#c989b8",
           networkEnabled = true,
           webSearchEnabled = true,
+          backgroundKeepAliveEnabled = true,
           language = "zh",
           maxAgentIterations = 120,
           agentAuthorityMode = "full",
@@ -1586,6 +1588,7 @@ class ProviderConfigInstrumentedTest {
       assertEquals("#C989B8", updated.themeColor)
       assertTrue(updated.networkEnabled)
       assertTrue(updated.webSearchEnabled)
+      assertTrue(updated.backgroundKeepAliveEnabled)
       assertEquals("zh", updated.language)
       assertEquals(0, updated.maxAgentIterations)
       assertEquals("full", updated.agentAuthorityMode)
@@ -1656,6 +1659,25 @@ class ProviderConfigInstrumentedTest {
       assertTrue(updated.webSearchEnabled)
       assertEquals("brave-key", updated.braveSearchApiKey)
       assertEquals("brave-key", store.load().braveSearchApiKey)
+    } finally {
+      store.save(original)
+    }
+  }
+
+  @Test
+  fun settingsControllerPersistsBackgroundKeepAliveSetting() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val store = SettingsStore(context)
+    val original = store.load()
+    try {
+      val controller = SettingsController(store)
+
+      val enabled = controller.setBackgroundKeepAlive(AppSettings(), enabled = true)
+      val disabled = controller.setBackgroundKeepAlive(enabled, enabled = false)
+
+      assertTrue(enabled.backgroundKeepAliveEnabled)
+      assertFalse(disabled.backgroundKeepAliveEnabled)
+      assertFalse(store.load().backgroundKeepAliveEnabled)
     } finally {
       store.save(original)
     }

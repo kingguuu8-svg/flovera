@@ -63,7 +63,8 @@ class AndroidAgentRunStatusNotifier(context: Context) : AgentRunStatusNotifier {
 
 internal object AgentRunNotifications {
   const val CHANNEL_ID = "flovera_agent_runs"
-  const val NOTIFICATION_ID = 7104
+  const val FOREGROUND_NOTIFICATION_ID = 7104
+  const val RESULT_NOTIFICATION_ID = 7106
 
   fun build(context: Context, title: String, body: String, ongoing: Boolean, priority: Int) =
     NotificationCompat.Builder(context.applicationContext, CHANNEL_ID)
@@ -82,7 +83,7 @@ internal object AgentRunNotifications {
     if (!canPostNotifications(appContext)) return
     ensureChannel(appContext)
     val notification = build(appContext, title, body, ongoing, priority)
-    NotificationManagerCompat.from(appContext).notify(NOTIFICATION_ID, notification)
+    NotificationManagerCompat.from(appContext).notify(RESULT_NOTIFICATION_ID, notification)
   }
 
   fun ensureChannel(context: Context) {

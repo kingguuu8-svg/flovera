@@ -3,10 +3,12 @@ package com.flovera.app
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import com.flovera.app.agent.AgentRunStatusNotifier
 import com.flovera.app.agent.AgentRunController
 import com.flovera.app.agent.AgentRunEventType
+import com.flovera.app.agent.AgentRunForegroundService
 import com.flovera.app.agent.AndroidAgentRunStatusNotifier
 import com.flovera.app.config.AppSettings
 import com.flovera.app.config.ModelSettingsDraft
@@ -229,6 +231,9 @@ class AgentController(
     if (initialHtmlLoading) {
       startSelectedHtmlBackend(workspaceSnapshot.selectedHtmlPath)
     }
+    if (settings.backgroundKeepAliveEnabled) {
+      startBackgroundKeepAliveService()
+    }
   }
 
   fun updateInput(value: String) {
@@ -271,6 +276,23 @@ class AgentController(
     }
   }
 
+  fun setBackgroundKeepAliveEnabled(enabled: Boolean) {
+    val current = _state.value
+    val settings = settingsController.setBackgroundKeepAlive(current.settings, enabled)
+    workspaceController.syncFloveraSettings(settings)
+    if (enabled) {
+      if (!current.isRunning) startBackgroundKeepAliveService()
+    } else if (!current.isRunning) {
+      stopBackgroundKeepAliveService()
+    }
+    _state.update {
+      it.copy(
+        settings = settings,
+        status = if (enabled) "Background keep-alive enabled" else "Background keep-alive disabled",
+      )
+    }
+  }
+
   fun saveModelSettings(
     providerId: String = _state.value.providerDraft,
     model: String = _state.value.modelDraft,
@@ -285,6 +307,7 @@ class AgentController(
     deepSeekThinkingEffort: String = _state.value.settings.deepSeekThinkingEffort,
     webSearchEnabled: Boolean = _state.value.settings.webSearchEnabled,
     braveSearchApiKey: String = _state.value.settings.braveSearchApiKey,
+    backgroundKeepAliveEnabled: Boolean = _state.value.settings.backgroundKeepAliveEnabled,
   ) {
     val current = _state.value
     val modelSettings = settingsController.saveModelSettings(
@@ -306,9 +329,15 @@ class AgentController(
     val settingsWithAuthority = settingsController.setAuthorityMode(settings, authorityMode)
     val settingsWithThinking = settingsController.setDeepSeekThinkingEffort(settingsWithAuthority, deepSeekThinkingEffort)
     val settingsWithSearch = settingsController.setWebSearch(settingsWithThinking, webSearchEnabled, braveSearchApiKey)
-    val draft = settingsController.draftFor(settingsWithSearch)
-    workspaceController.syncFloveraSettings(settingsWithSearch)
-    val workspaceSnapshot = workspaceController.snapshot(settingsWithSearch.selectedHtmlPath)
+    val settingsWithBackground = settingsController.setBackgroundKeepAlive(settingsWithSearch, backgroundKeepAliveEnabled)
+    if (backgroundKeepAliveEnabled) {
+      if (!current.isRunning) startBackgroundKeepAliveService()
+    } else if (!current.isRunning) {
+      stopBackgroundKeepAliveService()
+    }
+    val draft = settingsController.draftFor(settingsWithBackground)
+    workspaceController.syncFloveraSettings(settingsWithBackground)
+    val workspaceSnapshot = workspaceController.snapshot(settingsWithBackground.selectedHtmlPath)
     val selectedHtmlTarget = selectedHtmlTarget(workspaceSnapshot)
     val workspaceRootUrl = workspaceRootUrl(selectedHtmlTarget.url, workspaceSnapshot)
     val artifactServerStatuses = workspacePythonHttpRuntime.statusesFor(workspaceSnapshot.workspaceArtifacts)
@@ -318,7 +347,7 @@ class AgentController(
       current.selectedHtmlLoading
     _state.update {
       it.copy(
-        settings = settingsWithSearch,
+        settings = settingsWithBackground,
         providerDraft = draft.providerId,
         modelDraft = draft.model,
         apiKeyDraft = draft.apiKey,
@@ -793,6 +822,9 @@ class AgentController(
         if (nextInput == null) {
           resetAgentRunNotificationThrottle()
           agentRunStatusNotifier.finished(succeeded)
+          if (_state.value.settings.backgroundKeepAliveEnabled) {
+            startBackgroundKeepAliveService()
+          }
           refreshWorkspaceState(
             session = updated,
             isRunning = false,
@@ -843,6 +875,29 @@ class AgentController(
   private fun resetAgentRunNotificationThrottle() {
     lastRunNotificationAtMillis = 0
     lastRunNotificationBody = ""
+  }
+
+  private fun startBackgroundKeepAliveService() {
+    runCatching {
+      ContextCompat.startForegroundService(
+        appContext,
+        AgentRunForegroundService.keepAliveIntent(appContext),
+      )
+    }
+  }
+
+  private fun stopBackgroundKeepAliveService() {
+    runCatching {
+      appContext.startService(AgentRunForegroundService.stopKeepAliveIntent(appContext))
+    }
+  }
+
+  private fun reconcileBackgroundKeepAlive(settings: AppSettings, isRunning: Boolean) {
+    if (settings.backgroundKeepAliveEnabled) {
+      if (!isRunning) startBackgroundKeepAliveService()
+    } else if (!isRunning) {
+      stopBackgroundKeepAliveService()
+    }
   }
 
   private fun clearPendingActiveRunGuidance() {
@@ -964,6 +1019,9 @@ class AgentController(
       )
     }
     agentRunStatusNotifier.interrupted()
+    if (_state.value.settings.backgroundKeepAliveEnabled) {
+      startBackgroundKeepAliveService()
+    }
     refreshWorkspaceState(
       session = interrupted ?: current.session,
       isRunning = false,
@@ -1140,6 +1198,7 @@ class AgentController(
       workspaceController.syncFloveraSettings(normalizedSettings)
       workspaceSnapshot = workspaceController.snapshot(normalizedSettings.selectedHtmlPath)
     }
+    reconcileBackgroundKeepAlive(normalizedSettings, isRunning)
     val selectedHtmlTarget = selectedHtmlTarget(workspaceSnapshot)
     val workspaceRootUrl = workspaceRootUrl(selectedHtmlTarget.url, workspaceSnapshot)
     val artifactServerStatuses = workspacePythonHttpRuntime.statusesFor(workspaceSnapshot.workspaceArtifacts)

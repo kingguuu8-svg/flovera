@@ -61,6 +61,7 @@ class WorkspaceController(context: Context, workspaceId: String) {
         maxAgentIterations = settings.maxAgentIterations,
         networkEnabled = settings.networkEnabled,
         webSearchEnabled = settings.webSearchEnabled,
+        backgroundKeepAliveEnabled = settings.backgroundKeepAliveEnabled,
         language = settings.language,
         themeMode = settings.themeMode,
         themeColor = settings.themeColor,

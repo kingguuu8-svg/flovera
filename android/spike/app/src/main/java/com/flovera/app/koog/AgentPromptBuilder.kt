@@ -73,7 +73,7 @@ Stable Flovera runtime boundary:
 - WebView injects --flovera-viewport-height/width, --flovera-safe-bottom, window.FloveraViewport, and flovera:viewport.
 - Legacy bridge only: window.Flovera.toast, window.Flovera.runAction, window.Flovera.getJob, window.Flovera.cancelJob.
 - Provider credentials and API keys live in Flovera app settings by default. Workspace code may accept user-provided API keys through its own UI/backend; do not assume app-owned secrets are readable files.
-- Flovera native runtime owns lifecycle, permissions, secrets, provider behavior, WebView, notifications, background execution, and restore.
+- Flovera native runtime owns lifecycle, permissions, secrets, provider behavior, WebView, notifications, background execution, and restore. Active agent runs use an Android foreground service; the optional background keep-alive mode is user-controlled and notification-visible, not a hidden daemon.
 - If a task needs an unsupported daemon, external port listener, app-owned secret in Python, or other out-of-bound capability, report the platform gap. Do not emulate it with a project-specific protocol.
 """
 
@@ -152,6 +152,8 @@ Current run facts:
 - workspaceSearch=available
 - workspaceArtifacts=available
 - agentRunTimeline=available
+- foregroundAgentRunService=available
+- backgroundKeepAlive=user_setting
     """.trimIndent()
   }
 }

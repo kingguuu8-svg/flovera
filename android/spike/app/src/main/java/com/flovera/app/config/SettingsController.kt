@@ -98,6 +98,12 @@ class SettingsController(private val store: SettingsStore) {
     return updated
   }
 
+  fun setBackgroundKeepAlive(settings: AppSettings, enabled: Boolean): AppSettings {
+    val updated = settings.copy(backgroundKeepAliveEnabled = enabled)
+    store.save(updated)
+    return updated
+  }
+
   fun setLanguage(settings: AppSettings, language: String): AppSettings {
     val updated = settings.copy(language = normalizeLanguageId(language))
     store.save(updated)
@@ -141,6 +147,7 @@ class SettingsController(private val store: SettingsStore) {
       maxAgentIterations = maxIterations,
       networkEnabled = changes.networkEnabled ?: settings.networkEnabled,
       webSearchEnabled = changes.webSearchEnabled ?: settings.webSearchEnabled,
+      backgroundKeepAliveEnabled = changes.backgroundKeepAliveEnabled ?: settings.backgroundKeepAliveEnabled,
       language = changes.language?.let { normalizeLanguageId(it) } ?: settings.language,
       themeMode = changes.themeMode?.let { normalizeThemeMode(it) } ?: settings.themeMode,
       themeColor = changes.themeColor?.let { normalizeThemeColor(it) } ?: settings.themeColor,
@@ -378,6 +385,7 @@ data class SettingsProposalChanges(
   val maxAgentIterations: Int? = null,
   val networkEnabled: Boolean? = null,
   val webSearchEnabled: Boolean? = null,
+  val backgroundKeepAliveEnabled: Boolean? = null,
   val language: String? = null,
   val themeMode: String? = null,
   val themeColor: String? = null,
