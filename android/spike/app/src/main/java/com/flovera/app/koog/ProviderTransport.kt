@@ -18,6 +18,7 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.defaultRequest
 import io.ktor.client.request.header
+import java.net.URI
 import kotlinx.serialization.json.Json
 
 enum class ProviderTransport(val id: String) {
@@ -54,6 +55,46 @@ fun providerRuntimeHeaders(
 private fun isOpenRouterGrokModel(modelId: String): Boolean {
   val normalized = modelId.trim().lowercase()
   return normalized.startsWith("x-ai/grok-") || normalized.startsWith("xai/grok-")
+}
+
+data class ProviderKtorRoute(
+  val baseUrl: String,
+  val chatCompletionsPath: String,
+  val responsesPath: String,
+  val messagesPath: String,
+  val modelsPath: String,
+)
+
+fun providerKtorRoute(runtimeProfile: ProviderRuntimeProfile): ProviderKtorRoute {
+  val baseUrl = runtimeProfile.requireBaseUrl()
+  val uri = runCatching { URI(baseUrl) }.getOrNull()
+  val origin = if (uri?.scheme != null && uri.rawAuthority != null) {
+    "${uri.scheme}://${uri.rawAuthority}"
+  } else {
+    baseUrl.trimEnd('/')
+  }
+  val basePath = uri?.rawPath.orEmpty().trim('/')
+  return ProviderKtorRoute(
+    baseUrl = origin,
+    chatCompletionsPath = combineProviderPath(basePath, runtimeProfile.chatCompletionsPath),
+    responsesPath = combineProviderPath(basePath, runtimeProfile.responsesPath),
+    messagesPath = combineProviderPath(basePath, runtimeProfile.messagesPath),
+    modelsPath = combineProviderPath(basePath, runtimeProfile.modelsPath),
+  )
+}
+
+private fun combineProviderPath(basePath: String, requestPath: String): String {
+  val request = requestPath.trim().trimStart('/')
+  val base = basePath.trim().trim('/')
+  if (base.isBlank()) return request
+  if (request.isBlank()) return base
+  val baseSegments = base.split('/').filter { it.isNotBlank() }
+  val requestSegments = request.split('/').filter { it.isNotBlank() }
+  val overlap = (minOf(baseSegments.size, requestSegments.size) downTo 1)
+    .firstOrNull { size ->
+      baseSegments.takeLast(size) == requestSegments.take(size)
+    } ?: 0
+  return (baseSegments + requestSegments.drop(overlap)).joinToString("/")
 }
 
 object ProviderTransportFactory {
@@ -124,11 +165,13 @@ object ProviderTransportFactory {
     settings: AppSettings,
     modelContext: ModelContextSpec,
   ): LLMClient {
+    val route = providerKtorRoute(runtimeProfile)
     return FloveraOpenAICompatibleLLMClient(
       apiKey = apiKey,
       settings = OpenAIClientSettings(
-        baseUrl = runtimeProfile.requireBaseUrl(),
-        chatCompletionsPath = runtimeProfile.chatCompletionsPath,
+        baseUrl = route.baseUrl,
+        chatCompletionsPath = route.chatCompletionsPath,
+        modelsPath = route.modelsPath,
       ),
       providerIdentity = runtimeProfile.llmProvider,
       requestProfile = runtimeProfile.requestProfile,
@@ -160,12 +203,14 @@ object ProviderTransportFactory {
     apiKey: String,
     settings: AppSettings,
   ): LLMClient {
+    val route = providerKtorRoute(runtimeProfile)
     return FloveraCodexResponsesLLMClient(
       apiKey = apiKey,
       settings = OpenAIClientSettings(
-        baseUrl = runtimeProfile.requireBaseUrl(),
-        responsesAPIPath = runtimeProfile.responsesPath,
-        modelsPath = runtimeProfile.modelsPath.trimStart('/'),
+        baseUrl = route.baseUrl,
+        chatCompletionsPath = route.chatCompletionsPath,
+        responsesAPIPath = route.responsesPath,
+        modelsPath = route.modelsPath,
       ),
       providerIdentity = runtimeProfile.llmProvider,
       requestSettings = FloveraCodexResponsesRequestSettings(
@@ -181,10 +226,11 @@ object ProviderTransportFactory {
     runtimeProfile: ProviderRuntimeProfile,
     apiKey: String,
   ): LLMClient {
+    val route = providerKtorRoute(runtimeProfile)
     val settings = AnthropicClientSettings(
-      baseUrl = runtimeProfile.requireBaseUrl(),
-      messagesPath = runtimeProfile.messagesPath,
-      modelsPath = runtimeProfile.modelsPath,
+      baseUrl = route.baseUrl,
+      messagesPath = route.messagesPath,
+      modelsPath = route.modelsPath,
     )
     return AnthropicLLMClient(
       settings = settings,
@@ -192,7 +238,7 @@ object ProviderTransportFactory {
         clientName = "FloveraAnthropicMessagesClient",
         logger = logger,
         baseClient = HttpClient(),
-        baseUrl = runtimeProfile.requireBaseUrl(),
+        baseUrl = route.baseUrl,
         requestTimeoutMillis = 900_000,
         connectTimeoutMillis = 10_000,
         socketTimeoutMillis = 900_000,
