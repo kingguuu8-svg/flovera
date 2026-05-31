@@ -332,7 +332,7 @@ class ProviderConfigInstrumentedTest {
       AppSettings(provider = "zai", model = "glm-5"),
     )
     assertEquals("https://api.z.ai/api/paas/v4", zaiProfile.baseUrl)
-    assertEquals("/chat/completions", zaiProfile.chatCompletionsPath)
+    assertEquals("chat/completions", zaiProfile.chatCompletionsPath)
 
     assertEquals(LLMProvider.OpenRouter, openRouter.llmProvider)
     assertEquals(ProviderTransport.FloveraOpenAICompatibleChatCompletions, openRouter.transport)

@@ -496,7 +496,7 @@ object ModelProviderCatalog {
       suggestedModels = listOf("glm-5", "glm-4-9b", "glm-4.5-flash"),
       aliases = setOf("glm", "z-ai", "z.ai", "zhipu"),
       baseUrl = "https://api.z.ai/api/paas/v4",
-      chatCompletionsPath = "/chat/completions",
+      chatCompletionsPath = "chat/completions",
       defaultAuxModel = "glm-4.5-flash",
       defaultContext = hermesContext(202_752),
     ),
