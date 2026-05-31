@@ -1,6 +1,20 @@
 # Flovera
 
-English | [????](README.zh-CN.md)
+<p align="center">
+  <img src="docs/assets/flovera-wordmark.svg" alt="Flovera Preview" width="760">
+</p>
+
+<p align="center">
+  <a href="README.zh-CN.md"><img src="docs/assets/badges/lang-zh-cn.svg" alt="中文 README"></a>
+  <a href="LICENSE"><img src="docs/assets/badges/license-mit.svg" alt="MIT License"></a>
+  <img src="docs/assets/badges/status-preview.svg" alt="Flovera Preview">
+  <img src="docs/assets/badges/platform-android.svg" alt="Android-local">
+  <img src="docs/assets/badges/deepseek-tested.svg" alt="Tested with DeepSeek API">
+</p>
+
+<p align="center">
+  Android-local workspace agent for creating and previewing small demos on your phone.
+</p>
 
 Flovera is an Android-local workspace agent app.
 

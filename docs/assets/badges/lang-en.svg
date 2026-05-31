@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="90" height="28" viewBox="0 0 90 28" role="img" aria-label="English README">
+  <rect width="90" height="28" rx="7" fill="#101319"/>
+  <rect x="1" y="1" width="88" height="26" rx="6" fill="none" stroke="#26313A"/>
+  <text x="14" y="18" fill="#F7778B" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="12" font-weight="800">EN</text>
+  <text x="38" y="18" fill="#AEB8C2" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="12" font-weight="700">README</text>
+</svg>

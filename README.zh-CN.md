@@ -1,6 +1,20 @@
 # Flovera
 
-[English](README.md) | 简体中文
+<p align="center">
+  <img src="docs/assets/flovera-wordmark.svg" alt="Flovera Preview" width="760">
+</p>
+
+<p align="center">
+  <a href="README.md"><img src="docs/assets/badges/lang-en.svg" alt="English README"></a>
+  <a href="LICENSE"><img src="docs/assets/badges/license-mit.svg" alt="MIT License"></a>
+  <img src="docs/assets/badges/status-preview.svg" alt="Flovera Preview">
+  <img src="docs/assets/badges/platform-android.svg" alt="Android-local">
+  <img src="docs/assets/badges/deepseek-tested.svg" alt="Tested with DeepSeek API">
+</p>
+
+<p align="center">
+  运行在 Android 本地的 workspace agent，用来在手机上创建和预览小型 demo。
+</p>
 
 Flovera 是一个运行在 Android 本地的 workspace agent 应用。
 
