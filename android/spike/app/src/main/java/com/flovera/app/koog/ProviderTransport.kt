@@ -10,15 +10,26 @@ import ai.koog.prompt.executor.clients.bedrock.BedrockLLMClient
 import ai.koog.prompt.executor.clients.bedrock.BedrockModelFamilies
 import ai.koog.prompt.executor.clients.google.GoogleClientSettings
 import ai.koog.prompt.executor.clients.google.GoogleLLMClient
+import ai.koog.prompt.dsl.ModerationResult
+import ai.koog.agents.core.tools.ToolDescriptor
 import ai.koog.prompt.executor.clients.openai.OpenAIClientSettings
 import ai.koog.http.client.ktor.fromKtorClient
 import aws.sdk.kotlin.runtime.auth.credentials.DefaultChainCredentialsProvider
 import com.flovera.app.config.AppSettings
+import ai.koog.prompt.dsl.Prompt
+import ai.koog.prompt.llm.LLModel
+import ai.koog.prompt.llm.LLMProvider
+import ai.koog.prompt.message.Message
+import ai.koog.prompt.streaming.StreamFrame
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.defaultRequest
 import io.ktor.client.request.header
 import java.net.URI
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.json.Json
 
 enum class ProviderTransport(val id: String) {
@@ -66,6 +77,10 @@ data class ProviderKtorRoute(
 )
 
 fun providerKtorRoute(runtimeProfile: ProviderRuntimeProfile): ProviderKtorRoute {
+  return providerKtorRouteCandidates(runtimeProfile).first()
+}
+
+fun providerKtorRouteCandidates(runtimeProfile: ProviderRuntimeProfile): List<ProviderKtorRoute> {
   val baseUrl = runtimeProfile.requireBaseUrl()
   val uri = runCatching { URI(baseUrl) }.getOrNull()
   val origin = if (uri?.scheme != null && uri.rawAuthority != null) {
@@ -74,13 +89,24 @@ fun providerKtorRoute(runtimeProfile: ProviderRuntimeProfile): ProviderKtorRoute
     baseUrl.trimEnd('/')
   }
   val basePath = uri?.rawPath.orEmpty().trim('/')
-  return ProviderKtorRoute(
-    baseUrl = origin,
-    chatCompletionsPath = combineProviderPath(basePath, runtimeProfile.chatCompletionsPath),
-    responsesPath = combineProviderPath(basePath, runtimeProfile.responsesPath),
-    messagesPath = combineProviderPath(basePath, runtimeProfile.messagesPath),
-    modelsPath = combineProviderPath(basePath, runtimeProfile.modelsPath),
-  )
+  return routePathCandidates(basePath, runtimeProfile.chatCompletionsPath).map { chatPath ->
+    ProviderKtorRoute(
+      baseUrl = origin,
+      chatCompletionsPath = chatPath,
+      responsesPath = combineProviderPath(basePath, runtimeProfile.responsesPath),
+      messagesPath = combineProviderPath(basePath, runtimeProfile.messagesPath),
+      modelsPath = combineProviderPath(basePath, runtimeProfile.modelsPath),
+    )
+  }.distinct()
+}
+
+private fun routePathCandidates(basePath: String, requestPath: String): List<String> {
+  val trimmedRequest = requestPath.trim().trimStart('/')
+  val candidates = mutableListOf(combineProviderPath(basePath, trimmedRequest))
+  if (basePath.isNotBlank() && trimmedRequest.startsWith("v1/")) {
+    candidates += combineProviderPath(basePath, trimmedRequest.removePrefix("v1/"))
+  }
+  return candidates.distinct()
 }
 
 private fun combineProviderPath(basePath: String, requestPath: String): String {
@@ -165,25 +191,32 @@ object ProviderTransportFactory {
     settings: AppSettings,
     modelContext: ModelContextSpec,
   ): LLMClient {
-    val route = providerKtorRoute(runtimeProfile)
-    return FloveraOpenAICompatibleLLMClient(
-      apiKey = apiKey,
-      settings = OpenAIClientSettings(
-        baseUrl = route.baseUrl,
-        chatCompletionsPath = route.chatCompletionsPath,
-        modelsPath = route.modelsPath,
-      ),
+    val routeCandidates = providerKtorRouteCandidates(runtimeProfile)
+    val clients = routeCandidates.map { route ->
+      FloveraOpenAICompatibleLLMClient(
+        apiKey = apiKey,
+        settings = OpenAIClientSettings(
+          baseUrl = route.baseUrl,
+          chatCompletionsPath = route.chatCompletionsPath,
+          modelsPath = route.modelsPath,
+        ),
+        providerIdentity = runtimeProfile.llmProvider,
+        requestProfile = runtimeProfile.requestProfile,
+        modelContext = modelContext,
+        requestContext = ProviderRequestContext(
+          providerId = runtimeProfile.providerId,
+          supportsReasoning = modelContext.supportsReasoning,
+          reasoningConfig = providerReasoningConfigFromEffort(settings.reasoningEffort),
+          openRouterProviderPreferences = settings.openRouterProvider.providerPreferences,
+          openRouterMinCodingScore = settings.openRouterProvider.minCodingScore,
+        ),
+        baseClient = openAICompatibleBaseClient(providerRuntimeHeaders(runtimeProfile, settings)),
+      )
+    }
+    return ProviderRouteFallbackLLMClient(
+      clients = clients,
+      routes = routeCandidates,
       providerIdentity = runtimeProfile.llmProvider,
-      requestProfile = runtimeProfile.requestProfile,
-      modelContext = modelContext,
-      requestContext = ProviderRequestContext(
-        providerId = runtimeProfile.providerId,
-        supportsReasoning = modelContext.supportsReasoning,
-        reasoningConfig = providerReasoningConfigFromEffort(settings.reasoningEffort),
-        openRouterProviderPreferences = settings.openRouterProvider.providerPreferences,
-        openRouterMinCodingScore = settings.openRouterProvider.minCodingScore,
-      ),
-      baseClient = openAICompatibleBaseClient(providerRuntimeHeaders(runtimeProfile, settings)),
     )
   }
 
@@ -253,6 +286,98 @@ object ProviderTransportFactory {
     ignoreUnknownKeys = true
     encodeDefaults = false
   }
+}
+
+private class ProviderRouteFallbackLLMClient(
+  private val clients: List<LLMClient>,
+  private val routes: List<ProviderKtorRoute>,
+  private val providerIdentity: LLMProvider,
+) : LLMClient() {
+  override fun llmProvider(): LLMProvider = providerIdentity
+
+  override suspend fun execute(
+    prompt: Prompt,
+    model: LLModel,
+    tools: List<ToolDescriptor>,
+  ): List<Message.Response> {
+    return retryRoute404 { client ->
+      client.execute(prompt, model, tools)
+    }
+  }
+
+  override suspend fun executeMultipleChoices(
+    prompt: Prompt,
+    model: LLModel,
+    tools: List<ToolDescriptor>,
+  ): List<List<Message.Response>> {
+    return retryRoute404 { client ->
+      client.executeMultipleChoices(prompt, model, tools)
+    }
+  }
+
+  override fun executeStreaming(
+    prompt: Prompt,
+    model: LLModel,
+    tools: List<ToolDescriptor>,
+  ): Flow<StreamFrame> = flow {
+    clients.forEachIndexed { index, client ->
+      try {
+        emitAll(client.executeStreaming(prompt, model, tools))
+        return@flow
+      } catch (error: CancellationException) {
+        throw error
+      } catch (error: Throwable) {
+        if (!isRouteNotFound(error) || index == clients.lastIndex) throw error
+        logger.info { "Provider streaming route returned 404; retrying with fallback route ${routes[index + 1]}" }
+      }
+    }
+  }
+
+  override suspend fun moderate(prompt: Prompt, model: LLModel): ModerationResult {
+    return clients.first().moderate(prompt, model)
+  }
+
+  override suspend fun models(): List<LLModel> = clients.first().models()
+
+  override fun close() {
+    clients.forEach { it.close() }
+  }
+
+  private suspend fun <T> retryRoute404(block: suspend (LLMClient) -> T): T {
+    var lastError: Throwable? = null
+    clients.forEachIndexed { index, client ->
+      try {
+        return block(client)
+      } catch (error: CancellationException) {
+        throw error
+      } catch (error: Throwable) {
+        if (!isRouteNotFound(error) || index == clients.lastIndex) throw error
+        lastError = error
+        logger.info { "Provider route returned 404; retrying with fallback route ${routes[index + 1]}" }
+      }
+    }
+    throw lastError ?: IllegalStateException("Provider route fallback had no clients.")
+  }
+
+  private companion object {
+    val logger = KotlinLogging.logger {}
+  }
+}
+
+private fun isRouteNotFound(error: Throwable): Boolean {
+  var current: Throwable? = error
+  while (current != null) {
+    val message = current.message.orEmpty()
+    if (
+      message.contains("Status code: 404", ignoreCase = true) ||
+      message.contains("status=404", ignoreCase = true) ||
+      message.contains("Expected status code 200 but was 404", ignoreCase = true)
+    ) {
+      return true
+    }
+    current = current.cause
+  }
+  return false
 }
 
 fun providerAnthropicRuntimeHeaders(

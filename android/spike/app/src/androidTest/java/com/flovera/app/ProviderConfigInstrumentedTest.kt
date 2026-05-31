@@ -36,6 +36,7 @@ import com.flovera.app.koog.grokSupportsReasoningEffort
 import com.flovera.app.koog.hookIds
 import com.flovera.app.koog.providerAnthropicRuntimeHeaders
 import com.flovera.app.koog.providerKtorRoute
+import com.flovera.app.koog.providerKtorRouteCandidates
 import com.flovera.app.koog.providerRuntimeHeaders
 import com.flovera.app.koog.providerReasoningConfigFromEffort
 import com.flovera.app.koog.translateGoogleCloudCodeAssistStreamEvent
@@ -311,6 +312,15 @@ class ProviderConfigInstrumentedTest {
 
     assertEquals("https://local.example", custom.baseUrl)
     assertEquals("v1/chat/completions", custom.chatCompletionsPath)
+
+    val zaiHermesV1PathCandidates = providerKtorRouteCandidates(
+      ModelProviderCatalog.runtimeProfileFor(
+        ModelProviderCatalog.requireProvider("zai"),
+        AppSettings(provider = "zai", model = "glm-5"),
+      ).copy(chatCompletionsPath = "/v1/chat/completions"),
+    )
+    assertEquals("api/paas/v4/v1/chat/completions", zaiHermesV1PathCandidates.first().chatCompletionsPath)
+    assertTrue(zaiHermesV1PathCandidates.any { it.chatCompletionsPath == "api/paas/v4/chat/completions" })
   }
 
   @Test
