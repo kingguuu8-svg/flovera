@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="151" height="28" viewBox="0 0 151 28" role="img" aria-label="Platform: Android-local">
+  <rect width="151" height="28" rx="7" fill="#101319"/>
+  <rect x="1" y="1" width="149" height="26" rx="6" fill="none" stroke="#26313A"/>
+  <text x="13" y="18" fill="#AEB8C2" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="12" font-weight="700">PLATFORM</text>
+  <text x="83" y="18" fill="#62B6FF" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="12" font-weight="800">ANDROID</text>
+</svg>
