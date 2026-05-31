@@ -11,6 +11,8 @@ Required outputs for this pass:
 - `github-showcase-research.md`: GitHub README/showcase page research.
 - `social-media-research.md`: open-source social launch research and style
   decisions.
+- `video-production-research.md`: GitHub video/animation skill research and a
+  Flovera screen-recording production workflow.
 - `github-showcase-draft.md`: draft GitHub showcase README copy, not yet applied
   to the public README.
 - `github-showcase-draft.zh-CN.md`: Chinese draft of the GitHub showcase page.
