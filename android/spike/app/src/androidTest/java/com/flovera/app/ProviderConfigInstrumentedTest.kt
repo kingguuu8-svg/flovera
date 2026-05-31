@@ -1486,11 +1486,29 @@ class ProviderConfigInstrumentedTest {
   }
 
   @Test
-  fun networkToolsDefaultToDisabled() {
-    assertFalse(AppSettings().networkEnabled)
-    assertFalse(AppSettings().webSearchEnabled)
+  fun networkToolsDefaultToEnabled() {
+    assertTrue(AppSettings().networkEnabled)
+    assertTrue(AppSettings().webSearchEnabled)
+    assertFalse(AppSettings().networkUserConfigured)
+    assertFalse(AppSettings().webSearchUserConfigured)
     assertFalse(AppSettings().backgroundKeepAliveEnabled)
     assertTrue(AppSettings(networkEnabled = true).networkEnabled)
+  }
+
+  @Test
+  fun settingsControllerMigratesOldNetworkDefaultsWithoutOverridingUserChoice() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val store = SettingsStore(context)
+    val original = store.load()
+    try {
+      store.save(AppSettings(networkEnabled = false, networkUserConfigured = false))
+      assertTrue(SettingsController(store).load().networkEnabled)
+
+      store.save(AppSettings(networkEnabled = false, networkUserConfigured = true))
+      assertFalse(SettingsController(store).load().networkEnabled)
+    } finally {
+      store.save(original)
+    }
   }
 
   @Test
@@ -1587,7 +1605,9 @@ class ProviderConfigInstrumentedTest {
       assertEquals("light", updated.themeMode)
       assertEquals("#C989B8", updated.themeColor)
       assertTrue(updated.networkEnabled)
+      assertTrue(updated.networkUserConfigured)
       assertTrue(updated.webSearchEnabled)
+      assertTrue(updated.webSearchUserConfigured)
       assertTrue(updated.backgroundKeepAliveEnabled)
       assertEquals("zh", updated.language)
       assertEquals(0, updated.maxAgentIterations)
@@ -1657,6 +1677,7 @@ class ProviderConfigInstrumentedTest {
       val updated = controller.setWebSearch(AppSettings(), enabled = true, braveApiKey = " brave-key ")
 
       assertTrue(updated.webSearchEnabled)
+      assertTrue(updated.webSearchUserConfigured)
       assertEquals("brave-key", updated.braveSearchApiKey)
       assertEquals("brave-key", store.load().braveSearchApiKey)
     } finally {

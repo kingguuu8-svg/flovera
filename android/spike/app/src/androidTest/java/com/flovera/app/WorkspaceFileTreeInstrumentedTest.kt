@@ -1563,6 +1563,8 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(settingsView.contains("\"providerRequestAddedFields\""))
     assertTrue(settingsView.contains("\"modelSupportsReasoning\""))
     assertTrue(settingsView.contains("\"compressionThresholdPercent\""))
+    assertTrue(settingsView.contains("\"networkUserConfigured\""))
+    assertTrue(settingsView.contains("\"webSearchUserConfigured\""))
     assertTrue(settingsView.contains("\"customOpenAIBaseUrl\""))
     assertTrue(settingsView.contains("\"customOpenAIChatCompletionsPath\""))
     assertTrue(settingsView.contains("\"recentHtmlPaths\""))
@@ -1575,6 +1577,39 @@ class WorkspaceFileTreeInstrumentedTest {
     assertFalse(workspace.deleteSettingsProposal(".flovera/proposals/search-tool.json"))
     assertTrue(workspace.deleteControlledToolProposal(".flovera/proposals/search-tool.json"))
     assertTrue(workspace.listControlledToolProposals().isEmpty())
+  }
+
+  @Test
+  fun workspaceSettingsProposalsAcceptWrappedAndRawChangeShapes() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "test-settings-proposal-shapes-${System.currentTimeMillis()}")
+    workspace.ensureSeedFiles()
+    workspace.writeFile(
+      ".flovera/proposals/raw-network.json",
+      """{"networkEnabled":true}""",
+      createAutoSnapshot = false,
+    )
+    workspace.writeFile(
+      ".flovera/proposals/wrapped-background.json",
+      """
+      {
+        "type": "settings",
+        "title": "Keep alive",
+        "changes": {
+          "backgroundKeepAliveEnabled": true
+        }
+      }
+      """.trimIndent(),
+      createAutoSnapshot = false,
+    )
+
+    val proposals = workspace.listSettingsProposals().associateBy { it.path }
+
+    assertEquals(true, proposals[".flovera/proposals/raw-network.json"]?.changes?.networkEnabled)
+    assertEquals(true, proposals[".flovera/proposals/wrapped-background.json"]?.changes?.backgroundKeepAliveEnabled)
+    assertFalse(workspace.listControlledToolProposals().any { it.path == ".flovera/proposals/raw-network.json" })
+    assertTrue(workspace.deleteSettingsProposal(".flovera/proposals/raw-network.json"))
+    assertTrue(workspace.deleteSettingsProposal(".flovera/proposals/wrapped-background.json"))
   }
 
   @Test

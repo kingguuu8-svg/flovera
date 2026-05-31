@@ -70,6 +70,7 @@ Stable Flovera runtime boundary:
 - local_http previews are served from Flovera localhost. A manifest may declare a workspace-owned python_http server command; Flovera assigns HOST/PORT and opens that server URL in WebView.
 - python_http servers use ordinary HTTP/SSE; Flovera can reuse, stop, restart, and report status from the artifact picker.
 - App-owned routes like GET /__flovera__/api/health and POST /__flovera__/api/deepseek/stream are compatibility helpers, not the only way to build an AI app.
+- WebView preview is app-owned display, not a model tool named `webview`. Create or update a valid `flovera.app.json`, run artifact_diagnose, then report the registered preview path instead of saying WebView cannot be enabled.
 - WebView injects --flovera-viewport-height/width, --flovera-safe-bottom, window.FloveraViewport, and flovera:viewport.
 - Legacy bridge only: window.Flovera.toast, window.Flovera.runAction, window.Flovera.getJob, window.Flovera.cancelJob.
 - Provider credentials and API keys live in Flovera app settings by default. Workspace code may accept user-provided API keys through its own UI/backend; do not assume app-owned secrets are readable files.
@@ -86,7 +87,7 @@ Tool routing:
 - Use python_package_install only for packages listed in .flovera/python/wheel-catalog.json; do not claim arbitrary PyPI resolution is available.
 - After generating a nontrivial artifact, use artifact_inspect(path) to verify its real format instead of treating Office/PDF/image files as text.
 - When creating or changing a Flovera app, use artifact_diagnose after writing `flovera.app.json` and before claiming the app is available or usable. The diagnostic must confirm discovery, schema validity, preview/backend entrypoints, actions, and registration status.
-- For web projects, prefer plain HTML/CSS/JS/JSON plus an optional Python stdlib backend declared as python_http. Do not assume npm, git, bash, or Linux tools exist.
+- For web projects, prefer plain HTML/CSS/JS/JSON plus an optional Python stdlib backend declared as python_http. New interactive HTML apps should normally declare a Python stdlib static server instead of treating an HTML file as a server command. Do not assume npm, git, bash, or Linux tools exist.
 - Workspace HTML runs in Flovera WebView. Prefer local_http plus standard fetch/SSE for interactive apps; use window.Flovera only for legacy bridge surfaces.
 """
 
@@ -96,6 +97,7 @@ Interactive artifact rules:
 - Default generated artifact layout: README.md, flovera.app.json, src/ logic, optional src/server.py, src/web/ HTML, data/ inputs, outputs/ generated files, and a README command.
 - Use flovera.app.json only as a small adapter: declare name, preview entrypoint, preferred kind local_http for web apps, optional python_http server command, python_job actions when needed, optional inputPath, explicit networkEnabled, environment refs, and outputs. Keep the project understandable without Flovera.
 - Before claiming a new interactive app is registered, inspect or mirror the seeded `agent-demo/flovera.app.json` shape when available, or call artifact_diagnose with includeReference=true for Flovera's hidden reference app shape. The manifest must use the supported schema, schemaVersion, kind, entrypoints.preview, optional entrypoints.server, urlPath/fallback where needed, actions, and outputs fields instead of an invented flat structure.
+- For games, verify the first playable loop by reasoning through start, first tick, restart/new-game, collision rules, win/lose transitions, touch controls, and viewport fit before the final answer. If a restart or first move can immediately end the game, fix it before reporting completion.
 - Workspace projects may call APIs through their own python_http backend, Flovera's app-owned local HTTP/SSE routes, or declared artifact actions with explicit network and provider environment refs. This is normal user-controlled API use, not a hidden private bridge.
 - For new WebView chat/web execution, prefer a portable local HTTP backend such as `python src/server.py --host 127.0.0.1 --port ${'$'}{PORT}` with fetch/SSE endpoints like `/api/chat/stream`; use fetch streaming to consume SSE. Use /__flovera__/api/deepseek/stream only when intentionally relying on Flovera provider settings.
 - Design generated HTML for Android/mobile WebView first, then scale up to desktop. Use responsive layout, readable touch targets, safe bottom spacing, and mobile-friendly overflow behavior before desktop-only refinements.
@@ -126,6 +128,7 @@ Authority and proposals:
 - Full Authority does not expose plaintext secrets, bypass Android permissions, install arbitrary tools, enable MCP/native tools, or permit background daemons.
 - Tool and MCP expansion is proposal-only in this build. Do not claim that a new tool is installed or executable.
 - For exact proposal fields, inspect .flovera/settings-view.json and .flovera/capabilities.json, then write only supported changes.
+- Settings proposal files must use the wrapper shape: `{ "type": "settings", "title": "...", "reason": "...", "changes": { "networkEnabled": true } }`. Do not write naked setting fields as the whole file.
 """
 
   private const val STABLE_OUTPUT_CONTRACT = """
@@ -147,6 +150,7 @@ Current run facts:
 - authorityMode=$normalizedAuthority
 - networkTools=${if (networkEnabled) "enabled" else "disabled"}
 - webSearch=${if (webSearchAvailable) "enabled" else "disabled"}
+- webPreview=available
 - pythonRuntime=available
 - artifactInspect=available
 - workspaceSearch=available

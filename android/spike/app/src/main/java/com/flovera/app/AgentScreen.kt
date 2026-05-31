@@ -1,13 +1,20 @@
 ﻿package com.flovera.app
 
+import android.Manifest
+import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.graphics.Bitmap
 import android.graphics.pdf.PdfRenderer
+import android.os.Build
+import android.os.PowerManager
+import android.provider.Settings
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -121,6 +128,7 @@ import io.noties.markwon.Markwon
 import io.noties.markwon.ext.tables.TablePlugin
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.core.app.ActivityCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.flovera.app.agent.AgentContextBudget
 import com.flovera.app.config.AppSettings
@@ -169,6 +177,7 @@ private val FloveraDesignAssistantBubble = Color(0xFFEEF2F1)
 private val FloveraDesignDarkSettingMask = Color(0xFF5A3446)
 private val FloveraDesignDarkSettingOnMask = Color(0xFFFFD8E7)
 private const val WebChromeColorSampleDelayMs = 120L
+private const val BACKGROUND_NOTIFICATION_PERMISSION_REQUEST_CODE = 1202
 
 @Composable
 private fun floveraDesignFrontendEnabled(): Boolean {
@@ -4572,6 +4581,61 @@ private fun AgentFileDialog(
   )
 }
 
+private fun requestBackgroundKeepAlivePermissions(context: Context) {
+  val activity = context.findActivity() ?: return
+  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+    activity.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+  ) {
+    ActivityCompat.requestPermissions(
+      activity,
+      arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+      BACKGROUND_NOTIFICATION_PERMISSION_REQUEST_CODE,
+    )
+  }
+
+  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+    val powerManager = activity.getSystemService(PowerManager::class.java)
+    if (powerManager?.isIgnoringBatteryOptimizations(activity.packageName) != true) {
+      val requestIntent = Intent(
+        Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+        Uri.parse("package:${activity.packageName}"),
+      )
+      val opened = runCatching { activity.startActivity(requestIntent) }.isSuccess
+      if (!opened) {
+        openAppDetailsSettings(activity)
+      }
+    }
+  }
+}
+
+private fun openAppNotificationSettings(context: Context) {
+  val activity = context.findActivity() ?: return
+  val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+    Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+      .putExtra(Settings.EXTRA_APP_PACKAGE, activity.packageName)
+  } else {
+    Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${activity.packageName}"))
+  }
+  runCatching { activity.startActivity(intent) }.onFailure { openAppDetailsSettings(activity) }
+}
+
+private fun openAppDetailsSettings(activity: Activity) {
+  runCatching {
+    activity.startActivity(
+      Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${activity.packageName}")),
+    )
+  }
+}
+
+private fun Context.findActivity(): Activity? {
+  var current: Context? = this
+  while (current is ContextWrapper) {
+    if (current is Activity) return current
+    current = current.baseContext
+  }
+  return null
+}
+
 @Composable
 private fun SettingsDialog(
   state: AgentScreenState,
@@ -4598,11 +4662,13 @@ private fun SettingsDialog(
   var deepSeekThinkingEffortDraft by remember(state.settings.deepSeekThinkingEffort) {
     mutableStateOf(state.settings.deepSeekThinkingEffort)
   }
+  var networkEnabledDraft by remember(state.settings.networkEnabled) { mutableStateOf(state.settings.networkEnabled) }
   var webSearchEnabledDraft by remember(state.settings.webSearchEnabled) { mutableStateOf(state.settings.webSearchEnabled) }
   var braveSearchApiKeyDraft by remember(state.settings.braveSearchApiKey) { mutableStateOf(state.settings.braveSearchApiKey) }
   var backgroundKeepAliveDraft by remember(state.settings.backgroundKeepAliveEnabled) {
     mutableStateOf(state.settings.backgroundKeepAliveEnabled)
   }
+  val settingsContext = LocalContext.current
   val selectedProvider = ModelProviderCatalog.findProvider(providerDraft) ?: ModelProviderCatalog.defaultProvider
   var providerMenuOpen by remember { mutableStateOf(false) }
   var modelMenuOpen by remember { mutableStateOf(false) }
@@ -4741,6 +4807,30 @@ private fun SettingsDialog(
             }
           }
         }
+        Text(t(language, "Network", "\u7f51\u7edc"), style = MaterialTheme.typography.titleSmall)
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Column(modifier = Modifier.weight(1f)) {
+            Text(t(language, "Network tools", "\u7f51\u7edc\u5de5\u5177"), style = MaterialTheme.typography.bodyMedium)
+            Text(
+              t(
+                language,
+                "Enabled by default. Turn off only when a workspace must stay offline.",
+                "\u9ed8\u8ba4\u5f00\u542f\u3002\u53ea\u6709\u5728 workspace \u5fc5\u987b\u79bb\u7ebf\u65f6\u624d\u5173\u95ed\u3002",
+              ),
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+              style = MaterialTheme.typography.bodySmall,
+            )
+          }
+          Switch(
+            checked = networkEnabledDraft,
+            onCheckedChange = { networkEnabledDraft = it },
+            modifier = Modifier.semantics { contentDescription = "Network tools switch" },
+          )
+        }
         Text(t(language, "Web search", "Web search"), style = MaterialTheme.typography.titleSmall)
         Row(
           modifier = Modifier.fillMaxWidth(),
@@ -4752,8 +4842,8 @@ private fun SettingsDialog(
             Text(
               t(
                 language,
-                "Requires Network enabled in each conversation.",
-                "\u9700\u8981\u5728\u6bcf\u6b21\u5bf9\u8bdd\u4e2d\u6253\u5f00\u8054\u7f51\u5f00\u5173\u3002",
+                "Available when Network is enabled and a Brave Search API key is saved.",
+                "\u5728\u7f51\u7edc\u5f00\u542f\u4e14\u5df2\u4fdd\u5b58 Brave Search API key \u65f6\u53ef\u7528\u3002",
               ),
               color = MaterialTheme.colorScheme.onSurfaceVariant,
               style = MaterialTheme.typography.bodySmall,
@@ -4792,9 +4882,22 @@ private fun SettingsDialog(
           }
           Switch(
             checked = backgroundKeepAliveDraft,
-            onCheckedChange = { backgroundKeepAliveDraft = it },
+            onCheckedChange = {
+              backgroundKeepAliveDraft = it
+              if (it) requestBackgroundKeepAlivePermissions(settingsContext)
+            },
             modifier = Modifier.semantics { contentDescription = "Background keep-alive switch" },
           )
+        }
+        if (backgroundKeepAliveDraft) {
+          Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = { requestBackgroundKeepAlivePermissions(settingsContext) }) {
+              Text(t(language, "Grant keep-alive permissions", "\u6388\u6743\u540e\u53f0\u4fdd\u6301"))
+            }
+            TextButton(onClick = { openAppNotificationSettings(settingsContext) }) {
+              Text(t(language, "Notifications", "\u901a\u77e5"))
+            }
+          }
         }
         Box {
           OutlinedButton(onClick = { languageMenuOpen = true }, modifier = Modifier.fillMaxWidth()) {
@@ -4937,6 +5040,7 @@ private fun SettingsDialog(
             themeColor = themeColorDraft,
             authorityMode = authorityModeDraft,
             deepSeekThinkingEffort = deepSeekThinkingEffortDraft,
+            networkEnabled = networkEnabledDraft,
             webSearchEnabled = webSearchEnabledDraft,
             braveSearchApiKey = braveSearchApiKeyDraft,
             backgroundKeepAliveEnabled = backgroundKeepAliveDraft,
@@ -5083,6 +5187,7 @@ private fun settingsProposalSummary(proposal: WorkspaceSettingsProposal): String
     changes.maxAgentIterations?.let { "maxIterations=$it" },
     changes.networkEnabled?.let { "network=$it" },
     changes.webSearchEnabled?.let { "webSearch=$it" },
+    changes.backgroundKeepAliveEnabled?.let { "backgroundKeepAlive=$it" },
     changes.language?.let { "language=$it" },
     changes.themeMode?.let { "themeMode=$it" },
     changes.themeColor?.let { "themeColor=$it" },

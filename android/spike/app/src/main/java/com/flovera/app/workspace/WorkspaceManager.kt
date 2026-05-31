@@ -15,6 +15,10 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 data class WorkspaceFileNode(
   val name: String,
@@ -1074,19 +1078,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     val proposalsDir = safeFile(".flovera/proposals")
     return proposalsDir.listFiles()
       ?.filter { it.isFile && it.extension.equals("json", ignoreCase = true) }
-      ?.mapNotNull { file ->
-        runCatching {
-          val decoded = json.decodeFromString<WorkspaceSettingsProposalFile>(readUtf8Text(file))
-          if (!decoded.type.equals("settings", ignoreCase = true)) return@mapNotNull null
-          WorkspaceSettingsProposal(
-            path = relativeToRoot(file),
-            title = decoded.title.ifBlank { file.nameWithoutExtension },
-            reason = decoded.reason,
-            changes = decoded.changes,
-            createdAtMillis = file.lastModified(),
-          )
-        }.getOrNull()
-      }
+      ?.mapNotNull { file -> parseSettingsProposal(file) }
       ?.sortedByDescending { it.createdAtMillis }
       ?: emptyList()
   }
@@ -1097,9 +1089,10 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
       ?.filter { it.isFile && it.extension.equals("json", ignoreCase = true) }
       ?.mapNotNull { file ->
         runCatching {
-          val decoded = json.decodeFromString<WorkspaceControlledToolProposalFile>(readUtf8Text(file))
-          val normalizedType = decoded.type.lowercase()
+          val element = json.parseToJsonElement(readUtf8Text(file)).jsonObject
+          val normalizedType = element["type"]?.jsonPrimitive?.contentOrNull?.lowercase() ?: return@mapNotNull null
           if (normalizedType !in setOf("tool", "mcp")) return@mapNotNull null
+          val decoded = json.decodeFromJsonElement<WorkspaceControlledToolProposalFile>(element)
           WorkspaceControlledToolProposal(
             path = relativeToRoot(file),
             type = normalizedType,
@@ -1122,11 +1115,35 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
   fun deleteSettingsProposal(path: String): Boolean {
     val file = safeFile(path)
     if (!file.isFile || !relativeToRoot(file).startsWith(".flovera/proposals/")) return false
-    val decoded = runCatching {
-      json.decodeFromString<WorkspaceSettingsProposalFile>(readUtf8Text(file))
-    }.getOrNull() ?: return false
-    if (!decoded.type.equals("settings", ignoreCase = true)) return false
+    parseSettingsProposal(file) ?: return false
     return file.delete()
+  }
+
+  private fun parseSettingsProposal(file: File): WorkspaceSettingsProposal? {
+    return runCatching {
+      val element = json.parseToJsonElement(readUtf8Text(file)).jsonObject
+      val explicitType = element["type"]?.jsonPrimitive?.contentOrNull
+      val decoded = json.decodeFromJsonElement<WorkspaceSettingsProposalFile>(element)
+      val rawChanges = if ("changes" in element) {
+        SettingsProposalChanges()
+      } else {
+        runCatching { json.decodeFromJsonElement<SettingsProposalChanges>(element) }.getOrDefault(SettingsProposalChanges())
+      }
+      val changes = if (decoded.changes == SettingsProposalChanges() && rawChanges != SettingsProposalChanges()) {
+        rawChanges
+      } else {
+        decoded.changes
+      }
+      val normalizedType = explicitType ?: if (rawChanges != SettingsProposalChanges()) "settings" else decoded.type
+      if (!normalizedType.equals("settings", ignoreCase = true)) return@runCatching null
+      WorkspaceSettingsProposal(
+        path = relativeToRoot(file),
+        title = decoded.title.ifBlank { file.nameWithoutExtension },
+        reason = decoded.reason,
+        changes = changes,
+        createdAtMillis = file.lastModified(),
+      )
+    }.getOrNull()
   }
 
   fun appendFullAuthorityAudit(
@@ -2587,7 +2604,9 @@ data class FloveraSettingsView(
   val workspaceArtifactJobsPath: String = ".flovera/jobs",
   val maxAgentIterations: Int = 0,
   val networkEnabled: Boolean = false,
+  val networkUserConfigured: Boolean = false,
   val webSearchEnabled: Boolean = false,
+  val webSearchUserConfigured: Boolean = false,
   val backgroundKeepAliveEnabled: Boolean = false,
   val language: String = "",
   val themeMode: String = "",

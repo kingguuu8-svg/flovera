@@ -242,8 +242,8 @@ Counter-paths:
 
 - User switches provider: API keys are scoped by provider.
 - Key is missing: agent reports configuration error without starting a broken loop.
-- Network tools are off: agent does not see or call network tools.
-- Network tools are on: agent sees `fetch_url` and `download_file`.
+- Network tools are on by default: agent sees `fetch_url` and `download_file`.
+- Network tools are explicitly off: agent does not see or call network tools.
 - Project is opened publicly: source does not contain user secrets.
 
 Acceptance criteria:
@@ -251,7 +251,8 @@ Acceptance criteria:
 - `.env`, `setting.json`, API keys, and local paths are not hardcoded into source.
 - Settings persist across app restarts.
 - Provider settings are validated and normalized.
-- Network tools default to disabled.
+- Network tools default to enabled, remain inspectable in Settings, and preserve
+  an explicit user-disabled choice.
 
 ## Product Backlog
 
@@ -576,11 +577,13 @@ Interrupts persist the active draft transcript plus a lightweight
 `run_interrupted` status instead of a full assistant bubble, and notification
 copy now says partial transcript/tool history was saved. Settings include an
 explicit opt-in background keep-alive mode that keeps Flovera foreground-service
-visible for long workspace work and restores from the persisted setting after a
-service restart. Remaining work is clearer UI separation between system rules
-and workspace rules, stronger cancellation coverage for active provider/tool
-work, notification actions, overlay/floating-window research, and more explicit
-background lifecycle diagnostics.
+visible for long workspace work, requests notification permission, opens the
+Android battery-optimization exception flow, and restores from the persisted
+setting after a service restart. Remaining work is clearer UI separation
+between system rules and workspace rules, stronger cancellation coverage for
+active provider/tool work, notification actions, OEM-specific autostart
+diagnostics, overlay/floating-window research, and more explicit background
+lifecycle diagnostics.
 
 - Separate system rules from user/workspace rules:
   - System rules are app-owned product and safety constraints.
@@ -605,12 +608,12 @@ background lifecycle diagnostics.
   current run state and failure/success outcome. Remaining work: notification
   actions such as interrupt/resume.
 - Offer a stronger opt-in keep-alive mode for long-running local work. Baseline
-  implemented as a settings-controlled foreground-service notification.
-  Remaining work: evaluate whether a small overlay/floating-window affordance
-  can lawfully and usefully keep Flovera foreground-adjacent on Android. This
-  must be gated by explicit user permission, clear visible state, and a
-  fallback path when the overlay permission is denied or the OEM background
-  policy still stops work.
+  implemented as a settings-controlled foreground-service notification plus
+  Android notification/battery-optimization permission prompts. Remaining work:
+  evaluate whether a small overlay/floating-window affordance can lawfully and
+  usefully keep Flovera foreground-adjacent on Android. This must be gated by
+  explicit user permission, clear visible state, and a fallback path when the
+  overlay permission is denied or the OEM background policy still stops work.
 - Background execution must preserve existing settings, session persistence,
   error logs, and notification permission boundaries.
 
@@ -669,17 +672,16 @@ capability claims.
 ### Web Search And Tool Expansion
 
 Status: Partially implemented for web search. Brave-backed `web_search`,
-`fetch_url`, and `download_file` tools exist behind explicit network/search
-settings. Remaining work is the proposal and approval flow for additional
-restricted tools and MCP integrations.
+`fetch_url`, and `download_file` tools exist behind Settings controls. Network
+tools default to enabled with a user override, and web search defaults on when a
+Brave Search API key is present. Remaining work is the proposal and approval
+flow for additional restricted tools and MCP integrations.
 
 - Add Brave Search API support as the first non-provider web search path.
 - Expose web search as an agent tool behind an explicit permission setting.
-- Revisit the default network posture for release: make network-enabled
-  workflows available by default when the user has configured the needed
-  provider/search credentials, but move the switch into Settings instead of
-  keeping it as a prominent conversation control. The UI must still make the
-  current network/tool permission state inspectable.
+- Keep the default network posture release-friendly: network-enabled workflows
+  are available by default, Brave search is available by default when the key is
+  configured, and both switches stay inspectable in Settings.
 - Let the agent propose additional restricted tools and MCP integrations.
 - Add a user approval flow before proposed tools or MCP entries become active.
 - Keep tool availability visible to the agent only when the corresponding user

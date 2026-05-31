@@ -305,6 +305,7 @@ class AgentController(
     themeColor: String = _state.value.settings.themeColor,
     authorityMode: String = _state.value.settings.agentAuthorityMode,
     deepSeekThinkingEffort: String = _state.value.settings.deepSeekThinkingEffort,
+    networkEnabled: Boolean = _state.value.settings.networkEnabled,
     webSearchEnabled: Boolean = _state.value.settings.webSearchEnabled,
     braveSearchApiKey: String = _state.value.settings.braveSearchApiKey,
     backgroundKeepAliveEnabled: Boolean = _state.value.settings.backgroundKeepAliveEnabled,
@@ -328,7 +329,8 @@ class AgentController(
     )
     val settingsWithAuthority = settingsController.setAuthorityMode(settings, authorityMode)
     val settingsWithThinking = settingsController.setDeepSeekThinkingEffort(settingsWithAuthority, deepSeekThinkingEffort)
-    val settingsWithSearch = settingsController.setWebSearch(settingsWithThinking, webSearchEnabled, braveSearchApiKey)
+    val settingsWithNetwork = settingsController.setNetworkEnabled(settingsWithThinking, networkEnabled)
+    val settingsWithSearch = settingsController.setWebSearch(settingsWithNetwork, webSearchEnabled, braveSearchApiKey)
     val settingsWithBackground = settingsController.setBackgroundKeepAlive(settingsWithSearch, backgroundKeepAliveEnabled)
     if (backgroundKeepAliveEnabled) {
       if (!current.isRunning) startBackgroundKeepAliveService()

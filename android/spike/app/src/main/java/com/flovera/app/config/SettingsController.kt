@@ -23,19 +23,21 @@ class SettingsController(private val store: SettingsStore) {
   fun loadResult(): SettingsLoadResult {
     val result = store.loadResult()
     val loaded = result.settings
-    val normalized = normalizeReasoningEffort(
-      normalizeDeepSeekThinkingEffort(
-        normalizeAuthorityMode(
-          normalizeRunLimits(
-            normalizeAppearance(
-              normalizeLanguage(
-                normalizeCustomOpenAIProvider(normalizeProviderAndModel(normalizeHtmlLists(loaded))),
+    val normalized = normalizeNetworkAndSearchDefaults(
+      normalizeReasoningEffort(
+        normalizeDeepSeekThinkingEffort(
+          normalizeAuthorityMode(
+            normalizeRunLimits(
+              normalizeAppearance(
+                normalizeLanguage(
+                  normalizeCustomOpenAIProvider(normalizeProviderAndModel(normalizeHtmlLists(loaded))),
+                ),
               ),
             ),
           ),
         ),
-      ),
-    ).let { normalizeOpenRouterProvider(it) }
+      ).let { normalizeOpenRouterProvider(it) },
+    )
     if (normalized != loaded) store.save(normalized)
     return result.copy(settings = normalized)
   }
@@ -84,7 +86,7 @@ class SettingsController(private val store: SettingsStore) {
   }
 
   fun setNetworkEnabled(settings: AppSettings, enabled: Boolean): AppSettings {
-    val updated = settings.copy(networkEnabled = enabled)
+    val updated = settings.copy(networkEnabled = enabled, networkUserConfigured = true)
     store.save(updated)
     return updated
   }
@@ -92,6 +94,7 @@ class SettingsController(private val store: SettingsStore) {
   fun setWebSearch(settings: AppSettings, enabled: Boolean, braveApiKey: String): AppSettings {
     val updated = settings.copy(
       webSearchEnabled = enabled,
+      webSearchUserConfigured = true,
       braveSearchApiKey = normalizeBraveSearchApiKey(braveApiKey),
     )
     store.save(updated)
@@ -146,7 +149,9 @@ class SettingsController(private val store: SettingsStore) {
       selectedHtmlPath = changes.selectedHtmlPath?.trim() ?: settings.selectedHtmlPath,
       maxAgentIterations = maxIterations,
       networkEnabled = changes.networkEnabled ?: settings.networkEnabled,
+      networkUserConfigured = if (changes.networkEnabled != null) true else settings.networkUserConfigured,
       webSearchEnabled = changes.webSearchEnabled ?: settings.webSearchEnabled,
+      webSearchUserConfigured = if (changes.webSearchEnabled != null) true else settings.webSearchUserConfigured,
       backgroundKeepAliveEnabled = changes.backgroundKeepAliveEnabled ?: settings.backgroundKeepAliveEnabled,
       language = changes.language?.let { normalizeLanguageId(it) } ?: settings.language,
       themeMode = changes.themeMode?.let { normalizeThemeMode(it) } ?: settings.themeMode,
@@ -267,6 +272,22 @@ class SettingsController(private val store: SettingsStore) {
         minCodingScore = settings.openRouterProvider.minCodingScore?.let { normalizeOpenRouterMinCodingScore(it) },
       ),
     )
+  }
+
+  private fun normalizeNetworkAndSearchDefaults(settings: AppSettings): AppSettings {
+    val networkDefaulted = if (!settings.networkUserConfigured && !settings.networkEnabled) {
+      settings.copy(networkEnabled = true)
+    } else {
+      settings
+    }
+    return if (!networkDefaulted.webSearchUserConfigured &&
+      networkDefaulted.braveSearchApiKey.isNotBlank() &&
+      !networkDefaulted.webSearchEnabled
+    ) {
+      networkDefaulted.copy(webSearchEnabled = true)
+    } else {
+      networkDefaulted
+    }
   }
 
   private fun AppSettings.withMergedModelContextOverride(
