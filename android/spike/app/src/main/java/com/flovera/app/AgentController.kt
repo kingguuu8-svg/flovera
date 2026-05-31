@@ -669,6 +669,12 @@ class AgentController(
     startAgentRun(AgentRunInput(modelInput = trimmed), current.session ?: sessionController.createSession())
   }
 
+  fun submitInNewSession(input: String) {
+    val trimmed = input.trim()
+    if (trimmed.isBlank() || _state.value.isRunning) return
+    startAgentRun(AgentRunInput(modelInput = trimmed), sessionController.createSession())
+  }
+
   fun guideAgentRun() {
     val current = _state.value
     val trimmed = current.input.trim()

@@ -41,17 +41,25 @@ import org.junit.Test
 class AgentScreenInteractionInstrumentedTest {
   @get:Rule val composeRule = createAndroidComposeRule<ComponentActivity>()
 
+  private fun openConversation() {
+    composeRule.onNodeWithContentDescription("Open conversation").performClick()
+  }
+
+  private fun usableSettings(settings: AppSettings = AppSettings()): AppSettings {
+    return settings.copy(provider = "lmstudio", model = "local-model")
+  }
+
   @Test
   fun defaultWebSurfaceShowsEmptyHtmlPrompt() {
     val context = composeRule.activity.applicationContext
-    SettingsStore(context).save(AppSettings(selectedHtmlPath = ""))
+    SettingsStore(context).save(usableSettings(AppSettings(selectedHtmlPath = "")))
     val controller = AgentController(context)
 
     composeRule.setContent {
       AgentScreen(controller)
     }
 
-    composeRule.onNodeWithText("\u53ef\u9009\u62e9 HTML / Markdown / JSON / CSV / Text \u8fdb\u884c\u6253\u5f00").assertIsDisplayed()
+    composeRule.onNodeWithText("\u548c Flovera \u5bf9\u8bdd\u6765\u521b\u5efa\u9879\u76ee").assertIsDisplayed()
   }
 
   @Test
@@ -67,7 +75,7 @@ class AgentScreenInteractionInstrumentedTest {
   @Test
   fun tappingSessionRowOpensSession() {
     val context = composeRule.activity.applicationContext
-    SettingsStore(context).save(AppSettings(language = "en"))
+    SettingsStore(context).save(usableSettings(AppSettings(language = "en")))
     val store = AgentSessionStore(context)
     val suffix = System.currentTimeMillis()
     val target = store.appendMessage(
@@ -84,7 +92,7 @@ class AgentScreenInteractionInstrumentedTest {
       AgentScreen(controller)
     }
 
-    composeRule.onNodeWithText("Agent").performClick()
+    openConversation()
     composeRule.onNodeWithContentDescription("More").performClick()
     composeRule.onNodeWithText("Sessions").performClick()
     composeRule.onNodeWithTag("open-session-${target.id}").performScrollTo().performClick()
@@ -97,14 +105,14 @@ class AgentScreenInteractionInstrumentedTest {
   @Test
   fun newConversationShowsDraftAndDoesNotPersistUntilMessage() {
     val context = composeRule.activity.applicationContext
-    SettingsStore(context).save(AppSettings(language = "en"))
+    SettingsStore(context).save(usableSettings(AppSettings(language = "en")))
     val controller = AgentController(context)
 
     composeRule.setContent {
       AgentScreen(controller)
     }
 
-    composeRule.onNodeWithText("Agent").performClick()
+    openConversation()
     composeRule.onNodeWithText("New").performClick()
 
     val draftId = controller.state.value.session?.id
@@ -126,7 +134,7 @@ class AgentScreenInteractionInstrumentedTest {
   @Test
   fun conversationHeaderDoesNotExposeSessionTitle() {
     val context = composeRule.activity.applicationContext
-    SettingsStore(context).save(AppSettings(language = "en"))
+    SettingsStore(context).save(usableSettings(AppSettings(language = "en")))
     val store = AgentSessionStore(context)
     val title = "Hidden title ${System.currentTimeMillis()}"
     val session = store.appendMessage(
@@ -140,7 +148,7 @@ class AgentScreenInteractionInstrumentedTest {
       AgentScreen(controller)
     }
 
-    composeRule.onNodeWithText("Agent").performClick()
+    openConversation()
     composeRule.onNodeWithText("Conversation").assertIsDisplayed()
     assertEquals(0, composeRule.onAllNodesWithText(title).fetchSemanticsNodes().size)
   }
@@ -148,7 +156,7 @@ class AgentScreenInteractionInstrumentedTest {
   @Test
   fun conversationRendersCompressionDividerSeparatelyFromAssistantBubble() {
     val context = composeRule.activity.applicationContext
-    SettingsStore(context).save(AppSettings(language = "en"))
+    SettingsStore(context).save(usableSettings(AppSettings(language = "en")))
     val store = AgentSessionStore(context)
     val session = store.appendMessage(
       store.create("Compression visible ${System.currentTimeMillis()}"),
@@ -180,7 +188,7 @@ class AgentScreenInteractionInstrumentedTest {
       AgentScreen(controller)
     }
 
-    composeRule.onNodeWithText("Agent").performClick()
+    openConversation()
     composeRule.onNodeWithText("Context compressed").assertIsDisplayed()
     composeRule.onNodeWithText("Show handoff summary").performClick()
     composeRule.onNodeWithText("Remember the active workspace", substring = true).assertIsDisplayed()
@@ -189,7 +197,7 @@ class AgentScreenInteractionInstrumentedTest {
   @Test
   fun contextUsageHeaderUsesDeepSeekCatalogForOldRecordsAndShowsDetailsOnClick() {
     val context = composeRule.activity.applicationContext
-    SettingsStore(context).save(AppSettings(language = "en"))
+    SettingsStore(context).save(usableSettings(AppSettings(language = "en")))
     val store = AgentSessionStore(context)
     val session = store.appendMessage(
       store.create("Context compact ${System.currentTimeMillis()}"),
@@ -217,7 +225,7 @@ class AgentScreenInteractionInstrumentedTest {
       AgentScreen(controller)
     }
 
-    composeRule.onNodeWithText("Agent").performClick()
+    openConversation()
     composeRule.onNodeWithText("est 90% · 900k/1M").assertIsDisplayed()
     assertEquals(0, composeRule.onAllNodesWithText("unknown", substring = true).fetchSemanticsNodes().size)
 
@@ -233,7 +241,7 @@ class AgentScreenInteractionInstrumentedTest {
   fun conversationPathLinkOpensExistingWorkspaceFilePreview() {
     val context = composeRule.activity.applicationContext
     val workspaceId = "conversation-path-${System.currentTimeMillis()}"
-    SettingsStore(context).save(AppSettings(language = "en", activeWorkspaceId = workspaceId, selectedHtmlPath = "index.html"))
+    SettingsStore(context).save(usableSettings(AppSettings(language = "en", activeWorkspaceId = workspaceId, selectedHtmlPath = "index.html")))
     val workspace = WorkspaceManager(context, workspaceId).also { it.ensureSeedFiles() }
     workspace.writeFile("notes/info.md", "# Linked note\nOpen target", createAutoSnapshot = false)
     val store = AgentSessionStore(context)
@@ -248,7 +256,7 @@ class AgentScreenInteractionInstrumentedTest {
       AgentScreen(controller)
     }
 
-    composeRule.onNodeWithText("Agent").performClick()
+    openConversation()
     composeRule.onNodeWithContentDescription("Open conversation path notes/info.md").performClick()
 
     composeRule.onNodeWithText("Linked note").assertIsDisplayed()
@@ -262,7 +270,7 @@ class AgentScreenInteractionInstrumentedTest {
   fun conversationPathLinksOpenAgentRunLogAndCheckpointFiles() {
     val context = composeRule.activity.applicationContext
     val workspaceId = "conversation-run-path-${System.currentTimeMillis()}"
-    SettingsStore(context).save(AppSettings(language = "en", activeWorkspaceId = workspaceId, selectedHtmlPath = "index.html"))
+    SettingsStore(context).save(usableSettings(AppSettings(language = "en", activeWorkspaceId = workspaceId, selectedHtmlPath = "index.html")))
     val workspace = WorkspaceManager(context, workspaceId).also { it.ensureSeedFiles() }
     val logPath = ".flovera/logs/agent-error-test.md"
     val checkpointPath = ".flovera/runs/test-checkpoint.json"
@@ -288,7 +296,7 @@ class AgentScreenInteractionInstrumentedTest {
       AgentScreen(controller)
     }
 
-    composeRule.onNodeWithText("Agent").performClick()
+    openConversation()
     composeRule.onNodeWithContentDescription("Open conversation path $logPath").performClick()
 
     composeRule.onNodeWithText("Agent Error Log").assertIsDisplayed()
@@ -297,7 +305,7 @@ class AgentScreenInteractionInstrumentedTest {
       assertTrue(controller.state.value.selectedPreviewContent.contains("errorCategory: provider"))
     }
 
-    composeRule.onNodeWithText("Agent").performClick()
+    openConversation()
     composeRule.onNodeWithContentDescription("Open conversation path $checkpointPath").performClick()
 
     composeRule.onNodeWithText("JSON preview").assertIsDisplayed()
@@ -310,7 +318,7 @@ class AgentScreenInteractionInstrumentedTest {
   @Test
   fun runningAgentCanBeInterruptedFromConversation() {
     val context = composeRule.activity.applicationContext
-    SettingsStore(context).save(AppSettings(language = "en"))
+    SettingsStore(context).save(usableSettings(AppSettings(language = "en")))
     val runtime = BlockingAgentRuntime()
     val notifier = FakeAgentRunStatusNotifier()
     val controller = AgentController(
@@ -323,7 +331,7 @@ class AgentScreenInteractionInstrumentedTest {
       AgentScreen(controller)
     }
 
-    composeRule.onNodeWithText("Agent").performClick()
+    openConversation()
     composeRule.onAllNodes(hasSetTextAction())[0].performTextInput("start long task")
     composeRule.onNodeWithContentDescription("Send message").performClick()
 
@@ -345,7 +353,7 @@ class AgentScreenInteractionInstrumentedTest {
   @Test
   fun runningAgentQueuesNextMessageAndStartsItAfterCurrentRun() {
     val context = composeRule.activity.applicationContext
-    SettingsStore(context).save(AppSettings(language = "en"))
+    SettingsStore(context).save(usableSettings(AppSettings(language = "en")))
     val runtime = QueueingAgentRuntime()
     val controller = AgentController(
       context,
@@ -358,7 +366,7 @@ class AgentScreenInteractionInstrumentedTest {
       AgentScreen(controller)
     }
 
-    composeRule.onNodeWithText("Agent").performClick()
+    openConversation()
     composeRule.onAllNodes(hasSetTextAction())[0].performTextInput(firstTask)
     composeRule.onNodeWithContentDescription("Send message").performClick()
 
@@ -392,7 +400,7 @@ class AgentScreenInteractionInstrumentedTest {
   @Test
   fun runningAgentAcceptsGuidanceForNextRun() {
     val context = composeRule.activity.applicationContext
-    SettingsStore(context).save(AppSettings(language = "en"))
+    SettingsStore(context).save(usableSettings(AppSettings(language = "en")))
     val runtime = QueueingAgentRuntime()
     val controller = AgentController(
       context,
@@ -405,7 +413,7 @@ class AgentScreenInteractionInstrumentedTest {
       AgentScreen(controller)
     }
 
-    composeRule.onNodeWithText("Agent").performClick()
+    openConversation()
     composeRule.onAllNodes(hasSetTextAction())[0].performTextInput(firstTask)
     composeRule.onNodeWithContentDescription("Send message").performClick()
 
@@ -439,7 +447,7 @@ class AgentScreenInteractionInstrumentedTest {
   @Test
   fun unappliedGuidanceRunShowsOnlyUserTextInConversation() {
     val context = composeRule.activity.applicationContext
-    SettingsStore(context).save(AppSettings(language = "en"))
+    SettingsStore(context).save(usableSettings(AppSettings(language = "en")))
     val runtime = QueueingAgentRuntime(consumeGuidanceOnCompletion = false)
     val controller = AgentController(
       context,
@@ -453,7 +461,7 @@ class AgentScreenInteractionInstrumentedTest {
       AgentScreen(controller)
     }
 
-    composeRule.onNodeWithText("Agent").performClick()
+    openConversation()
     composeRule.onAllNodes(hasSetTextAction())[0].performTextInput(firstTask)
     composeRule.onNodeWithContentDescription("Send message").performClick()
 
@@ -487,18 +495,18 @@ class AgentScreenInteractionInstrumentedTest {
   @Test
   fun mainSurfaceExposesAgentAndHtmlQuickPickerWhileConversationOwnsSecondaryEntries() {
     val context = composeRule.activity.applicationContext
-    SettingsStore(context).save(AppSettings(language = "en"))
+    SettingsStore(context).save(usableSettings(AppSettings(language = "en")))
     val controller = AgentController(context)
 
     composeRule.setContent {
       AgentScreen(controller)
     }
 
-    composeRule.onNodeWithText("Agent").assertIsDisplayed()
-    composeRule.onNodeWithText("HTML").assertIsDisplayed()
+    composeRule.onNodeWithContentDescription("Open conversation").assertIsDisplayed()
+    composeRule.onNodeWithContentDescription("Current display target").assertIsDisplayed()
     assertEquals(0, composeRule.onAllNodesWithText("Menu").fetchSemanticsNodes().size)
 
-    composeRule.onNodeWithText("Agent").performClick()
+    openConversation()
     composeRule.onNodeWithContentDescription("More").performClick()
     composeRule.onNodeWithText("Sessions").assertIsDisplayed()
     composeRule.onNodeWithText("Open Preview").assertIsDisplayed()
@@ -510,16 +518,16 @@ class AgentScreenInteractionInstrumentedTest {
   @Test
   fun htmlQuickPickerOpensWorkspaceHtmlFromMainSurface() {
     val context = composeRule.activity.applicationContext
-    SettingsStore(context).save(AppSettings(language = "en"))
+    SettingsStore(context).save(usableSettings(AppSettings(language = "en")))
     val controller = AgentController(context)
 
     composeRule.setContent {
       AgentScreen(controller)
     }
 
-    composeRule.onNodeWithContentDescription("Open HTML quick picker").performClick()
-    composeRule.onNodeWithText("Workspace Apps").assertIsDisplayed()
-    composeRule.onNodeWithText("HTML Files").assertIsDisplayed()
+    composeRule.onNodeWithContentDescription("Current display target").performClick()
+    composeRule.onNodeWithText("Preview Display").assertIsDisplayed()
+    composeRule.onNodeWithText("HTML Display Files").assertIsDisplayed()
     composeRule.onNodeWithText("index.html").performClick()
 
     composeRule.runOnIdle {
@@ -530,14 +538,14 @@ class AgentScreenInteractionInstrumentedTest {
   @Test
   fun tappingHtmlFileOpensItInWebView() {
     val context = composeRule.activity.applicationContext
-    SettingsStore(context).save(AppSettings(language = "en"))
+    SettingsStore(context).save(usableSettings(AppSettings(language = "en")))
     val controller = AgentController(context)
 
     composeRule.setContent {
       AgentScreen(controller)
     }
 
-    composeRule.onNodeWithText("Agent").performClick()
+    openConversation()
     composeRule.onNodeWithContentDescription("More").performClick()
     composeRule.onNodeWithText("Files").performClick()
     composeRule.onNodeWithText("index.html", substring = true).performClick()
@@ -551,14 +559,14 @@ class AgentScreenInteractionInstrumentedTest {
   @Test
   fun tappingMarkdownFileOpensNativePreviewOverPreviousHtml() {
     val context = composeRule.activity.applicationContext
-    SettingsStore(context).save(AppSettings(language = "en", selectedHtmlPath = "index.html"))
+    SettingsStore(context).save(usableSettings(AppSettings(language = "en", selectedHtmlPath = "index.html")))
     val controller = AgentController(context)
 
     composeRule.setContent {
       AgentScreen(controller)
     }
 
-    composeRule.onNodeWithText("Agent").performClick()
+    openConversation()
     composeRule.onNodeWithContentDescription("More").performClick()
     composeRule.onNodeWithText("Files").performClick()
     composeRule.onNodeWithText("README.md", substring = true).performClick()
@@ -577,7 +585,7 @@ class AgentScreenInteractionInstrumentedTest {
   fun structuredWorkspaceFilesRenderAsJsonAndCsvPreviews() {
     val context = composeRule.activity.applicationContext
     val workspaceId = "structured-preview-${System.currentTimeMillis()}"
-    SettingsStore(context).save(AppSettings(language = "en", activeWorkspaceId = workspaceId, selectedHtmlPath = "index.html"))
+    SettingsStore(context).save(usableSettings(AppSettings(language = "en", activeWorkspaceId = workspaceId, selectedHtmlPath = "index.html")))
     val workspace = WorkspaceManager(context, workspaceId).also { it.ensureSeedFiles() }
     workspace.writeFile("data.json", """{"name":"Flovera","status":"ready"}""", createAutoSnapshot = false)
     workspace.writeFile("table.csv", "name,status\nFlovera,ready", createAutoSnapshot = false)
@@ -613,7 +621,7 @@ class AgentScreenInteractionInstrumentedTest {
   @Test
   fun runningAgentShowsDeterministicToolProgressNarration() {
     val context = composeRule.activity.applicationContext
-    SettingsStore(context).save(AppSettings(language = "en"))
+    SettingsStore(context).save(usableSettings(AppSettings(language = "en")))
     val runtime = ToolProgressAgentRuntime()
     val controller = AgentController(
       context,
@@ -625,7 +633,7 @@ class AgentScreenInteractionInstrumentedTest {
       AgentScreen(controller)
     }
 
-    composeRule.onNodeWithText("Agent").performClick()
+    openConversation()
     composeRule.onAllNodes(hasSetTextAction())[0].performTextInput("inspect workspace")
     composeRule.onNodeWithContentDescription("Send message").performClick()
 
@@ -651,7 +659,7 @@ class AgentScreenInteractionInstrumentedTest {
   @Test
   fun runningAgentShowsStreamingFinalResponseDraft() {
     val context = composeRule.activity.applicationContext
-    SettingsStore(context).save(AppSettings(language = "en"))
+    SettingsStore(context).save(usableSettings(AppSettings(language = "en")))
     val runtime = StreamingFinalDraftAgentRuntime()
     val controller = AgentController(
       context,
@@ -663,7 +671,7 @@ class AgentScreenInteractionInstrumentedTest {
       AgentScreen(controller)
     }
 
-    composeRule.onNodeWithText("Agent").performClick()
+    openConversation()
     composeRule.onAllNodes(hasSetTextAction())[0].performTextInput("stream final")
     composeRule.onNodeWithContentDescription("Send message").performClick()
 
@@ -688,7 +696,7 @@ class AgentScreenInteractionInstrumentedTest {
   fun tappingImageFileOpensNativeImagePreviewOverPreviousHtml() {
     val context = composeRule.activity.applicationContext
     val workspaceId = "image-preview-${System.currentTimeMillis()}"
-    SettingsStore(context).save(AppSettings(language = "en", activeWorkspaceId = workspaceId, selectedHtmlPath = "index.html"))
+    SettingsStore(context).save(usableSettings(AppSettings(language = "en", activeWorkspaceId = workspaceId, selectedHtmlPath = "index.html")))
     val workspace = WorkspaceManager(context, workspaceId).also { it.ensureSeedFiles() }
     workspace.writeBytes("sample.png", testPngBytes(), createAutoSnapshot = false)
     val controller = AgentController(context)
@@ -697,7 +705,7 @@ class AgentScreenInteractionInstrumentedTest {
       AgentScreen(controller)
     }
 
-    composeRule.onNodeWithText("Agent").performClick()
+    openConversation()
     composeRule.onNodeWithContentDescription("More").performClick()
     composeRule.onNodeWithText("Files").performClick()
     composeRule.onNodeWithText("sample.png", substring = true).performClick()
@@ -717,7 +725,7 @@ class AgentScreenInteractionInstrumentedTest {
   fun tappingPdfFileOpensNativePdfPreviewOverPreviousHtml() {
     val context = composeRule.activity.applicationContext
     val workspaceId = "pdf-preview-${System.currentTimeMillis()}"
-    SettingsStore(context).save(AppSettings(language = "en", activeWorkspaceId = workspaceId, selectedHtmlPath = "index.html"))
+    SettingsStore(context).save(usableSettings(AppSettings(language = "en", activeWorkspaceId = workspaceId, selectedHtmlPath = "index.html")))
     val workspace = WorkspaceManager(context, workspaceId).also { it.ensureSeedFiles() }
     workspace.writeBytes("sample.pdf", testPdfBytes(), createAutoSnapshot = false)
     val controller = AgentController(context)
@@ -726,7 +734,7 @@ class AgentScreenInteractionInstrumentedTest {
       AgentScreen(controller)
     }
 
-    composeRule.onNodeWithText("Agent").performClick()
+    openConversation()
     composeRule.onNodeWithContentDescription("More").performClick()
     composeRule.onNodeWithText("Files").performClick()
     composeRule.onNodeWithText("sample.pdf", substring = true).performClick()
@@ -745,7 +753,7 @@ class AgentScreenInteractionInstrumentedTest {
   @Test
   fun agentRulesCancelKeepsPersistedRules() {
     val context = composeRule.activity.applicationContext
-    SettingsStore(context).save(AppSettings(language = "en"))
+    SettingsStore(context).save(usableSettings(AppSettings(language = "en")))
     val controller = AgentController(context)
     val original = controller.state.value.agentRulesDraft
 
@@ -753,7 +761,7 @@ class AgentScreenInteractionInstrumentedTest {
       AgentScreen(controller)
     }
 
-    composeRule.onNodeWithText("Agent").performClick()
+    openConversation()
     composeRule.onNodeWithContentDescription("More").performClick()
     composeRule.onNodeWithText("AGENT.md").performClick()
     composeRule.onAllNodes(hasSetTextAction())[0].performTextClearance()
@@ -934,7 +942,7 @@ class AgentScreenInteractionInstrumentedTest {
   @Test
   fun settingsCancelKeepsModelDraftAndLanguageSaveSwitchesUi() {
     val context = composeRule.activity.applicationContext
-    SettingsStore(context).save(AppSettings(language = "en"))
+    SettingsStore(context).save(usableSettings(AppSettings(language = "en")))
     val controller = AgentController(context)
     val originalModel = controller.state.value.modelDraft
 
@@ -942,7 +950,7 @@ class AgentScreenInteractionInstrumentedTest {
       AgentScreen(controller)
     }
 
-    composeRule.onNodeWithText("Agent").performClick()
+    openConversation()
     composeRule.onNodeWithContentDescription("More").performClick()
     composeRule.onNodeWithText("Settings").performClick()
     composeRule.onAllNodes(hasSetTextAction())[0].performTextClearance()
@@ -954,14 +962,14 @@ class AgentScreenInteractionInstrumentedTest {
       assertEquals("en", controller.state.value.settings.language)
     }
 
-    composeRule.onNodeWithText("Agent").performClick()
+    openConversation()
     composeRule.onNodeWithContentDescription("More").performClick()
     composeRule.onNodeWithText("Settings").performClick()
     composeRule.onNodeWithText("Language: English").performClick()
     composeRule.onNodeWithText("\u4e2d\u6587").performClick()
     composeRule.onNodeWithText("Save").performClick()
 
-    composeRule.onNodeWithText("Agent").assertIsDisplayed()
+    composeRule.onNodeWithContentDescription("Open conversation").assertIsDisplayed()
     composeRule.runOnIdle {
       assertEquals("zh", controller.state.value.settings.language)
     }

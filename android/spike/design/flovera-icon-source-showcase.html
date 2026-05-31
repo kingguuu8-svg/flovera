@@ -1,0 +1,858 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Flovera Icon Source Showcase</title>
+  <script src="https://code.iconify.design/iconify-icon/2.3.0/iconify-icon.min.js"></script>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #1d232a;
+      --muted: #657079;
+      --soft: #f4f7f6;
+      --panel: #ffffff;
+      --line: #dbe5e4;
+      --accent: #127089;
+      --accent-2: #1e9a9c;
+      --accent-soft: #d8eeee;
+      --warm: #f7efe4;
+      --danger: #a34f4a;
+      --shadow: 0 24px 70px rgba(29, 35, 42, 0.10);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        linear-gradient(180deg, rgba(216, 238, 238, 0.64), rgba(244, 247, 246, 0) 360px),
+        var(--soft);
+      color: var(--ink);
+      font-family: Inter, "SF Pro Display", "Segoe UI", "Microsoft YaHei", sans-serif;
+      letter-spacing: 0;
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .page {
+      width: min(1180px, calc(100vw - 40px));
+      margin: 0 auto;
+      padding: 32px 0 72px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: 1.02fr 0.98fr;
+      gap: 28px;
+      align-items: stretch;
+      min-height: 420px;
+    }
+
+    .intro {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 18px 0 10px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 54px;
+    }
+
+    .brand img {
+      width: 54px;
+      height: 54px;
+      border-radius: 16px;
+      box-shadow: 0 10px 30px rgba(29, 35, 42, 0.12);
+    }
+
+    .brand strong {
+      display: block;
+      font-size: 15px;
+      line-height: 1.2;
+    }
+
+    .brand span {
+      display: block;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    h1 {
+      max-width: 620px;
+      margin: 0;
+      font-size: clamp(44px, 6vw, 76px);
+      line-height: 0.94;
+      font-weight: 720;
+      letter-spacing: 0;
+    }
+
+    .lead {
+      max-width: 650px;
+      margin: 24px 0 0;
+      color: #40505a;
+      font-size: 19px;
+      line-height: 1.72;
+    }
+
+    .decision {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-top: 34px;
+    }
+
+    .decision-card,
+    .phone,
+    .source-card,
+    .set-card,
+    .rationale {
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.82);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(18px);
+    }
+
+    .decision-card {
+      min-height: 128px;
+      border-radius: 8px;
+      padding: 16px;
+    }
+
+    .decision-card .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      height: 26px;
+      padding: 0 9px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: #0e5d70;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .decision-card:nth-child(2) .tag {
+      background: var(--warm);
+      color: #6d5740;
+    }
+
+    .decision-card:nth-child(3) .tag {
+      background: #eef0f2;
+      color: #4f5962;
+    }
+
+    .decision-card h2 {
+      margin: 16px 0 8px;
+      font-size: 18px;
+      line-height: 1.15;
+    }
+
+    .decision-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .phone {
+      position: relative;
+      overflow: hidden;
+      border-radius: 32px;
+      padding: 14px;
+      background: #fdfefe;
+    }
+
+    .screen {
+      position: relative;
+      min-height: 600px;
+      overflow: hidden;
+      border: 1px solid #dce7e5;
+      border-radius: 24px;
+      background:
+        linear-gradient(180deg, rgba(18, 112, 137, 0.08), rgba(255,255,255,0) 36%),
+        #fbfcfc;
+    }
+
+    .phone-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 20px 18px 0;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .viewer {
+      margin: 34px 18px 0;
+      border: 1px solid #dce7e5;
+      border-radius: 10px;
+      background: #ffffff;
+      min-height: 330px;
+      padding: 18px;
+    }
+
+    .viewer-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .viewer-grid {
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      gap: 10px;
+      margin-top: 18px;
+    }
+
+    .graph {
+      min-height: 170px;
+      border-radius: 8px;
+      background:
+        linear-gradient(135deg, rgba(18,112,137,0.14), rgba(30,154,156,0.06)),
+        repeating-linear-gradient(0deg, transparent 0 26px, rgba(29,35,42,0.05) 27px),
+        #f8fbfb;
+      border: 1px solid #e5eeee;
+    }
+
+    .mini-list {
+      display: grid;
+      gap: 9px;
+    }
+
+    .mini-list span {
+      display: block;
+      height: 38px;
+      border-radius: 8px;
+      background: #f1f6f6;
+      border: 1px solid #e0ebea;
+    }
+
+    .overlay-bubble {
+      position: absolute;
+      left: 28px;
+      right: 28px;
+      bottom: 98px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 48px;
+      padding: 10px 12px;
+      border: 1px solid rgba(18, 112, 137, 0.24);
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.88);
+      box-shadow: 0 18px 46px rgba(18, 112, 137, 0.14);
+      color: #31414a;
+      font-size: 13px;
+      line-height: 1.25;
+    }
+
+    .overlay-bubble iconify-icon {
+      color: var(--accent);
+      font-size: 23px;
+      flex: none;
+    }
+
+    .bottom-bar {
+      position: absolute;
+      left: 14px;
+      right: 14px;
+      bottom: 14px;
+      display: grid;
+      grid-template-columns: 1fr 48px;
+      gap: 9px;
+      align-items: center;
+      padding: 9px;
+      border: 1px solid #d4e1df;
+      border-radius: 18px;
+      background: rgba(255,255,255,0.94);
+      box-shadow: 0 18px 48px rgba(29, 35, 42, 0.12);
+    }
+
+    .input-preview {
+      min-width: 0;
+      padding: 0 10px;
+    }
+
+    .preview-state {
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      color: #748087;
+      font-size: 11px;
+      line-height: 1.2;
+    }
+
+    .prompt-line {
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      margin-top: 5px;
+      color: #27343c;
+      font-size: 15px;
+    }
+
+    .action-button {
+      display: grid;
+      place-items: center;
+      width: 48px;
+      height: 48px;
+      border-radius: 15px;
+      border: 0;
+      background: var(--ink);
+      color: white;
+    }
+
+    .action-button iconify-icon {
+      font-size: 25px;
+    }
+
+    .section {
+      margin-top: 34px;
+    }
+
+    .section-title {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 14px;
+    }
+
+    .section-title h2 {
+      margin: 0;
+      font-size: 24px;
+      line-height: 1.15;
+    }
+
+    .section-title p {
+      max-width: 640px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.55;
+      text-align: right;
+    }
+
+    .sources {
+      display: grid;
+      grid-template-columns: 1.2fr 1fr 0.88fr;
+      gap: 14px;
+    }
+
+    .source-card {
+      border-radius: 8px;
+      padding: 18px;
+      min-height: 176px;
+    }
+
+    .source-card.recommended {
+      border-color: rgba(18, 112, 137, 0.34);
+      background:
+        linear-gradient(180deg, rgba(216,238,238,0.72), rgba(255,255,255,0.88));
+    }
+
+    .source-card h3 {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 0 0 10px;
+      font-size: 20px;
+    }
+
+    .source-card h3 iconify-icon {
+      font-size: 27px;
+      color: var(--accent);
+    }
+
+    .source-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.65;
+    }
+
+    .source-card .link {
+      display: inline-flex;
+      margin-top: 18px;
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .sets {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .set-card {
+      border-radius: 8px;
+      padding: 18px;
+      min-width: 0;
+    }
+
+    .set-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .set-head h3 {
+      margin: 0;
+      font-size: 18px;
+    }
+
+    .set-head span {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .icon-row {
+      display: grid;
+      grid-template-columns: 96px repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      align-items: stretch;
+    }
+
+    .icon-row + .icon-row {
+      margin-top: 10px;
+    }
+
+    .row-label {
+      display: flex;
+      align-items: center;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+
+    .pick {
+      display: grid;
+      grid-template-columns: 42px 1fr;
+      gap: 10px;
+      align-items: center;
+      min-height: 60px;
+      padding: 10px;
+      border: 1px solid #dde8e6;
+      border-radius: 8px;
+      background: #fbfdfd;
+    }
+
+    .pick.recommended {
+      border-color: rgba(18, 112, 137, 0.42);
+      background: #f0f9f9;
+    }
+
+    .pick iconify-icon {
+      display: grid;
+      place-items: center;
+      width: 42px;
+      height: 42px;
+      color: var(--ink);
+      font-size: 28px;
+    }
+
+    .pick.recommended iconify-icon {
+      color: var(--accent);
+    }
+
+    .pick strong,
+    .pick small {
+      display: block;
+      min-width: 0;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    .pick strong {
+      font-size: 13px;
+      line-height: 1.2;
+    }
+
+    .pick small {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.2;
+    }
+
+    .rationale {
+      border-radius: 8px;
+      padding: 18px;
+    }
+
+    .rationale-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+
+    .metric {
+      min-height: 112px;
+      border: 1px solid #e0e9e8;
+      border-radius: 8px;
+      padding: 14px;
+      background: #fbfdfd;
+    }
+
+    .metric strong {
+      display: block;
+      font-size: 15px;
+    }
+
+    .metric p {
+      margin: 9px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .footer-note {
+      margin: 26px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.7;
+    }
+
+    @media (max-width: 980px) {
+      .hero,
+      .sources,
+      .sets,
+      .rationale-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .decision {
+        grid-template-columns: 1fr;
+      }
+
+      .phone {
+        max-width: 520px;
+        width: 100%;
+        margin: 0 auto;
+      }
+
+      .section-title {
+        display: block;
+      }
+
+      .section-title p {
+        margin-top: 8px;
+        text-align: left;
+      }
+    }
+
+    @media (max-width: 660px) {
+      .page {
+        width: min(100vw - 24px, 1180px);
+        padding-top: 18px;
+      }
+
+      h1 {
+        font-size: 42px;
+      }
+
+      .lead {
+        font-size: 16px;
+      }
+
+      .screen {
+        min-height: 560px;
+      }
+
+      .icon-row {
+        grid-template-columns: 1fr;
+      }
+
+      .row-label {
+        padding: 2px 0 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <div class="intro">
+        <div>
+          <a class="brand" href="../app/src/main/res/drawable-nodpi/flovera_style_icon.png">
+            <img src="../app/src/main/res/drawable-nodpi/flovera_style_icon.png" alt="Flovera icon">
+            <span>
+              <strong>Flovera Quiet Instrument</strong>
+              <span>icon source decision board</span>
+            </span>
+          </a>
+          <h1>先定图标骨架，再定每个动作的表情。</h1>
+          <p class="lead">
+            我选 Material Symbols 作为 Flovera 的系统主图标库，Phosphor 作为少量人格化入口的候选，Lucide 只保留在工具状态和次级动作里。理由是 Flovera 的主界面需要 Android 原生感、低噪声和明确语义，不能被一套“很像网页模板”的线性图标带偏。
+          </p>
+        </div>
+
+        <div class="decision">
+          <article class="decision-card">
+            <span class="tag"><iconify-icon icon="material-symbols:check-circle-rounded"></iconify-icon>主库</span>
+            <h2>Material Symbols Rounded</h2>
+            <p>和 Android 语境最近，圆角但不幼稚，可通过 weight/fill 做状态差异。</p>
+          </article>
+          <article class="decision-card">
+            <span class="tag"><iconify-icon icon="ph:sparkle-bold"></iconify-icon>人格化</span>
+            <h2>Phosphor</h2>
+            <p>用于 Flovera、agent、生成、灵感类入口，线条更松，能降低工具感。</p>
+          </article>
+          <article class="decision-card">
+            <span class="tag"><iconify-icon icon="lucide:wrench"></iconify-icon>次级</span>
+            <h2>Lucide</h2>
+            <p>只放在设置、文件、过滤等低情绪工具里，避免主入口变成 SaaS 面板。</p>
+          </article>
+        </div>
+      </div>
+
+      <aside class="phone" aria-label="phone preview">
+        <div class="screen">
+          <div class="phone-top">
+            <span>flovera</span>
+            <span>09:41</span>
+          </div>
+          <div class="viewer">
+            <div class="viewer-head">
+              <span>index.html</span>
+              <iconify-icon icon="material-symbols:preview"></iconify-icon>
+            </div>
+            <div class="viewer-grid">
+              <div class="graph"></div>
+              <div class="mini-list"><span></span><span></span><span></span><span></span></div>
+            </div>
+          </div>
+          <div class="overlay-bubble">
+            <iconify-icon icon="ph:chat-circle-dots-bold"></iconify-icon>
+            <span>已生成首版界面。下一步会把交互状态拆成更小的可预览块。</span>
+          </div>
+          <div class="bottom-bar">
+            <div class="input-preview">
+              <div class="preview-state">preview · index.html</div>
+              <div class="prompt-line">把计算器做成更像真实工具</div>
+            </div>
+            <button class="action-button" aria-label="send"><iconify-icon icon="material-symbols:arrow-upward-rounded"></iconify-icon></button>
+          </div>
+        </div>
+      </aside>
+    </section>
+
+    <section class="section">
+      <div class="section-title">
+        <h2>素材来源选择</h2>
+        <p>不是所有开源图标库都适合 Flovera。这里按“移动端主入口是否稳、是否有 Android 感、是否能长期扩展”筛选。</p>
+      </div>
+      <div class="sources">
+        <article class="source-card recommended">
+          <h3><iconify-icon icon="material-symbols:apps"></iconify-icon>Material Symbols</h3>
+          <p>Google 官方 Material Symbols 提供 2500+ 图标，并支持可变 weight、fill、grade、optical size。它最适合作为 Flovera 的默认系统动作语言。</p>
+          <a class="link" href="https://developers.google.com/fonts/docs/material_symbols">查看官方文档</a>
+        </article>
+        <article class="source-card">
+          <h3><iconify-icon icon="ph:circles-four-bold"></iconify-icon>Phosphor</h3>
+          <p>Phosphor 的图标更有人味，适合 agent、对话、灵感、生成这类“Flovera 在场”的入口。不要全局使用，局部使用才有辨识度。</p>
+          <a class="link" href="https://phosphoricons.com/">查看图标库</a>
+        </article>
+        <article class="source-card">
+          <h3><iconify-icon icon="lucide:box"></iconify-icon>Lucide</h3>
+          <p>Lucide 的覆盖面和一致性很好，但现在网页工具味太重。可以放在设置、过滤、文件管理等功能按钮，不作为主表达。</p>
+          <a class="link" href="https://lucide.dev/">查看图标库</a>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-title">
+        <h2>按功能语义挑图标</h2>
+        <p>每组第一列是我建议的默认方向。选择时看轮廓重量、负形面积、和 Flovera 新图标放在一起是否同频。</p>
+      </div>
+
+      <div class="sets">
+        <article class="set-card">
+          <div class="set-head"><h3>发送 / 主动作</h3><span>bottom bar primary</span></div>
+          <div class="icon-row">
+            <div class="row-label">Material</div>
+            <div class="pick recommended"><iconify-icon icon="material-symbols:arrow-upward-rounded"></iconify-icon><span><strong>Arrow Up</strong><small>默认推荐，像移动输入框</small></span></div>
+            <div class="pick"><iconify-icon icon="material-symbols:send-rounded"></iconify-icon><span><strong>Send</strong><small>语义直接，但偏聊天</small></span></div>
+            <div class="pick"><iconify-icon icon="material-symbols:keyboard-return-rounded"></iconify-icon><span><strong>Return</strong><small>更像执行，不够移动</small></span></div>
+          </div>
+          <div class="icon-row">
+            <div class="row-label">Phosphor</div>
+            <div class="pick"><iconify-icon icon="ph:arrow-up-bold"></iconify-icon><span><strong>Arrow Up</strong><small>人格弱，形态轻</small></span></div>
+            <div class="pick"><iconify-icon icon="ph:paper-plane-tilt-bold"></iconify-icon><span><strong>Plane Tilt</strong><small>更有温度，但聊天感强</small></span></div>
+            <div class="pick"><iconify-icon icon="ph:rocket-launch-bold"></iconify-icon><span><strong>Rocket</strong><small>太活跃，不适合主栏</small></span></div>
+          </div>
+          <div class="icon-row">
+            <div class="row-label">Lucide</div>
+            <div class="pick"><iconify-icon icon="lucide:arrow-up"></iconify-icon><span><strong>Arrow Up</strong><small>极简，略冷</small></span></div>
+            <div class="pick"><iconify-icon icon="lucide:send-horizontal"></iconify-icon><span><strong>Send Horizontal</strong><small>网页消息工具感</small></span></div>
+            <div class="pick"><iconify-icon icon="lucide:corner-down-left"></iconify-icon><span><strong>Corner Return</strong><small>适合键盘提示</small></span></div>
+          </div>
+        </article>
+
+        <article class="set-card">
+          <div class="set-head"><h3>Agent / Conversation</h3><span>flovera entry</span></div>
+          <div class="icon-row">
+            <div class="row-label">Material</div>
+            <div class="pick"><iconify-icon icon="material-symbols:mode-comment-rounded"></iconify-icon><span><strong>Comment</strong><small>稳，但普通</small></span></div>
+            <div class="pick"><iconify-icon icon="material-symbols:forum-rounded"></iconify-icon><span><strong>Forum</strong><small>更像对话页</small></span></div>
+            <div class="pick"><iconify-icon icon="material-symbols:smart-toy-rounded"></iconify-icon><span><strong>Smart Toy</strong><small>AI 味太直白</small></span></div>
+          </div>
+          <div class="icon-row">
+            <div class="row-label">Phosphor</div>
+            <div class="pick recommended"><iconify-icon icon="ph:chat-circle-dots-bold"></iconify-icon><span><strong>Chat Dots</strong><small>推荐，和 Flovera 形象相容</small></span></div>
+            <div class="pick"><iconify-icon icon="ph:sparkle-bold"></iconify-icon><span><strong>Sparkle</strong><small>生成感强，泛 AI</small></span></div>
+            <div class="pick"><iconify-icon icon="ph:brain-bold"></iconify-icon><span><strong>Brain</strong><small>解释性过强</small></span></div>
+          </div>
+          <div class="icon-row">
+            <div class="row-label">Lucide</div>
+            <div class="pick"><iconify-icon icon="lucide:message-circle"></iconify-icon><span><strong>Message</strong><small>太常见</small></span></div>
+            <div class="pick"><iconify-icon icon="lucide:bot"></iconify-icon><span><strong>Bot</strong><small>像客服机器人</small></span></div>
+            <div class="pick"><iconify-icon icon="lucide:sparkles"></iconify-icon><span><strong>Sparkles</strong><small>泛 AI 感明显</small></span></div>
+          </div>
+        </article>
+
+        <article class="set-card">
+          <div class="set-head"><h3>预览 / 展示面</h3><span>main surface</span></div>
+          <div class="icon-row">
+            <div class="row-label">Material</div>
+            <div class="pick recommended"><iconify-icon icon="material-symbols:preview"></iconify-icon><span><strong>Preview</strong><small>推荐，语义完整</small></span></div>
+            <div class="pick"><iconify-icon icon="material-symbols:web-asset"></iconify-icon><span><strong>Web Asset</strong><small>更具体但偏网页</small></span></div>
+            <div class="pick"><iconify-icon icon="material-symbols:select-window"></iconify-icon><span><strong>Window</strong><small>电脑平台痕迹重</small></span></div>
+          </div>
+          <div class="icon-row">
+            <div class="row-label">Phosphor</div>
+            <div class="pick"><iconify-icon icon="ph:monitor-play-bold"></iconify-icon><span><strong>Monitor Play</strong><small>偏桌面</small></span></div>
+            <div class="pick"><iconify-icon icon="ph:browser-bold"></iconify-icon><span><strong>Browser</strong><small>技术物更明确</small></span></div>
+            <div class="pick"><iconify-icon icon="ph:selection-background-bold"></iconify-icon><span><strong>Selection</strong><small>适合画布，不适合预览</small></span></div>
+          </div>
+          <div class="icon-row">
+            <div class="row-label">Lucide</div>
+            <div class="pick"><iconify-icon icon="lucide:eye"></iconify-icon><span><strong>Eye</strong><small>可视，但不代表页面</small></span></div>
+            <div class="pick"><iconify-icon icon="lucide:monitor"></iconify-icon><span><strong>Monitor</strong><small>电脑感强</small></span></div>
+            <div class="pick"><iconify-icon icon="lucide:panels-top-left"></iconify-icon><span><strong>Panels</strong><small>工具面板语义</small></span></div>
+          </div>
+        </article>
+
+        <article class="set-card">
+          <div class="set-head"><h3>设置 / 工具入口</h3><span>secondary utility</span></div>
+          <div class="icon-row">
+            <div class="row-label">Material</div>
+            <div class="pick recommended"><iconify-icon icon="material-symbols:tune-rounded"></iconify-icon><span><strong>Tune</strong><small>推荐，比齿轮轻</small></span></div>
+            <div class="pick"><iconify-icon icon="material-symbols:settings-rounded"></iconify-icon><span><strong>Settings</strong><small>标准但重</small></span></div>
+            <div class="pick"><iconify-icon icon="material-symbols:display-settings-rounded"></iconify-icon><span><strong>Display</strong><small>适合预览设置</small></span></div>
+          </div>
+          <div class="icon-row">
+            <div class="row-label">Phosphor</div>
+            <div class="pick"><iconify-icon icon="ph:sliders-horizontal-bold"></iconify-icon><span><strong>Sliders</strong><small>轻，但不够 Android</small></span></div>
+            <div class="pick"><iconify-icon icon="ph:gear-six-bold"></iconify-icon><span><strong>Gear Six</strong><small>形态有性格</small></span></div>
+            <div class="pick"><iconify-icon icon="ph:wrench-bold"></iconify-icon><span><strong>Wrench</strong><small>像开发者工具</small></span></div>
+          </div>
+          <div class="icon-row">
+            <div class="row-label">Lucide</div>
+            <div class="pick"><iconify-icon icon="lucide:sliders-horizontal"></iconify-icon><span><strong>Sliders</strong><small>适合筛选</small></span></div>
+            <div class="pick"><iconify-icon icon="lucide:settings"></iconify-icon><span><strong>Settings</strong><small>标准工具味</small></span></div>
+            <div class="pick"><iconify-icon icon="lucide:wrench"></iconify-icon><span><strong>Wrench</strong><small>维护语义强</small></span></div>
+          </div>
+        </article>
+
+        <article class="set-card">
+          <div class="set-head"><h3>新会话 / 创建</h3><span>session creation</span></div>
+          <div class="icon-row">
+            <div class="row-label">Material</div>
+            <div class="pick recommended"><iconify-icon icon="material-symbols:add-circle-rounded"></iconify-icon><span><strong>Add Circle</strong><small>推荐，低解释成本</small></span></div>
+            <div class="pick"><iconify-icon icon="material-symbols:edit-square-rounded"></iconify-icon><span><strong>Edit Square</strong><small>偏新建文档</small></span></div>
+            <div class="pick"><iconify-icon icon="material-symbols:keep-public-rounded"></iconify-icon><span><strong>Pin Add</strong><small>语义太绕</small></span></div>
+          </div>
+          <div class="icon-row">
+            <div class="row-label">Phosphor</div>
+            <div class="pick"><iconify-icon icon="ph:plus-circle-bold"></iconify-icon><span><strong>Plus Circle</strong><small>清楚但普通</small></span></div>
+            <div class="pick"><iconify-icon icon="ph:note-pencil-bold"></iconify-icon><span><strong>Note Pencil</strong><small>像写笔记</small></span></div>
+            <div class="pick"><iconify-icon icon="ph:magic-wand-bold"></iconify-icon><span><strong>Magic Wand</strong><small>泛 AI 味重</small></span></div>
+          </div>
+          <div class="icon-row">
+            <div class="row-label">Lucide</div>
+            <div class="pick"><iconify-icon icon="lucide:circle-plus"></iconify-icon><span><strong>Circle Plus</strong><small>工具标准</small></span></div>
+            <div class="pick"><iconify-icon icon="lucide:square-pen"></iconify-icon><span><strong>Square Pen</strong><small>像编辑</small></span></div>
+            <div class="pick"><iconify-icon icon="lucide:wand-sparkles"></iconify-icon><span><strong>Wand</strong><small>太模板化</small></span></div>
+          </div>
+        </article>
+
+        <article class="set-card">
+          <div class="set-head"><h3>运行 / 停止 / 状态</h3><span>agent loop state</span></div>
+          <div class="icon-row">
+            <div class="row-label">Material</div>
+            <div class="pick recommended"><iconify-icon icon="material-symbols:progress-activity"></iconify-icon><span><strong>Progress</strong><small>推荐，只作状态</small></span></div>
+            <div class="pick"><iconify-icon icon="material-symbols:stop-circle-rounded"></iconify-icon><span><strong>Stop Circle</strong><small>停止语义直接</small></span></div>
+            <div class="pick"><iconify-icon icon="material-symbols:play-circle-rounded"></iconify-icon><span><strong>Play Circle</strong><small>易误解为媒体</small></span></div>
+          </div>
+          <div class="icon-row">
+            <div class="row-label">Phosphor</div>
+            <div class="pick"><iconify-icon icon="ph:spinner-gap-bold"></iconify-icon><span><strong>Spinner Gap</strong><small>可动效化</small></span></div>
+            <div class="pick"><iconify-icon icon="ph:stop-circle-bold"></iconify-icon><span><strong>Stop Circle</strong><small>线条友好</small></span></div>
+            <div class="pick"><iconify-icon icon="ph:pulse-bold"></iconify-icon><span><strong>Pulse</strong><small>状态感强</small></span></div>
+          </div>
+          <div class="icon-row">
+            <div class="row-label">Lucide</div>
+            <div class="pick"><iconify-icon icon="lucide:loader-circle"></iconify-icon><span><strong>Loader</strong><small>通用状态</small></span></div>
+            <div class="pick"><iconify-icon icon="lucide:circle-stop"></iconify-icon><span><strong>Stop</strong><small>工具冷感</small></span></div>
+            <div class="pick"><iconify-icon icon="lucide:activity"></iconify-icon><span><strong>Activity</strong><small>技术监控感</small></span></div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-title">
+        <h2>落地判断</h2>
+        <p>这套选择不是审美投票，而是为了减少主界面的语义噪声。</p>
+      </div>
+      <div class="rationale">
+        <div class="rationale-grid">
+          <div class="metric">
+            <strong>主入口不能像网页模板</strong>
+            <p>Lucide 很干净，但太容易让产品回到“通用 SaaS 控制台”的气质。</p>
+          </div>
+          <div class="metric">
+            <strong>Android 感优先</strong>
+            <p>Material Symbols 能和 Compose、Material 3、系统控件建立同一套视觉语言。</p>
+          </div>
+          <div class="metric">
+            <strong>Flovera 保留人格</strong>
+            <p>Phosphor 只用于 agent 在场的入口，避免全局变花。</p>
+          </div>
+          <div class="metric">
+            <strong>图标要能变状态</strong>
+            <p>发送、运行、预览、设置都要支持 active、disabled、busy、empty 四种状态。</p>
+          </div>
+        </div>
+        <p class="footer-note">
+          技术落地建议：Android 版优先使用本地 VectorDrawable 或 Compose ImageVector，不在正式 App 里依赖在线 icon font。这个 HTML 只是用于快速比较候选来源。
+        </p>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

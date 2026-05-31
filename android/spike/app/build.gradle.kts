@@ -25,6 +25,14 @@ android {
             dimension = "installSlot"
             applicationId = "com.flovera.app"
         }
+        create("design") {
+            dimension = "installSlot"
+            applicationId = "com.flovera.design"
+        }
+        create("style") {
+            dimension = "installSlot"
+            applicationId = "com.flovera.style"
+        }
         create("legacy") {
             dimension = "installSlot"
             applicationId = "com.example.ailinuxvmspike"

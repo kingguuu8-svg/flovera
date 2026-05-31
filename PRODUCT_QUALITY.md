@@ -204,10 +204,24 @@ Acceptance criteria:
 
 - Main surface has no visible URL bar.
 - Empty state text is minimal and visually consistent with Flovera.
+- The `flovera` flavor uses the promoted design front-end: the primary display
+  remains the workspace preview, the bottom command bar carries display state,
+  and Conversation/Preview are opened from compact semantic controls instead of
+  a debug-style multi-entry chrome.
 - `window.Flovera.toast(...)` is supported.
 - `window.Flovera.notify(JSON.stringify(...))` is supported.
 - `window.Flovera.postEvent(JSON.stringify(...))` rejects unsupported event types explicitly.
 - Agent rules mention available controlled app events.
+
+Implementation note, 2026-05-31:
+
+- Promoted the design-lane bottom command bar and visual system into the
+  `flovera` flavor by enabling `design_frontend_style_enabled` for the main app.
+- Verification gate: `BottomCommandBarInstrumentedTest`,
+  `AgentScreenInteractionInstrumentedTest#mainSurfaceExposesAgentAndHtmlQuickPickerWhileConversationOwnsSecondaryEntries`,
+  and
+  `AgentScreenInteractionInstrumentedTest#htmlQuickPickerOpensWorkspaceHtmlFromMainSurface`
+  must pass on an update-only real-device APK.
 
 ### Provider And Configuration
 
@@ -657,6 +671,45 @@ restricted tools and MCP integrations.
 - Add a user approval flow before proposed tools or MCP entries become active.
 - Keep tool availability visible to the agent only when the corresponding user
   permission is enabled.
+
+### MCP Endpoint Tool Registry
+
+Status: Deferred with a concrete first implementation path. Flovera should
+integrate MCP as a controlled client for approved HTTP/SSE or Streamable HTTP
+endpoints, not as an Android-local npm, npx, stdio, or subprocess runtime.
+Koog's MCP support can be used to turn discovered MCP tools into Koog tools at
+agent-run creation time, but Flovera must own endpoint approval, permission
+gates, output limits, credentials, auditing, failure handling, and user-visible
+capability state.
+
+- First phase: support only externally running or app-owned HTTP MCP endpoints.
+  Do not install npm packages, run `npx`, start arbitrary subprocesses, or
+  expose stdio MCP servers from the Android app.
+- Store MCP configuration as approved app/workspace capability state, created
+  through proposal and approval. A proposed MCP entry should include name,
+  endpoint URL, transport, requested capabilities, permission class, optional
+  credential references, and user-facing risk notes.
+- At the start of each agent run, load enabled MCP endpoints, discover their
+  tool schemas, convert approved tools into the Koog `ToolRegistry`, and merge
+  them with Flovera's built-in workspace tools. Runtime discovery affects the
+  next run boundary, not an already-running agent loop.
+- Apply per-endpoint and per-tool controls: allowlist/denylist, timeout,
+  bounded input/output, network permission checks, audit events, and clear
+  fallback status if discovery or invocation fails.
+- Handle credentials as references such as `apiKeyRef`, never as plaintext
+  values visible to the agent or workspace files. Prefer app-owned request
+  mediation when a tool needs a Flovera-managed secret.
+- Treat npm MCP packages as external-server instructions only. Flovera may
+  record that a package such as `@scope/server-name` can be run outside Android
+  and connected by endpoint, but it must not claim on-device npm support.
+- Acceptance criteria before implementation:
+  - an approved HTTP MCP endpoint contributes at least one callable tool to a
+    new agent run;
+  - disabled or failed endpoints do not break built-in tools or the agent run;
+  - tool invocation is persisted as bounded run/tool events;
+  - settings and `.flovera/capabilities.json` expose which MCP endpoints and
+    tools are enabled;
+  - unapproved MCP proposals remain inert and cannot be called by the agent.
 
 ### Workspace Shell And JGit
 

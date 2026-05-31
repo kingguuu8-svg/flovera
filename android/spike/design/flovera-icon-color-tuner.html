@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Flovera Icon Color Tuner</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0c0f0e;
+      --panel: #121716;
+      --line: #26302d;
+      --text: #e8efec;
+      --muted: #91a09a;
+      --accent: #58e0b0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: minmax(340px, 460px) minmax(420px, 1fr);
+      background:
+        radial-gradient(circle at 82% 18%, rgb(88 224 176 / 0.08), transparent 28%),
+        var(--bg);
+    }
+
+    aside {
+      height: 100vh;
+      overflow: auto;
+      border-right: 1px solid var(--line);
+      background: color-mix(in srgb, var(--panel) 92%, black);
+      padding: 22px;
+    }
+
+    main {
+      min-width: 0;
+      display: grid;
+      grid-template-rows: minmax(420px, 1fr) 260px;
+    }
+
+    h1 {
+      margin: 0 0 4px;
+      font-size: 18px;
+      line-height: 1.25;
+      font-weight: 680;
+      letter-spacing: 0;
+    }
+
+    .sub {
+      margin: 0 0 18px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .section {
+      padding: 14px 0;
+      border-top: 1px solid var(--line);
+    }
+
+    .section:first-of-type { border-top: 0; }
+
+    .section-title {
+      margin: 0 0 10px;
+      color: #cbd6d1;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+
+    .rule {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .swatch-row {
+      display: grid;
+      grid-template-columns: 118px 42px minmax(0, 1fr);
+      align-items: center;
+      gap: 10px;
+      min-height: 42px;
+      padding: 6px 0;
+    }
+
+    label {
+      color: #d7dfdc;
+      font-size: 12px;
+      line-height: 1.25;
+    }
+
+    input[type="color"] {
+      width: 42px;
+      height: 32px;
+      padding: 0;
+      border: 1px solid #35423e;
+      border-radius: 8px;
+      background: transparent;
+      cursor: pointer;
+    }
+
+    input[type="text"] {
+      width: 100%;
+      height: 32px;
+      border: 1px solid #2e3936;
+      border-radius: 8px;
+      padding: 0 9px;
+      background: #0a0d0c;
+      color: #dfe8e4;
+      font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      outline: none;
+      text-transform: uppercase;
+    }
+
+    input[type="text"]:focus { border-color: var(--accent); }
+
+    .range-row {
+      display: grid;
+      grid-template-columns: 118px minmax(0, 1fr) 48px;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 0;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      accent-color: var(--accent);
+    }
+
+    output {
+      color: #9debcf;
+      font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      text-align: right;
+    }
+
+    .buttons {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    button {
+      height: 38px;
+      border: 1px solid #31413c;
+      border-radius: 8px;
+      background: #17201d;
+      color: var(--text);
+      font: 13px/1 Inter, ui-sans-serif, system-ui, sans-serif;
+      cursor: pointer;
+    }
+
+    button:hover { background: #1d2a25; }
+
+    .preview {
+      min-width: 0;
+      display: grid;
+      place-items: center;
+      padding: 34px;
+    }
+
+    .preview-stack {
+      display: grid;
+      gap: 22px;
+      justify-items: center;
+    }
+
+    #largePreview {
+      width: min(60vh, 560px);
+      max-width: 70vw;
+      aspect-ratio: 1;
+      border-radius: 32px;
+      background:
+        linear-gradient(45deg, #151918 25%, transparent 25%),
+        linear-gradient(-45deg, #151918 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #151918 75%),
+        linear-gradient(-45deg, transparent 75%, #151918 75%),
+        #101312;
+      background-position: 0 0, 0 12px, 12px -12px, -12px 0;
+      background-size: 24px 24px;
+      box-shadow: 0 28px 90px rgb(0 0 0 / 0.36);
+    }
+
+    .sizes {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      padding: 14px 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #111514;
+    }
+
+    .size-cell {
+      display: grid;
+      gap: 7px;
+      justify-items: center;
+      color: var(--muted);
+      font-size: 11px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .size-cell svg {
+      display: block;
+      background: #0e1110;
+      border-radius: 8px;
+    }
+
+    textarea {
+      width: 100%;
+      height: 100%;
+      min-height: 220px;
+      resize: none;
+      border: 0;
+      border-top: 1px solid var(--line);
+      padding: 16px;
+      outline: none;
+      background: #070908;
+      color: #cbd7d2;
+      font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    }
+
+    @media (max-width: 920px) {
+      body { grid-template-columns: 1fr; }
+      aside {
+        height: auto;
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+      main { grid-template-rows: auto 260px; }
+      #largePreview {
+        width: min(78vw, 420px);
+        max-width: 78vw;
+      }
+    }
+  </style>
+</head>
+<body>
+  <aside>
+    <h1>Flovera Icon Color Tuner</h1>
+    <p class="sub">颜色按角色调：底色压住，主体发亮，焦点保持高对比。</p>
+
+    <section class="section">
+      <p class="section-title">色彩规则</p>
+      <p class="rule">底色三阶必须接近黑绿，不抢主体；框线只做空间边界；主体用绿青梯度；焦点黑色负责识别，亮心负责生命感。</p>
+    </section>
+
+    <section class="section" id="colorControls"></section>
+    <section class="section" id="rangeControls"></section>
+
+    <div class="buttons">
+      <button id="resetButton" type="button">重置</button>
+      <button id="copyButton" type="button">复制 SVG</button>
+      <button id="downloadButton" type="button">下载 SVG</button>
+      <button id="randomButton" type="button">生成近似组</button>
+    </div>
+  </aside>
+
+  <main>
+    <section class="preview">
+      <div class="preview-stack">
+        <div id="largePreview"></div>
+        <div class="sizes">
+          <div class="size-cell"><div id="size96"></div><span>96</span></div>
+          <div class="size-cell"><div id="size48"></div><span>48</span></div>
+          <div class="size-cell"><div id="size32"></div><span>32</span></div>
+          <div class="size-cell"><div id="size24"></div><span>24</span></div>
+        </div>
+      </div>
+    </section>
+    <textarea id="svgText" spellcheck="false"></textarea>
+  </main>
+
+  <script>
+    const paths = {
+      outer: "M 296 112 L 728 112 L 779.54 112.99 L 807.06 115.94 L 828.95 120.88 L 847.31 127.82 L 862.93 136.78 L 876.17 147.83 L 887.22 161.07 L 896.18 176.69 L 903.12 195.05 L 908.06 216.94 L 911.01 244.46 L 912 296 L 912 728 L 911.01 779.54 L 908.06 807.06 L 903.12 828.95 L 896.18 847.31 L 887.22 862.93 L 876.17 876.17 L 862.93 887.22 L 847.31 896.18 L 828.95 903.12 L 807.06 908.06 L 779.54 911.01 L 728 912 L 296 912 L 244.46 911.01 L 216.94 908.06 L 195.05 903.12 L 176.69 896.18 L 161.07 887.22 L 147.83 876.17 L 136.78 862.93 L 127.82 847.31 L 120.88 828.95 L 115.94 807.06 L 112.99 779.54 L 112 728 L 112 296 L 112.99 244.46 L 115.94 216.94 L 120.88 195.05 L 127.82 176.69 L 136.78 161.07 L 147.83 147.83 L 161.07 136.78 L 176.69 127.82 L 195.05 120.88 L 216.94 115.94 L 244.46 112.99 L 296 112 Z",
+      frame: "M 304 148 L 720 148 L 763.70 148.84 L 787.03 151.34 L 805.59 155.53 L 821.15 161.41 L 834.39 169.01 L 845.62 178.38 L 854.99 189.61 L 862.59 202.85 L 868.47 218.41 L 872.66 236.97 L 875.16 260.30 L 876 304 L 876 720 L 875.16 763.70 L 872.66 787.03 L 868.47 805.59 L 862.59 821.15 L 854.99 834.39 L 845.62 845.62 L 834.39 854.99 L 821.15 862.59 L 805.59 868.47 L 787.03 872.66 L 763.70 875.16 L 720 876 L 304 876 L 260.30 875.16 L 236.97 872.66 L 218.41 868.47 L 202.85 862.59 L 189.61 854.99 L 178.38 845.62 L 169.01 834.39 L 161.41 821.15 L 155.53 805.59 L 151.34 787.03 L 148.84 763.70 L 148 720 L 148 304 L 148.84 260.30 L 151.34 236.97 L 155.53 218.41 L 161.41 202.85 L 169.01 189.61 L 178.38 178.38 L 189.61 169.01 L 202.85 161.41 L 218.41 155.53 L 236.97 151.34 L 260.30 148.84 L 304 148 Z",
+      agent: "M 422 286 L 602 286 L 633.37 286.60 L 650.12 288.40 L 663.45 291.41 L 674.62 295.63 L 684.13 301.09 L 692.19 307.81 L 698.91 315.87 L 704.37 325.38 L 708.59 336.55 L 711.60 349.88 L 713.40 366.63 L 714 398 L 714 626 L 713.40 657.37 L 711.60 674.12 L 708.59 687.45 L 704.37 698.62 L 698.91 708.13 L 692.19 716.19 L 684.13 722.91 L 674.62 728.37 L 663.45 732.59 L 650.12 735.60 L 633.37 737.40 L 602 738 L 422 738 L 390.63 737.40 L 373.88 735.60 L 360.55 732.59 L 349.38 728.37 L 339.87 722.91 L 331.81 716.19 L 325.09 708.13 L 319.63 698.62 L 315.41 687.45 L 312.40 674.12 L 310.60 657.37 L 310 626 L 310 398 L 310.60 366.63 L 312.40 349.88 L 315.41 336.55 L 319.63 325.38 L 325.09 315.87 L 331.81 307.81 L 339.87 301.09 L 349.38 295.63 L 360.55 291.41 L 373.88 288.40 L 390.63 286.60 L 422 286 Z"
+    };
+
+    const defaults = {
+      baseTop: "#182521",
+      baseMid: "#0E1715",
+      baseBottom: "#07100E",
+      frame: "#1F3B34",
+      agentTop: "#C9FFE8",
+      agentMid: "#47D6A0",
+      agentBottom: "#168A69",
+      focal: "#07100E",
+      glow: "#66FFD1",
+      core: "#D7FFF2",
+      shadow: "#020605",
+      frameOpacity: 0.72,
+      shadowOpacity: 0.34,
+      glowOpacity: 0.7,
+      glowBlur: 9
+    };
+
+    const state = { ...defaults };
+
+    const colorFields = [
+      ["baseTop", "底色高光"],
+      ["baseMid", "底色中段"],
+      ["baseBottom", "底色暗部"],
+      ["frame", "内框线"],
+      ["agentTop", "主体高光"],
+      ["agentMid", "主体中段"],
+      ["agentBottom", "主体暗部"],
+      ["focal", "焦点黑"],
+      ["glow", "亮心光晕"],
+      ["core", "亮心实圆"],
+      ["shadow", "投影"]
+    ];
+
+    const rangeFields = [
+      ["frameOpacity", "内框透明", 0, 1, 0.01],
+      ["shadowOpacity", "投影透明", 0, 0.8, 0.01],
+      ["glowOpacity", "光晕透明", 0, 1, 0.01],
+      ["glowBlur", "光晕半径", 0, 18, 1]
+    ];
+
+    const palettes = [
+      {
+        baseTop: "#182521", baseMid: "#0E1715", baseBottom: "#07100E",
+        frame: "#1F3B34", agentTop: "#C9FFE8", agentMid: "#47D6A0", agentBottom: "#168A69",
+        focal: "#07100E", glow: "#66FFD1", core: "#D7FFF2", shadow: "#020605"
+      },
+      {
+        baseTop: "#20241D", baseMid: "#111610", baseBottom: "#070B08",
+        frame: "#33402D", agentTop: "#E8FFD0", agentMid: "#9BE15D", agentBottom: "#3C8A35",
+        focal: "#07100A", glow: "#C7FF7E", core: "#F3FFE2", shadow: "#030603"
+      },
+      {
+        baseTop: "#1D2424", baseMid: "#101717", baseBottom: "#070D0D",
+        frame: "#284041", agentTop: "#D3FFFF", agentMid: "#55D9D1", agentBottom: "#167F84",
+        focal: "#07100F", glow: "#79FFF7", core: "#E9FFFF", shadow: "#020606"
+      },
+      {
+        baseTop: "#251F1B", baseMid: "#15110F", baseBottom: "#090706",
+        frame: "#463A2E", agentTop: "#FFF2C7", agentMid: "#F0B75F", agentBottom: "#9B6530",
+        focal: "#100B07", glow: "#FFD98C", core: "#FFF8DD", shadow: "#060302"
+      }
+    ];
+
+    const colorControls = document.getElementById("colorControls");
+    const rangeControls = document.getElementById("rangeControls");
+    const svgText = document.getElementById("svgText");
+
+    function clampHex(value) {
+      const clean = value.trim().replace(/^#/, "").toUpperCase();
+      if (/^[0-9A-F]{6}$/.test(clean)) return `#${clean}`;
+      if (/^[0-9A-F]{3}$/.test(clean)) {
+        return `#${clean.split("").map((char) => char + char).join("")}`;
+      }
+      return null;
+    }
+
+    function svgMarkup() {
+      return `<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="base" x1="210" y1="146" x2="828" y2="892" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="${state.baseTop}"/>
+      <stop offset="0.56" stop-color="${state.baseMid}"/>
+      <stop offset="1" stop-color="${state.baseBottom}"/>
+    </linearGradient>
+    <linearGradient id="agent" x1="354" y1="294" x2="702" y2="730" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="${state.agentTop}"/>
+      <stop offset="0.42" stop-color="${state.agentMid}"/>
+      <stop offset="1" stop-color="${state.agentBottom}"/>
+    </linearGradient>
+    <filter id="softShadow" x="208" y="202" width="608" height="628" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="22" stdDeviation="24" flood-color="${state.shadow}" flood-opacity="${state.shadowOpacity}"/>
+    </filter>
+    <filter id="coreGlow" x="394" y="558" width="130" height="130" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="${state.glowBlur}"/>
+    </filter>
+  </defs>
+
+  <path d="${paths.outer}" fill="url(#base)"/>
+  <path d="${paths.frame}" fill="none" stroke="${state.frame}" stroke-width="28" opacity="${state.frameOpacity}"/>
+  <g filter="url(#softShadow)">
+    <path d="${paths.agent}" fill="url(#agent)" transform="rotate(-8 512 512)"/>
+  </g>
+  <circle cx="459.09" cy="623" r="54" fill="${state.focal}" opacity="0.95"/>
+  <circle cx="459.09" cy="623" r="30" fill="${state.glow}" opacity="${state.glowOpacity}" filter="url(#coreGlow)"/>
+  <circle cx="459.09" cy="623" r="27" fill="${state.core}"/>
+</svg>`;
+    }
+
+    function render() {
+      const markup = svgMarkup();
+      document.getElementById("largePreview").innerHTML = markup;
+      for (const size of [96, 48, 32, 24]) {
+        const holder = document.getElementById(`size${size}`);
+        holder.innerHTML = markup;
+        holder.firstElementChild.setAttribute("width", size);
+        holder.firstElementChild.setAttribute("height", size);
+      }
+      svgText.value = markup;
+      document.documentElement.style.setProperty("--accent", state.agentMid);
+    }
+
+    function buildColorControls() {
+      colorControls.innerHTML = `<p class="section-title">颜色角色</p>`;
+      for (const [key, labelText] of colorFields) {
+        const row = document.createElement("div");
+        row.className = "swatch-row";
+
+        const label = document.createElement("label");
+        label.setAttribute("for", `${key}Color`);
+        label.textContent = labelText;
+
+        const color = document.createElement("input");
+        color.type = "color";
+        color.id = `${key}Color`;
+        color.value = state[key];
+
+        const text = document.createElement("input");
+        text.type = "text";
+        text.id = `${key}Text`;
+        text.value = state[key];
+        text.inputMode = "text";
+
+        color.addEventListener("input", () => {
+          state[key] = color.value.toUpperCase();
+          text.value = state[key];
+          render();
+        });
+
+        text.addEventListener("input", () => {
+          const next = clampHex(text.value);
+          if (!next) return;
+          state[key] = next;
+          color.value = next;
+          text.value = next;
+          render();
+        });
+
+        row.append(label, color, text);
+        colorControls.append(row);
+      }
+    }
+
+    function buildRangeControls() {
+      rangeControls.innerHTML = `<p class="section-title">强度</p>`;
+      for (const [key, labelText, min, max, step] of rangeFields) {
+        const row = document.createElement("div");
+        row.className = "range-row";
+
+        const label = document.createElement("label");
+        label.setAttribute("for", `${key}Range`);
+        label.textContent = labelText;
+
+        const input = document.createElement("input");
+        input.type = "range";
+        input.id = `${key}Range`;
+        input.min = min;
+        input.max = max;
+        input.step = step;
+        input.value = state[key];
+
+        const out = document.createElement("output");
+        out.value = state[key];
+        out.textContent = state[key];
+
+        input.addEventListener("input", () => {
+          state[key] = Number(input.value);
+          out.value = input.value;
+          out.textContent = input.value;
+          render();
+        });
+
+        row.append(label, input, out);
+        rangeControls.append(row);
+      }
+    }
+
+    function refreshControls() {
+      for (const [key] of colorFields) {
+        document.getElementById(`${key}Color`).value = state[key];
+        document.getElementById(`${key}Text`).value = state[key];
+      }
+      for (const [key] of rangeFields) {
+        const input = document.getElementById(`${key}Range`);
+        const out = input.parentElement.querySelector("output");
+        input.value = state[key];
+        out.value = state[key];
+        out.textContent = state[key];
+      }
+    }
+
+    document.getElementById("resetButton").addEventListener("click", () => {
+      Object.assign(state, defaults);
+      refreshControls();
+      render();
+    });
+
+    document.getElementById("randomButton").addEventListener("click", () => {
+      const palette = palettes[Math.floor(Math.random() * palettes.length)];
+      Object.assign(state, palette);
+      state.frameOpacity = 0.66 + Math.random() * 0.16;
+      state.shadowOpacity = 0.25 + Math.random() * 0.18;
+      state.glowOpacity = 0.52 + Math.random() * 0.32;
+      state.glowBlur = Math.round(6 + Math.random() * 8);
+      refreshControls();
+      render();
+    });
+
+    document.getElementById("copyButton").addEventListener("click", async () => {
+      await navigator.clipboard.writeText(svgText.value);
+    });
+
+    document.getElementById("downloadButton").addEventListener("click", () => {
+      const blob = new Blob([svgText.value], { type: "image/svg+xml" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "flovera-icon-color-study.svg";
+      link.click();
+      URL.revokeObjectURL(url);
+    });
+
+    buildColorControls();
+    buildRangeControls();
+    render();
+  </script>
+</body>
+</html>
