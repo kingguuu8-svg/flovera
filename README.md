@@ -1,20 +1,21 @@
-<p align="center">
-  <img src="docs/assets/flovera-app-icon.png" alt="Flovera app icon" width="132">
-</p>
-
-<h1 align="center">Flovera</h1>
-
-<p align="center">
-  <a href="README.zh-CN.md"><img src="docs/assets/badges/lang-zh-cn.svg" alt="中文 README"></a>
-  <a href="LICENSE"><img src="docs/assets/badges/license-mit.svg" alt="MIT License"></a>
-  <img src="docs/assets/badges/status-preview.svg" alt="Flovera Preview">
-  <img src="docs/assets/badges/platform-android.svg" alt="Android-local">
-  <img src="docs/assets/badges/deepseek-tested.svg" alt="Tested with DeepSeek API">
-</p>
-
-<p align="center">
-  Android-local workspace agent for creating and previewing small demos on your phone.
-</p>
+<table>
+  <tr>
+    <td width="104">
+      <img src="docs/assets/flovera-icon.svg" alt="Flovera app icon" width="88">
+    </td>
+    <td>
+      <h1>Flovera</h1>
+      <p>Android-local workspace agent for creating and previewing small demos on your phone.</p>
+      <p>
+        <a href="README.zh-CN.md"><img src="docs/assets/badges/lang-zh-cn.svg" alt="中文 README"></a>
+        <a href="LICENSE"><img src="docs/assets/badges/license-mit.svg" alt="MIT License"></a>
+        <img src="docs/assets/badges/status-preview.svg" alt="Flovera Preview">
+        <img src="docs/assets/badges/platform-android.svg" alt="Android-local">
+        <img src="docs/assets/badges/deepseek-tested.svg" alt="Tested with DeepSeek API">
+      </p>
+    </td>
+  </tr>
+</table>
 
 Flovera is an Android-local workspace agent app.
 

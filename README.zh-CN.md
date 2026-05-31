@@ -1,20 +1,21 @@
-<p align="center">
-  <img src="docs/assets/flovera-app-icon.png" alt="Flovera app icon" width="132">
-</p>
-
-<h1 align="center">Flovera</h1>
-
-<p align="center">
-  <a href="README.md"><img src="docs/assets/badges/lang-en.svg" alt="English README"></a>
-  <a href="LICENSE"><img src="docs/assets/badges/license-mit.svg" alt="MIT License"></a>
-  <img src="docs/assets/badges/status-preview.svg" alt="Flovera Preview">
-  <img src="docs/assets/badges/platform-android.svg" alt="Android-local">
-  <img src="docs/assets/badges/deepseek-tested.svg" alt="Tested with DeepSeek API">
-</p>
-
-<p align="center">
-  运行在 Android 本地的 workspace agent，用来在手机上创建和预览小型 demo。
-</p>
+<table>
+  <tr>
+    <td width="104">
+      <img src="docs/assets/flovera-icon.svg" alt="Flovera app icon" width="88">
+    </td>
+    <td>
+      <h1>Flovera</h1>
+      <p>运行在 Android 本地的 workspace agent，用来在手机上创建和预览小型 demo。</p>
+      <p>
+        <a href="README.md"><img src="docs/assets/badges/lang-en.svg" alt="English README"></a>
+        <a href="LICENSE"><img src="docs/assets/badges/license-mit.svg" alt="MIT License"></a>
+        <img src="docs/assets/badges/status-preview.svg" alt="Flovera Preview">
+        <img src="docs/assets/badges/platform-android.svg" alt="Android-local">
+        <img src="docs/assets/badges/deepseek-tested.svg" alt="Tested with DeepSeek API">
+      </p>
+    </td>
+  </tr>
+</table>
 
 Flovera 是一个运行在 Android 本地的 workspace agent 应用。
 
