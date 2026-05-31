@@ -35,6 +35,8 @@ import com.flovera.app.koog.googleOAuthRefreshFormBody
 import com.flovera.app.koog.grokSupportsReasoningEffort
 import com.flovera.app.koog.hookIds
 import com.flovera.app.koog.providerAnthropicRuntimeHeaders
+import com.flovera.app.koog.providerKtorRoute
+import com.flovera.app.koog.providerKtorRouteCandidates
 import com.flovera.app.koog.providerRuntimeHeaders
 import com.flovera.app.koog.providerReasoningConfigFromEffort
 import com.flovera.app.koog.translateGoogleCloudCodeAssistStreamEvent
@@ -248,6 +250,80 @@ class ProviderConfigInstrumentedTest {
   }
 
   @Test
+  fun providerKtorRoutesPreserveHermesBasePathPrefixes() {
+    val openAi = providerKtorRoute(
+      ModelProviderCatalog.runtimeProfileFor(
+        ModelProviderCatalog.requireProvider("openai"),
+        AppSettings(provider = "openai", model = "gpt-5.2"),
+      ),
+    )
+    val alibaba = providerKtorRoute(
+      ModelProviderCatalog.runtimeProfileFor(
+        ModelProviderCatalog.requireProvider("alibaba"),
+        AppSettings(provider = "alibaba", model = "qwen3-coder-plus"),
+      ),
+    )
+    val zai = providerKtorRoute(
+      ModelProviderCatalog.runtimeProfileFor(
+        ModelProviderCatalog.requireProvider("zai"),
+        AppSettings(provider = "zai", model = "glm-5"),
+      ),
+    )
+    val xai = providerKtorRoute(
+      ModelProviderCatalog.runtimeProfileFor(
+        ModelProviderCatalog.requireProvider("xai"),
+        AppSettings(provider = "xai", model = "grok-code-fast-2"),
+      ),
+    )
+    val minimax = providerKtorRoute(
+      ModelProviderCatalog.runtimeProfileFor(
+        ModelProviderCatalog.requireProvider("minimax"),
+        AppSettings(provider = "minimax", model = "MiniMax-M2.7"),
+      ),
+    )
+    val custom = providerKtorRoute(
+      ModelProviderCatalog.runtimeProfileFor(
+        ModelProviderCatalog.requireProvider("custom-openai"),
+        AppSettings(
+          provider = "custom-openai",
+          model = "local-model",
+          customOpenAIProvider = CustomOpenAIProviderSettings(
+            baseUrl = "https://local.example/v1",
+            chatCompletionsPath = "/chat/completions",
+          ),
+        ),
+      ),
+    )
+
+    assertEquals("https://api.openai.com", openAi.baseUrl)
+    assertEquals("v1/chat/completions", openAi.chatCompletionsPath)
+
+    assertEquals("https://dashscope-intl.aliyuncs.com", alibaba.baseUrl)
+    assertEquals("compatible-mode/v1/chat/completions", alibaba.chatCompletionsPath)
+
+    assertEquals("https://api.z.ai", zai.baseUrl)
+    assertEquals("api/paas/v4/chat/completions", zai.chatCompletionsPath)
+
+    assertEquals("https://api.x.ai", xai.baseUrl)
+    assertEquals("v1/responses", xai.responsesPath)
+
+    assertEquals("https://api.minimax.io", minimax.baseUrl)
+    assertEquals("anthropic/v1/messages", minimax.messagesPath)
+
+    assertEquals("https://local.example", custom.baseUrl)
+    assertEquals("v1/chat/completions", custom.chatCompletionsPath)
+
+    val zaiHermesV1PathCandidates = providerKtorRouteCandidates(
+      ModelProviderCatalog.runtimeProfileFor(
+        ModelProviderCatalog.requireProvider("zai"),
+        AppSettings(provider = "zai", model = "glm-5"),
+      ).copy(chatCompletionsPath = "/v1/chat/completions"),
+    )
+    assertEquals("api/paas/v4/v1/chat/completions", zaiHermesV1PathCandidates.first().chatCompletionsPath)
+    assertTrue(zaiHermesV1PathCandidates.any { it.chatCompletionsPath == "api/paas/v4/chat/completions" })
+  }
+
+  @Test
   fun representativeOpenAICompatibleRequestsEmitHermesEquivalentGoldenBodies() {
     val openRouter = openAICompatibleRequestProbe(
       AppSettings(
@@ -325,6 +401,15 @@ class ProviderConfigInstrumentedTest {
     assertEquals("/v1/chat/completions", profile.chatCompletionsPath)
     assertEquals("generic", profile.requestProfile.compatibilityMode)
     assertFalse(profile.requestProfile.injectOllamaNumCtx)
+
+    val zai = ModelProviderCatalog.requireProvider("zai")
+    val zaiProfile = ModelProviderCatalog.runtimeProfileFor(
+      zai,
+      AppSettings(provider = "zai", model = "glm-5"),
+    )
+    assertEquals("https://api.z.ai/api/paas/v4", zaiProfile.baseUrl)
+    assertEquals("chat/completions", zaiProfile.chatCompletionsPath)
+
     assertEquals(LLMProvider.OpenRouter, openRouter.llmProvider)
     assertEquals(ProviderTransport.FloveraOpenAICompatibleChatCompletions, openRouter.transport)
     assertEquals(

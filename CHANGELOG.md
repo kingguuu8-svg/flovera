@@ -3,6 +3,16 @@
 Flovera is pre-release. This changelog starts from the Android-local workspace
 agent product direction.
 
+## v0.1.1
+
+### Fixed
+
+- Hardened OpenAI-compatible provider route normalization for Hermes-derived
+  provider profiles whose base URLs include vendor path prefixes.
+- Added 404-only fallback route candidates for missing or duplicated version
+  path segments.
+- Added live Z.AI provider route smoke coverage for real-device verification.
+
 ## v0.1.0-alpha.1
 
 ### Current Capabilities
