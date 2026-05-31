@@ -1,8 +1,8 @@
-# Flovera
-
 <p align="center">
-  <img src="docs/assets/flovera-wordmark.svg" alt="Flovera Preview" width="760">
+  <img src="docs/assets/flovera-app-icon.png" alt="Flovera app icon" width="132">
 </p>
+
+<h1 align="center">Flovera</h1>
 
 <p align="center">
   <a href="README.md"><img src="docs/assets/badges/lang-en.svg" alt="English README"></a>
