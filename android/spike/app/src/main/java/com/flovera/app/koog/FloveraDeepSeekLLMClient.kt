@@ -1,5 +1,6 @@
 package com.flovera.app.koog
 
+import ai.koog.agents.core.tools.ToolDescriptor
 import ai.koog.http.client.KoogHttpClient
 import ai.koog.prompt.dsl.ModerationResult
 import ai.koog.prompt.dsl.Prompt
@@ -19,6 +20,7 @@ import ai.koog.prompt.executor.clients.serialization.AdditionalPropertiesFlatten
 import ai.koog.prompt.llm.LLMProvider
 import ai.koog.prompt.llm.LLModel
 import ai.koog.prompt.message.LLMChoice
+import ai.koog.prompt.message.Message
 import ai.koog.prompt.message.ResponseMetaInfo
 import ai.koog.prompt.params.LLMParams
 import ai.koog.prompt.streaming.StreamFrame
@@ -26,10 +28,20 @@ import ai.koog.prompt.streaming.buildStreamFrameFlow
 import com.flovera.app.config.AppSettings
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.ktor.client.HttpClient
+import java.io.IOException
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
 import kotlin.time.Clock
 
 open class FloveraDeepSeekLLMClient(
@@ -63,8 +75,25 @@ open class FloveraDeepSeekLLMClient(
   override val clientName: String = DEEPSEEK_CLIENT_NAME
 
   private val reasoningByToolCallId = mutableMapOf<String, String>()
+  private val streamingReasoningByChoiceIndex = mutableMapOf<Int, StreamingReasoningState>()
 
   override fun llmProvider(): LLMProvider = LLMProvider.DeepSeek
+
+  override suspend fun execute(
+    prompt: Prompt,
+    model: LLModel,
+    tools: List<ToolDescriptor>,
+  ): List<Message.Response> {
+    return retryDeepSeekTransient { super.execute(prompt, model, tools) }
+  }
+
+  override suspend fun executeMultipleChoices(
+    prompt: Prompt,
+    model: LLModel,
+    tools: List<ToolDescriptor>,
+  ): List<List<Message.Response>> {
+    return retryDeepSeekTransient { super.executeMultipleChoices(prompt, model, tools) }
+  }
 
   override fun serializeProviderChatRequest(
     messages: List<OpenAIMessage>,
@@ -121,7 +150,9 @@ open class FloveraDeepSeekLLMClient(
   }
 
   override fun decodeStreamingResponse(data: String): DeepSeekChatCompletionStreamResponse {
-    return json.decodeFromString(data)
+    val response = json.decodeFromString<DeepSeekChatCompletionStreamResponse>(data)
+    captureDeepSeekStreamingReasoning(data)
+    return response
   }
 
   override fun decodeResponse(data: String): DeepSeekChatCompletionResponse {
@@ -132,6 +163,7 @@ open class FloveraDeepSeekLLMClient(
     return buildStreamFrameFlow {
       var finishReason: String? = null
       var metaInfo: ResponseMetaInfo? = null
+      var receivedFinishReason = false
 
       response.collect { chunk ->
         chunk.choices.firstOrNull()?.let { choice ->
@@ -144,11 +176,17 @@ open class FloveraDeepSeekLLMClient(
               index = toolCall.index,
             )
           }
-          choice.finishReason?.let { finishReason = it }
+          choice.finishReason?.let {
+            finishReason = it
+            receivedFinishReason = true
+          }
         }
         chunk.usage?.let { metaInfo = createMetaInfo(it) }
       }
 
+      check(receivedFinishReason) {
+        "DeepSeek streaming response ended before finish_reason; final answer may be truncated."
+      }
       emitEnd(finishReason, metaInfo)
     }
   }
@@ -183,10 +221,101 @@ open class FloveraDeepSeekLLMClient(
     throw UnsupportedOperationException("Embedding is not supported by DeepSeek API.")
   }
 
+  private suspend fun <T> retryDeepSeekTransient(block: suspend () -> T): T {
+    var attempt = 0
+    var delayMillis = DEEPSEEK_TRANSIENT_RETRY_INITIAL_DELAY_MS
+    while (true) {
+      try {
+        return block()
+      } catch (error: CancellationException) {
+        throw error
+      } catch (error: Throwable) {
+        if (!isTransientDeepSeekClientFailure(error) || attempt >= DEEPSEEK_TRANSIENT_RETRY_COUNT) {
+          throw error
+        }
+        attempt += 1
+        staticLogger.warn(error) {
+          "Transient DeepSeek client failure; retrying request attempt=$attempt/$DEEPSEEK_TRANSIENT_RETRY_COUNT"
+        }
+        delay(delayMillis)
+        delayMillis *= 2
+      }
+    }
+  }
+
+  private fun captureDeepSeekStreamingReasoning(data: String) {
+    val root = runCatching { json.parseToJsonElement(data).jsonObject }.getOrNull() ?: return
+    val choices = root["choices"].asJsonArrayOrNull() ?: return
+    choices.forEach { choiceElement ->
+      val choice = choiceElement.asJsonObjectOrNull() ?: return@forEach
+      val index = choice["index"].asJsonPrimitiveOrNull()?.intOrNull ?: 0
+      val delta = choice["delta"].asJsonObjectOrNull()
+      val state = streamingReasoningByChoiceIndex.getOrPut(index) { StreamingReasoningState() }
+
+      delta?.get("reasoning_content").asJsonPrimitiveOrNull()?.contentOrNull
+        ?.takeIf { it.isNotEmpty() }
+        ?.let { state.reasoning.append(it) }
+
+      delta?.get("tool_calls").asJsonArrayOrNull()?.forEach { toolCallElement ->
+        val toolCall = toolCallElement.asJsonObjectOrNull() ?: return@forEach
+        toolCall["id"].asJsonPrimitiveOrNull()?.contentOrNull
+          ?.takeIf { it.isNotBlank() }
+          ?.let { state.toolCallIds += it }
+      }
+
+      val finishReason = choice["finish_reason"].asJsonPrimitiveOrNull()?.contentOrNull
+      if (finishReason != null) {
+        if (finishReason == "tool_calls") {
+          val reasoning = state.reasoning.toString()
+          if (reasoning.isNotBlank()) {
+            state.toolCallIds.forEach { toolCallId ->
+              reasoningByToolCallId[toolCallId] = reasoning
+            }
+          }
+        }
+        streamingReasoningByChoiceIndex.remove(index)
+      }
+    }
+  }
+
   companion object {
     private const val DEEPSEEK_CLIENT_NAME = "FloveraDeepSeekLLMClient"
+    private const val DEEPSEEK_TRANSIENT_RETRY_COUNT = 2
+    private const val DEEPSEEK_TRANSIENT_RETRY_INITIAL_DELAY_MS = 750L
     private val staticLogger = KotlinLogging.logger { }
   }
+}
+
+private class StreamingReasoningState {
+  val reasoning: StringBuilder = StringBuilder()
+  val toolCallIds: MutableSet<String> = linkedSetOf()
+}
+
+private fun JsonElement?.asJsonObjectOrNull(): JsonObject? = this as? JsonObject
+
+private fun JsonElement?.asJsonArrayOrNull(): JsonArray? = this as? JsonArray
+
+private fun JsonElement?.asJsonPrimitiveOrNull(): JsonPrimitive? = this as? JsonPrimitive
+
+internal fun isTransientDeepSeekClientFailure(error: Throwable): Boolean {
+  var current: Throwable? = error
+  while (current != null) {
+    if (current is IOException) return true
+    val className = current.javaClass.name.lowercase()
+    val message = current.message.orEmpty().lowercase()
+    if (
+      className.contains("closedbytechannel") ||
+      message.contains("software caused connection abort") ||
+      message.contains("connection reset") ||
+      message.contains("closedbytechannel") ||
+      message.contains("closed byte channel") ||
+      message.contains("timeout")
+    ) {
+      return true
+    }
+    current = current.cause
+  }
+  return false
 }
 
 data class FloveraDeepSeekRequestSettings(

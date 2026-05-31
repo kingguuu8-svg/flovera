@@ -1,0 +1,4 @@
+interface:
+  display_name: "Flovera Frontend Design"
+  short_description: "Design and audit Flovera UI without generic AI styling."
+  default_prompt: "Use this skill to redesign or review Flovera frontends around mobile main-display and conversation surfaces."

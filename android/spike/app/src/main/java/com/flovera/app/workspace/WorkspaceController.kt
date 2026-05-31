@@ -15,6 +15,8 @@ data class WorkspaceSnapshot(
   val selectedHtmlPath: String,
   val selectedHtmlUrl: String?,
   val workspaceRootUrl: String,
+  val workspaceArtifacts: List<WorkspaceArtifact>,
+  val workspaceArtifactJobs: List<WorkspaceArtifactJob>,
   val snapshots: List<WorkspaceSnapshotRecord>,
   val settingsProposals: List<WorkspaceSettingsProposal>,
   val controlledToolProposals: List<WorkspaceControlledToolProposal>,
@@ -58,7 +60,10 @@ class WorkspaceController(context: Context, workspaceId: String) {
         recentHtmlPaths = settings.recentHtmlPaths,
         maxAgentIterations = settings.maxAgentIterations,
         networkEnabled = settings.networkEnabled,
+        networkUserConfigured = settings.networkUserConfigured,
         webSearchEnabled = settings.webSearchEnabled,
+        webSearchUserConfigured = settings.webSearchUserConfigured,
+        backgroundKeepAliveEnabled = settings.backgroundKeepAliveEnabled,
         language = settings.language,
         themeMode = settings.themeMode,
         themeColor = settings.themeColor,
@@ -125,6 +130,8 @@ class WorkspaceController(context: Context, workspaceId: String) {
 
   fun rename(path: String, newName: String): String = workspace.rename(path, newName)
 
+  fun deletePath(path: String): String = workspace.deletePath(path)
+
   fun exportableFile(path: String): File? = workspace.exportableFile(path)
 
   fun mimeType(path: String): String = workspace.mimeType(path)
@@ -132,6 +139,30 @@ class WorkspaceController(context: Context, workspaceId: String) {
   fun displayUrl(path: String): String? = workspace.displayUrl(path)
 
   fun previewTextFile(path: String): String = workspace.readFilePreview(path, maxChars = 128 * 1024)
+
+  fun resolveWorkspaceArtifactAction(previewPath: String, actionId: String): WorkspaceArtifactActionTarget? {
+    return workspace.resolveWorkspaceArtifactAction(previewPath, actionId)
+  }
+
+  fun resolveWorkspaceArtifactActionByManifest(manifestPath: String, actionId: String): WorkspaceArtifactActionTarget? {
+    return workspace.resolveWorkspaceArtifactActionByManifest(manifestPath, actionId)
+  }
+
+  fun createWorkspaceArtifactJob(target: WorkspaceArtifactActionTarget, inputPath: String = ""): WorkspaceArtifactJob {
+    return workspace.createWorkspaceArtifactJob(target, inputPath)
+  }
+
+  fun updateWorkspaceArtifactJob(job: WorkspaceArtifactJob): WorkspaceArtifactJob = workspace.writeWorkspaceArtifactJob(job)
+
+  fun readWorkspaceArtifactJob(jobId: String): WorkspaceArtifactJob? = workspace.readWorkspaceArtifactJob(jobId)
+
+  fun listWorkspaceArtifactJobs(): List<WorkspaceArtifactJob> = workspace.listWorkspaceArtifactJobs()
+
+  fun workspaceArtifactJobJson(jobId: String): String = workspace.workspaceArtifactJobJson(jobId)
+
+  fun writeWorkspaceArtifactInput(jobId: String, artifactRootPath: String, inputPath: String, inputJson: String): String {
+    return workspace.writeWorkspaceArtifactInput(jobId, artifactRootPath, inputPath, inputJson)
+  }
 
   fun createSnapshot(name: String, selectedHtmlPath: String): WorkspaceSnapshotRecord {
     return workspace.createManualSnapshot(name, selectedHtmlPath)
@@ -159,6 +190,8 @@ class WorkspaceController(context: Context, workspaceId: String) {
       selectedHtmlPath = selectedHtmlPath,
       selectedHtmlUrl = workspace.displayUrl(selectedHtmlPath),
       workspaceRootUrl = workspace.rootUrl(),
+      workspaceArtifacts = workspace.listWorkspaceArtifacts(),
+      workspaceArtifactJobs = workspace.listWorkspaceArtifactJobs(),
       snapshots = workspace.listSnapshots(),
       settingsProposals = workspace.listSettingsProposals(),
       controlledToolProposals = workspace.listControlledToolProposals(),

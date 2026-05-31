@@ -6,6 +6,7 @@ import ai.koog.prompt.executor.llms.MultiLLMPromptExecutor
 import ai.koog.utils.io.use
 import com.flovera.app.agent.HANDOFF_SOURCE_LLM
 import com.flovera.app.agent.HANDOFF_SOURCE_LOCAL_FALLBACK
+import com.flovera.app.agent.InterruptedRunHandoff
 import com.flovera.app.agent.SessionHandoffCompression
 import com.flovera.app.agent.SessionHandoffCompressor
 import com.flovera.app.config.AppSettings
@@ -21,8 +22,9 @@ class KoogSessionHandoffCompressor : SessionHandoffCompressor {
     session: AgentSession,
     record: ContextUsageRecord,
     workspace: WorkspaceManager,
+    interruptedRun: InterruptedRunHandoff?,
   ): SessionHandoffCompression {
-    val localSummary = SessionHandoffSummarizer.summarize(session, record)
+    val localSummary = SessionHandoffSummarizer.summarize(session, record, interruptedRun)
     return runCatching {
       val provider = ModelProviderCatalog.requireProvider(settings.provider)
       val apiKey = settings.apiKeyFor(provider.id)
@@ -37,7 +39,7 @@ class KoogSessionHandoffCompressor : SessionHandoffCompressor {
       )
       val output = agent.use {
         it.run(
-          agentInput = buildHandoffInput(session, record, workspace),
+          agentInput = buildHandoffInput(session, record, workspace, interruptedRun),
           sessionId = "${session.id}-${record.id}-handoff",
         )
       }
@@ -72,7 +74,12 @@ class KoogSessionHandoffCompressor : SessionHandoffCompressor {
     """.trimIndent()
   }
 
-  private fun buildHandoffInput(session: AgentSession, record: ContextUsageRecord, workspace: WorkspaceManager): String {
+  private fun buildHandoffInput(
+    session: AgentSession,
+    record: ContextUsageRecord,
+    workspace: WorkspaceManager,
+    interruptedRun: InterruptedRunHandoff?,
+  ): String {
     val messages = session.messages
       .filterNot { it.role == SESSION_ROLE_COMPRESSION }
       .joinToString("\n\n") { message ->
@@ -105,8 +112,50 @@ class KoogSessionHandoffCompressor : SessionHandoffCompressor {
       Workspace files:
       ${workspace.listFiles(".").take(WORKSPACE_LIMIT)}
 
+      Interrupted run:
+      ${interruptedRun?.toHandoffText() ?: "(none)"}
+
       Conversation to compress:
       ${messages.ifBlank { "(empty)" }}
+    """.trimIndent()
+  }
+
+  private fun InterruptedRunHandoff.toHandoffText(): String {
+    val tools = toolEvents
+      .takeLast(12)
+      .joinToString("\n") { event ->
+        "- ${event.name}: args=${oneLine(event.args, 180)} result=${oneLine(event.result, 300)}"
+      }
+      .ifBlank { "- none" }
+    val transcript = transcriptEvents
+      .takeLast(16)
+      .joinToString("\n") { event ->
+        "- ${event.type}: ${oneLine(event.content.ifBlank { event.title.ifBlank { event.detail } }, 220)}"
+      }
+      .ifBlank { "- none" }
+    return """
+      ## Recovery Mode
+      This handoff is for retrying the same interrupted run after a provider failure.
+      Do not redo completed tool work unless verification requires it.
+
+      ## Original Input
+      ${originalInput.take(MESSAGE_LIMIT)}
+
+      ## Assistant Draft So Far
+      ${assistantDraft.take(MESSAGE_LIMIT).ifBlank { "(empty)" }}
+
+      ## Completed Tool Results During Interrupted Run
+      $tools
+
+      ## Transcript During Interrupted Run
+      $transcript
+
+      ## Failure
+      - stage: $failureStage
+      - providerError: ${oneLine(providerError, 600)}
+
+      ## Recovery Instruction
+      $recoveryInstruction
     """.trimIndent()
   }
 

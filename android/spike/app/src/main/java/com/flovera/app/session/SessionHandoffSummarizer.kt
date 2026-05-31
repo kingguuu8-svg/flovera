@@ -1,7 +1,13 @@
 package com.flovera.app.session
 
+import com.flovera.app.agent.InterruptedRunHandoff
+
 object SessionHandoffSummarizer {
-  fun summarize(session: AgentSession, record: ContextUsageRecord): String {
+  fun summarize(
+    session: AgentSession,
+    record: ContextUsageRecord,
+    interruptedRun: InterruptedRunHandoff? = null,
+  ): String {
     val messages = session.messages
       .filterNot { it.role == SESSION_ROLE_COMPRESSION }
     val recent = messages.takeLast(12)
@@ -43,6 +49,24 @@ object SessionHandoffSummarizer {
       appendLine("## Recent Tool Activity")
       appendLine()
       if (toolEvents.isEmpty()) appendLine("- none") else toolEvents.forEach(::appendLine)
+      if (interruptedRun != null) {
+        appendLine()
+        appendLine("## Interrupted Run State")
+        appendLine()
+        appendLine("- recoveryMode: retry the same interrupted run")
+        appendLine("- failureStage: ${oneLine(interruptedRun.failureStage, 160)}")
+        appendLine("- providerError: ${oneLine(interruptedRun.providerError, 240)}")
+        appendLine("- originalInput: ${oneLine(interruptedRun.originalInput, 240)}")
+        appendLine("- assistantDraft: ${oneLine(interruptedRun.assistantDraft, 240)}")
+        appendLine("- recoveryInstruction: ${oneLine(interruptedRun.recoveryInstruction, 240)}")
+        appendLine()
+        appendLine("## Interrupted Tool Activity")
+        appendLine()
+        val interruptedTools = interruptedRun.toolEvents
+          .takeLast(8)
+          .map { "- ${it.name}: ${oneLine(it.result, 180)}" }
+        if (interruptedTools.isEmpty()) appendLine("- none") else interruptedTools.forEach(::appendLine)
+      }
     }.trim()
   }
 

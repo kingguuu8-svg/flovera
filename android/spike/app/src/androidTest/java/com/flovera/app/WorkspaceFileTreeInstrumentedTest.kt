@@ -4,19 +4,38 @@ import android.net.Uri
 import androidx.core.content.FileProvider
 import androidx.test.platform.app.InstrumentationRegistry
 import com.flovera.app.koog.ArtifactInspectTool
+import com.flovera.app.koog.ArtifactDiagnoseTool
+import com.flovera.app.koog.FloveraPythonRuntime
 import com.flovera.app.koog.PythonRunTool
 import com.flovera.app.koog.PythonPackageInstallTool
 import com.flovera.app.config.AppSettings
 import com.flovera.app.koog.ToolEventRecorder
 import com.flovera.app.koog.WorkspaceSearchTool
+import com.flovera.app.web.FloveraWebBridge
+import com.flovera.app.config.SettingsStore
 import com.flovera.app.workspace.WorkspaceController
 import com.flovera.app.workspace.FloveraSettingsView
 import com.flovera.app.workspace.WorkspaceManager
 import java.io.File
+import java.io.Closeable
+import java.net.HttpURLConnection
+import java.net.ServerSocket
+import java.net.URL
+import java.nio.charset.StandardCharsets
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
+import kotlin.concurrent.thread
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -44,6 +63,10 @@ class WorkspaceFileTreeInstrumentedTest {
     val result = workspace.rename("nested/page.html", "home.html")
     assertTrue(result.startsWith("Renamed"))
     assertTrue(workspace.listHtmlFiles().contains("nested/home.html"))
+
+    val deleteResult = workspace.deletePath("nested/home.html")
+    assertEquals("Deleted nested/home.html", deleteResult)
+    assertEquals("File does not exist: nested/home.html", workspace.readFile("nested/home.html"))
   }
 
   @Test
@@ -92,6 +115,604 @@ class WorkspaceFileTreeInstrumentedTest {
 
     assertTrue(preview.startsWith("a".repeat(16)))
     assertTrue(preview.contains("[truncated: showing first 16 chars"))
+  }
+
+  @Test
+  fun seedWorkspaceIncludesPortableAgentDemoArtifact() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "seed-artifact-demo-${System.currentTimeMillis()}").also { it.ensureSeedFiles() }
+
+    val artifact = workspace.listWorkspaceArtifacts().single { it.manifestPath == "agent-demo/flovera.app.json" }
+
+    assertTrue(artifact.valid)
+    assertEquals("Flovera Workspace Chat Demo", artifact.name)
+    assertEquals("local_http", artifact.preview?.kind)
+    assertEquals("agent-demo/src/web/index.html", artifact.preview?.path)
+    assertTrue(artifact.preview?.command.orEmpty().contains("python src/server.py"))
+    assertEquals("agent-demo", artifact.preview?.cwd)
+    assertEquals("/", artifact.preview?.urlPath)
+    assertTrue(artifact.actions.isEmpty())
+    assertTrue(workspace.readFile("agent-demo/README.md").contains("standard fetch/SSE"))
+    assertTrue(workspace.readFile("agent-demo/src/web/index.html").contains("id=\"apiKey\""))
+    assertTrue(workspace.readFile("agent-demo/src/web/index.html").contains("id=\"baseUrl\""))
+    assertTrue(workspace.readFile("agent-demo/src/web/app.js").contains("/api/chat/stream"))
+    assertTrue(workspace.readFile("agent-demo/src/web/app.js").contains("apiKey: apiKeyInput.value.trim()"))
+    assertFalse(workspace.readFile("agent-demo/src/web/app.js").contains("/__flovera__/api/deepseek/stream"))
+    assertFalse(workspace.readFile("agent-demo/src/web/app.js").contains("window.Flovera.runAction"))
+
+    val outsideResult = FloveraPythonRuntime(workspace, networkEnabled = false).runScript(
+      scriptPath = "src/server.py",
+      argv = listOf("--self-test"),
+      cwd = "agent-demo",
+      timeoutMs = 30_000,
+      sessionId = "portable-demo-outside",
+    )
+
+    assertEquals(0, outsideResult.exitCode)
+    assertTrue(outsideResult.stdout.contains("portable-python-http ok"))
+  }
+
+  @Test
+  fun artifactDiagnoseToolReportsRegistrationState() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "artifact-diagnose-${System.currentTimeMillis()}").also { it.ensureSeedFiles() }
+    val tool = ArtifactDiagnoseTool(workspace, ToolEventRecorder())
+
+    val registered = tool.execute(
+      ArtifactDiagnoseTool.Args(manifestPath = "agent-demo/flovera.app.json"),
+    )
+    assertTrue(registered, registered.contains("status=registered"))
+    assertTrue(registered, registered.contains("manifestPath=agent-demo/flovera.app.json"))
+    assertTrue(registered, registered.contains("preview=agent-demo/src/web/index.html"))
+    assertTrue(registered, registered.contains("serverCommand=python src/server.py"))
+    assertTrue(registered, registered.contains("diagnostics=(none)"))
+
+    val missing = tool.execute(
+      ArtifactDiagnoseTool.Args(manifestPath = "missing/flovera.app.json"),
+    )
+    assertTrue(missing, missing.contains("status=missing"))
+    assertTrue(missing, missing.contains("Discovered manifests:"))
+
+    val reference = tool.execute(
+      ArtifactDiagnoseTool.Args(includeReference = true),
+    )
+    assertTrue(reference, reference.contains("Hidden reference app demo"))
+    assertTrue(reference, reference.contains("Reference Mobile Chat Demo"))
+    assertTrue(reference, reference.contains("python src/server.py --host 127.0.0.1 --port"))
+    assertTrue(reference, reference.contains("POST /api/chat/stream"))
+  }
+
+  @Test
+  fun controllerStartsSeedArtifactPythonHttpPreview() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspaceId = "controller-local-http-${System.currentTimeMillis()}"
+    val settingsStore = SettingsStore(context, File(context.filesDir, "$workspaceId-settings.json")).also {
+      it.save(AppSettings(activeWorkspaceId = workspaceId, provider = "deepseek", model = "deepseek-v4-pro"))
+    }
+    val controller = AgentController(context, settingsStore = settingsStore).also {
+      it.refreshWorkspaceFiles()
+      it.selectHtmlFile("agent-demo/src/web/index.html")
+    }
+
+    val selectedUrl = awaitSelectedHtmlUrl(controller)
+    assertTrue(selectedUrl.startsWith("http://127.0.0.1:"))
+    assertFalse(selectedUrl.contains("/__flovera__/workspace/"))
+
+    val html = URL(selectedUrl).readText()
+    assertTrue(html.contains("Flovera Workspace Chat"))
+
+    val origin = selectedUrl.trimEnd('/')
+    val health = JSONObject(URL("$origin/api/health").readText())
+    assertEquals("portable-python-http", health.getString("runtime"))
+    assertFalse(health.getBoolean("hasServerApiKey"))
+    assertTrue(health.getBoolean("acceptsRequestApiKey"))
+
+    val connection = (URL("$origin/api/chat/stream").openConnection() as HttpURLConnection).apply {
+      requestMethod = "POST"
+      doOutput = true
+      setRequestProperty("Content-Type", "application/json")
+    }
+    connection.outputStream.use { stream ->
+      stream.write("""{"messages":[{"role":"user","content":"hello"}]}""".toByteArray(StandardCharsets.UTF_8))
+    }
+    val sse = connection.inputStream.bufferedReader().use { it.readText() }
+    assertTrue(sse.contains("Provide an API key in the workspace app"))
+    assertTrue(sse.contains("[DONE]"))
+    controller.stopWorkspaceArtifactServer("agent-demo/flovera.app.json")
+  }
+
+  @Test
+  fun controllerDoesNotSilentlyFallbackWhenPythonHttpPreviewFails() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspaceId = "controller-local-http-fail-${System.currentTimeMillis()}"
+    val workspace = WorkspaceManager(context, workspaceId).also { it.ensureSeedFiles() }
+    workspace.writeFile("broken/src/web/index.html", "<!doctype html><title>Broken HTTP app</title>", createAutoSnapshot = false)
+    workspace.writeFile(
+      "broken/flovera.app.json",
+      """
+        {
+          "schemaVersion": 1,
+          "name": "Broken HTTP app",
+          "kind": "interactive",
+          "entrypoints": {
+            "preview": { "kind": "local_http", "path": "src/web/index.html" },
+            "server": { "kind": "python_http", "command": "python src/missing.py --host 127.0.0.1 --port 8765" }
+          }
+        }
+      """.trimIndent(),
+      createAutoSnapshot = false,
+    )
+    val settingsFile = File(context.filesDir, "$workspaceId-settings.json")
+    val settingsStore = SettingsStore(context, settingsFile).also {
+      it.save(AppSettings(activeWorkspaceId = workspaceId, provider = "", model = ""))
+    }
+    val controller = AgentController(context, settingsStore = settingsStore).also {
+      it.refreshWorkspaceFiles()
+      it.selectHtmlFile("broken/src/web/index.html")
+    }
+
+    val selectedError = awaitSelectedHtmlError(controller)
+    assertNull(controller.state.value.selectedHtmlUrl)
+    assertTrue(selectedError.contains("Artifact backend failed to start"))
+    val status = controller.state.value.workspaceArtifactServerStatuses
+      .single { it.manifestPath == "broken/flovera.app.json" }
+    assertEquals("error", status.state)
+    assertTrue(status.detail.contains("python_http script does not exist"))
+    assertFalse(status.detail.contains("/__flovera__/workspace/"))
+
+    settingsFile.delete()
+    File(File(context.filesDir, "workspaces"), workspaceId).deleteRecursively()
+  }
+
+  @Test
+  fun controllerReusesStopsAndRestartsSeedArtifactPythonHttpPreview() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspaceId = "controller-local-http-lifecycle-${System.currentTimeMillis()}"
+    val settingsFile = File(context.filesDir, "$workspaceId-settings.json")
+    var controller: AgentController? = null
+    try {
+      val settingsStore = SettingsStore(context, settingsFile).also {
+        it.save(AppSettings(activeWorkspaceId = workspaceId, provider = "", model = ""))
+      }
+      controller = AgentController(context, settingsStore = settingsStore).also {
+        it.refreshWorkspaceFiles()
+        it.selectHtmlFile("agent-demo/src/web/index.html")
+      }
+
+      val firstUrl = awaitSelectedHtmlUrl(controller)
+      assertTrue(firstUrl.startsWith("http://127.0.0.1:"))
+      val runningStatus = controller.state.value.workspaceArtifactServerStatuses
+        .single { it.manifestPath == "agent-demo/flovera.app.json" }
+      assertEquals("running", runningStatus.state)
+      assertEquals(firstUrl, runningStatus.url)
+      assertNotNull(runningStatus.port)
+      assertTrue(runningStatus.command.contains("python src/server.py"))
+      assertEquals("agent-demo", runningStatus.cwd)
+
+      controller.refreshWorkspaceFiles()
+      assertEquals(firstUrl, controller.state.value.selectedHtmlUrl)
+
+      controller.stopWorkspaceArtifactServer("agent-demo/flovera.app.json")
+      val stoppedStatus = controller.state.value.workspaceArtifactServerStatuses
+        .single { it.manifestPath == "agent-demo/flovera.app.json" }
+      assertEquals("stopped", stoppedStatus.state)
+      assertEquals("Artifact server stopped", controller.state.value.status)
+
+      controller.selectHtmlFile("agent-demo/src/web/index.html")
+      val restartedUrl = awaitSelectedHtmlUrl(controller)
+      assertTrue(restartedUrl.startsWith("http://127.0.0.1:"))
+      val restartedStatus = controller.state.value.workspaceArtifactServerStatuses
+        .single { it.manifestPath == "agent-demo/flovera.app.json" }
+      assertEquals("running", restartedStatus.state)
+      assertEquals(restartedUrl, restartedStatus.url)
+    } finally {
+      controller?.stopWorkspaceArtifactServer("agent-demo/flovera.app.json")
+      settingsFile.delete()
+      File(File(context.filesDir, "workspaces"), workspaceId).deleteRecursively()
+    }
+  }
+
+  @Test
+  fun seedArtifactRelaysOpenAiCompatibleSseUsingRequestApiKey() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspaceId = "controller-local-http-upstream-${System.currentTimeMillis()}"
+    val settingsStore = SettingsStore(context, File(context.filesDir, "$workspaceId-settings.json")).also {
+      it.save(AppSettings(activeWorkspaceId = workspaceId, provider = "", model = ""))
+    }
+    val controller = AgentController(context, settingsStore = settingsStore).also {
+      it.refreshWorkspaceFiles()
+      it.selectHtmlFile("agent-demo/src/web/index.html")
+    }
+    val selectedUrl = awaitSelectedHtmlUrl(controller)
+    assertTrue(selectedUrl.startsWith("http://127.0.0.1:"))
+    val origin = selectedUrl.trimEnd('/')
+
+    FakeOpenAiCompatibleSseServer().use { upstream ->
+      val connection = (URL("$origin/api/chat/stream").openConnection() as HttpURLConnection).apply {
+        requestMethod = "POST"
+        doOutput = true
+        setRequestProperty("Content-Type", "application/json")
+      }
+      val requestBody = """
+        {
+          "apiKey": "user-owned-apikey",
+          "baseUrl": "${upstream.baseUrl}/v1",
+          "model": "fake-model",
+          "messages": [{"role":"user","content":"hello"}]
+        }
+      """.trimIndent()
+      connection.outputStream.use { stream ->
+        stream.write(requestBody.toByteArray(StandardCharsets.UTF_8))
+      }
+
+      val sse = connection.inputStream.bufferedReader().use { it.readText() }
+
+      assertTrue(sse.contains("stub-ok"))
+      assertTrue(sse.contains("[DONE]"))
+      assertEquals("Bearer user-owned-apikey", upstream.authorization())
+      assertTrue(upstream.requestBody().contains("\"model\": \"fake-model\""))
+    }
+    controller.stopWorkspaceArtifactServer("agent-demo/flovera.app.json")
+  }
+
+  @Test
+  fun workspaceOwnedPythonHttpDoesNotRequireFloveraProviderSettings() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspaceId = "workspace-owned-http-${System.currentTimeMillis()}"
+    val settingsStore = SettingsStore(context, File(context.filesDir, "$workspaceId-settings.json")).also {
+      it.save(AppSettings(activeWorkspaceId = workspaceId, provider = "", model = ""))
+    }
+    val workspace = WorkspaceManager(context, workspaceId)
+    workspace.writeFile("own-api/src/web/index.html", "<!doctype html><title>Own API</title><main>Own API Chat</main>", createAutoSnapshot = false)
+    workspace.writeFile(
+      "own-api/src/server.py",
+      """
+        import argparse
+        import json
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, _format, *args):
+                return
+
+            def send_body(self, status, content_type, body):
+                self.send_response(status)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_GET(self):
+                if self.path == "/":
+                    self.send_body(200, "text/html; charset=utf-8", b"Own API Chat")
+                    return
+                if self.path == "/api/health":
+                    self.send_body(200, "application/json; charset=utf-8", b'{"ok":true,"runtime":"workspace-python-http"}')
+                    return
+                self.send_body(404, "text/plain; charset=utf-8", b"not found")
+
+            def do_POST(self):
+                if self.path != "/api/chat/stream":
+                    self.send_body(404, "text/plain; charset=utf-8", b"not found")
+                    return
+                length = int(self.headers.get("Content-Length") or "0")
+                payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+                api_key = payload.get("apiKey", "")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(("data: " + json.dumps({"content": "key=" + api_key[-4:]}) + "\n\n").encode("utf-8"))
+                self.wfile.write(b"data: [DONE]\n\n")
+
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--host", default="127.0.0.1")
+        parser.add_argument("--port", type=int, required=True)
+        args = parser.parse_args()
+        ThreadingHTTPServer((args.host, args.port), Handler).serve_forever()
+      """.trimIndent(),
+      createAutoSnapshot = false,
+    )
+    workspace.writeFile(
+      "own-api/flovera.app.json",
+      """
+      {
+        "schemaVersion": 1,
+        "name": "own-api",
+        "kind": "interactive",
+        "entrypoints": {
+          "preview": {
+            "kind": "local_http",
+            "path": "src/web/index.html",
+            "urlPath": "/"
+          },
+          "server": {
+            "kind": "python_http",
+            "command": "python src/server.py --host 127.0.0.1 --port 8765"
+          }
+        }
+      }
+      """.trimIndent(),
+      createAutoSnapshot = false,
+    )
+    val controller = AgentController(context, settingsStore = settingsStore).also {
+      it.refreshWorkspaceFiles()
+      it.selectHtmlFile("own-api/src/web/index.html")
+    }
+
+    val selectedUrl = awaitSelectedHtmlUrl(controller)
+    assertTrue(selectedUrl.startsWith("http://127.0.0.1:"))
+    assertFalse(selectedUrl.contains("/__flovera__/api/"))
+    assertTrue(URL(selectedUrl).readText().contains("Own API Chat"))
+
+    val origin = selectedUrl.trimEnd('/')
+    val health = JSONObject(URL("$origin/api/health").readText())
+    assertEquals("workspace-python-http", health.getString("runtime"))
+
+    val connection = (URL("$origin/api/chat/stream").openConnection() as HttpURLConnection).apply {
+      requestMethod = "POST"
+      doOutput = true
+      setRequestProperty("Content-Type", "application/json")
+    }
+    connection.outputStream.use { stream ->
+      stream.write("""{"apiKey":"user-owned-apikey","messages":[{"role":"user","content":"hello"}]}""".toByteArray(StandardCharsets.UTF_8))
+    }
+    val sse = connection.inputStream.bufferedReader().use { it.readText() }
+    assertTrue(sse.contains("key=ikey"))
+    assertTrue(sse.contains("[DONE]"))
+    controller.stopWorkspaceArtifactServer("own-api/flovera.app.json")
+  }
+
+  @Test
+  fun artifactPythonJobInjectsDeclaredProviderEnvironment() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspaceId = "controller-artifact-env-${System.currentTimeMillis()}"
+    val settingsStore = SettingsStore(context, File(context.filesDir, "$workspaceId-settings.json")).also {
+      it.save(AppSettings(activeWorkspaceId = workspaceId, provider = "deepseek", model = "deepseek-v4-pro", apiKey = "test-deepseek-key"))
+    }
+    val workspace = WorkspaceManager(context, workspaceId)
+    workspace.writeFile("env-demo/src/web/index.html", "<!doctype html><title>Env Demo</title>", createAutoSnapshot = false)
+    workspace.writeFile(
+      "env-demo/src/env_check.py",
+      """
+        import os
+        print(os.environ.get("DEEPSEEK_API_KEY", "missing"))
+        print(os.environ.get("DEEPSEEK_MODEL", "missing"))
+      """.trimIndent(),
+      createAutoSnapshot = false,
+    )
+    workspace.writeFile(
+      "env-demo/flovera.app.json",
+      """
+      {
+        "schema": "https://flovera.dev/schemas/app.v1.json",
+        "name": "env-demo",
+        "kind": "interactive",
+        "entrypoints": {
+          "preview": {
+            "kind": "webview",
+            "path": "src/web/index.html"
+          }
+        },
+        "actions": [
+          {
+            "id": "check-env",
+            "kind": "python_job",
+            "command": "python src/env_check.py",
+            "environment": {
+              "DEEPSEEK_API_KEY": "provider:deepseek.apiKey",
+              "DEEPSEEK_MODEL": "provider:deepseek.model"
+            }
+          }
+        ]
+      }
+      """.trimIndent(),
+      createAutoSnapshot = false,
+    )
+    val controller = AgentController(context, settingsStore = settingsStore).also {
+      it.refreshWorkspaceFiles()
+      it.selectHtmlFile("env-demo/src/web/index.html")
+    }
+    val queued = JSONObject(controller.runWorkspaceArtifactAction("check-env", "{}"))
+    val jobId = queued.getString("id")
+
+    val finished = withTimeout(10_000) {
+      var current = queued
+      while (current.optString("status") in setOf("queued", "running")) {
+        delay(100)
+        current = JSONObject(controller.getWorkspaceArtifactJob(jobId))
+      }
+      current
+    }
+
+    assertEquals("succeeded", finished.getString("status"))
+    assertTrue(finished.getString("stdout").contains("test-deepseek-key"))
+    assertTrue(finished.getString("stdout").contains("deepseek-v4-pro"))
+  }
+
+  @Test
+  fun workspaceDiscoversValidArtifactManifest() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "artifact-valid-${System.currentTimeMillis()}")
+    workspace.writeFile("demo/src/web/index.html", "<!doctype html><title>Agent Demo</title>", createAutoSnapshot = false)
+    workspace.writeFile("demo/src/agent.py", "print('ok')", createAutoSnapshot = false)
+    workspace.writeFile(
+      "demo/flovera.app.json",
+      """
+      {
+        "schema": "https://flovera.dev/schemas/app.v1.json",
+        "name": "agent-demo",
+        "kind": "interactive",
+        "entrypoints": {
+          "preview": {
+            "kind": "webview",
+            "path": "src/web/index.html"
+          }
+        },
+        "actions": [
+          {
+            "id": "run-agent",
+            "label": "Run Agent",
+            "kind": "python_job",
+            "command": "python src/agent.py --input data/input.json --output outputs/result.json",
+            "timeoutMs": 120000,
+            "outputs": ["outputs/result.json"]
+          }
+        ],
+        "outputs": ["outputs/result.json"]
+      }
+      """.trimIndent(),
+      createAutoSnapshot = false,
+    )
+
+    val artifact = workspace.listWorkspaceArtifacts().single()
+
+    assertTrue(artifact.valid)
+    assertEquals("demo/flovera.app.json", artifact.manifestPath)
+    assertEquals("demo", artifact.rootPath)
+    assertEquals("agent-demo", artifact.name)
+    assertEquals("demo/src/web/index.html", artifact.preview?.path)
+    assertEquals("run-agent", artifact.actions.single().id)
+    assertEquals("python_job", artifact.actions.single().kind)
+    assertEquals("demo", artifact.actions.single().cwd)
+    assertEquals(listOf("demo/outputs/result.json"), artifact.actions.single().outputs)
+  }
+
+  @Test
+  fun workspaceReportsInvalidArtifactManifestDiagnostics() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "artifact-invalid-${System.currentTimeMillis()}")
+    workspace.writeFile(
+      "bad/flovera.app.json",
+      """
+      {
+        "name": "",
+        "entrypoints": {
+          "preview": {
+            "kind": "webview",
+            "path": "../escape.html"
+          }
+        },
+        "actions": [
+          {
+            "id": "run",
+            "kind": "shell",
+            "command": "bash run.sh"
+          }
+        ]
+      }
+      """.trimIndent(),
+      createAutoSnapshot = false,
+    )
+
+    val artifact = workspace.listWorkspaceArtifacts().single()
+
+    assertFalse(artifact.valid)
+    assertTrue(artifact.diagnostics.any { it.message.contains("non-empty name") })
+    assertTrue(artifact.diagnostics.any { it.message.contains("Unsupported action kind") })
+    assertTrue(artifact.diagnostics.any { it.message.contains("Path does not exist") || it.message.contains("escapes workspace") })
+  }
+
+  @Test
+  fun workspaceArtifactJobsPersistAndRestartInterruptsRunningJobs() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspaceId = "artifact-job-${System.currentTimeMillis()}"
+    val workspace = WorkspaceManager(context, workspaceId)
+    workspace.writeFile("demo/src/web/index.html", "<!doctype html>", createAutoSnapshot = false)
+    workspace.writeFile("demo/src/agent.py", "print('ok')", createAutoSnapshot = false)
+    workspace.writeFile(
+      "demo/flovera.app.json",
+      """
+      {
+        "name": "agent-demo",
+        "entrypoints": {
+          "preview": { "kind": "webview", "path": "src/web/index.html" }
+        },
+        "actions": [
+          {
+            "id": "run-agent",
+            "kind": "python_job",
+            "command": "python src/agent.py --input data/input.json",
+            "outputs": ["outputs/result.json"]
+          }
+        ]
+      }
+      """.trimIndent(),
+      createAutoSnapshot = false,
+    )
+    val target = workspace.resolveWorkspaceArtifactAction("demo/src/web/index.html", "run-agent")!!
+    val job = workspace.createWorkspaceArtifactJob(target)
+    val running = workspace.writeWorkspaceArtifactJob(job.copy(status = "running"))
+
+    assertEquals("running", workspace.readWorkspaceArtifactJob(running.id)?.status)
+    assertTrue(workspace.workspaceArtifactJobJson(running.id).contains("\"actionId\":\"run-agent\""))
+
+    val restartedWorkspace = WorkspaceManager(context, workspaceId)
+    restartedWorkspace.ensureFloveraMetadata()
+
+    val interrupted = restartedWorkspace.readWorkspaceArtifactJob(running.id)
+    assertNotNull(interrupted)
+    assertEquals("interrupted", interrupted!!.status)
+  }
+
+  @Test
+  fun workspaceArtifactPythonJobRunsScriptAndWritesOutputs() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "artifact-python-job-${System.currentTimeMillis()}")
+    workspace.writeFile("demo/data/input.json", """{"message":"hello"}""", createAutoSnapshot = false)
+    workspace.writeFile(
+      "demo/src/agent.py",
+      """
+      import argparse
+      import json
+      import os
+
+      parser = argparse.ArgumentParser()
+      parser.add_argument("--input", required=True)
+      parser.add_argument("--output", required=True)
+      args = parser.parse_args()
+
+      with open(args.input, "r", encoding="utf-8") as handle:
+          payload = json.load(handle)
+      os.makedirs(os.path.dirname(args.output), exist_ok=True)
+      with open(args.output, "w", encoding="utf-8") as handle:
+          json.dump({"reply": payload["message"] + " world"}, handle)
+      print("wrote", args.output)
+      """.trimIndent(),
+      createAutoSnapshot = false,
+    )
+
+    val result = FloveraPythonRuntime(workspace, networkEnabled = false).runScript(
+      scriptPath = "src/agent.py",
+      argv = listOf("--input", "data/input.json", "--output", "outputs/result.json"),
+      cwd = "demo",
+      timeoutMs = 30_000,
+      sessionId = "artifact-test",
+    )
+
+    assertEquals(0, result.exitCode)
+    assertTrue(result.stdout.contains("wrote outputs/result.json"))
+    assertTrue(workspace.readFile("demo/outputs/result.json").contains("hello world"))
+  }
+
+  @Test
+  fun floveraWebBridgeRoutesWorkspaceArtifactCalls() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val bridge = FloveraWebBridge(
+      context,
+      object : FloveraWebBridge.ArtifactActions {
+        override fun runAction(actionId: String, inputJson: String): String = "run:$actionId:$inputJson"
+        override fun getJob(jobId: String): String = "get:$jobId"
+        override fun cancelJob(jobId: String): String = "cancel:$jobId"
+      },
+    )
+
+    assertEquals("run:run-agent:{\"x\":1}", bridge.runAction("run-agent", """{"x":1}"""))
+    assertEquals("get:job-1", bridge.getJob("job-1"))
+    assertEquals("cancel:job-1", bridge.cancelJob("job-1"))
   }
 
   @Test
@@ -316,6 +937,7 @@ class WorkspaceFileTreeInstrumentedTest {
     assertFalse(compact.contains("scannedFiles="))
     assertTrue(debug.contains("maxScore="))
     assertTrue(debug.contains("scannedFiles="))
+    assertTrue(debug.contains("elapsedMs="))
   }
 
   @Test
@@ -445,6 +1067,30 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(workspace.exportableFile("production-xlsxwriter.xlsx")!!.length() > 0)
     assertTrue(workspace.readFile("production.html").contains("<strong>ready</strong>"))
     assertTrue(workspace.exportableFile("production.pdf")!!.length() > 0)
+  }
+
+  @Test
+  fun pythonRunAllowsChaquopyStdlibReadsForNetworkAndAsyncImports() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "python-stdlib-${System.currentTimeMillis()}")
+    val tool = PythonRunTool(workspace, ToolEventRecorder())
+
+    val result = tool.execute(
+      PythonRunTool.Args(
+        code = """
+        import asyncio
+        import ssl
+        import urllib.request
+
+        print("stdlib imports ready")
+        print(asyncio.__name__, ssl.__name__, urllib.request.__name__)
+        """.trimIndent(),
+        snapshotBeforeRun = false,
+      ),
+    )
+
+    assertTrue(result, result.contains("Python status=ok exitCode=0"))
+    assertTrue(result, result.contains("stdlib imports ready"))
   }
 
   @Test
@@ -621,6 +1267,92 @@ class WorkspaceFileTreeInstrumentedTest {
   }
 
   @Test
+  fun manualSnapshotAfterRestoreCountsCurrentWorkspaceFiles() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "snapshot-count-${System.currentTimeMillis()}").also {
+      it.ensureSeedFiles()
+      it.writeFile("only-in-baseline.txt", "baseline")
+    }
+    val baseline = workspace.createManualSnapshot("baseline", selectedHtmlPath = "index.html")
+    workspace.writeFile("new-a.txt", "a")
+    workspace.writeFile("new-b.txt", "b")
+
+    workspace.restoreSnapshot(baseline.id)
+    val expectedFileCount = workspace.root.walkTopDown().count { it.isFile }
+    val afterRestore = workspace.createManualSnapshot("after restore", selectedHtmlPath = "index.html")
+
+    assertEquals(expectedFileCount, afterRestore.fileCount)
+    assertEquals(baseline.fileCount, afterRestore.fileCount)
+    assertEquals("File does not exist: new-a.txt", workspace.readFile("new-a.txt"))
+    assertEquals("baseline", workspace.readFile("only-in-baseline.txt"))
+  }
+
+  private class FakeOpenAiCompatibleSseServer : Closeable {
+    private val server = ServerSocket(0)
+    private val requestLatch = CountDownLatch(1)
+    private val auth = AtomicReference("")
+    private val body = AtomicReference("")
+    private val worker = thread(start = true, isDaemon = true, name = "FakeOpenAiCompatibleSseServer") {
+      runCatching {
+        server.accept().use { socket ->
+          val input = socket.getInputStream().bufferedReader(StandardCharsets.UTF_8)
+          input.readLine()
+          var contentLength = 0
+          while (true) {
+            val line = input.readLine() ?: break
+            if (line.isBlank()) break
+            val separator = line.indexOf(':')
+            if (separator > 0) {
+              val name = line.substring(0, separator).trim()
+              val value = line.substring(separator + 1).trim()
+              if (name.equals("Authorization", ignoreCase = true)) auth.set(value)
+              if (name.equals("Content-Length", ignoreCase = true)) contentLength = value.toIntOrNull() ?: 0
+            }
+          }
+          if (contentLength > 0) {
+            val chars = CharArray(contentLength)
+            input.read(chars)
+            body.set(String(chars))
+          }
+          val responseBody = (
+            "data: {\"choices\":[{\"delta\":{\"content\":\"stub-ok\"}}]}\r\n\r\n" +
+              "data: [DONE]\r\n\r\n"
+            ).toByteArray(StandardCharsets.UTF_8)
+          val headers = (
+            "HTTP/1.1 200 OK\r\n" +
+              "Content-Type: text/event-stream; charset=utf-8\r\n" +
+              "Content-Length: ${responseBody.size}\r\n" +
+              "Connection: close\r\n\r\n"
+            ).toByteArray(StandardCharsets.UTF_8)
+          socket.getOutputStream().use { output ->
+            output.write(headers)
+            output.write(responseBody)
+            output.flush()
+          }
+          requestLatch.countDown()
+        }
+      }
+    }
+
+    val baseUrl: String = "http://127.0.0.1:${server.localPort}"
+
+    fun authorization(): String {
+      assertTrue("Fake upstream was not called", requestLatch.await(10, TimeUnit.SECONDS))
+      return auth.get()
+    }
+
+    fun requestBody(): String {
+      assertTrue("Fake upstream was not called", requestLatch.await(10, TimeUnit.SECONDS))
+      return body.get()
+    }
+
+    override fun close() {
+      server.close()
+      worker.join(500)
+    }
+  }
+
+  @Test
   fun workspaceFloveraMetadataExposesCapabilitiesAndSettingsProposals() {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val workspaceId = "metadata-${System.currentTimeMillis()}"
@@ -631,6 +1363,7 @@ class WorkspaceFileTreeInstrumentedTest {
           activeWorkspaceId = workspaceId,
           networkEnabled = true,
           webSearchEnabled = true,
+          backgroundKeepAliveEnabled = true,
           agentAuthorityMode = "assisted",
         ),
       )
@@ -681,13 +1414,44 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"openpyxl\""))
     assertTrue(capabilities.contains("\"artifactInspect\": true"))
     assertTrue(capabilities.contains("\"artifactInspectFormats\""))
+    assertTrue(capabilities.contains("\"workspaceArtifacts\": true"))
+    assertTrue(capabilities.contains("\"workspaceArtifactManifestName\": \"flovera.app.json\""))
+    assertTrue(capabilities.contains("\"workspaceArtifactActionKinds\""))
+    assertTrue(capabilities.contains("\"python_job\""))
+    assertTrue(capabilities.contains("\"workspaceArtifactPythonHttp\": true"))
+    assertTrue(capabilities.contains("\"workspaceArtifactWorkspaceOwnedHttp\": true"))
+    assertTrue(capabilities.contains("\"workspaceArtifactPythonHttpLifecycle\": true"))
+    assertTrue(capabilities.contains("\"workspaceArtifactPythonHttpDiagnostics\": true"))
+    assertTrue(capabilities.contains("\"workspaceArtifactViewportHelper\": true"))
+    assertTrue(capabilities.contains("\"workspaceArtifactViewportCssVars\""))
+    assertTrue(capabilities.contains("\"--flovera-viewport-height\""))
+    assertTrue(capabilities.contains("\"workspaceArtifactVisibleContentCheck\": true"))
+    assertTrue(capabilities.contains("\"workspaceArtifactPythonJobNetwork\": true"))
+    assertTrue(capabilities.contains("\"workspaceArtifactEnvironmentRefs\""))
+    assertTrue(capabilities.contains("\"workspaceArtifactBridgeCalls\""))
+    assertTrue(capabilities.contains("\"runAction\""))
+    assertTrue(capabilities.contains("\"workspaceArtifactJobUi\": true"))
+    assertTrue(capabilities.contains("\"seededPortableArtifactDemoPath\": \"agent-demo/flovera.app.json\""))
+    assertTrue(capabilities.contains("\"toolProgressNarration\": true"))
+    assertTrue(capabilities.contains("\"agentRunTimeline\": true"))
+    assertTrue(capabilities.contains("\"agentRunEventBus\": true"))
+    assertTrue(capabilities.contains("\"finalAssistantResponseStreaming\": true"))
+    assertTrue(capabilities.contains("\"modelTextDeltaStreaming\": true"))
+    assertTrue(capabilities.contains("\"modelTextDeltaPolicy\": \"optional_model_output_not_required\""))
+    assertTrue(capabilities.contains("\"koog_stream_frame_event_handler\""))
+    assertTrue(capabilities.contains("\"mainSurfaceHtmlQuickPicker\": true"))
+    assertTrue(capabilities.contains("\"conversationPathLinks\": true"))
     assertTrue(capabilities.contains("\"workspaceSearch\": true"))
     assertTrue(capabilities.contains("\"workspaceSearchScopes\""))
     assertTrue(capabilities.contains("\"workspace_app_metadata\""))
     assertTrue(capabilities.contains("\"webSearch\": true"))
+    assertTrue(capabilities.contains("\"foregroundAgentRunService\": true"))
+    assertTrue(capabilities.contains("\"backgroundKeepAlive\": true"))
+    assertTrue(capabilities.contains("\"backgroundKeepAliveEnabled\": true"))
     assertTrue(capabilities.contains("\"previewFormats\""))
     assertTrue(capabilities.contains("\"json\""))
     assertTrue(capabilities.contains("\"csv\""))
+    assertTrue(capabilities.contains("\"code\""))
     assertTrue(capabilities.contains("\"pdf\""))
     assertTrue(capabilities.contains("\"modelContextOverrides\": true"))
     assertTrue(capabilities.contains("\"reasoningEffort\": true"))
@@ -789,6 +1553,7 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(settingsView.contains("\"providerSupportsHealthCheck\""))
     assertTrue(settingsView.contains("\"customOpenAICompatibilityMode\""))
     assertTrue(settingsView.contains("\"reasoningEffort\""))
+    assertTrue(settingsView.contains("\"backgroundKeepAliveEnabled\": true"))
     assertTrue(settingsView.contains("\"openRouterProviderPreferences\""))
     assertTrue(settingsView.contains("\"openRouterMinCodingScore\""))
     assertTrue(settingsView.contains("\"providerInjectsOllamaNumCtx\""))
@@ -798,6 +1563,8 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(settingsView.contains("\"providerRequestAddedFields\""))
     assertTrue(settingsView.contains("\"modelSupportsReasoning\""))
     assertTrue(settingsView.contains("\"compressionThresholdPercent\""))
+    assertTrue(settingsView.contains("\"networkUserConfigured\""))
+    assertTrue(settingsView.contains("\"webSearchUserConfigured\""))
     assertTrue(settingsView.contains("\"customOpenAIBaseUrl\""))
     assertTrue(settingsView.contains("\"customOpenAIChatCompletionsPath\""))
     assertTrue(settingsView.contains("\"recentHtmlPaths\""))
@@ -810,6 +1577,39 @@ class WorkspaceFileTreeInstrumentedTest {
     assertFalse(workspace.deleteSettingsProposal(".flovera/proposals/search-tool.json"))
     assertTrue(workspace.deleteControlledToolProposal(".flovera/proposals/search-tool.json"))
     assertTrue(workspace.listControlledToolProposals().isEmpty())
+  }
+
+  @Test
+  fun workspaceSettingsProposalsAcceptWrappedAndRawChangeShapes() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "test-settings-proposal-shapes-${System.currentTimeMillis()}")
+    workspace.ensureSeedFiles()
+    workspace.writeFile(
+      ".flovera/proposals/raw-network.json",
+      """{"networkEnabled":true}""",
+      createAutoSnapshot = false,
+    )
+    workspace.writeFile(
+      ".flovera/proposals/wrapped-background.json",
+      """
+      {
+        "type": "settings",
+        "title": "Keep alive",
+        "changes": {
+          "backgroundKeepAliveEnabled": true
+        }
+      }
+      """.trimIndent(),
+      createAutoSnapshot = false,
+    )
+
+    val proposals = workspace.listSettingsProposals().associateBy { it.path }
+
+    assertEquals(true, proposals[".flovera/proposals/raw-network.json"]?.changes?.networkEnabled)
+    assertEquals(true, proposals[".flovera/proposals/wrapped-background.json"]?.changes?.backgroundKeepAliveEnabled)
+    assertFalse(workspace.listControlledToolProposals().any { it.path == ".flovera/proposals/raw-network.json" })
+    assertTrue(workspace.deleteSettingsProposal(".flovera/proposals/raw-network.json"))
+    assertTrue(workspace.deleteSettingsProposal(".flovera/proposals/wrapped-background.json"))
   }
 
   @Test
@@ -842,4 +1642,21 @@ class WorkspaceFileTreeInstrumentedTest {
     assertEquals(3, automatic.size)
     assertEquals("three", workspace.restoreSnapshot(automatic.first().id)?.let { workspace.readFile("counter.txt") })
   }
+
+  private fun awaitSelectedHtmlUrl(controller: AgentController): String = runBlocking {
+    withTimeout(20_000) {
+      controller.state
+        .map { it.selectedHtmlUrl.orEmpty() }
+        .first { it.startsWith("http://127.0.0.1:") }
+    }
+  }
+
+  private fun awaitSelectedHtmlError(controller: AgentController): String = runBlocking {
+    withTimeout(20_000) {
+      controller.state
+        .map { it.selectedHtmlError }
+        .first { it.isNotBlank() }
+    }
+  }
+
 }

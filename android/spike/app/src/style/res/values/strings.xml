@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Flovera Style</string>
+    <bool name="style_showcase_mode">true</bool>
+</resources>

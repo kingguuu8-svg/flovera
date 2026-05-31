@@ -25,7 +25,7 @@ class FloveraPythonTimeout(TimeoutError):
     pass
 
 
-def run_code(code, workspace_root, cwd, timeout_ms, max_output_chars, session_id, reset_session, scope, network_enabled):
+def run_code(code, workspace_root, cwd, timeout_ms, max_output_chars, session_id, reset_session, scope, network_enabled, environment_json="{}"):
     with _run_lock:
         started_at = time.monotonic()
         root = os.path.realpath(workspace_root)
@@ -44,12 +44,16 @@ def run_code(code, workspace_root, cwd, timeout_ms, max_output_chars, session_id
 
         old_cwd = os.getcwd()
         old_tempdir = tempfile.tempdir
+        old_dont_write_bytecode = sys.dont_write_bytecode
+        old_environ = os.environ.copy()
         deadline = time.monotonic() + timeout_s
         patches = _install_boundaries(root, start_cwd, scope, bool(network_enabled), deadline)
         old_trace = sys.gettrace()
         try:
             os.chdir(start_cwd)
             tempfile.tempdir = start_cwd
+            sys.dont_write_bytecode = True
+            os.environ.update(_safe_environment(environment_json))
             sys.settrace(_timeout_trace(deadline))
             with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
                 exec(compile(code, "<flovera-python-run>", "exec"), globals_dict)
@@ -67,6 +71,9 @@ def run_code(code, workspace_root, cwd, timeout_ms, max_output_chars, session_id
         finally:
             sys.settrace(old_trace)
             _restore_patches(patches)
+            os.environ.clear()
+            os.environ.update(old_environ)
+            sys.dont_write_bytecode = old_dont_write_bytecode
             tempfile.tempdir = old_tempdir
             os.chdir(old_cwd)
 
@@ -95,6 +102,22 @@ def _globals_for_session(session_id, reset_session):
     if reset_session or key not in _sessions:
         _sessions[key] = {"__name__": "__main__", "__builtins__": builtins}
     return _sessions[key]
+
+
+def _safe_environment(environment_json):
+    try:
+        parsed = json.loads(environment_json or "{}")
+    except Exception:
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    result = {}
+    for key, value in parsed.items():
+        key_text = str(key)
+        if not key_text or "=" in key_text or "\x00" in key_text:
+            continue
+        result[key_text] = str(value)
+    return result
 
 
 def _preload_runtime_packages():
@@ -129,11 +152,10 @@ def _normalize_path(root, current_cwd, path, scope, write, read_roots=None):
     base = current_cwd if not os.path.isabs(raw) else root
     resolved = os.path.realpath(raw if os.path.isabs(raw) else os.path.join(base, raw))
     if resolved != root and not resolved.startswith(root + os.sep):
-        if not write and (
-            _is_under_any(resolved, read_roots or ())
-            or _is_chaquopy_asset_path(raw)
-            or _is_chaquopy_asset_path(resolved)
-        ):
+        if _is_chaquopy_asset_path(raw) or _is_chaquopy_asset_path(resolved):
+            if not write or _is_chaquopy_import_stack() or _is_chaquopy_runtime_write_path(resolved):
+                return resolved
+        if not write and _is_under_any(resolved, read_roots or ()):
             return resolved
         raise FloveraPythonBoundaryError("Path escapes workspace: " + raw)
     _check_flovera_scope(root, resolved, scope, write)
@@ -148,7 +170,38 @@ def _is_under_any(path, roots):
 
 
 def _is_chaquopy_asset_path(path):
-    return (os.sep + "chaquopy" + os.sep + "AssetFinder" + os.sep) in path
+    normalized = str(path).replace("\\", "/")
+    return (
+        "/chaquopy/AssetFinder" in normalized
+        or normalized.startswith("chaquopy/AssetFinder")
+    )
+
+
+def _chaquopy_asset_root(path):
+    try:
+        parts = os.path.realpath(path).replace("\\", "/").split("/")
+    except (OSError, TypeError, ValueError):
+        return None
+    for index in range(len(parts) - 1):
+        if parts[index] == "chaquopy" and parts[index + 1] == "AssetFinder":
+            return "/".join(parts[: index + 2])
+    return None
+
+
+def _is_chaquopy_runtime_write_path(path):
+    normalized = str(path).replace("\\", "/")
+    marker = "/chaquopy/AssetFinder/stdlib-"
+    return marker in normalized
+
+
+def _is_chaquopy_import_stack():
+    frame = sys._getframe()
+    while frame:
+        filename = str(frame.f_code.co_filename).replace("\\", "/")
+        if filename.endswith("import.pxi") or "/java/chaquopy/" in filename:
+            return True
+        frame = frame.f_back
+    return False
 
 
 def _python_read_roots():
@@ -168,8 +221,14 @@ def _python_read_roots():
     asset_root = os.path.dirname(module_dir)
     for value in (module_dir, asset_root, os.path.join(asset_root, "requirements")):
         add_root(value, require_exists=False)
+    chaquopy_asset_root = _chaquopy_asset_root(module_dir)
+    if chaquopy_asset_root:
+        add_root(chaquopy_asset_root, require_exists=False)
     for value in list(sys.path) + [sys.prefix, sys.exec_prefix]:
         add_root(value)
+        chaquopy_asset_root = _chaquopy_asset_root(value)
+        if chaquopy_asset_root:
+            add_root(chaquopy_asset_root, require_exists=False)
     return tuple(sorted(roots))
 
 
@@ -207,6 +266,7 @@ def _install_boundaries(root, start_cwd, scope, network_enabled, deadline):
     original_open = builtins.open
     original_chdir = os.chdir
     original_sleep = time.sleep
+    original_socket = socket.socket
     read_roots = _python_read_roots()
 
     def patch(obj, name, value):
@@ -255,6 +315,13 @@ def _install_boundaries(root, start_cwd, scope, network_enabled, deadline):
                 return
             original_sleep(min(target - now, deadline - now, 0.05))
 
+    class GuardedSocket(original_socket):
+        def connect(self, *args, **kwargs):
+            raise RuntimeError("socket.socket.connect is disabled in blocking python_run")
+
+        def connect_ex(self, *args, **kwargs):
+            raise RuntimeError("socket.socket.connect_ex is disabled in blocking python_run")
+
     patch(builtins, "open", guarded_open)
     patch(io, "open", guarded_open)
     patch(os, "chdir", guarded_chdir)
@@ -282,7 +349,7 @@ def _install_boundaries(root, start_cwd, scope, network_enabled, deadline):
     patch(threading.Thread, "start", deny("threading.Thread.start"))
     patch(time, "sleep", guarded_sleep)
     if not network_enabled:
-        patch(socket, "socket", deny("socket.socket"))
+        patch(socket, "socket", GuardedSocket)
         patch(socket, "create_connection", deny("socket.create_connection"))
     return patches
 

@@ -3,6 +3,9 @@ package com.flovera.app.config
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
 
+const val AGENT_ITERATIONS_UNLIMITED = 0
+const val AGENT_ITERATIONS_INTERNAL_GUARD = 1_000_000
+
 @Serializable
 data class ModelContextOverride(
   val contextWindowTokens: Int? = null,
@@ -35,13 +38,16 @@ data class AppSettings(
   val selectedHtmlPath: String = "",
   val pinnedHtmlPaths: List<String> = emptyList(),
   val recentHtmlPaths: List<String> = emptyList(),
-  val maxAgentIterations: Int = 20,
-  val networkEnabled: Boolean = false,
-  val webSearchEnabled: Boolean = false,
+  val maxAgentIterations: Int = AGENT_ITERATIONS_UNLIMITED,
+  val networkEnabled: Boolean = true,
+  val networkUserConfigured: Boolean = false,
+  val webSearchEnabled: Boolean = true,
+  val webSearchUserConfigured: Boolean = false,
+  val backgroundKeepAliveEnabled: Boolean = false,
   val braveSearchApiKey: String = "",
   val language: String = "en",
-  val themeMode: String = "dark",
-  val themeColor: String = "#76C4D8",
+  val themeMode: String = "light",
+  val themeColor: String = "#127089",
   val agentAuthorityMode: String = "safe",
   val deepSeekThinkingEffort: String = "high",
   val reasoningEffort: String = "",

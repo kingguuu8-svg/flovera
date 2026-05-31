@@ -25,6 +25,14 @@ android {
             dimension = "installSlot"
             applicationId = "com.flovera.app"
         }
+        create("design") {
+            dimension = "installSlot"
+            applicationId = "com.flovera.design"
+        }
+        create("style") {
+            dimension = "installSlot"
+            applicationId = "com.flovera.style"
+        }
         create("legacy") {
             dimension = "installSlot"
             applicationId = "com.example.ailinuxvmspike"
@@ -91,6 +99,9 @@ dependencies {
   implementation(libs.androidx.activity.compose)
   implementation(libs.koog.agents)
   implementation(libs.kotlinx.serialization.json)
+  implementation(libs.jtokkit)
+  implementation(libs.markwon.core)
+  implementation(libs.markwon.ext.tables)
 
   // Arch Components
   implementation(libs.androidx.lifecycle.runtime.compose)

@@ -2,6 +2,9 @@ param(
   [string]$DeviceSerial = "",
   [string]$InstrumentationClass = "",
   [int]$InstrumentationTimeoutSeconds = 240,
+  [string]$DeepSeekApiKey = "",
+  [string]$DeepSeekModel = "deepseek-chat",
+  [switch]$RunLiveDeepSeekSmoke,
   [switch]$SkipDevice,
   [switch]$SkipRelease,
   [switch]$AllowFreshInstall
@@ -166,7 +169,8 @@ function Invoke-AdbInstrumentation {
     [string]$Serial,
     [string]$Runner,
     [string]$ClassFilter,
-    [int]$TimeoutSeconds
+    [int]$TimeoutSeconds,
+    [string[]]$ExtraInstrumentationArgs = @()
   )
 
   $OutputFile = Join-Path ([System.IO.Path]::GetTempPath()) "flovera-instrumentation-$([System.Guid]::NewGuid().ToString('N')).out"
@@ -174,6 +178,9 @@ function Invoke-AdbInstrumentation {
   $Arguments = @("-s", $Serial, "shell", "am", "instrument", "-w", "-r")
   if ($ClassFilter) {
     $Arguments += @("-e", "class", $ClassFilter)
+  }
+  if ($ExtraInstrumentationArgs) {
+    $Arguments += $ExtraInstrumentationArgs
   }
   $Arguments += $Runner
 
@@ -222,6 +229,7 @@ function Get-InstrumentationClassFilters {
 
   $TestRoot = Join-Path $ProjectRoot "app\src\androidTest\java\com\flovera\app"
   $Tests = Get-ChildItem -Path $TestRoot -Filter "*Test.kt" |
+    Where-Object { $_.BaseName -ne "WorkspaceLocalHttpDeepSeekSmokeInstrumentedTest" } |
     Sort-Object Name |
     ForEach-Object { "com.flovera.app.$($_.BaseName)" }
   if (-not $Tests) {
@@ -303,16 +311,48 @@ try {
   } else {
     Get-InstrumentationClassFilters -ProjectRoot $ProjectRoot
   }
+  $CompletedInstrumentationShards = 0
   foreach ($ClassFilter in $InstrumentationFilters) {
+    $ExtraInstrumentationArgs = @()
+    if ($ClassFilter -eq "com.flovera.app.WorkspaceLocalHttpDeepSeekSmokeInstrumentedTest" -and $DeepSeekApiKey) {
+      $ExtraInstrumentationArgs += @("-e", "deepseekApiKey", $DeepSeekApiKey)
+      if ($DeepSeekModel) {
+        $ExtraInstrumentationArgs += @("-e", "deepseekModel", $DeepSeekModel)
+      }
+      Write-Host "Live DeepSeek SSE smoke enabled for local HTTP runtime; API key value is not printed."
+    }
     Stop-AppPackages -AdbPath $Adb -Serial $DeviceSerial
     Invoke-AdbInstrumentation `
       -AdbPath $Adb `
       -Serial $DeviceSerial `
       -Runner "com.flovera.app.test/androidx.test.runner.AndroidJUnitRunner" `
       -ClassFilter $ClassFilter `
-      -TimeoutSeconds $InstrumentationTimeoutSeconds
+      -TimeoutSeconds $InstrumentationTimeoutSeconds `
+      -ExtraInstrumentationArgs $ExtraInstrumentationArgs
+    $CompletedInstrumentationShards += 1
   }
-  Write-Host "Instrumentation shards completed: $($InstrumentationFilters.Count)"
+  $LiveSmokeClass = "com.flovera.app.WorkspaceLocalHttpDeepSeekSmokeInstrumentedTest"
+  if (($RunLiveDeepSeekSmoke -or $DeepSeekApiKey) -and ($InstrumentationFilters -notcontains $LiveSmokeClass)) {
+    if (-not $DeepSeekApiKey) {
+      Write-Host "Live DeepSeek SSE smoke skipped because -DeepSeekApiKey was not provided."
+    } else {
+      $ExtraInstrumentationArgs = @("-e", "deepseekApiKey", $DeepSeekApiKey)
+      if ($DeepSeekModel) {
+        $ExtraInstrumentationArgs += @("-e", "deepseekModel", $DeepSeekModel)
+      }
+      Write-Host "Live DeepSeek SSE smoke enabled for local HTTP runtime; API key value is not printed."
+      Stop-AppPackages -AdbPath $Adb -Serial $DeviceSerial
+      Invoke-AdbInstrumentation `
+        -AdbPath $Adb `
+        -Serial $DeviceSerial `
+        -Runner "com.flovera.app.test/androidx.test.runner.AndroidJUnitRunner" `
+        -ClassFilter $LiveSmokeClass `
+        -TimeoutSeconds $InstrumentationTimeoutSeconds `
+        -ExtraInstrumentationArgs $ExtraInstrumentationArgs
+      $CompletedInstrumentationShards += 1
+    }
+  }
+  Write-Host "Instrumentation shards completed: $CompletedInstrumentationShards"
 } finally {
   Pop-Location
 }

@@ -17,7 +17,10 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import org.json.JSONObject
 
-class FloveraWebBridge(private val context: Context) {
+class FloveraWebBridge(
+  private val context: Context,
+  private val artifactActions: ArtifactActions? = null,
+) {
   private val appContext = context.applicationContext
   private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -70,6 +73,21 @@ class FloveraWebBridge(private val context: Context) {
 
     NotificationManagerCompat.from(appContext).notify(nextNotificationId(), notification)
     return "ok"
+  }
+
+  @JavascriptInterface
+  fun runAction(actionId: String, inputJson: String): String {
+    return artifactActions?.runAction(actionId, inputJson) ?: """{"status":"unsupported","error":"workspace artifact actions are not available"}"""
+  }
+
+  @JavascriptInterface
+  fun getJob(jobId: String): String {
+    return artifactActions?.getJob(jobId) ?: """{"status":"unsupported","error":"workspace artifact jobs are not available"}"""
+  }
+
+  @JavascriptInterface
+  fun cancelJob(jobId: String): String {
+    return artifactActions?.cancelJob(jobId) ?: """{"status":"unsupported","error":"workspace artifact job cancellation is not available"}"""
   }
 
   private fun ensureNotificationChannel() {
@@ -128,6 +146,12 @@ class FloveraWebBridge(private val context: Context) {
       pendingNotification = null
       FloveraWebBridge(context).postNotification(pending.title, pending.body)
     }
+  }
+
+  interface ArtifactActions {
+    fun runAction(actionId: String, inputJson: String): String
+    fun getJob(jobId: String): String
+    fun cancelJob(jobId: String): String
   }
 
   private data class PendingNotification(

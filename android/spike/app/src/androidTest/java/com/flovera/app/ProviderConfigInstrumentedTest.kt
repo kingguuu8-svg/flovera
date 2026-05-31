@@ -766,8 +766,8 @@ class ProviderConfigInstrumentedTest {
     val inferredRefresh = GoogleCloudCodeAssistCredentials.from("1//refresh-token|project-c|managed-c")
     val refreshBody = googleOAuthRefreshFormBody(
       refreshToken = "1//refresh-token",
-      clientId = "flovera-test-client-id",
-      clientSecret = "flovera-test-client-secret",
+      clientId = "test-oauth-client-id.apps.googleusercontent.com",
+      clientSecret = "test-oauth-client-secret",
     )
 
     assertFalse(access.usesRefreshToken)
@@ -781,8 +781,8 @@ class ProviderConfigInstrumentedTest {
     assertTrue(inferredRefresh.usesRefreshToken)
     assertTrue(refreshBody.contains("grant_type=refresh_token"))
     assertTrue(refreshBody.contains("refresh_token=1%2F%2Frefresh-token"))
-    assertTrue(refreshBody.contains("client_id=flovera-test-client-id"))
-    assertTrue(refreshBody.contains("client_secret=flovera-test-client-secret"))
+    assertTrue(refreshBody.contains("client_id=test-oauth-client-id.apps.googleusercontent.com"))
+    assertTrue(refreshBody.contains("client_secret=test-oauth-client-secret"))
   }
 
   @Test
@@ -1490,10 +1490,29 @@ class ProviderConfigInstrumentedTest {
   }
 
   @Test
-  fun networkToolsDefaultToDisabled() {
-    assertFalse(AppSettings().networkEnabled)
-    assertFalse(AppSettings().webSearchEnabled)
+  fun networkToolsDefaultToEnabled() {
+    assertTrue(AppSettings().networkEnabled)
+    assertTrue(AppSettings().webSearchEnabled)
+    assertFalse(AppSettings().networkUserConfigured)
+    assertFalse(AppSettings().webSearchUserConfigured)
+    assertFalse(AppSettings().backgroundKeepAliveEnabled)
     assertTrue(AppSettings(networkEnabled = true).networkEnabled)
+  }
+
+  @Test
+  fun settingsControllerMigratesOldNetworkDefaultsWithoutOverridingUserChoice() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val store = SettingsStore(context)
+    val original = store.load()
+    try {
+      store.save(AppSettings(networkEnabled = false, networkUserConfigured = false))
+      assertTrue(SettingsController(store).load().networkEnabled)
+
+      store.save(AppSettings(networkEnabled = false, networkUserConfigured = true))
+      assertFalse(SettingsController(store).load().networkEnabled)
+    } finally {
+      store.save(original)
+    }
   }
 
   @Test
@@ -1546,7 +1565,7 @@ class ProviderConfigInstrumentedTest {
       assertEquals("full", state.settings.agentAuthorityMode)
       assertEquals("light", state.settings.themeMode)
       assertEquals("#C989B8", state.settings.themeColor)
-      assertEquals(44, state.settings.maxAgentIterations)
+      assertEquals(0, state.settings.maxAgentIterations)
       assertTrue(workspace.listSettingsProposals().isEmpty())
       assertTrue(audit.contains("\"action\":\"settings_proposal_auto_apply\""))
       assertTrue(audit.contains("\"targetPath\":\".flovera/proposals/theme.json\""))
@@ -1571,6 +1590,7 @@ class ProviderConfigInstrumentedTest {
           themeColor = "#c989b8",
           networkEnabled = true,
           webSearchEnabled = true,
+          backgroundKeepAliveEnabled = true,
           language = "zh",
           maxAgentIterations = 120,
           agentAuthorityMode = "full",
@@ -1589,9 +1609,12 @@ class ProviderConfigInstrumentedTest {
       assertEquals("light", updated.themeMode)
       assertEquals("#C989B8", updated.themeColor)
       assertTrue(updated.networkEnabled)
+      assertTrue(updated.networkUserConfigured)
       assertTrue(updated.webSearchEnabled)
+      assertTrue(updated.webSearchUserConfigured)
+      assertTrue(updated.backgroundKeepAliveEnabled)
       assertEquals("zh", updated.language)
-      assertEquals(80, updated.maxAgentIterations)
+      assertEquals(0, updated.maxAgentIterations)
       assertEquals("full", updated.agentAuthorityMode)
       assertEquals("max", updated.deepSeekThinkingEffort)
       assertEquals("xhigh", updated.reasoningEffort)
@@ -1658,8 +1681,28 @@ class ProviderConfigInstrumentedTest {
       val updated = controller.setWebSearch(AppSettings(), enabled = true, braveApiKey = " brave-key ")
 
       assertTrue(updated.webSearchEnabled)
+      assertTrue(updated.webSearchUserConfigured)
       assertEquals("brave-key", updated.braveSearchApiKey)
       assertEquals("brave-key", store.load().braveSearchApiKey)
+    } finally {
+      store.save(original)
+    }
+  }
+
+  @Test
+  fun settingsControllerPersistsBackgroundKeepAliveSetting() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val store = SettingsStore(context)
+    val original = store.load()
+    try {
+      val controller = SettingsController(store)
+
+      val enabled = controller.setBackgroundKeepAlive(AppSettings(), enabled = true)
+      val disabled = controller.setBackgroundKeepAlive(enabled, enabled = false)
+
+      assertTrue(enabled.backgroundKeepAliveEnabled)
+      assertFalse(disabled.backgroundKeepAliveEnabled)
+      assertFalse(store.load().backgroundKeepAliveEnabled)
     } finally {
       store.save(original)
     }

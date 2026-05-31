@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Flovera Icon Tuner</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0d0f12;
+      color: #e7ece9;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: minmax(320px, 440px) minmax(360px, 1fr);
+      gap: 0;
+    }
+    aside {
+      border-right: 1px solid #242a2d;
+      padding: 22px;
+      overflow: auto;
+      background: #111518;
+    }
+    main {
+      display: grid;
+      grid-template-rows: minmax(360px, 1fr) 220px;
+      min-width: 0;
+    }
+    h1 {
+      margin: 0 0 18px;
+      font-size: 18px;
+      font-weight: 650;
+      letter-spacing: 0;
+    }
+    .control {
+      display: grid;
+      gap: 8px;
+      padding: 12px 0;
+      border-bottom: 1px solid #20262a;
+    }
+    label {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 16px;
+      font-size: 13px;
+      color: #c7d0cc;
+    }
+    output {
+      min-width: 64px;
+      text-align: right;
+      color: #8be8c4;
+      font-variant-numeric: tabular-nums;
+    }
+    input[type="range"] {
+      width: 100%;
+      accent-color: #32d69d;
+    }
+    .preview {
+      min-width: 0;
+      display: grid;
+      place-items: center;
+      padding: 32px;
+    }
+    .preview-wrap {
+      display: grid;
+      gap: 20px;
+      justify-items: center;
+    }
+    #iconPreview {
+      width: min(62vh, 560px);
+      max-width: 72vw;
+      aspect-ratio: 1;
+      border-radius: 32px;
+      background: #171b1f;
+      box-shadow: 0 30px 80px rgb(0 0 0 / 0.35);
+    }
+    .sizes {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      padding: 16px 20px;
+      border-radius: 16px;
+      background: #111518;
+      border: 1px solid #242a2d;
+    }
+    .sizes svg {
+      display: block;
+      background: #171b1f;
+      border-radius: 10px;
+    }
+    textarea {
+      width: 100%;
+      height: 100%;
+      min-height: 180px;
+      resize: none;
+      padding: 16px;
+      border: 0;
+      border-top: 1px solid #242a2d;
+      background: #090b0d;
+      color: #c9d4cf;
+      font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      outline: none;
+    }
+    .actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin: 18px 0 8px;
+    }
+    button {
+      border: 1px solid #2d3639;
+      border-radius: 10px;
+      padding: 10px 12px;
+      background: #18201e;
+      color: #e7ece9;
+      font: inherit;
+      cursor: pointer;
+    }
+    button:hover { background: #202a27; }
+    @media (max-width: 860px) {
+      body { grid-template-columns: 1fr; }
+      aside { border-right: 0; border-bottom: 1px solid #242a2d; }
+      main { grid-template-rows: auto 220px; }
+      #iconPreview { width: min(78vw, 420px); }
+    }
+  </style>
+</head>
+<body>
+  <aside>
+    <h1>Flovera Icon Tuner</h1>
+    <div id="controls"></div>
+    <div class="actions">
+      <button id="resetButton" type="button">重置</button>
+      <button id="copyButton" type="button">复制 SVG</button>
+    </div>
+  </aside>
+  <main>
+    <section class="preview">
+      <div class="preview-wrap">
+        <div id="iconPreview"></div>
+        <div class="sizes">
+          <div id="size96"></div>
+          <div id="size48"></div>
+          <div id="size32"></div>
+          <div id="size24"></div>
+        </div>
+      </div>
+    </section>
+    <textarea id="svgText" spellcheck="false"></textarea>
+  </main>
+
+  <script>
+    const defaults = {
+      angle: -8,
+      innerWidth: 404,
+      innerHeight: 452,
+      innerRadius: 132,
+      dotOuter: 58,
+      dotInner: 29,
+      squareOuter: 88,
+      squareInner: 44,
+      squareRadius: 11,
+      barWidth: 48,
+      barLength: 116,
+      barOffset: 66,
+      barShiftX: 0,
+      barShiftY: 0,
+      outerRadius: 216,
+      frameStroke: 28
+    };
+    const state = { ...defaults };
+    const controls = [
+      ["angle", "内层旋转", -18, 18, 1],
+      ["innerWidth", "内层宽度", 280, 520, 4],
+      ["innerHeight", "内层高度", 300, 560, 4],
+      ["innerRadius", "内层圆角", 48, 180, 2],
+      ["dotOuter", "圆点外径半径", 36, 82, 1],
+      ["dotInner", "圆点亮心半径", 12, 42, 1],
+      ["squareOuter", "方块外径", 56, 132, 2],
+      ["squareInner", "方块亮心", 20, 72, 2],
+      ["squareRadius", "方块圆角", 0, 28, 1],
+      ["barWidth", "短横粗细", 20, 70, 1],
+      ["barLength", "短横长度", 50, 180, 2],
+      ["barOffset", "短横离中心", 36, 112, 2],
+      ["barShiftX", "短横水平偏移", -80, 80, 2],
+      ["barShiftY", "短横垂直偏移", -80, 80, 2],
+      ["outerRadius", "外层圆角", 160, 260, 2],
+      ["frameStroke", "内框线宽", 0, 44, 2]
+    ];
+
+    const controlsEl = document.getElementById("controls");
+    const svgText = document.getElementById("svgText");
+
+    function rotatePoint(x, y, angleDeg, cx = 512, cy = 512) {
+      const rad = angleDeg * Math.PI / 180;
+      const cos = Math.cos(rad);
+      const sin = Math.sin(rad);
+      const dx = x - cx;
+      const dy = y - cy;
+      return [cx + dx * cos - dy * sin, cy + dx * sin + dy * cos];
+    }
+
+    function fixed(value) {
+      return Number(value).toFixed(2).replace(/\.00$/, "");
+    }
+
+    function svgMarkup() {
+      const innerX = 512 - state.innerWidth / 2;
+      const innerY = 512 - state.innerHeight / 2;
+      const r = Math.min(state.innerRadius, state.innerWidth / 2, state.innerHeight / 2);
+      const leftLower = rotatePoint(innerX + r, innerY + state.innerHeight - r, state.angle);
+      const rightUpper = rotatePoint(innerX + state.innerWidth - r, innerY + r, state.angle);
+      const lowerBarStart = rotatePoint(512 - state.barOffset + state.barShiftX, 512 + state.innerHeight / 2 - r + state.barShiftY, state.angle);
+      const lowerBarEnd = rotatePoint(512 - state.barOffset + state.barLength + state.barShiftX, 512 + state.innerHeight / 2 - r + state.barShiftY, state.angle);
+      const upperBarStart = rotatePoint(1024 - (512 - state.barOffset + state.barShiftX), 1024 - (512 + state.innerHeight / 2 - r + state.barShiftY), state.angle);
+      const upperBarEnd = rotatePoint(1024 - (512 - state.barOffset + state.barLength + state.barShiftX), 1024 - (512 + state.innerHeight / 2 - r + state.barShiftY), state.angle);
+      const squareX = rightUpper[0] - state.squareOuter / 2;
+      const squareY = rightUpper[1] - state.squareOuter / 2;
+      const squareInnerX = rightUpper[0] - state.squareInner / 2;
+      const squareInnerY = rightUpper[1] - state.squareInner / 2;
+      return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="Flovera geometric double-layer icon">
+  <defs>
+    <linearGradient id="base" x1="172" y1="128" x2="852" y2="896" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#10201C"/>
+      <stop offset="1" stop-color="#050807"/>
+    </linearGradient>
+    <linearGradient id="agent" x1="346" y1="298" x2="692" y2="734" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7DFFD6"/>
+      <stop offset="0.58" stop-color="#26D9A2"/>
+      <stop offset="1" stop-color="#0C7D61"/>
+    </linearGradient>
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="28" stdDeviation="28" flood-color="#000000" flood-opacity="0.38"/>
+    </filter>
+    <filter id="agentGlow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="22" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.18  0 0 0 0 1.00  0 0 0 0 0.72  0 0 0 0.72 0" result="glow"/>
+      <feMerge>
+        <feMergeNode in="glow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <rect x="112" y="112" width="800" height="800" rx="${fixed(state.outerRadius)}" fill="url(#base)"/>
+  <rect x="148" y="148" width="728" height="728" rx="${fixed(Math.max(0, state.outerRadius - 32))}" fill="none" stroke="#1F3B34" stroke-width="${fixed(state.frameStroke)}" opacity="0.72"/>
+  <g filter="url(#softShadow)">
+    <rect x="${fixed(innerX)}" y="${fixed(innerY)}" width="${fixed(state.innerWidth)}" height="${fixed(state.innerHeight)}" rx="${fixed(r)}" fill="url(#agent)" transform="rotate(${fixed(state.angle)} 512 512)"/>
+  </g>
+  <circle cx="${fixed(leftLower[0])}" cy="${fixed(leftLower[1])}" r="${fixed(state.dotOuter)}" fill="#07100E" opacity="0.94"/>
+  <circle cx="${fixed(leftLower[0])}" cy="${fixed(leftLower[1])}" r="${fixed(state.dotInner)}" fill="#D7FFF2" filter="url(#agentGlow)"/>
+  <path d="M${fixed(lowerBarStart[0])} ${fixed(lowerBarStart[1])} L${fixed(lowerBarEnd[0])} ${fixed(lowerBarEnd[1])}" fill="none" stroke="#000000" stroke-width="${fixed(state.barWidth)}" stroke-linecap="round"/>
+  <path d="M${fixed(upperBarStart[0])} ${fixed(upperBarStart[1])} L${fixed(upperBarEnd[0])} ${fixed(upperBarEnd[1])}" fill="none" stroke="#000000" stroke-width="${fixed(state.barWidth)}" stroke-linecap="round"/>
+  <rect x="${fixed(squareX)}" y="${fixed(squareY)}" width="${fixed(state.squareOuter)}" height="${fixed(state.squareOuter)}" rx="${fixed(state.squareRadius)}" fill="#000000" transform="rotate(${fixed(state.angle)} ${fixed(rightUpper[0])} ${fixed(rightUpper[1])})"/>
+  <rect x="${fixed(squareInnerX)}" y="${fixed(squareInnerY)}" width="${fixed(state.squareInner)}" height="${fixed(state.squareInner)}" rx="${fixed(Math.min(8, state.squareInner / 4))}" fill="#D7FFF2" filter="url(#agentGlow)" transform="rotate(${fixed(state.angle)} ${fixed(rightUpper[0])} ${fixed(rightUpper[1])})"/>
+</svg>`;
+    }
+
+    function render() {
+      const markup = svgMarkup();
+      document.getElementById("iconPreview").innerHTML = markup;
+      svgText.value = markup;
+      for (const [id, size] of [["size96", 96], ["size48", 48], ["size32", 32], ["size24", 24]]) {
+        const el = document.getElementById(id);
+        el.innerHTML = markup;
+        const svg = el.querySelector("svg");
+        svg.setAttribute("width", size);
+        svg.setAttribute("height", size);
+      }
+      for (const [key] of controls) {
+        document.querySelector(`output[data-key="${key}"]`).value = state[key];
+      }
+    }
+
+    function buildControls() {
+      for (const [key, label, min, max, step] of controls) {
+        const wrap = document.createElement("div");
+        wrap.className = "control";
+        wrap.innerHTML = `
+          <label><span>${label}</span><output data-key="${key}">${state[key]}</output></label>
+          <input type="range" min="${min}" max="${max}" step="${step}" value="${state[key]}" data-key="${key}">
+        `;
+        wrap.querySelector("input").addEventListener("input", event => {
+          state[key] = Number(event.target.value);
+          render();
+        });
+        controlsEl.appendChild(wrap);
+      }
+    }
+
+    document.getElementById("resetButton").addEventListener("click", () => {
+      Object.assign(state, defaults);
+      for (const input of document.querySelectorAll("input[type='range']")) {
+        input.value = state[input.dataset.key];
+      }
+      render();
+    });
+
+    document.getElementById("copyButton").addEventListener("click", async () => {
+      await navigator.clipboard.writeText(svgText.value);
+    });
+
+    buildControls();
+    render();
+  </script>
+</body>
+</html>

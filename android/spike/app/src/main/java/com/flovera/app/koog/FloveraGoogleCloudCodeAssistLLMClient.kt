@@ -901,9 +901,6 @@ internal fun googleOAuthRefreshFormBody(
   clientId: String = GOOGLE_GEMINI_CLI_OAUTH_CLIENT_ID,
   clientSecret: String = GOOGLE_GEMINI_CLI_OAUTH_CLIENT_SECRET,
 ): String {
-  require(clientId.isNotBlank()) {
-    "Google OAuth refresh requires an explicit OAuth client id in public builds."
-  }
   val fields = linkedMapOf(
     "grant_type" to "refresh_token",
     "refresh_token" to refreshToken,
@@ -992,8 +989,9 @@ private fun JsonObject.booleanOrNull(key: String): Boolean? {
 
 private const val CODE_ASSIST_ENDPOINT = "https://cloudcode-pa.googleapis.com"
 private const val GOOGLE_OAUTH_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
-private const val GOOGLE_GEMINI_CLI_OAUTH_CLIENT_ID = ""
-private const val GOOGLE_GEMINI_CLI_OAUTH_CLIENT_SECRET = ""
+private const val GOOGLE_GEMINI_CLI_OAUTH_CLIENT_ID =
+  "configure-google-oauth-client-id.apps.googleusercontent.com"
+private const val GOOGLE_GEMINI_CLI_OAUTH_CLIENT_SECRET = "configure-google-oauth-client-secret"
 private const val GOOGLE_OAUTH_REFRESH_SKEW_MILLIS = 60_000L
 private const val FREE_TIER_ID = "free-tier"
 private const val GEMINI_CLI_USER_AGENT = "google-api-nodejs-client/9.15.1 (gzip)"

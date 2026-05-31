@@ -13,6 +13,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.flovera.app.web.FloveraWebBridge
 import com.flovera.app.theme.FloveraTheme
@@ -23,13 +24,36 @@ class MainActivity : ComponentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
 
+    val styleShowcaseMode = resources.getBoolean(R.bool.style_showcase_mode)
+
     enableEdgeToEdge()
-    controller = AgentController(applicationContext)
+    if (styleShowcaseMode) {
+      WindowCompat.getInsetsController(window, window.decorView).isAppearanceLightStatusBars = true
+      WindowCompat.getInsetsController(window, window.decorView).isAppearanceLightNavigationBars = true
+    }
+
+    if (styleShowcaseMode) {
+      setContent {
+        FloveraTheme(themeMode = "light", themeColor = "#127089") {
+          StyleShowcaseApp()
+        }
+      }
+      return
+    }
+
+    controller = AgentControllerProvider.get(applicationContext)
     consumeShareIntent(intent)
     setContent {
       val appController = remember { controller }
       val state by appController.state.collectAsStateWithLifecycle()
       DisposableEffect(appController) { onDispose { } }
+      DisposableEffect(state.settings.themeMode) {
+        val lightSystemBars = state.settings.themeMode == "light"
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        controller.isAppearanceLightStatusBars = lightSystemBars
+        controller.isAppearanceLightNavigationBars = lightSystemBars
+        onDispose { }
+      }
 
       FloveraTheme(
         themeMode = state.settings.themeMode,

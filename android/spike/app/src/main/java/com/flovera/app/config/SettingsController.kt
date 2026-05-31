@@ -23,17 +23,21 @@ class SettingsController(private val store: SettingsStore) {
   fun loadResult(): SettingsLoadResult {
     val result = store.loadResult()
     val loaded = result.settings
-    val normalized = normalizeReasoningEffort(
-      normalizeDeepSeekThinkingEffort(
-        normalizeAuthorityMode(
-          normalizeAppearance(
-            normalizeLanguage(
-              normalizeCustomOpenAIProvider(normalizeProviderAndModel(normalizeHtmlLists(loaded))),
+    val normalized = normalizeNetworkAndSearchDefaults(
+      normalizeReasoningEffort(
+        normalizeDeepSeekThinkingEffort(
+          normalizeAuthorityMode(
+            normalizeRunLimits(
+              normalizeAppearance(
+                normalizeLanguage(
+                  normalizeCustomOpenAIProvider(normalizeProviderAndModel(normalizeHtmlLists(loaded))),
+                ),
+              ),
             ),
           ),
         ),
-      ),
-    ).let { normalizeOpenRouterProvider(it) }
+      ).let { normalizeOpenRouterProvider(it) },
+    )
     if (normalized != loaded) store.save(normalized)
     return result.copy(settings = normalized)
   }
@@ -82,7 +86,7 @@ class SettingsController(private val store: SettingsStore) {
   }
 
   fun setNetworkEnabled(settings: AppSettings, enabled: Boolean): AppSettings {
-    val updated = settings.copy(networkEnabled = enabled)
+    val updated = settings.copy(networkEnabled = enabled, networkUserConfigured = true)
     store.save(updated)
     return updated
   }
@@ -90,8 +94,15 @@ class SettingsController(private val store: SettingsStore) {
   fun setWebSearch(settings: AppSettings, enabled: Boolean, braveApiKey: String): AppSettings {
     val updated = settings.copy(
       webSearchEnabled = enabled,
+      webSearchUserConfigured = true,
       braveSearchApiKey = normalizeBraveSearchApiKey(braveApiKey),
     )
+    store.save(updated)
+    return updated
+  }
+
+  fun setBackgroundKeepAlive(settings: AppSettings, enabled: Boolean): AppSettings {
+    val updated = settings.copy(backgroundKeepAliveEnabled = enabled)
     store.save(updated)
     return updated
   }
@@ -129,14 +140,19 @@ class SettingsController(private val store: SettingsStore) {
       ?: ModelProviderCatalog.findProvider(settings.provider)
       ?: ModelProviderCatalog.defaultProvider
     val model = changes.model?.trim()?.takeIf { it.isNotBlank() } ?: settings.model.ifBlank { provider.defaultModel }
-    val maxIterations = changes.maxAgentIterations?.coerceIn(1, 80) ?: settings.maxAgentIterations
+    val maxIterations = changes.maxAgentIterations
+      ?.let { normalizeMaxAgentIterations(it) }
+      ?: settings.maxAgentIterations
     val updated = settings.copy(
       provider = provider.id,
       model = model,
       selectedHtmlPath = changes.selectedHtmlPath?.trim() ?: settings.selectedHtmlPath,
       maxAgentIterations = maxIterations,
       networkEnabled = changes.networkEnabled ?: settings.networkEnabled,
+      networkUserConfigured = if (changes.networkEnabled != null) true else settings.networkUserConfigured,
       webSearchEnabled = changes.webSearchEnabled ?: settings.webSearchEnabled,
+      webSearchUserConfigured = if (changes.webSearchEnabled != null) true else settings.webSearchUserConfigured,
+      backgroundKeepAliveEnabled = changes.backgroundKeepAliveEnabled ?: settings.backgroundKeepAliveEnabled,
       language = changes.language?.let { normalizeLanguageId(it) } ?: settings.language,
       themeMode = changes.themeMode?.let { normalizeThemeMode(it) } ?: settings.themeMode,
       themeColor = changes.themeColor?.let { normalizeThemeColor(it) } ?: settings.themeColor,
@@ -227,6 +243,10 @@ class SettingsController(private val store: SettingsStore) {
     )
   }
 
+  private fun normalizeRunLimits(settings: AppSettings): AppSettings {
+    return settings.copy(maxAgentIterations = normalizeMaxAgentIterations(settings.maxAgentIterations))
+  }
+
   private fun normalizeHtmlLists(settings: AppSettings): AppSettings {
     return settings.copy(
       pinnedHtmlPaths = normalizeHtmlPathList(settings.pinnedHtmlPaths),
@@ -252,6 +272,22 @@ class SettingsController(private val store: SettingsStore) {
         minCodingScore = settings.openRouterProvider.minCodingScore?.let { normalizeOpenRouterMinCodingScore(it) },
       ),
     )
+  }
+
+  private fun normalizeNetworkAndSearchDefaults(settings: AppSettings): AppSettings {
+    val networkDefaulted = if (!settings.networkUserConfigured && !settings.networkEnabled) {
+      settings.copy(networkEnabled = true)
+    } else {
+      settings
+    }
+    return if (!networkDefaulted.webSearchUserConfigured &&
+      networkDefaulted.braveSearchApiKey.isNotBlank() &&
+      !networkDefaulted.webSearchEnabled
+    ) {
+      networkDefaulted.copy(webSearchEnabled = true)
+    } else {
+      networkDefaulted
+    }
   }
 
   private fun AppSettings.withMergedModelContextOverride(
@@ -345,6 +381,10 @@ class SettingsController(private val store: SettingsStore) {
     return score.takeIf { it in 0.0..1.0 }
   }
 
+  private fun normalizeMaxAgentIterations(value: Int): Int {
+    return AGENT_ITERATIONS_UNLIMITED
+  }
+
   private fun normalizeHtmlPathList(paths: List<String>): List<String> {
     return paths.map { it.trim() }
       .filter { it.isNotBlank() }
@@ -366,6 +406,7 @@ data class SettingsProposalChanges(
   val maxAgentIterations: Int? = null,
   val networkEnabled: Boolean? = null,
   val webSearchEnabled: Boolean? = null,
+  val backgroundKeepAliveEnabled: Boolean? = null,
   val language: String? = null,
   val themeMode: String? = null,
   val themeColor: String? = null,
