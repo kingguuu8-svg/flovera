@@ -310,12 +310,11 @@ private class PythonCommandAdapter(
 
   private fun pythonCommandCode(code: String, scriptArgs: List<String>): String {
     val encodedArgs = FloveraPythonRuntime.json.encodeToString(scriptArgs)
-    return """
-      import sys as _flovera_sys
-      _flovera_sys.argv = ["-c"] + $encodedArgs
-      del _flovera_sys
-      $code
-    """.trimIndent()
+    val normalizedCode = code.trimStart('\n', '\r')
+    return "import sys as _flovera_sys\n" +
+      "_flovera_sys.argv = [\"-c\"] + $encodedArgs\n" +
+      "del _flovera_sys\n" +
+      normalizedCode
   }
 }
 
@@ -456,12 +455,13 @@ private class GroovyCommandAdapter(
     val scriptClass = loader.loadClass(scriptDex.mainClassName).asSubclass(Script::class.java)
     val script = scriptClass.getDeclaredConstructor().newInstance()
     script.binding = binding
-    return script.run()
+    return FloveraGroovyFile.withWorkspaceRoot(workspace.root) { script.run() }
   }
 
   private fun normalizeGroovyAndroidJavaVersion() {
     System.setProperty("java.specification.version", "1.8")
   }
+
 }
 
 private class JvmArtifactManager(
@@ -596,16 +596,20 @@ private class JvmArtifactManager(
     val cacheDir = File(cacheRoot, "groovy/$key")
     val dexDir = File(cacheDir, "dex")
     val classDir = File(cacheDir, "classes")
+    val sourceDir = File(cacheDir, "source")
     val optimizedDir = File(cacheDir, "optimized")
     val dexFile = File(dexDir, "classes.dex")
     val mainClassFile = File(cacheDir, "main-class.txt")
     if (!dexFile.isFile || !mainClassFile.isFile) {
       classDir.deleteRecursively()
       dexDir.deleteRecursively()
+      sourceDir.deleteRecursively()
       optimizedDir.mkdirs()
       classDir.mkdirs()
       dexDir.mkdirs()
-      compileGroovyToClasses(scriptFile, classDir, libraryDex)
+      sourceDir.mkdirs()
+      val compileSource = transformedGroovySource(scriptFile, sourceDir)
+      compileGroovyToClasses(compileSource, classDir, libraryDex)
       val mainClassName = findGroovyScriptClassName(scriptFile, classDir)
       compileClassesToDex(classDir, dexDir, jars)
       markDexReadOnly(dexDir)
@@ -637,6 +641,15 @@ private class JvmArtifactManager(
     val groovyClassLoader = GroovyClassLoader(parentLoader, configuration, false)
     val compilationUnit = CompilationUnit(configuration, null, groovyClassLoader)
     FileSystemCompiler(configuration, compilationUnit).compile(arrayOf(scriptFile.absolutePath))
+  }
+
+  private fun transformedGroovySource(scriptFile: File, sourceDir: File): File {
+    val transformed = NEW_FILE_PATTERN.replace(scriptFile.readText(StandardCharsets.UTF_8)) {
+      "new com.flovera.app.koog.FloveraGroovyFile("
+    }
+    val output = File(sourceDir, scriptFile.name)
+    output.writeText(transformed, StandardCharsets.UTF_8)
+    return output
   }
 
   private fun findGroovyScriptClassName(scriptFile: File, classDir: File): String {
@@ -865,6 +878,38 @@ class FloveraGroovyContext internal constructor(
   }
 }
 
+class FloveraGroovyFile : File {
+  constructor(pathname: String) : super(resolveWorkspacePath(pathname))
+  constructor(parent: String?, child: String) : super(parent?.let { resolveWorkspacePath(it) }, child)
+  constructor(parent: File?, child: String) : super(parent, child)
+
+  companion object {
+    private val workspaceRoot = ThreadLocal<File>()
+
+    internal fun <T> withWorkspaceRoot(root: File, block: () -> T): T {
+      val previous = workspaceRoot.get()
+      workspaceRoot.set(root.canonicalFile)
+      return try {
+        block()
+      } finally {
+        if (previous == null) {
+          workspaceRoot.remove()
+        } else {
+          workspaceRoot.set(previous)
+        }
+      }
+    }
+
+    @JvmStatic
+    fun resolveWorkspacePath(path: String): String {
+      val file = File(path)
+      if (file.isAbsolute) return file.path
+      val root = workspaceRoot.get() ?: return file.path
+      return File(root, path).path
+    }
+  }
+}
+
 private data class BoundedText(
   val text: String,
   val truncated: Boolean,
@@ -884,6 +929,7 @@ private fun sha256(bytes: ByteArray): String {
 
 private val mavenJson = Json { ignoreUnknownKeys = true }
 private val MAVEN_PROPERTY_PATTERN = Regex("""\$\{([^}]+)\}""")
+private val NEW_FILE_PATTERN = Regex("""\bnew\s+File\s*\(""")
 
 private fun kotlinx.serialization.json.JsonElement.jsonArrayOrNull(): JsonArray? = this as? JsonArray
 

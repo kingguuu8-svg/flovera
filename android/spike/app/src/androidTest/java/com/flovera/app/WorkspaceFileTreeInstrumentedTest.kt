@@ -1012,6 +1012,34 @@ class WorkspaceFileTreeInstrumentedTest {
   }
 
   @Test
+  fun workspaceCommandRunExecutesMultilinePythonCommandCode() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "workspace-command-python-c-${System.currentTimeMillis()}")
+    val tool = WorkspaceCommandRunTool(workspace, ToolEventRecorder(), authorityMode = "full")
+
+    val result = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf(
+          "python",
+          "-c",
+          """
+          import os
+          os.makedirs("out", exist_ok=True)
+          with open("out/from-python-c.txt", "w", encoding="utf-8") as handle:
+              handle.write("ok")
+          print("python-c-ok")
+          """.trimIndent(),
+        ),
+        snapshotBeforeRun = false,
+      ),
+    )
+
+    assertTrue(result, result.contains("Workspace command status=ok exitCode=0"))
+    assertTrue(result, result.contains("python-c-ok"))
+    assertTrue(workspace.readFile("out/from-python-c.txt").contains("ok"))
+  }
+
+  @Test
   fun workspaceCommandRunRejectsUnsupportedCommands() = runBlocking {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val workspace = WorkspaceManager(context, "workspace-command-unsupported-${System.currentTimeMillis()}")
@@ -1095,6 +1123,37 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(result, result.contains("groovy-args=alpha"))
     assertTrue(result, result.contains("groovy-return"))
     assertTrue(workspace.readFile("out/groovy.txt").contains("groovy ok alpha"))
+  }
+
+  @Test
+  fun workspaceCommandRunGroovyRelativeFileIoUsesWorkspaceRoot() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "workspace-command-groovy-file-${System.currentTimeMillis()}")
+    workspace.writeFile(
+      "tools/write_relative.groovy",
+      """
+      new File("out").mkdirs()
+      new File("out/groovy-relative.txt").withWriter("UTF-8") { writer ->
+          writer.write("relative-ok")
+      }
+      out.println(new File("out/groovy-relative.txt").text)
+      return "file-io-ok"
+      """.trimIndent(),
+      createAutoSnapshot = false,
+    )
+    val tool = WorkspaceCommandRunTool(workspace, ToolEventRecorder(), authorityMode = "full")
+
+    val result = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("groovy", "tools/write_relative.groovy"),
+        snapshotBeforeRun = false,
+      ),
+    )
+
+    assertTrue(result, result.contains("Workspace command status=ok exitCode=0"))
+    assertTrue(result, result.contains("relative-ok"))
+    assertTrue(result, result.contains("file-io-ok"))
+    assertTrue(workspace.readFile("out/groovy-relative.txt").contains("relative-ok"))
   }
 
   @Test
