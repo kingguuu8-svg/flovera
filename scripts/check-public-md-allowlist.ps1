@@ -4,29 +4,66 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$allowed = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-@(
-  "README.md",
-  "CHANGELOG.md",
-  "CONTRIBUTING.md",
-  "SECURITY.md",
-  "THIRD_PARTY_NOTICES.md"
-) | ForEach-Object { [void]$allowed.Add($_) }
-
 $files = & git ls-tree -r --name-only $Ref
 if ($LASTEXITCODE -ne 0) {
   exit $LASTEXITCODE
 }
 
-$blocked = @(
-  $files |
-    Where-Object { $_.EndsWith(".md", [System.StringComparison]::OrdinalIgnoreCase) } |
-    Where-Object { -not $allowed.Contains($_) }
-)
+$blockedPaths = @()
+foreach ($file in $files) {
+  $normalized = $file -replace "\\", "/"
+  $lower = $normalized.ToLowerInvariant()
 
-if ($blocked.Count -gt 0) {
-  Write-Error ("Public markdown allowlist failed for {0}. Blocked files:`n{1}" -f $Ref, ($blocked -join "`n"))
+  $isEnvExample = $lower.EndsWith(".env.example") -or $lower.EndsWith("/.env.example")
+  $isForbiddenRuntimePath =
+    $lower -match "(^|/)(sessions|workspaces|device-dumps|adb-dumps|logs)/" -or
+    $lower -match "(^|/)\.flovera/(sessions|workspaces|logs|settings\.json)" -or
+    $lower -match "(^|/)(settings|setting|local\.settings)\.json$" -or
+    $lower -match "\.local\.json$"
+  $isForbiddenSecretPath =
+    (-not $isEnvExample -and $lower -match "(^|/)\.env($|[./])") -or
+    $lower -match "\.(jks|keystore|p12|pfx|mobileprovision|pem|key)$" -or
+    $lower -match "(^|/)(google-services\.json|secrets\.properties)$"
+  $isForbiddenBuildOutput =
+    $lower -match "\.(apk|ap_|aab)$" -or
+    $lower -match "(^|/)(build|\.gradle|\.cxx)/"
+
+  if ($isForbiddenRuntimePath -or $isForbiddenSecretPath -or $isForbiddenBuildOutput) {
+    $blockedPaths += $file
+  }
+}
+
+if ($blockedPaths.Count -gt 0) {
+  Write-Error ("Public safety scan failed for {0}. Blocked tracked paths:`n{1}" -f $Ref, ($blockedPaths -join "`n"))
   exit 1
 }
 
-Write-Host "Public markdown allowlist passed for $Ref."
+$secretPatterns = @(
+  "g[h]p_[A-Za-z0-9_]{20,}",
+  "g[h]o_[A-Za-z0-9_]{20,}",
+  "g[i]thu[b]_pat_[A-Za-z0-9_]{30,}",
+  "s[k]-[A-Za-z0-9]{20,}",
+  "A[I]za[0-9A-Za-z_-]{20,}",
+  "A[K]IA[0-9A-Z]{16}",
+  "B[e]arer[ ]+[A-Za-z0-9._~+/=-]{30,}",
+  "api[_-]?key[ ]*[:=][ ]*['""]?[A-Za-z0-9._-]{30,}",
+  "token[ ]*[:=][ ]*['""]?[A-Za-z0-9._-]{30,}",
+  "B[E]GIN .{0,30}PRIVATE KEY"
+)
+
+$matches = @()
+foreach ($pattern in $secretPatterns) {
+  $result = & git grep -I -n -E $pattern $Ref -- . 2>$null
+  if ($LASTEXITCODE -eq 0 -and $result) {
+    $matches += $result
+  } elseif ($LASTEXITCODE -gt 1) {
+    exit $LASTEXITCODE
+  }
+}
+
+if ($matches.Count -gt 0) {
+  Write-Error ("Public safety scan failed for {0}. Possible secrets:`n{1}" -f $Ref, (($matches | Select-Object -First 50) -join "`n"))
+  exit 1
+}
+
+Write-Host "Public safety scan passed for $Ref."

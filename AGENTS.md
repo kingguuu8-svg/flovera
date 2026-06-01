@@ -46,21 +46,25 @@ This file defines repository-local rules for AI collaboration.
 - Do not create or update a GitHub Release unless the user explicitly approves it.
 - Keep the latest pushed commit and the latest release aligned.
 
-## Public Markdown Rules
+## Public Safety Rules
 
-- Internal Markdown files may be committed locally.
-- Internal Markdown files must not be pushed to the public remote.
-- Only open-source-facing Markdown files may be pushed publicly.
-- The public Markdown allowlist is:
-  - `README.md`
-  - `CHANGELOG.md`
-  - `CONTRIBUTING.md`
-  - `SECURITY.md`
-  - `THIRD_PARTY_NOTICES.md`
-- All other Markdown files are internal unless the user explicitly reclassifies them as public-facing.
-- `AGENTS.md`, `PRODUCT_QUALITY.md`, `docs/OPEN_SOURCE_READINESS.md`, archived route docs, release draft notes, and planning docs are internal Markdown.
-- Before any public push, run `scripts/check-public-md-allowlist.ps1 -Ref <public-ref>`.
-- If the check fails, do not push that ref.
+- This repository is allowed to be public as a product and process showcase.
+  Planning docs, backlog notes, design docs, and repository-local collaboration
+  rules may be committed and pushed when they are useful.
+- Do not create special public-only commit selections just to hide ordinary docs.
+  When the user approves a push, push the normal committed branch state unless
+  there is a concrete safety issue.
+- Use `.gitignore` as the primary boundary for local-only files: secrets,
+  signing material, APK/AAB outputs, device dumps, private workspace data,
+  session logs, local settings, and generated caches should not become tracked.
+- `.gitignore` does not protect files that are already tracked. If a tracked
+  file contains a secret or private device/user data, stop and remove the
+  sensitive content before pushing.
+- Before a public release or whenever safety is uncertain, run
+  `scripts/check-public-md-allowlist.ps1 -Ref <ref>`. The script is now a
+  lightweight public safety scan despite the legacy name; it must fail only for
+  likely secrets, signing files, binaries, or private local/runtime data, not for
+  ordinary Markdown documents.
 
 ## Device Verification Rules
 

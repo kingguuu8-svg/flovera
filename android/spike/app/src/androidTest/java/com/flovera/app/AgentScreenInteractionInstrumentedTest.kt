@@ -61,8 +61,22 @@ class AgentScreenInteractionInstrumentedTest {
     }
 
     composeRule.onNodeWithText("No preview \u00b7 choose display").assertIsDisplayed()
-    composeRule.onNodeWithText("\u505a\u4e00\u4e2a\u79d1\u5b66\u8ba1\u7b97\u5668").assertIsDisplayed()
+    composeRule.onNodeWithText("Make a scientific calculator").assertIsDisplayed()
     composeRule.onNodeWithContentDescription("Open conversation").assertIsDisplayed()
+  }
+
+  @Test
+  fun starterPromptsFollowChineseLanguageSetting() {
+    val context = composeRule.activity.applicationContext
+    SettingsStore(context).save(usableSettings(AppSettings(selectedHtmlPath = "", language = "zh")))
+    val controller = AgentController(context)
+
+    composeRule.setContent {
+      AgentScreen(controller)
+    }
+
+    composeRule.onNodeWithText("\u505a\u4e00\u4e2a\u79d1\u5b66\u8ba1\u7b97\u5668").assertIsDisplayed()
+    composeRule.onNodeWithText("\u505a\u4e00\u4e2a\u8d2a\u5403\u86c7\u5c0f\u6e38\u620f").assertIsDisplayed()
   }
 
   @Test
@@ -86,7 +100,7 @@ class AgentScreenInteractionInstrumentedTest {
     }
 
     composeRule.onNodeWithText("No preview \u00b7 choose display").assertIsDisplayed()
-    composeRule.onNodeWithText("\u505a\u4e00\u4e2a\u79d1\u5b66\u8ba1\u7b97\u5668").assertIsDisplayed()
+    composeRule.onNodeWithText("Make a scientific calculator").assertIsDisplayed()
     composeRule.onNodeWithContentDescription("Open settings to configure model API").assertIsDisplayed()
     composeRule.runOnIdle {
       val state = controller.state.value

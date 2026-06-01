@@ -2,6 +2,7 @@
 artifacts/*
 !artifacts/README.md
 docs/archive/legacy-qemu-vps/runtime/artifacts/screenshots/
+docs/release-work/**/media/
 *.img
 *.qcow2
 *.raw
@@ -13,18 +14,41 @@ docs/archive/legacy-qemu-vps/runtime/artifacts/screenshots/
 # Local caches
 .cache/
 tmp/
+.codex/
 .env
 .env.*
 !.env.example
 setting.json
 settings.json
+local.settings.json
+*.local.json
 .gradle/
 **/build/
 **/.cxx/
 **/local.properties
-android/spike/**/*.apk
-android/spike/**/*.ap_
+*.apk
+*.ap_
+*.aab
 android/spike/app/src/main/jniLibs/arm64-v8a/*.so*
+
+# Signing and credentials
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.mobileprovision
+google-services.json
+secrets.properties
+
+# Flovera local runtime state
+.flovera/settings.json
+.flovera/sessions/
+.flovera/workspaces/
+.flovera/logs/
+sessions/
+workspaces/
+device-dumps/
+adb-dumps/
 
 # Logs
 *.log
