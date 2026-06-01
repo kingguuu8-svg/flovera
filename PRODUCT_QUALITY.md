@@ -741,8 +741,13 @@ the generated dex through `DexClassLoader`; direct `GroovyShell` loading is not
 used because Android cannot load JVM class files directly. Groovy also scans
 workspace `libs/**/*.jar`, compiles scripts against those jars, converts the
 jars to dex, and caches script/library dex under `.flovera/runtime/jvm-artifacts`.
-This supports pure JVM jars as the first reusable library source; Maven
-coordinate resolution is still deferred. The older direct evaluator tool
+The same JVM artifact layer can resolve direct Maven coordinates declared in
+`libs/maven.json` or `.flovera/jvm/maven.json`, downloading POM/JAR files into
+the workspace runtime cache, parsing common compile/runtime transitive
+dependencies, and then feeding those jars into the same D8/classloader path.
+This supports pure JVM jars and direct Maven coordinates as reusable library
+sources; full Maven/Gradle builds, BOMs, exclusions, classifiers, and advanced
+conflict mediation remain deferred. The older direct evaluator tool
 `python_run` is disabled by default to keep the request tool schema smaller and
 reduce routing ambiguity; it can be restored as a fallback through
 `pythonRunToolFallbackEnabled` in app settings/settings proposals. This is not
@@ -762,6 +767,9 @@ broader shell-compatible commands remain deferred.
   cwd, timeout, output, snapshot, and audit boundary.
 - Done: add the first JVM artifact layer for Groovy: workspace `libs/**/*.jar`
   classpath discovery, D8 conversion, dex caching, and runtime class loading.
+- Done: add direct Maven coordinate resolution through `libs/maven.json` and
+  `.flovera/jvm/maven.json`, with Maven Central defaults, runtime cache, and
+  basic compile/runtime transitive dependency parsing.
 - Next target: keep expanding command runtimes, such as Git/JGit, only when
   they can reuse the same execution boundary.
 - Keep ordinary file operations as app-owned tools (`read`, `edit`, `search`,

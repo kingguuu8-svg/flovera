@@ -16,17 +16,29 @@ import groovy.lang.Script
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.PrintWriter
+import java.net.URL
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
+import javax.xml.parsers.DocumentBuilderFactory
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.codehaus.groovy.control.CompilationUnit
 import org.codehaus.groovy.control.CompilerConfiguration
 import org.codehaus.groovy.tools.FileSystemCompiler
+import org.w3c.dom.Element
 
 class WorkspaceCommandRunTool(
   private val workspace: WorkspaceManager,
@@ -80,7 +92,7 @@ class WorkspaceCommandGateway(
 ) {
   private val adapters: List<WorkspaceCommandAdapter> = listOf(
     PythonCommandAdapter(workspace, networkEnabled),
-    GroovyCommandAdapter(workspace),
+    GroovyCommandAdapter(workspace, networkEnabled),
   )
 
   fun run(args: WorkspaceCommandRunTool.Args): String {
@@ -309,6 +321,7 @@ private class PythonCommandAdapter(
 
 private class GroovyCommandAdapter(
   private val workspace: WorkspaceManager,
+  private val networkEnabled: Boolean,
 ) : WorkspaceCommandAdapter {
   override val commandNames: Set<String> = setOf("groovy")
 
@@ -424,7 +437,7 @@ private class GroovyCommandAdapter(
   ): Any? {
     normalizeGroovyAndroidJavaVersion()
     val artifacts = JvmArtifactManager(workspace)
-    val workspaceJars = artifacts.workspaceJars()
+    val workspaceJars = artifacts.workspaceJars() + artifacts.mavenJars(networkEnabled)
     val libraryDex = artifacts.ensureLibraryDex(workspaceJars)
     val scriptDex = artifacts.ensureGroovyScriptDex(scriptFile, workspaceJars, libraryDex)
     val outWriter = PrintWriter(stdout.writer(StandardCharsets.UTF_8), true)
@@ -474,6 +487,60 @@ private class JvmArtifactManager(
       .filter { isInsideWorkspace(it.file) }
       .sortedBy { it.relativePath }
       .toList()
+  }
+
+  fun mavenJars(networkEnabled: Boolean): List<JvmJarArtifact> {
+    val request = readMavenRequest() ?: return emptyList()
+    val resolver = MavenArtifactResolver(
+      repositoryRoot = File(cacheRoot, "maven/repository"),
+      repositories = request.repositories,
+      networkEnabled = networkEnabled,
+    )
+    return resolver.resolve(request.dependencies).map { file ->
+      val canonical = file.canonicalFile
+      JvmJarArtifact(
+        file = canonical,
+        relativePath = ".flovera/runtime/jvm-artifacts/maven/repository/${canonical.relativeTo(File(cacheRoot, "maven/repository").canonicalFile).invariantSeparatorsPath}",
+        sha256 = sha256(canonical.readBytes()),
+        sizeBytes = canonical.length(),
+      )
+    }
+  }
+
+  private fun readMavenRequest(): MavenRequest? {
+    val configFiles = listOf(
+      File(root, "libs/maven.json"),
+      File(root, ".flovera/jvm/maven.json"),
+    ).map { it.canonicalFile }.filter { it.isFile && isInsideWorkspace(it) }
+    if (configFiles.isEmpty()) return null
+    val repositories = linkedSetOf("https://repo1.maven.org/maven2")
+    val dependencies = linkedSetOf<MavenCoordinate>()
+    configFiles.forEach { file ->
+      val obj = mavenJson.parseToJsonElement(file.readText(StandardCharsets.UTF_8)).jsonObject
+      obj["repositories"]?.jsonArrayOrNull()?.forEach { element ->
+        element.jsonPrimitive.contentOrNull?.trim()?.trimEnd('/')?.takeIf { it.isNotBlank() }?.let { repositories += it }
+      }
+      obj["dependencies"]?.jsonArrayOrNull()?.forEach { element ->
+        parseMavenDependency(element)?.let { dependencies += it }
+      }
+    }
+    if (dependencies.isEmpty()) return null
+    return MavenRequest(repositories = repositories.toList(), dependencies = dependencies.toList())
+  }
+
+  private fun parseMavenDependency(element: kotlinx.serialization.json.JsonElement): MavenCoordinate? {
+    if (element is JsonPrimitive) {
+      return MavenCoordinate.parse(element.contentOrNull.orEmpty())
+    }
+    val obj = (element as? JsonObject) ?: return null
+    val coordinate = obj["coordinate"]?.jsonPrimitive?.contentOrNull
+      ?: obj["coords"]?.jsonPrimitive?.contentOrNull
+      ?: obj["gav"]?.jsonPrimitive?.contentOrNull
+    if (!coordinate.isNullOrBlank()) return MavenCoordinate.parse(coordinate)
+    val groupId = obj["groupId"]?.jsonPrimitive?.contentOrNull.orEmpty()
+    val artifactId = obj["artifactId"]?.jsonPrimitive?.contentOrNull.orEmpty()
+    val version = obj["version"]?.jsonPrimitive?.contentOrNull.orEmpty()
+    return MavenCoordinate.of(groupId, artifactId, version)
   }
 
   fun ensureLibraryDex(jars: List<JvmJarArtifact>): JvmLibraryDex? {
@@ -638,6 +705,151 @@ private data class GroovyScriptDex(
   val key: String,
 )
 
+private data class MavenRequest(
+  val repositories: List<String>,
+  val dependencies: List<MavenCoordinate>,
+)
+
+private data class MavenCoordinate(
+  val groupId: String,
+  val artifactId: String,
+  val version: String,
+) {
+  val key: String get() = "$groupId:$artifactId"
+  val gav: String get() = "$groupId:$artifactId:$version"
+  val artifactPath: String get() = "${groupId.replace('.', '/')}/$artifactId/$version"
+  val jarFileName: String get() = "$artifactId-$version.jar"
+  val pomFileName: String get() = "$artifactId-$version.pom"
+
+  companion object {
+    fun parse(value: String): MavenCoordinate? {
+      val parts = value.trim().split(":")
+      if (parts.size != 3) return null
+      return of(parts[0], parts[1], parts[2])
+    }
+
+    fun of(groupId: String, artifactId: String, version: String): MavenCoordinate? {
+      val normalizedGroup = groupId.trim()
+      val normalizedArtifact = artifactId.trim()
+      val normalizedVersion = version.trim()
+      if (normalizedGroup.isBlank() || normalizedArtifact.isBlank() || normalizedVersion.isBlank()) return null
+      if (listOf(normalizedGroup, normalizedArtifact, normalizedVersion).any { it.contains("/") || it.contains("\\") }) return null
+      return MavenCoordinate(normalizedGroup, normalizedArtifact, normalizedVersion)
+    }
+  }
+}
+
+private data class MavenPomInfo(
+  val dependencies: List<MavenCoordinate>,
+)
+
+private class MavenArtifactResolver(
+  private val repositoryRoot: File,
+  private val repositories: List<String>,
+  private val networkEnabled: Boolean,
+) {
+  private val xmlFactory = DocumentBuilderFactory.newInstance().apply {
+    isNamespaceAware = false
+    runCatching { setFeature("http://apache.org/xml/features/disallow-doctype-decl", true) }
+    runCatching { setFeature("http://xml.org/sax/features/external-general-entities", false) }
+    runCatching { setFeature("http://xml.org/sax/features/external-parameter-entities", false) }
+  }
+
+  fun resolve(roots: List<MavenCoordinate>): List<File> {
+    repositoryRoot.mkdirs()
+    val resolved = linkedMapOf<String, MavenCoordinate>()
+    val queue = ArrayDeque<MavenCoordinate>()
+    roots.forEach { queue.add(it) }
+    while (queue.isNotEmpty() && resolved.size < 96) {
+      val coordinate = queue.removeFirst()
+      val existing = resolved[coordinate.key]
+      if (existing != null) continue
+      ensureArtifactFile(coordinate, "pom")
+      resolved[coordinate.key] = coordinate
+      parsePom(coordinate).dependencies.forEach { dependency ->
+        if (dependency.key !in resolved) queue.add(dependency)
+      }
+    }
+    return resolved.values.map { coordinate -> ensureArtifactFile(coordinate, "jar") }
+  }
+
+  private fun parsePom(coordinate: MavenCoordinate): MavenPomInfo {
+    val pomFile = ensureArtifactFile(coordinate, "pom")
+    val document = xmlFactory.newDocumentBuilder().parse(pomFile)
+    val project = document.documentElement
+    val parent = project.directChild("parent")
+    val properties = mutableMapOf<String, String>()
+    val projectGroupId = project.childText("groupId") ?: parent?.childText("groupId") ?: coordinate.groupId
+    val projectVersion = project.childText("version") ?: parent?.childText("version") ?: coordinate.version
+    val projectArtifactId = project.childText("artifactId") ?: coordinate.artifactId
+    properties["project.groupId"] = projectGroupId
+    properties["pom.groupId"] = projectGroupId
+    properties["project.version"] = projectVersion
+    properties["pom.version"] = projectVersion
+    properties["project.artifactId"] = projectArtifactId
+    properties["pom.artifactId"] = projectArtifactId
+    project.directChild("properties")?.directChildren()?.forEach { property ->
+      properties[property.tagName] = property.textContent.trim()
+    }
+
+    val dependencies = project.directChild("dependencies")
+      ?.directChildren("dependency")
+      ?.mapNotNull { dependency ->
+        val scope = substituteProperties(dependency.childText("scope") ?: "compile", properties)
+        val optional = substituteProperties(dependency.childText("optional") ?: "false", properties)
+        if (scope in setOf("test", "provided", "system", "import") || optional.equals("true", ignoreCase = true)) {
+          null
+        } else {
+          val groupId = substituteProperties(dependency.childText("groupId").orEmpty(), properties)
+          val artifactId = substituteProperties(dependency.childText("artifactId").orEmpty(), properties)
+          val version = substituteProperties(dependency.childText("version").orEmpty(), properties)
+          MavenCoordinate.of(groupId, artifactId, version)
+        }
+      }
+      .orEmpty()
+    return MavenPomInfo(dependencies)
+  }
+
+  private fun ensureArtifactFile(coordinate: MavenCoordinate, extension: String): File {
+    val fileName = if (extension == "pom") coordinate.pomFileName else coordinate.jarFileName
+    val localFile = File(repositoryRoot, "${coordinate.artifactPath}/$fileName")
+    if (localFile.isFile) return localFile
+    localFile.parentFile?.mkdirs()
+    val relativePath = "${coordinate.artifactPath}/$fileName"
+    val errors = mutableListOf<String>()
+    repositories.forEach { repository ->
+      val source = "${repository.trimEnd('/')}/$relativePath"
+      val protocol = runCatching { URL(source).protocol }.getOrElse { "" }
+      if (!networkEnabled && protocol in setOf("http", "https")) {
+        errors += "network disabled for $source"
+        return@forEach
+      }
+      runCatching {
+        URL(source).openStream().use { input ->
+          localFile.outputStream().use { output -> input.copyTo(output) }
+        }
+      }.onSuccess {
+        return localFile
+      }.onFailure { error ->
+        errors += "${error::class.java.simpleName}: ${error.message.orEmpty()}"
+      }
+    }
+    error("Unable to resolve Maven artifact ${coordinate.gav} ($extension). Tried ${repositories.size} repositories. ${errors.take(3).joinToString("; ")}")
+  }
+
+  private fun substituteProperties(value: String, properties: Map<String, String>): String {
+    var current = value.trim()
+    repeat(8) {
+      val next = MAVEN_PROPERTY_PATTERN.replace(current) { match ->
+        properties[match.groupValues[1]] ?: match.value
+      }
+      if (next == current) return current
+      current = next
+    }
+    return current
+  }
+}
+
 class FloveraGroovyContext internal constructor(
   private val workspace: WorkspaceManager,
   private val out: PrintWriter,
@@ -668,6 +880,34 @@ private fun sha256(bytes: ByteArray): String {
   return MessageDigest.getInstance("SHA-256")
     .digest(bytes)
     .joinToString("") { "%02x".format(it) }
+}
+
+private val mavenJson = Json { ignoreUnknownKeys = true }
+private val MAVEN_PROPERTY_PATTERN = Regex("""\$\{([^}]+)\}""")
+
+private fun kotlinx.serialization.json.JsonElement.jsonArrayOrNull(): JsonArray? = this as? JsonArray
+
+private fun Element.childText(name: String): String? {
+  return directChild(name)?.textContent?.trim()?.takeIf { it.isNotBlank() }
+}
+
+private fun Element.directChild(name: String): Element? {
+  return directChildren(name).firstOrNull()
+}
+
+private fun Element.directChildren(name: String? = null): List<Element> {
+  val result = mutableListOf<Element>()
+  val nodes = childNodes
+  for (index in 0 until nodes.length) {
+    val node = nodes.item(index)
+    if (node.nodeType == org.w3c.dom.Node.ELEMENT_NODE) {
+      val element = node as Element
+      if (name == null || element.tagName == name) {
+        result += element
+      }
+    }
+  }
+  return result
 }
 
 private data class WorkspaceCommandRisk(

@@ -1142,6 +1142,60 @@ class WorkspaceFileTreeInstrumentedTest {
   }
 
   @Test
+  fun workspaceCommandRunResolvesMavenJarForGroovy() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "workspace-command-groovy-maven-${System.currentTimeMillis()}")
+    val repoDir = File(workspace.root, "test-maven-repo")
+    val artifactDir = File(repoDir, "demo/helper/1.0")
+    artifactDir.mkdirs()
+    File(artifactDir, "helper-1.0.jar").writeBytes(Base64.getDecoder().decode(TEST_HELPER_JAR_BASE64))
+    File(artifactDir, "helper-1.0.pom").writeText(
+      """
+      <project>
+        <modelVersion>4.0.0</modelVersion>
+        <groupId>demo</groupId>
+        <artifactId>helper</artifactId>
+        <version>1.0</version>
+      </project>
+      """.trimIndent(),
+      StandardCharsets.UTF_8,
+    )
+    workspace.writeFile(
+      "libs/maven.json",
+      """
+      {
+        "repositories": ["${repoDir.toURI().toString().trimEnd('/')}"],
+        "dependencies": ["demo:helper:1.0"]
+      }
+      """.trimIndent(),
+      createAutoSnapshot = false,
+    )
+    workspace.writeFile(
+      "tools/use_maven_helper.groovy",
+      """
+      import demo.Helper
+
+      out.println(Helper.shout(argv[0]))
+      return "maven-runtime-ok"
+      """.trimIndent(),
+      createAutoSnapshot = false,
+    )
+    val tool = WorkspaceCommandRunTool(workspace, ToolEventRecorder(), authorityMode = "full")
+
+    val result = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("groovy", "tools/use_maven_helper.groovy", "alpha"),
+        snapshotBeforeRun = false,
+      ),
+    )
+
+    assertTrue(result, result.contains("Workspace command status=ok exitCode=0"))
+    assertTrue(result, result.contains("jar-ALPHA"))
+    assertTrue(result, result.contains("maven-runtime-ok"))
+    assertTrue(File(workspace.root, ".flovera/runtime/jvm-artifacts/maven/repository/demo/helper/1.0/helper-1.0.jar").isFile)
+  }
+
+  @Test
   fun pythonRunSupportsXmlAndDocxDocumentProcessing() = runBlocking {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val workspace = WorkspaceManager(context, "python-docs-${System.currentTimeMillis()}")
@@ -1598,6 +1652,14 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"jvmArtifactDexCachePath\": \".flovera/runtime/jvm-artifacts\""))
     assertTrue(capabilities.contains("\"jvmArtifactSourceModes\""))
     assertTrue(capabilities.contains("\"workspace_jar\""))
+    assertTrue(capabilities.contains("\"maven_coordinate\""))
+    assertTrue(capabilities.contains("\"jvmMavenCoordinateResolution\": true"))
+    assertTrue(capabilities.contains("\"jvmMavenConfigPaths\""))
+    assertTrue(capabilities.contains("\"libs/maven.json\""))
+    assertTrue(capabilities.contains("\".flovera/jvm/maven.json\""))
+    assertTrue(capabilities.contains("\"jvmMavenDefaultRepositories\""))
+    assertTrue(capabilities.contains("\"https://repo1.maven.org/maven2\""))
+    assertTrue(capabilities.contains("\"jvmMavenTransitiveDependencies\": \"basic_compile_runtime_scope\""))
     assertTrue(capabilities.contains("\"workspaceCommandShellAccess\": false"))
     assertTrue(capabilities.contains("\"pythonPackageInstall\": true"))
     assertTrue(capabilities.contains("\"pythonPackageCatalogPath\""))
