@@ -154,6 +154,8 @@ class KoogAgentRuntime(
         workspace = workspace,
         recorder = recorder,
         networkEnabled = settings.networkEnabled,
+        pythonRunToolFallbackEnabled = settings.pythonRunToolFallbackEnabled,
+        authorityMode = settings.agentAuthorityMode,
         webSearchEnabled = webSearchAvailable,
         braveSearchApiKey = settings.braveSearchApiKey,
       ),
@@ -161,6 +163,7 @@ class KoogAgentRuntime(
         networkEnabled = settings.networkEnabled,
         webSearchAvailable = webSearchAvailable,
         authorityMode = settings.agentAuthorityMode,
+        pythonRunToolFallbackEnabled = settings.pythonRunToolFallbackEnabled,
       ),
       maxIterations = AGENT_ITERATIONS_INTERNAL_GUARD,
     )

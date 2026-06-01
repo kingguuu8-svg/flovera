@@ -18,7 +18,7 @@ class PythonRunTool(
 ) : SimpleTool<PythonRunTool.Args>(
   argsType = typeToken<Args>(),
   name = "python_run",
-  description = "Run blocking Python code inside the current workspace. The run is conversation-bound: no background threads, subprocesses, or daemon/server behavior. Use it for calculation, file generation, algorithm checks, and workspace-local scripting.",
+  description = "Low-level direct Python evaluator for blocking workspace code. Prefer workspace_command_run for normal Python execution, especially when the user says to use Python, run a script, or run a command. Use python_run only when a direct multiline evaluator or conversation-local Python session globals are specifically useful. It is not a daemon, background server, shell, package manager, port listener, SSE/WebSocket service, or subprocess host.",
 ) {
   @Serializable
   data class Args(
@@ -169,6 +169,7 @@ class FloveraPythonRuntime(
     maxOutputChars: Int = 20_000,
     sessionId: String = "",
     scope: String = "workspace_public",
+    snapshotBeforeRun: Boolean = false,
     environment: Map<String, String> = emptyMap(),
   ): PythonRunResult {
     val cwdFile = workspace.workspaceRuntimeDirectory(cwd)
@@ -204,7 +205,7 @@ class FloveraPythonRuntime(
         sessionId = sessionId,
         resetSession = true,
         scope = scope,
-        snapshotBeforeRun = false,
+        snapshotBeforeRun = snapshotBeforeRun,
         environment = environment,
       ),
     )

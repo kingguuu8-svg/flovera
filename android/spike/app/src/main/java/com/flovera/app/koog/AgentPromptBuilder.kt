@@ -4,7 +4,12 @@ import com.flovera.app.session.AgentSession
 import com.flovera.app.session.RuntimeSessionHistory
 
 object AgentPromptBuilder {
-  fun systemPrompt(networkEnabled: Boolean, webSearchAvailable: Boolean, authorityMode: String = "safe"): String {
+  fun systemPrompt(
+    networkEnabled: Boolean,
+    webSearchAvailable: Boolean,
+    authorityMode: String = "safe",
+    pythonRunToolFallbackEnabled: Boolean = false,
+  ): String {
     return listOf(
       STABLE_IDENTITY,
       STABLE_APP_BOUNDARIES,
@@ -14,7 +19,7 @@ object AgentPromptBuilder {
       STABLE_METADATA_AND_PROVIDER_BOUNDARIES,
       STABLE_AUTHORITY_RULES,
       STABLE_OUTPUT_CONTRACT,
-      runFacts(networkEnabled, webSearchAvailable, authorityMode),
+      runFacts(networkEnabled, webSearchAvailable, authorityMode, pythonRunToolFallbackEnabled),
     ).joinToString("\n\n")
   }
 
@@ -60,13 +65,14 @@ Core boundaries:
 
   private const val STABLE_RUNTIME_CAPABILITY_BOUNDARY = """
 Stable Flovera runtime boundary:
-- Stable surface: workspace files, bounded Python, WebView previews, workspace artifacts, local_http/python_http apps, app HTTP/SSE routes, artifact_inspect, artifact_diagnose, workspace_search, provider calls, and artifact Python jobs.
+- Stable surface: workspace files, bounded Python, bounded workspace command runtime, WebView previews, workspace artifacts, local_http/python_http apps, app HTTP/SSE routes, artifact_inspect, artifact_diagnose, workspace_search, provider calls, and artifact Python jobs.
 - Tool progress UI is app-generated from tool events, not model reasoning.
 - Conversation UI renders app-generated status/tool events and real model text deltas as a chronological transcript; observability, not hidden chain-of-thought.
 - Model text deltas may stream through AgentRunEvent from real provider StreamFrame events before, between, or after tool calls. Use natural-language progress only when it helps the user; do not add filler narration just to satisfy the UI.
 - Final-answer deltas may stream through AgentRunEvent from real provider StreamFrame events; do not fake-stream completed text.
 - Conversation UI can link existing workspace-relative paths in messages to the file preview; cite exact paths when reporting changed files.
-- python_run is bounded, blocking, and conversation-owned. It is not a daemon, background server, shell, package manager, port listener, SSE/WebSocket service, or subprocess host.
+- workspace_command_run is the default bounded argv-style execution surface, not Android shell access. It is a command gateway that classifies risk, checks authority, writes command audit records, and then dispatches to approved runtime adapters. It currently supports python/python3 workspace scripts, python -c code, and an experimental Full-Authority-only Groovy spike through argv such as `["groovy", "tools/hello.groovy"]`, with cwd, timeout, output limits, snapshots, and workspace boundaries. Groovy can compile against pure JVM jars placed under workspace `libs/`; Flovera converts those jars to dex and caches them under `.flovera/runtime/jvm-artifacts`. It does not support sh, bash, npm, git, daemons, shell operators, Maven resolution, or arbitrary OS commands yet.
+- python_run is a low-level direct Python evaluator fallback. It is disabled by default to reduce tool schema overhead. Use it only if it is visible in current tools or pythonRunToolFallbackEnabled is true; otherwise use workspace_command_run for Python execution.
 - local_http previews are served from Flovera localhost. A manifest may declare a workspace-owned python_http server command; Flovera assigns HOST/PORT and opens that server URL in WebView.
 - python_http servers use ordinary HTTP/SSE; Flovera can reuse, stop, restart, and report status from the artifact picker.
 - App-owned routes like GET /__flovera__/api/health and POST /__flovera__/api/deepseek/stream are compatibility helpers, not the only way to build an AI app.
@@ -82,7 +88,9 @@ Stable Flovera runtime boundary:
 Tool routing:
 - Use workspace_search before broad manual scanning for files or snippets by keyword, identifier, API path, or error text.
 - Use read_file for text inspection, edit_file for focused replacements, and write_file for new files or intentional full rewrites.
-- Use python_run when calculation, file generation, algorithm validation, or local scripting would materially improve the result. python_run is blocking and conversation-bound; do not use it for daemons, servers, watchers, subprocess workflows, or OS shell work.
+- Use workspace_command_run for Python execution by default, including calculation, file generation, algorithm validation, local scripting, `python -c` snippets, and Python scripts with command-line arguments such as `["python", "tools/check.py", "--input", "data.csv"]`.
+- Use workspace_command_run for Groovy only when JVM access is materially useful. Put pure JVM jars under `libs/`, import them from `.groovy`, and expect Android-incompatible APIs or native JVM artifacts to fail during D8/dex loading.
+- Use python_run only as the explicit fallback for direct multiline evaluator/session-global workflows when that tool is enabled. Treat unsupported commands as platform gaps instead of inventing shell access.
 - Only Flovera's assistant can run workspace Python through tools. The user cannot be expected to open a terminal or run Python manually inside the Android environment.
 - Use python_package_install only for packages listed in .flovera/python/wheel-catalog.json; do not claim arbitrary PyPI resolution is available.
 - After generating a nontrivial artifact, use artifact_inspect(path) to verify its real format instead of treating Office/PDF/image files as text.
@@ -128,7 +136,7 @@ Authority and proposals:
 - Full Authority does not expose plaintext secrets, bypass Android permissions, install arbitrary tools, enable MCP/native tools, or permit background daemons.
 - Tool and MCP expansion is proposal-only in this build. Do not claim that a new tool is installed or executable.
 - For exact proposal fields, inspect .flovera/settings-view.json and .flovera/capabilities.json, then write only supported changes.
-- Settings proposal files must use the wrapper shape: `{ "type": "settings", "title": "...", "reason": "...", "changes": { "networkEnabled": true } }`. Do not write naked setting fields as the whole file.
+- Settings proposal files must use the wrapper shape: `{ "type": "settings", "title": "...", "reason": "...", "changes": { "networkEnabled": true } }`. To temporarily expose the direct Python evaluator fallback, propose `{ "pythonRunToolFallbackEnabled": true }` under changes. Do not write naked setting fields as the whole file.
 """
 
   private const val STABLE_OUTPUT_CONTRACT = """
@@ -139,7 +147,12 @@ Output contract:
 - Before claiming an interactive artifact is done, answer: start action, executing runtime, input boundary, output return path, credential availability, outside-Flovera path, and workaround versus real platform support.
 """
 
-  private fun runFacts(networkEnabled: Boolean, webSearchAvailable: Boolean, authorityMode: String): String {
+  private fun runFacts(
+    networkEnabled: Boolean,
+    webSearchAvailable: Boolean,
+    authorityMode: String,
+    pythonRunToolFallbackEnabled: Boolean,
+  ): String {
     val normalizedAuthority = when (authorityMode) {
       "assisted" -> "assisted"
       "full" -> "full"
@@ -152,6 +165,8 @@ Current run facts:
 - webSearch=${if (webSearchAvailable) "enabled" else "disabled"}
 - webPreview=available
 - pythonRuntime=available
+- pythonRunToolFallback=${if (pythonRunToolFallbackEnabled) "enabled" else "disabled"}
+- workspaceCommandRuntime=available_python_groovy_workspace_jars_experimental
 - artifactInspect=available
 - workspaceSearch=available
 - workspaceArtifacts=available

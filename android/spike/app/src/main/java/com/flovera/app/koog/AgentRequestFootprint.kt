@@ -41,6 +41,7 @@ object AgentRequestFootprintBuilder {
       networkEnabled = settings.networkEnabled,
       webSearchAvailable = webSearchAvailable,
       authorityMode = settings.agentAuthorityMode,
+      pythonRunToolFallbackEnabled = settings.pythonRunToolFallbackEnabled,
     )
     val workspaceUserRules = workspace.readAgentRules()
     val userPrompt = AgentPromptBuilder.userInput(
@@ -53,6 +54,8 @@ object AgentRequestFootprintBuilder {
       workspace = workspace,
       recorder = ToolEventRecorder {},
       networkEnabled = settings.networkEnabled,
+      pythonRunToolFallbackEnabled = settings.pythonRunToolFallbackEnabled,
+      authorityMode = settings.agentAuthorityMode,
       webSearchEnabled = webSearchAvailable,
       braveSearchApiKey = settings.braveSearchApiKey,
     ).tools.map { it.descriptor }

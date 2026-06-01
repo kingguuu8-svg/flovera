@@ -1124,6 +1124,7 @@ class AgentRunController(
       "write_file" -> "Wrote ${path.ifBlank { "a file" }}"
       "edit_file" -> "Edited ${path.ifBlank { "a file" }}"
       "python_run" -> "Ran Python in ${toolArg(event.args, "cwd").ifBlank { "." }}"
+      "workspace_command_run" -> "Ran workspace command in ${toolArg(event.args, "cwd").ifBlank { "." }}"
       "python_package_install" -> "Checked Python package ${toolArg(event.args, "package").ifBlank { "(unknown)" }}"
       "artifact_inspect" -> "Inspected ${path.ifBlank { "artifact" }}"
       "fetch_url" -> "Fetched URL"

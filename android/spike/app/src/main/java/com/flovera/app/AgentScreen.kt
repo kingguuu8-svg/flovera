@@ -347,6 +347,7 @@ fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
         )
         MainDisplayStarterPrompts(
           visible = !starterPromptsDismissed && !hasPreviewSurface && state.selectedHtmlError.isBlank(),
+          language = language,
           enabled = !state.isRunning && hasUsableApi,
           onSubmitPreset = { prompt ->
             if (!state.isRunning && hasUsableApi) {
@@ -616,6 +617,7 @@ private fun MissingApiSettingsEntry(
 @Composable
 private fun MainDisplayStarterPrompts(
   visible: Boolean,
+  language: String,
   enabled: Boolean,
   onSubmitPreset: (String) -> Unit,
   modifier: Modifier = Modifier,
@@ -629,7 +631,7 @@ private fun MainDisplayStarterPrompts(
     horizontalArrangement = Arrangement.spacedBy(8.dp),
     verticalAlignment = Alignment.CenterVertically,
   ) {
-    listOf("\u505a\u4e00\u4e2a\u79d1\u5b66\u8ba1\u7b97\u5668", "\u505a\u4e00\u4e2a\u8d2a\u5403\u86c7\u5c0f\u6e38\u620f").forEach { prompt ->
+    starterPrompts(language).forEach { prompt ->
       Surface(
         modifier = Modifier
           .height(38.dp)
@@ -1381,7 +1383,7 @@ private fun EmptyWorkspacePrompt(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
       ) {
-        listOf("\u505a\u4e00\u4e2a\u79d1\u5b66\u8ba1\u7b97\u5668", "\u505a\u4e00\u4e2a\u8d2a\u5403\u86c7\u5c0f\u6e38\u620f").forEach { prompt ->
+        starterPrompts(state.settings.language).forEach { prompt ->
           OutlinedButton(
             onClick = {
               focusManager.clearFocus()
@@ -1940,6 +1942,13 @@ private fun parseCsvLine(line: String): List<String> {
 }
 
 private fun t(language: String, en: String, zh: String): String = if (language == "zh") zh else en
+
+private fun starterPrompts(language: String): List<String> {
+  return listOf(
+    t(language, "Make a scientific calculator", "\u505a\u4e00\u4e2a\u79d1\u5b66\u8ba1\u7b97\u5668"),
+    t(language, "Make a snake game", "\u505a\u4e00\u4e2a\u8d2a\u5403\u86c7\u5c0f\u6e38\u620f"),
+  )
+}
 
 private fun currentDisplayTargetPath(state: AgentScreenState): String {
   return state.selectedPreviewPath.ifBlank { state.selectedHtmlPath }
@@ -2853,6 +2862,7 @@ private fun toolEventInlineDetail(event: ToolEvent): String {
     "write_file" -> "Wrote ${path.ifBlank { "file" }}"
     "edit_file" -> "Edited ${path.ifBlank { "file" }}"
     "python_run" -> "Ran Python"
+    "workspace_command_run" -> "Ran workspace command"
     "python_package_install" -> "Checked Python package"
     "artifact_inspect" -> "Inspected ${path.ifBlank { "artifact" }}"
     "fetch_url" -> "Fetched URL"
@@ -5188,6 +5198,7 @@ private fun settingsProposalSummary(proposal: WorkspaceSettingsProposal): String
     changes.networkEnabled?.let { "network=$it" },
     changes.webSearchEnabled?.let { "webSearch=$it" },
     changes.backgroundKeepAliveEnabled?.let { "backgroundKeepAlive=$it" },
+    changes.pythonRunToolFallbackEnabled?.let { "pythonRunFallback=$it" },
     changes.language?.let { "language=$it" },
     changes.themeMode?.let { "themeMode=$it" },
     changes.themeColor?.let { "themeColor=$it" },

@@ -44,6 +44,7 @@ data class AppSettings(
   val webSearchEnabled: Boolean = true,
   val webSearchUserConfigured: Boolean = false,
   val backgroundKeepAliveEnabled: Boolean = false,
+  val pythonRunToolFallbackEnabled: Boolean = false,
   val braveSearchApiKey: String = "",
   val language: String = "en",
   val themeMode: String = "light",

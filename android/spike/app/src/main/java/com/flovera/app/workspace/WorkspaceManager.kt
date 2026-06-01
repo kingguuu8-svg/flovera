@@ -1174,6 +1174,44 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     return relativeToRoot(file)
   }
 
+  fun appendWorkspaceCommandAudit(
+    command: String,
+    cwd: String,
+    authorityMode: String,
+    riskCategory: String,
+    permissions: List<String>,
+    allowed: Boolean,
+    reason: String,
+    status: String,
+    exitCode: Int,
+    elapsedMs: Int,
+  ): String {
+    val file = safeFile(".flovera/logs/workspace-command.jsonl")
+    val existing = if (file.exists()) readUtf8Text(file).trimEnd() else ""
+    val record = WorkspaceCommandAuditRecord(
+      id = UUID.randomUUID().toString(),
+      timestampMillis = System.currentTimeMillis(),
+      command = command,
+      cwd = cwd,
+      authorityMode = authorityMode,
+      riskCategory = riskCategory,
+      permissions = permissions,
+      allowed = allowed,
+      reason = reason,
+      status = status,
+      exitCode = exitCode,
+      elapsedMs = elapsedMs,
+    )
+    val updated = buildString {
+      if (existing.isNotBlank()) {
+        appendLine(existing)
+      }
+      appendLine(compactJson.encodeToString(record))
+    }
+    writeUtf8TextAtomically(file, updated)
+    return relativeToRoot(file)
+  }
+
   fun deleteControlledToolProposal(path: String): Boolean {
     val file = safeFile(path)
     if (!file.isFile || !relativeToRoot(file).startsWith(".flovera/proposals/")) return false
@@ -2608,6 +2646,7 @@ data class FloveraSettingsView(
   val webSearchEnabled: Boolean = false,
   val webSearchUserConfigured: Boolean = false,
   val backgroundKeepAliveEnabled: Boolean = false,
+  val pythonRunToolFallbackEnabled: Boolean = false,
   val language: String = "",
   val themeMode: String = "",
   val themeColor: String = "",
@@ -2728,6 +2767,19 @@ data class FloveraCapabilities(
   val backgroundKeepAliveEnabled: Boolean = false,
   val networkTools: Boolean = false,
   val pythonRuntime: Boolean = true,
+  val pythonRunTool: Boolean = false,
+  val pythonRunToolFallbackEnabled: Boolean = false,
+  val workspaceCommandRuntime: Boolean = true,
+  val workspaceCommandRuntimeKind: String = "argv",
+  val workspaceCommandSupportedCommands: List<String> = listOf("python", "python3", "groovy"),
+  val groovyCommandRuntime: Boolean = true,
+  val groovyCommandRuntimeStatus: String = "experimental_full_authority",
+  val groovyWorkspaceJarClasspath: Boolean = true,
+  val jvmWorkspaceLibraries: Boolean = true,
+  val jvmWorkspaceLibraryPath: String = "libs",
+  val jvmArtifactDexCachePath: String = ".flovera/runtime/jvm-artifacts",
+  val jvmArtifactSourceModes: List<String> = listOf("workspace_jar"),
+  val workspaceCommandShellAccess: Boolean = false,
   val pythonPackageInstall: Boolean = true,
   val pythonPackageCatalogPath: String = ".flovera/python/wheel-catalog.json",
   val pythonWorkspaceSitePackagesPath: String = ".flovera/python/site-packages",
@@ -2769,6 +2821,8 @@ data class FloveraCapabilities(
         networkTools = settingsView.networkEnabled,
         webSearch = settingsView.webSearchEnabled,
         backgroundKeepAliveEnabled = settingsView.backgroundKeepAliveEnabled,
+        pythonRunTool = settingsView.pythonRunToolFallbackEnabled,
+        pythonRunToolFallbackEnabled = settingsView.pythonRunToolFallbackEnabled,
         providerApiModes = providerApiModes,
         providerProfileCatalog = providerProfileCatalog,
         directSettingsWrite = fullAuthority,
@@ -2886,6 +2940,22 @@ data class WorkspaceFullAuthorityAuditRecord(
   val title: String,
   val reason: String,
   val changes: SettingsProposalChanges,
+)
+
+@Serializable
+data class WorkspaceCommandAuditRecord(
+  val id: String,
+  val timestampMillis: Long,
+  val command: String,
+  val cwd: String,
+  val authorityMode: String,
+  val riskCategory: String,
+  val permissions: List<String>,
+  val allowed: Boolean,
+  val reason: String,
+  val status: String,
+  val exitCode: Int,
+  val elapsedMs: Int,
 )
 
 data class WorkspaceSettingsProposal(

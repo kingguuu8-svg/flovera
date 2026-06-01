@@ -64,6 +64,7 @@ class WorkspaceController(context: Context, workspaceId: String) {
         webSearchEnabled = settings.webSearchEnabled,
         webSearchUserConfigured = settings.webSearchUserConfigured,
         backgroundKeepAliveEnabled = settings.backgroundKeepAliveEnabled,
+        pythonRunToolFallbackEnabled = settings.pythonRunToolFallbackEnabled,
         language = settings.language,
         themeMode = settings.themeMode,
         themeColor = settings.themeColor,

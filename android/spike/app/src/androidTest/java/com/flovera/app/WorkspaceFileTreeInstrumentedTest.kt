@@ -10,7 +10,9 @@ import com.flovera.app.koog.PythonRunTool
 import com.flovera.app.koog.PythonPackageInstallTool
 import com.flovera.app.config.AppSettings
 import com.flovera.app.koog.ToolEventRecorder
+import com.flovera.app.koog.WorkspaceCommandRunTool
 import com.flovera.app.koog.WorkspaceSearchTool
+import com.flovera.app.koog.workspaceToolRegistry
 import com.flovera.app.web.FloveraWebBridge
 import com.flovera.app.config.SettingsStore
 import com.flovera.app.workspace.WorkspaceController
@@ -22,6 +24,7 @@ import java.net.HttpURLConnection
 import java.net.ServerSocket
 import java.net.URL
 import java.nio.charset.StandardCharsets
+import java.util.Base64
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
@@ -38,6 +41,9 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+
+private const val TEST_HELPER_JAR_BASE64 =
+  "UEsDBBQACAgIAH2mwVwAAAAAAAAAAAAAAAAJAAQATUVUQS1JTkYv/soAAAMAUEsHCAAAAAACAAAAAAAAAFBLAwQUAAgICAB9psFcAAAAAAAAAAAAAAAAFAAAAE1FVEEtSU5GL01BTklGRVNULk1G803My0xLLS7RDUstKs7Mz7NSMNQz4OVyLkpNLElN0XWqBAqY6xnoGVooaPhmJhflF+enlWjycvFyAQBQSwcIBZVIozsAAAA6AAAAUEsDBAoAAAgAAH2mwVwAAAAAAAAAAAAAAAAFAAAAZGVtby9QSwMEFAAICAgAfabBXAAAAAAAAAAAAAAAABEAAABkZW1vL0hlbHBlci5jbGFzc31RTU/CQBB9S4FCqYKIoih+i4UEG423Gg+SGA9EEkETj4VusKS0pLT+LvUAiSb+AH+UcSoQIhh3k9md2Zn33ux8fr19ADiDIiEEQURYRgRRhlRHf9JVS7fbaq3Z4S2PIXpu2qZ3wSAoxXsRMYbsNKnuuabdvvRNy+CuBBFCDAmGcEd3y4G7IGMRSQLRez1uGwxlpTpbrRXnQmNALY4lpEUsy8hgZaLO90xLrTot3eLEdFurNRjS1dknTUIWayLWZeSw8auzEQdDwnPuSJZb0fuEVFDmMeaVaUFXeRlb2GaIec4EK6P8kStil1gM3nXUa24RE+mtOAaRJaumzW/8bpO7Db0ZNBLpPzq+N5Xx/wdpDFLd8d0WvzKD6sQI/zjIwwl2aKrBCtGmuYJhj7w8nYzOSGkI9kIXhn2y0Z+ggDgOcDhOPSU/iObeIT4MEU9LA8ilV6QGWKXbAJvPM/URsoUfyqNvUEsHCBvf9YJkAQAAXgIAAFBLAQIUABQACAgIAH2mwVwAAAAAAgAAAAAAAAAJAAQAAAAAAAAAAAAAAAAAAABNRVRBLUlORi/+ygAAUEsBAhQAFAAICAgAfabBXAWVSKM7AAAAOgAAABQAAAAAAAAAAAAAAAAAPQAAAE1FVEEtSU5GL01BTklGRVNULk1GUEsBAgoACgAACAAAfabBXAAAAAAAAAAAAAAAAAUAAAAAAAAAAAAAAAAAugAAAGRlbW8vUEsBAhQAFAAICAgAfabBXBvf9YJkAQAAXgIAABEAAAAAAAAAAAAAAAAA3QAAAGRlbW8vSGVscGVyLmNsYXNzUEsFBgAAAAAEAAQA7wAAAIACAAAAAA=="
 
 class WorkspaceFileTreeInstrumentedTest {
   @Test
@@ -968,6 +974,174 @@ class WorkspaceFileTreeInstrumentedTest {
   }
 
   @Test
+  fun workspaceCommandRunExecutesPythonScriptsWithArgv() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "workspace-command-${System.currentTimeMillis()}")
+    workspace.writeFile(
+      "tools/echo_args.py",
+      """
+      import json
+      import os
+      import sys
+
+      os.makedirs("out", exist_ok=True)
+      with open("out/argv.json", "w", encoding="utf-8") as handle:
+          json.dump({"argv": sys.argv[1:]}, handle)
+      print("args=" + ",".join(sys.argv[1:]))
+      """.trimIndent(),
+      createAutoSnapshot = false,
+    )
+    val tool = WorkspaceCommandRunTool(workspace, ToolEventRecorder())
+
+    val result = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("python", "tools/echo_args.py", "alpha", "beta"),
+        snapshotBeforeRun = false,
+      ),
+    )
+
+    assertTrue(result, result.contains("Workspace command status=ok exitCode=0"))
+    assertTrue(result, result.contains("authorization=allowed authority=safe risk=python.workspace_script"))
+    assertTrue(result, result.contains("permissions=workspace.read|workspace.write|workspace_script"))
+    assertTrue(result, result.contains("command=python tools/echo_args.py alpha beta"))
+    assertTrue(result, result.contains("args=alpha,beta"))
+    assertTrue(workspace.readFile("out/argv.json").contains("\"alpha\""))
+    val audit = workspace.readFile(".flovera/logs/workspace-command.jsonl")
+    assertTrue(audit, audit.contains("\"riskCategory\":\"python.workspace_script\""))
+    assertTrue(audit, audit.contains("\"allowed\":true"))
+  }
+
+  @Test
+  fun workspaceCommandRunRejectsUnsupportedCommands() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "workspace-command-unsupported-${System.currentTimeMillis()}")
+    val tool = WorkspaceCommandRunTool(workspace, ToolEventRecorder())
+
+    val result = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("sh", "-c", "echo unsafe"),
+        snapshotBeforeRun = false,
+      ),
+    )
+
+    assertTrue(result, result.contains("Workspace command status=unsupported exitCode=127"))
+    assertTrue(result, result.contains("authorization=denied authority=safe risk=unsupported"))
+    assertTrue(result, result.contains("Unsupported workspace command: sh"))
+    assertFalse(result, result.contains("stdout:"))
+  }
+
+  @Test
+  fun workspaceCommandRunIsDefaultPythonExecutionTool() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "workspace-command-tools-${System.currentTimeMillis()}")
+
+    val defaultToolNames = workspaceToolRegistry(workspace, ToolEventRecorder())
+      .tools
+      .map { it.descriptor.name }
+    val fallbackToolNames = workspaceToolRegistry(
+      workspace = workspace,
+      recorder = ToolEventRecorder(),
+      pythonRunToolFallbackEnabled = true,
+    ).tools.map { it.descriptor.name }
+
+    assertTrue(defaultToolNames.contains("workspace_command_run"))
+    assertFalse(defaultToolNames.contains("python_run"))
+    assertTrue(fallbackToolNames.contains("workspace_command_run"))
+    assertTrue(fallbackToolNames.contains("python_run"))
+  }
+
+  @Test
+  fun workspaceCommandRunDeniesGroovyOutsideFullAuthority() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "workspace-command-groovy-denied-${System.currentTimeMillis()}")
+    workspace.writeFile("tools/hello.groovy", "out.println('should-not-run')", createAutoSnapshot = false)
+    val tool = WorkspaceCommandRunTool(workspace, ToolEventRecorder())
+
+    val result = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("groovy", "tools/hello.groovy"),
+        snapshotBeforeRun = false,
+      ),
+    )
+
+    assertTrue(result, result.contains("authorization=denied authority=safe risk=groovy.workspace_script"))
+    assertTrue(result, result.contains("jvm.dynamic requires Full Authority"))
+    assertFalse(result, result.contains("should-not-run"))
+  }
+
+  @Test
+  fun workspaceCommandRunExecutesGroovySpikeInFullAuthority() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "workspace-command-groovy-${System.currentTimeMillis()}")
+    workspace.writeFile(
+      "tools/hello.groovy",
+      """
+      out.println("groovy-args=" + argv.join(","))
+      ctx.writeText("out/groovy.txt", "groovy ok " + argv[0])
+      return "groovy-return"
+      """.trimIndent(),
+      createAutoSnapshot = false,
+    )
+    val tool = WorkspaceCommandRunTool(workspace, ToolEventRecorder(), authorityMode = "full")
+
+    val result = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("groovy", "tools/hello.groovy", "alpha"),
+        snapshotBeforeRun = false,
+      ),
+    )
+
+    assertTrue(result, result.contains("authorization=allowed authority=full risk=groovy.workspace_script"))
+    assertTrue(result, result.contains("groovy-args=alpha"))
+    assertTrue(result, result.contains("groovy-return"))
+    assertTrue(workspace.readFile("out/groovy.txt").contains("groovy ok alpha"))
+  }
+
+  @Test
+  fun workspaceCommandRunLoadsWorkspaceJarFromGroovy() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "workspace-command-groovy-jar-${System.currentTimeMillis()}")
+    val libsDir = File(workspace.root, "libs")
+    libsDir.mkdirs()
+    File(libsDir, "helper.jar").writeBytes(Base64.getDecoder().decode(TEST_HELPER_JAR_BASE64))
+    workspace.writeFile(
+      "tools/use_helper.groovy",
+      """
+      import demo.Helper
+
+      out.println(Helper.shout(argv[0]))
+      ctx.writeText("out/jar.txt", Helper.shout("file"))
+      return "jar-runtime-ok"
+      """.trimIndent(),
+      createAutoSnapshot = false,
+    )
+    val tool = WorkspaceCommandRunTool(workspace, ToolEventRecorder(), authorityMode = "full")
+
+    val result = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("groovy", "tools/use_helper.groovy", "alpha"),
+        snapshotBeforeRun = false,
+      ),
+    )
+
+    assertTrue(result, result.contains("Workspace command status=ok exitCode=0"))
+    assertTrue(result, result.contains("jar-ALPHA"))
+    assertTrue(result, result.contains("jar-runtime-ok"))
+    assertTrue(workspace.readFile("out/jar.txt").contains("jar-FILE"))
+    assertTrue(File(workspace.root, ".flovera/runtime/jvm-artifacts/libs").walkTopDown().any { it.name == "classes.dex" })
+
+    val cachedResult = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("groovy", "tools/use_helper.groovy", "beta"),
+        snapshotBeforeRun = false,
+      ),
+    )
+
+    assertTrue(cachedResult, cachedResult.contains("Workspace command status=ok exitCode=0"))
+    assertTrue(cachedResult, cachedResult.contains("jar-BETA"))
+  }
+
+  @Test
   fun pythonRunSupportsXmlAndDocxDocumentProcessing() = runBlocking {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val workspace = WorkspaceManager(context, "python-docs-${System.currentTimeMillis()}")
@@ -1408,6 +1582,23 @@ class WorkspaceFileTreeInstrumentedTest {
 
     assertTrue(capabilities.contains("\"networkTools\": true"))
     assertTrue(capabilities.contains("\"pythonRuntime\": true"))
+    assertTrue(capabilities.contains("\"pythonRunTool\": false"))
+    assertTrue(capabilities.contains("\"pythonRunToolFallbackEnabled\": false"))
+    assertTrue(settingsView.contains("\"pythonRunToolFallbackEnabled\": false"))
+    assertTrue(capabilities.contains("\"workspaceCommandRuntime\": true"))
+    assertTrue(capabilities.contains("\"workspaceCommandRuntimeKind\": \"argv\""))
+    assertTrue(capabilities.contains("\"workspaceCommandSupportedCommands\""))
+    assertTrue(capabilities.contains("\"python3\""))
+    assertTrue(capabilities.contains("\"groovy\""))
+    assertTrue(capabilities.contains("\"groovyCommandRuntime\": true"))
+    assertTrue(capabilities.contains("\"groovyCommandRuntimeStatus\": \"experimental_full_authority\""))
+    assertTrue(capabilities.contains("\"groovyWorkspaceJarClasspath\": true"))
+    assertTrue(capabilities.contains("\"jvmWorkspaceLibraries\": true"))
+    assertTrue(capabilities.contains("\"jvmWorkspaceLibraryPath\": \"libs\""))
+    assertTrue(capabilities.contains("\"jvmArtifactDexCachePath\": \".flovera/runtime/jvm-artifacts\""))
+    assertTrue(capabilities.contains("\"jvmArtifactSourceModes\""))
+    assertTrue(capabilities.contains("\"workspace_jar\""))
+    assertTrue(capabilities.contains("\"workspaceCommandShellAccess\": false"))
     assertTrue(capabilities.contains("\"pythonPackageInstall\": true"))
     assertTrue(capabilities.contains("\"pythonPackageCatalogPath\""))
     assertTrue(capabilities.contains("\"pythonBuiltInPackages\""))

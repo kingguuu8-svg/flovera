@@ -13,12 +13,17 @@ fun workspaceToolRegistry(
   workspace: WorkspaceManager,
   recorder: ToolEventRecorder,
   networkEnabled: Boolean = false,
+  pythonRunToolFallbackEnabled: Boolean = false,
+  authorityMode: String = "safe",
   webSearchEnabled: Boolean = false,
   braveSearchApiKey: String = "",
 ): ToolRegistry = ToolRegistry {
   tool(ListFilesTool(workspace, recorder))
   tool(WorkspaceSearchTool(workspace, recorder))
-  tool(PythonRunTool(workspace, recorder, networkEnabled))
+  tool(WorkspaceCommandRunTool(workspace, recorder, networkEnabled, authorityMode))
+  if (pythonRunToolFallbackEnabled) {
+    tool(PythonRunTool(workspace, recorder, networkEnabled))
+  }
   tool(PythonPackageInstallTool(workspace, recorder, networkEnabled))
   tool(ArtifactInspectTool(workspace, recorder))
   tool(ArtifactDiagnoseTool(workspace, recorder))

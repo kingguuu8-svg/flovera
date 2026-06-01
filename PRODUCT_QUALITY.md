@@ -728,18 +728,42 @@ capability state.
 
 ### Workspace Shell And JGit
 
-Status: Deferred behind release stability. Flovera has not added a general
-workspace shell or embedded JGit runtime. The current release boundary remains
-workspace files, search, bounded Python, WebView/artifacts, and explicit
-app-owned tools. Git support is valuable, especially `diff`, status, branch,
-and commit workflows, but it should not be rushed into the demo-workbench
-release while conversation, artifact, and runtime control quality are still the
-main product risk.
+Status: Baseline command runtime started. Flovera now exposes one default
+execution entry, `workspace_command_run`, with argv-shaped execution, workspace
+cwd, timeouts, output limits, snapshots, and audit/tool events. The first
+supported runtimes are `python`/`python3` and an experimental
+Full-Authority-only `groovy` adapter, routed through a command gateway that
+classifies risk, checks authority mode, writes `.flovera/logs/workspace-command.jsonl`,
+and dispatches to approved runtime adapters. Python reuses the existing
+Flovera-owned Python runtime for workspace scripts and `python -c` code. Groovy
+compiles workspace scripts to JVM class files, converts them with D8, then runs
+the generated dex through `DexClassLoader`; direct `GroovyShell` loading is not
+used because Android cannot load JVM class files directly. Groovy also scans
+workspace `libs/**/*.jar`, compiles scripts against those jars, converts the
+jars to dex, and caches script/library dex under `.flovera/runtime/jvm-artifacts`.
+This supports pure JVM jars as the first reusable library source; Maven
+coordinate resolution is still deferred. The older direct evaluator tool
+`python_run` is disabled by default to keep the request tool schema smaller and
+reduce routing ambiguity; it can be restored as a fallback through
+`pythonRunToolFallbackEnabled` in app settings/settings proposals. This is not
+Android shell access and does not enable `sh`, `bash`, `npm`, `git`, daemons,
+shell operators, or arbitrary OS commands. Embedded JGit, MCP-on-JVM, and
+broader shell-compatible commands remain deferred.
 
-- Target shape: expose a workspace-scoped shell surface for selected command
+- Done: expose a workspace-scoped command surface for selected command
   runtimes, starting with Python when shell-style execution is more natural than
-  tool calls, and later add Git through JGit or another Android-compatible
-  implementation.
+  direct `python_run` code.
+- Done: keep `python_run` out of default tool registration; expose it only as a
+  settings-controlled fallback for direct evaluator/session-global workflows.
+- Done: centralize command risk classification, authority checks, and command
+  audit logging in the command gateway so Groovy/Git/JGit can reuse the same
+  execution boundary.
+- Done: add a Groovy runtime spike under Full Authority using the same workspace
+  cwd, timeout, output, snapshot, and audit boundary.
+- Done: add the first JVM artifact layer for Groovy: workspace `libs/**/*.jar`
+  classpath discovery, D8 conversion, dex caching, and runtime class loading.
+- Next target: keep expanding command runtimes, such as Git/JGit, only when
+  they can reuse the same execution boundary.
 - Keep ordinary file operations as app-owned tools (`read`, `edit`, `search`,
   artifact diagnostics) because those are safer, more inspectable, and easier
   for the UI to connect to workspace state.
