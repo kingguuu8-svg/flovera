@@ -190,11 +190,20 @@ class WorkspaceFileTreeInstrumentedTest {
 
     val manifest = workspace.readFile(".flovera/skills/manifest.json")
     val skill = workspace.readFile(".flovera/skills/flovera-android-webview-app/SKILL.md")
+    val skillCreator = workspace.readFile(".flovera/skills/flovera-skill-creator/SKILL.md")
 
     assertTrue(manifest.contains("\"id\": \"flovera-android-webview-app\""))
+    assertTrue(manifest.contains("\"id\": \"flovera-skill-creator\""))
+    assertFalse(manifest.contains("\"id\": \"flovera-context-handoff\""))
     assertTrue(manifest.contains(".flovera/skills/flovera-android-webview-app/SKILL.md"))
+    assertTrue(manifest.contains(".flovera/skills/flovera-skill-creator/SKILL.md"))
     assertTrue(skill.contains("# Flovera Android WebView App"))
+    assertTrue(skill.startsWith("---"))
     assertTrue(skill.contains("artifact_diagnose"))
+    assertTrue(skillCreator.contains("name: flovera-skill-creator"))
+    assertTrue(skillCreator.contains("description: Use when the user asks Flovera to create"))
+    assertTrue(skillCreator.contains(".flovera/skills/<skill-id>/"))
+    assertTrue(skillCreator.contains(".flovera/skills/manifest.json"))
 
     assertTrue(workspace.editFile(".flovera/skills/flovera-android-webview-app/SKILL.md", "artifact_diagnose", "artifact_diagnose immediately").contains("Edited"))
     assertTrue(workspace.readFile(".flovera/skills/flovera-android-webview-app/SKILL.md").contains("artifact_diagnose immediately"))

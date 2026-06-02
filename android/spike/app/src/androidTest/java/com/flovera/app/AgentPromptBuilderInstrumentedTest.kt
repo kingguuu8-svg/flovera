@@ -169,6 +169,7 @@ class AgentPromptBuilderInstrumentedTest {
     assertTrue(userInput.contains("Recent session history:"))
     assertTrue(userInput.contains("Available Flovera skills:"))
     assertTrue(userInput.contains("flovera-android-webview-app"))
+    assertTrue(userInput.contains("flovera-skill-creator"))
     assertTrue(userInput.contains(".flovera/skills/flovera-android-webview-app/SKILL.md"))
     assertTrue(userInput.contains("read its SKILL.md with read_file"))
     assertTrue(userInput.contains("Current user request:"))

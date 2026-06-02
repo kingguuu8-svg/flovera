@@ -29,9 +29,9 @@ data class FloveraSkillPromptDescriptor(
 object FloveraSkillRegistry {
   val defaultRegistrations: List<FloveraSkillRegistration> = listOf(
     FloveraSkillRegistration(id = "flovera-android-webview-app"),
-    FloveraSkillRegistration(id = "flovera-context-handoff"),
     FloveraSkillRegistration(id = "flovera-jvm-groovy"),
     FloveraSkillRegistration(id = "flovera-mcp-adapter"),
+    FloveraSkillRegistration(id = "flovera-skill-creator"),
   )
 
   fun defaultPromptDescriptors(): String {
@@ -83,22 +83,6 @@ object FloveraSkillRegistry {
         - If unsure about the manifest shape, call `artifact_diagnose` with `includeReference=true` and compare with the hidden reference app.
       """.trimIndent()
 
-      "flovera-context-handoff" -> """
-        ---
-        name: flovera-context-handoff
-        description: Use when continuing after compression, interruption, retry, provider overflow, or a long tool-heavy session.
-        ---
-
-        # Flovera Context Handoff
-
-        Required workflow:
-        - Treat the latest handoff summary, current user request, failed tool results, and recent artifact paths as higher priority than old successful stdout.
-        - Do not replay completed tool work unless verification or recovery requires it.
-        - Preserve actionable error tails, generated paths, active TODOs, and user guidance.
-        - If a previous run was interrupted, continue from the saved partial transcript/tool history instead of restarting from scratch.
-        - Report what was reused from history and what was reverified.
-      """.trimIndent()
-
       "flovera-jvm-groovy" -> """
         ---
         name: flovera-jvm-groovy
@@ -128,6 +112,72 @@ object FloveraSkillRegistry {
         - Prefer translating a narrow MCP server capability into workspace files and registered Flovera tools/artifacts over adding broad native tool surfaces.
         - Identify server inputs, outputs, auth needs, filesystem boundaries, network needs, and long-running process assumptions.
         - If the original MCP server depends on npm, daemons, OS shell behavior, native binaries, or hidden secrets, call out the platform gap and design a bounded replacement.
+      """.trimIndent()
+
+      "flovera-skill-creator" -> """
+        ---
+        name: flovera-skill-creator
+        description: Use when the user asks Flovera to create, edit, register, split, or organize skills under .flovera/skills.
+        ---
+
+        # Flovera Skill Creator
+
+        Flovera skills use the standard structure:
+
+        ```text
+        .flovera/skills/<skill-id>/
+          SKILL.md
+          references/   optional
+          scripts/      optional
+          assets/       optional
+        ```
+
+        ## Required SKILL.md Shape
+
+        Every skill must have YAML frontmatter followed by Markdown instructions:
+
+        ```markdown
+        ---
+        name: skill-id
+        description: Use when ...
+        ---
+
+        # Skill Title
+
+        Instructions...
+        ```
+
+        `name` and `description` are the entry metadata shown in the request. The full body is read only when the agent decides the skill is relevant.
+
+        ## Registration
+
+        Register skills in `.flovera/skills/manifest.json`:
+
+        ```json
+        {
+          "version": 1,
+          "skills": [
+            {
+              "id": "skill-id",
+              "path": ".flovera/skills/skill-id/SKILL.md",
+              "enabled": true
+            }
+          ]
+        }
+        ```
+
+        A skill is active only when it is enabled in the manifest and its `SKILL.md` exists. The user and agent may edit built-in skills, add custom skills, disable skills, or replace the manifest.
+
+        ## Design Rules
+
+        - Keep `SKILL.md` focused on instructions that change behavior.
+        - Prefer concise workflow steps over long background explanation.
+        - Use `references/` for optional large details; mention when to read each reference from `SKILL.md`.
+        - Use `scripts/` only for repeatable deterministic work.
+        - Use `assets/` for templates or files used as outputs.
+        - Do not add README, changelog, install guide, or extra docs unless the user explicitly asks.
+        - Do not put secrets or user-private runtime logs in a skill.
+        - After creating or changing a skill, verify the manifest path, frontmatter `name`, frontmatter `description`, and that the descriptor appears in the next prompt descriptor list when registered.
       """.trimIndent()
 
       else -> ""
