@@ -1120,6 +1120,7 @@ class WorkspaceFileTreeInstrumentedTest {
     )
 
     assertTrue(result, result.contains("authorization=allowed authority=full risk=groovy.workspace_script"))
+    assertTrue(result, result.contains("[jvm-worker] process=com.flovera.app:jvmworker"))
     assertTrue(result, result.contains("[jvm-build] jvm.queue.acquired"))
     assertTrue(result, result.contains("groovy-args=alpha"))
     assertTrue(result, result.contains("groovy-return"))
@@ -1229,6 +1230,8 @@ class WorkspaceFileTreeInstrumentedTest {
 
     assertTrue(cachedResult, cachedResult.contains("Workspace command status=ok exitCode=0"))
     assertTrue(cachedResult, cachedResult.contains("jar-BETA"))
+    assertTrue(cachedResult, cachedResult.contains("d8.library.jar.cache_hit"))
+    assertTrue(cachedResult, cachedResult.contains("groovy.script.cache_hit"))
   }
 
   @Test
@@ -1757,6 +1760,8 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"jvmBuildCancelFlagPath\": \".flovera/runtime/jvm-artifacts/cancel.flag\""))
     assertTrue(capabilities.contains("\"jvmBuildErrorClassification\": true"))
     assertTrue(capabilities.contains("\"jvmLibraryDexMode\": \"per_jar_low_peak_memory\""))
+    assertTrue(capabilities.contains("\"jvmWorkerProcess\": true"))
+    assertTrue(capabilities.contains("\"jvmWorkerProcessName\": \":jvmworker\""))
     assertTrue(capabilities.contains("\"appCrashLogPath\": \".flovera/logs/app-crash.jsonl\""))
     assertTrue(capabilities.contains("\"androidHistoricalExitLogging\": true"))
     assertTrue(capabilities.contains("\"workspaceCommandShellAccess\": false"))

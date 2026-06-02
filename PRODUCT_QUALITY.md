@@ -745,6 +745,9 @@ The same JVM artifact layer can resolve direct Maven coordinates declared in
 `libs/maven.json` or `.flovera/jvm/maven.json`, downloading POM/JAR files into
 the workspace runtime cache, parsing common compile/runtime transitive
 dependencies, and then feeding those jars into the same D8/classloader path.
+Groovy JVM preparation and execution are delegated to an Android service running
+in the isolated `:jvmworker` app process, so D8/Groovy peaks and worker death are
+separated from the UI process.
 Heavy JVM preparation is now guarded by a serialized throttled scheduler:
 Maven resolution, artifact download, library D8 conversion, Groovy compilation,
 and script D8 conversion write progress to `.flovera/logs/jvm-build.jsonl`.
@@ -793,10 +796,12 @@ broader shell-compatible commands remain deferred.
 - Done: add JVM build state, cancel-flag checks, worker background thread
   priority, and user-visible failure classification for Maven, D8, class
   loading, Groovy compile, cancellation, and runtime failures.
-- Deferred: move JVM preparation into a separate Android worker process. The
-  current implementation lowers peak pressure and preserves diagnostics, but it
-  still runs inside the app process; a bound/foreground worker service is needed
-  before worker death can be fully isolated from the UI process.
+- Done: move Groovy JVM preparation and execution behind a bound service running
+  in the isolated `:jvmworker` process. Tool output includes the worker process
+  marker, and worker IPC failures are reported separately from script failures.
+- Next hardening target: promote the worker to a foreground service during very
+  long JVM builds if Android background process pressure still kills the worker
+  before checkpointed work can resume.
 - Next target: keep expanding command runtimes, such as Git/JGit, only when
   they can reuse the same execution boundary.
 - Keep ordinary file operations as app-owned tools (`read`, `edit`, `search`,

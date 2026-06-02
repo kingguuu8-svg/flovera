@@ -2790,6 +2790,8 @@ data class FloveraCapabilities(
   val jvmBuildCancelFlagPath: String = ".flovera/runtime/jvm-artifacts/cancel.flag",
   val jvmBuildErrorClassification: Boolean = true,
   val jvmLibraryDexMode: String = "per_jar_low_peak_memory",
+  val jvmWorkerProcess: Boolean = true,
+  val jvmWorkerProcessName: String = ":jvmworker",
   val appCrashLogPath: String = ".flovera/logs/app-crash.jsonl",
   val androidHistoricalExitLogging: Boolean = true,
   val workspaceCommandShellAccess: Boolean = false,

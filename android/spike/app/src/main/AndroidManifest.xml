@@ -35,6 +35,12 @@
             android:foregroundServiceType="dataSync"
             android:stopWithTask="false" />
 
+        <service
+            android:name="com.flovera.app.koog.JvmWorkerService"
+            android:exported="false"
+            android:process=":jvmworker"
+            android:stopWithTask="false" />
+
         <activity
             android:name="com.flovera.app.MainActivity"
             android:exported="true"

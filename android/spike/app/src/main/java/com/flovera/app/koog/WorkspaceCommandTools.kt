@@ -3,7 +3,19 @@ package com.flovera.app.koog
 import ai.koog.agents.core.tools.SimpleTool
 import ai.koog.agents.core.tools.annotations.LLMDescription
 import ai.koog.serialization.typeToken
+import android.app.Application
+import android.app.Service
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.content.ServiceConnection
 import android.os.Build
+import android.os.Bundle
+import android.os.Handler
+import android.os.HandlerThread
+import android.os.IBinder
+import android.os.Message
+import android.os.Messenger
 import android.os.Process
 import com.android.tools.r8.CompilationMode
 import com.android.tools.r8.D8
@@ -22,11 +34,14 @@ import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import javax.xml.parsers.DocumentBuilderFactory
 import java.util.concurrent.Callable
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
+import java.util.concurrent.atomic.AtomicReference
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -323,6 +338,7 @@ private class PythonCommandAdapter(
 private class GroovyCommandAdapter(
   private val workspace: WorkspaceManager,
   private val networkEnabled: Boolean,
+  private val useIsolatedWorker: Boolean = true,
 ) : WorkspaceCommandAdapter {
   override val commandNames: Set<String> = setOf("groovy")
 
@@ -342,6 +358,14 @@ private class GroovyCommandAdapter(
     }
     if (argv[1].startsWith("-")) {
       return PythonRunResult(status = "error", exitCode = 1, stderr = "Unsupported groovy option: ${argv[1]}. Supported now: groovy script.groovy [args...]\n")
+    }
+
+    if (useIsolatedWorker) {
+      return JvmWorkerClient(
+        appContext = workspace.applicationContext,
+        workspaceId = workspace.root.name,
+        networkEnabled = networkEnabled,
+      ).runGroovy(argv, args)
     }
 
     val timeoutMs = args.timeoutMs.coerceIn(FloveraPythonRuntime.MIN_TIMEOUT_MS, FloveraPythonRuntime.MAX_TIMEOUT_MS)
@@ -520,6 +544,146 @@ private class GroovyCommandAdapter(
     System.setProperty("java.specification.version", "1.8")
   }
 
+}
+
+class JvmWorkerService : Service() {
+  private lateinit var workerThread: HandlerThread
+  private lateinit var messenger: Messenger
+
+  override fun onCreate() {
+    super.onCreate()
+    workerThread = HandlerThread("flovera-jvm-worker-service", Process.THREAD_PRIORITY_BACKGROUND).also { it.start() }
+    messenger = Messenger(Handler(workerThread.looper) { message ->
+      when (message.what) {
+        MSG_RUN_GROOVY -> {
+          handleRunGroovy(message)
+          true
+        }
+        else -> false
+      }
+    })
+  }
+
+  override fun onBind(intent: Intent?): IBinder = messenger.binder
+
+  override fun onDestroy() {
+    workerThread.quitSafely()
+    super.onDestroy()
+  }
+
+  private fun handleRunGroovy(message: Message) {
+    val replyTo = message.replyTo ?: return
+    val result = runCatching {
+      val data = message.data
+      val workspaceId = data.getString(KEY_WORKSPACE_ID).orEmpty()
+      val argsJson = data.getString(KEY_ARGS_JSON).orEmpty()
+      val argv = data.getStringArrayList(KEY_ARGV).orEmpty()
+      val networkEnabled = data.getBoolean(KEY_NETWORK_ENABLED)
+      val args = workspaceCommandJson.decodeFromString<WorkspaceCommandRunTool.Args>(argsJson)
+      val workspace = WorkspaceManager(applicationContext, workspaceId)
+      val directResult = GroovyCommandAdapter(
+        workspace = workspace,
+        networkEnabled = networkEnabled,
+        useIsolatedWorker = false,
+      ).execute(argv, args)
+      directResult.copy(stderr = workerHeader() + directResult.stderr)
+    }.getOrElse { throwable ->
+      PythonRunResult(
+        status = "error",
+        exitCode = 1,
+        stderr = workerHeader() +
+          "failureCategory=jvm_worker_failed\n" +
+          "failureHint=JVM worker 进程无法执行 Groovy 任务。查看 .flovera/logs/app-crash.jsonl 和 .flovera/logs/jvm-build.jsonl。\n" +
+          "JVM worker failed: ${throwable::class.java.name}: ${throwable.message.orEmpty()}\n",
+      )
+    }
+    val reply = Message.obtain(null, MSG_RESULT).apply {
+      data = Bundle().apply {
+        putString(KEY_RESULT_JSON, workspaceCommandJson.encodeToString(result))
+      }
+    }
+    runCatching { replyTo.send(reply) }
+  }
+
+  private fun workerHeader(): String {
+    return "[jvm-worker] process=${Application.getProcessName()} pid=${Process.myPid()}\n"
+  }
+}
+
+private class JvmWorkerClient(
+  private val appContext: Context,
+  private val workspaceId: String,
+  private val networkEnabled: Boolean,
+) {
+  fun runGroovy(argv: List<String>, args: WorkspaceCommandRunTool.Args): PythonRunResult {
+    val timeoutMs = args.timeoutMs.coerceIn(FloveraPythonRuntime.MIN_TIMEOUT_MS, FloveraPythonRuntime.MAX_TIMEOUT_MS)
+    val replyThread = HandlerThread("flovera-jvm-worker-reply", Process.THREAD_PRIORITY_BACKGROUND).also { it.start() }
+    val latch = CountDownLatch(1)
+    val resultRef = AtomicReference<PythonRunResult?>()
+    val errorRef = AtomicReference<String?>()
+    val replyMessenger = Messenger(Handler(replyThread.looper) { message ->
+      if (message.what == MSG_RESULT) {
+        runCatching {
+          val json = message.data.getString(KEY_RESULT_JSON).orEmpty()
+          resultRef.set(workspaceCommandJson.decodeFromString<PythonRunResult>(json))
+        }.onFailure { throwable ->
+          errorRef.set("${throwable::class.java.name}: ${throwable.message.orEmpty()}")
+        }
+        latch.countDown()
+        true
+      } else {
+        false
+      }
+    })
+    var bound = false
+    val connection = object : ServiceConnection {
+      override fun onServiceConnected(name: ComponentName, service: IBinder) {
+        runCatching {
+          val message = Message.obtain(null, MSG_RUN_GROOVY).apply {
+            replyTo = replyMessenger
+            data = Bundle().apply {
+              putString(KEY_WORKSPACE_ID, workspaceId)
+              putStringArrayList(KEY_ARGV, ArrayList(argv))
+              putString(KEY_ARGS_JSON, workspaceCommandJson.encodeToString(args))
+              putBoolean(KEY_NETWORK_ENABLED, networkEnabled)
+            }
+          }
+          Messenger(service).send(message)
+        }.onFailure { throwable ->
+          errorRef.set("${throwable::class.java.name}: ${throwable.message.orEmpty()}")
+          latch.countDown()
+        }
+      }
+
+      override fun onServiceDisconnected(name: ComponentName) {
+        errorRef.set("JVM worker service disconnected.")
+        latch.countDown()
+      }
+    }
+    return try {
+      bound = appContext.bindService(Intent(appContext, JvmWorkerService::class.java), connection, Context.BIND_AUTO_CREATE)
+      if (!bound) {
+        return workerClientError("jvm_worker_bind_failed", "JVM worker service 绑定失败。")
+      }
+      val waited = latch.await((timeoutMs + 15_000).toLong(), TimeUnit.MILLISECONDS)
+      if (!waited) {
+        workerClientError("jvm_worker_timeout", "JVM worker 超过 IPC 等待时间，任务可能被 Android 暂停或杀死。")
+      } else {
+        resultRef.get() ?: workerClientError("jvm_worker_reply_failed", errorRef.get() ?: "JVM worker 未返回有效结果。")
+      }
+    } finally {
+      if (bound) runCatching { appContext.unbindService(connection) }
+      replyThread.quitSafely()
+    }
+  }
+
+  private fun workerClientError(category: String, hint: String): PythonRunResult {
+    return PythonRunResult(
+      status = "error",
+      exitCode = 1,
+      stderr = "failureCategory=$category\nfailureHint=$hint 查看 .flovera/logs/app-crash.jsonl 和 .flovera/logs/jvm-build.jsonl。\n",
+    )
+  }
 }
 
 private class JvmArtifactManager(
@@ -1202,6 +1366,18 @@ private fun adaptiveCooldownMs(itemCount: Int, totalBytes: Long, baseMs: Long): 
   return (baseMs + itemCount * 90L + sizeMb * 18L).coerceIn(baseMs, 2_000L)
 }
 
+private const val MSG_RUN_GROOVY = 1
+private const val MSG_RESULT = 2
+private const val KEY_WORKSPACE_ID = "workspace_id"
+private const val KEY_ARGV = "argv"
+private const val KEY_ARGS_JSON = "args_json"
+private const val KEY_RESULT_JSON = "result_json"
+private const val KEY_NETWORK_ENABLED = "network_enabled"
+
+private val workspaceCommandJson = Json {
+  ignoreUnknownKeys = true
+  encodeDefaults = true
+}
 private val mavenJson = Json { ignoreUnknownKeys = true }
 private val MAVEN_PROPERTY_PATTERN = Regex("""\$\{([^}]+)\}""")
 private val NEW_FILE_PATTERN = Regex("""\bnew\s+File\s*\(""")
