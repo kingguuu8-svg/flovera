@@ -12,6 +12,7 @@ import com.flovera.app.storage.writeUtf8TextAtomically
 import java.io.File
 import java.util.UUID
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -1074,10 +1075,17 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
   }
 
   private fun ensureFloveraSkills() {
+    val manifestFile = safeFile(".flovera/skills/manifest.json")
+    val existingManifest = if (manifestFile.isFile) {
+      runCatching { json.decodeFromString<FloveraSkillManifest>(readUtf8Text(manifestFile)) }.getOrNull()
+    } else {
+      null
+    }
+    val mergedManifest = FloveraSkillRegistry.mergedDefaultManifest(existingManifest)
     writeFile(
       path = ".flovera/skills/manifest.json",
-      content = json.encodeToString(FloveraSkillManifest()),
-      overwrite = false,
+      content = json.encodeToString(mergedManifest),
+      overwrite = true,
       createAutoSnapshot = false,
     )
     FloveraSkillRegistry.defaultRegistrations.forEach { registration ->
@@ -1093,6 +1101,33 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
   fun readAgentRules(): String = readFile("AGENT.md")
 
   fun readFloveraSkillPromptDescriptors(): String = FloveraSkillRegistry.promptDescriptors(root, json)
+
+  fun listFloveraSkills(): List<FloveraSkillConsoleEntry> = FloveraSkillRegistry.consoleEntries(root, json)
+
+  fun setFloveraSkillEnabled(id: String, enabled: Boolean): Boolean {
+    val normalizedId = id.trim()
+    if (normalizedId.isBlank()) return false
+    val manifest = FloveraSkillRegistry.loadManifestFile(root, json)
+    var changed = false
+    val updated = manifest.copy(
+      skills = manifest.skills.map { registration ->
+        if (registration.id == normalizedId && registration.enabled != enabled) {
+          changed = true
+          registration.copy(enabled = enabled)
+        } else {
+          registration
+        }
+      },
+    )
+    if (!changed) return manifest.skills.any { it.id == normalizedId }
+    writeFile(
+      path = ".flovera/skills/manifest.json",
+      content = json.encodeToString(updated),
+      overwrite = true,
+      createAutoSnapshot = true,
+    )
+    return true
+  }
 
   fun listSnapshots(): List<WorkspaceSnapshotRecord> = snapshotStore.list()
 
@@ -2840,6 +2875,10 @@ data class FloveraCapabilities(
   val skillDescriptorsInPrompt: Boolean = true,
   val skillFilesEditable: Boolean = true,
   val skillRegistrationEditable: Boolean = true,
+  val skillConsoleManagement: Boolean = true,
+  val skillEnableSwitch: Boolean = true,
+  val skillBilingualDescriptions: Boolean = true,
+  val skillDisabledStillReadable: Boolean = true,
   val pythonBuiltInPackages: List<String> = listOf("lxml", "python-docx", "openpyxl", "XlsxWriter", "pypdf", "Markdown", "Jinja2"),
   val webSearch: Boolean = false,
   val settingsView: Boolean = true,

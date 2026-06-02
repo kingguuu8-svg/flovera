@@ -17,32 +17,86 @@ data class FloveraSkillRegistration(
   val id: String,
   val path: String = ".flovera/skills/$id/SKILL.md",
   val enabled: Boolean = true,
+  val titleEn: String = "",
+  val titleZh: String = "",
+  val descriptionEn: String = "",
+  val descriptionZh: String = "",
 )
 
 data class FloveraSkillPromptDescriptor(
   val id: String,
   val path: String,
   val name: String,
-  val description: String,
+  val descriptionEn: String,
+  val descriptionZh: String,
+)
+
+data class FloveraSkillConsoleEntry(
+  val id: String,
+  val path: String,
+  val enabled: Boolean,
+  val titleEn: String,
+  val titleZh: String,
+  val descriptionEn: String,
+  val descriptionZh: String,
 )
 
 object FloveraSkillRegistry {
   val defaultRegistrations: List<FloveraSkillRegistration> = listOf(
-    FloveraSkillRegistration(id = "flovera-android-webview-app"),
-    FloveraSkillRegistration(id = "flovera-jvm-groovy"),
-    FloveraSkillRegistration(id = "flovera-mcp-adapter"),
-    FloveraSkillRegistration(id = "flovera-skill-creator"),
+    defaultRegistration(
+      id = "flovera-android-webview-app",
+      titleEn = "Flovera Android WebView App",
+      titleZh = "Flovera Android WebView 应用",
+      descriptionEn = "Use when creating or fixing a Flovera workspace app, HTML preview, mobile WebView surface, game, touch UI, or flovera.app.json registration.",
+      descriptionZh = "用于创建或修复 Flovera 工作区应用、HTML 预览、移动 WebView、游戏、触控界面或 flovera.app.json 注册。",
+    ),
+    defaultRegistration(
+      id = "flovera-python-workspace-command",
+      titleEn = "Flovera Python Workspace Command",
+      titleZh = "Flovera Python 工作区命令",
+      descriptionEn = "Use when a task needs Python execution, scripts, calculation, document generation, package checks, or file-producing automation inside Flovera.",
+      descriptionZh = "用于需要在 Flovera 内运行 Python、脚本、计算、文档生成、包检查或文件产出自动化的任务。",
+    ),
+    defaultRegistration(
+      id = "flovera-jvm-groovy",
+      titleEn = "Flovera JVM Groovy Runtime",
+      titleZh = "Flovera JVM/Groovy 运行时",
+      descriptionEn = "Use when a task materially benefits from Groovy, JVM libraries, jars, Maven coordinates, or document libraries that CPython cannot cover well.",
+      descriptionZh = "用于任务明显需要 Groovy、JVM 库、jar、Maven 坐标，或 CPython 难以覆盖的文档类库时。",
+    ),
+    defaultRegistration(
+      id = "flovera-mcp-adapter",
+      titleEn = "Flovera MCP Adapter Planning",
+      titleZh = "Flovera MCP 适配规划",
+      descriptionEn = "Use when planning or prototyping a lightweight Flovera-side MCP adapter or server rewrite workflow.",
+      descriptionZh = "用于规划或原型实现轻量的 Flovera 侧 MCP 适配器或 server 重写流程。",
+    ),
+    defaultRegistration(
+      id = "flovera-skill-creator",
+      titleEn = "Flovera Skill Creator",
+      titleZh = "Flovera Skill 创建器",
+      descriptionEn = "Use when the user asks Flovera to create, edit, register, split, toggle, or organize skills under .flovera/skills.",
+      descriptionZh = "用于用户要求 Flovera 在 .flovera/skills 下创建、编辑、注册、拆分、开关或组织 skills。",
+    ),
   )
 
+  fun mergedDefaultManifest(existing: FloveraSkillManifest? = null): FloveraSkillManifest {
+    if (existing == null) return FloveraSkillManifest(skills = defaultRegistrations)
+    val existingById = existing.skills.associateBy { it.id }
+    val mergedDefaults = defaultRegistrations.filterNot { it.id in existingById }
+    return existing.copy(skills = existing.skills + mergedDefaults)
+  }
+
   fun defaultPromptDescriptors(): String {
-    return defaultRegistrations.joinToString("\n") { registration ->
-      val descriptor = descriptorFromSkillBody(
-        id = registration.id,
-        path = registration.path,
-        body = defaultSkillBody(registration.id),
-      )
-      descriptor.toPromptLine()
-    }
+    return defaultRegistrations.asSequence()
+      .filter { it.enabled }
+      .map { registration ->
+        val descriptor = descriptorFromRegistration(
+          registration = registration,
+          body = defaultSkillBody(registration.id),
+        )
+        descriptor.toPromptLine()
+      }.joinToString("\n")
   }
 
   fun promptDescriptors(workspaceRoot: File, json: Json): String {
@@ -54,9 +108,11 @@ object FloveraSkillRegistry {
         val path = normalizedSkillPath(registration)
         val file = workspaceFile(workspaceRoot, path) ?: return@mapNotNull null
         if (!file.isFile) return@mapNotNull null
-        descriptorFromSkillBody(
-          id = registration.id.ifBlank { file.parentFile?.name.orEmpty() },
-          path = path,
+        descriptorFromRegistration(
+          registration = registration.copy(
+            id = registration.id.ifBlank { file.parentFile?.name.orEmpty() },
+            path = path,
+          ),
           body = runCatching { readUtf8Text(file) }.getOrDefault(""),
         )
       }
@@ -64,12 +120,34 @@ object FloveraSkillRegistry {
       .joinToString("\n") { it.toPromptLine() }
   }
 
+  fun consoleEntries(workspaceRoot: File, json: Json): List<FloveraSkillConsoleEntry> {
+    val manifest = loadManifest(workspaceRoot, json)
+    return manifest.skills.map { registration ->
+      val path = normalizedSkillPath(registration)
+      val file = workspaceFile(workspaceRoot, path)
+      val body = if (file?.isFile == true) runCatching { readUtf8Text(file) }.getOrDefault("") else ""
+      val descriptor = descriptorFromRegistration(registration.copy(path = path), body)
+      FloveraSkillConsoleEntry(
+        id = registration.id,
+        path = path,
+        enabled = registration.enabled,
+        titleEn = registration.titleEn.ifBlank { descriptor.name },
+        titleZh = registration.titleZh.ifBlank { registration.titleEn.ifBlank { descriptor.name } },
+        descriptionEn = descriptor.descriptionEn,
+        descriptionZh = descriptor.descriptionZh,
+      )
+    }
+  }
+
+  fun loadManifestFile(workspaceRoot: File, json: Json): FloveraSkillManifest = loadManifest(workspaceRoot, json)
+
   fun defaultSkillBody(id: String): String {
     return when (id) {
       "flovera-android-webview-app" -> """
         ---
         name: flovera-android-webview-app
-        description: Use when creating or fixing a Flovera workspace app, HTML preview, mobile WebView surface, or flovera.app.json registration.
+        description: Use when creating or fixing a Flovera workspace app, HTML preview, mobile WebView surface, game, touch UI, or flovera.app.json registration.
+        description_zh: 用于创建或修复 Flovera 工作区应用、HTML 预览、移动 WebView、游戏、触控界面或 flovera.app.json 注册。
         ---
 
         # Flovera Android WebView App
@@ -81,12 +159,33 @@ object FloveraSkillRegistry {
         - Keep `flovera.app.json` as a small adapter. Do not invent a project-specific JSON handoff protocol as the main integration.
         - After writing or changing `flovera.app.json`, call `artifact_diagnose`. Do not claim registration or usability until diagnostics confirm the manifest and preview path.
         - If unsure about the manifest shape, call `artifact_diagnose` with `includeReference=true` and compare with the hidden reference app.
+        - For games and touch-heavy UI, reason through first launch, first input, restart/new-game, touch/click path, viewport fit, and safe-bottom behavior before reporting completion.
+      """.trimIndent()
+
+      "flovera-python-workspace-command" -> """
+        ---
+        name: flovera-python-workspace-command
+        description: Use when a task needs Python execution, scripts, calculation, document generation, package checks, or file-producing automation inside Flovera.
+        description_zh: 用于需要在 Flovera 内运行 Python、脚本、计算、文档生成、包检查或文件产出自动化的任务。
+        ---
+
+        # Flovera Python Workspace Command
+
+        Required workflow:
+        - Use `workspace_command_run` for Python by default, including scripts, `python -c`, calculations, document generation, file conversion, and validation.
+        - Use argv form, for example `["python", "tools/check.py", "--input", "data.csv"]`. Do not use shell operators, bash, npm, git, or terminal-only instructions.
+        - The user is in Android Flovera, not a desktop terminal. Do not ask the user to run Python manually.
+        - Use `python_run` only if the tool is visible or the explicit fallback setting is enabled.
+        - Use `python_package_install` only for packages in `.flovera/python/wheel-catalog.json`; do not claim arbitrary PyPI support.
+        - After generating nontrivial Office/PDF/image/data artifacts, verify with `artifact_inspect`.
+        - For reusable workspace scripts, prefer `.flovera/tools/` only when the user wants a repeatable workflow.
       """.trimIndent()
 
       "flovera-jvm-groovy" -> """
         ---
         name: flovera-jvm-groovy
         description: Use when a task needs JVM libraries, Groovy scripts, jars, Maven coordinates, or document-processing libraries that CPython cannot cover well.
+        description_zh: 用于任务需要 JVM 库、Groovy 脚本、jar、Maven 坐标，或 CPython 难以覆盖的文档处理类库时。
         ---
 
         # Flovera JVM Groovy Runtime
@@ -103,6 +202,7 @@ object FloveraSkillRegistry {
         ---
         name: flovera-mcp-adapter
         description: Use when planning or prototyping a lightweight Flovera-side MCP adapter or server rewrite workflow.
+        description_zh: 用于规划或原型实现轻量的 Flovera 侧 MCP 适配器或 server 重写流程。
         ---
 
         # Flovera MCP Adapter Planning
@@ -117,7 +217,8 @@ object FloveraSkillRegistry {
       "flovera-skill-creator" -> """
         ---
         name: flovera-skill-creator
-        description: Use when the user asks Flovera to create, edit, register, split, or organize skills under .flovera/skills.
+        description: Use when the user asks Flovera to create, edit, register, split, toggle, or organize skills under .flovera/skills.
+        description_zh: 用于用户要求 Flovera 在 .flovera/skills 下创建、编辑、注册、拆分、开关或组织 skills。
         ---
 
         # Flovera Skill Creator
@@ -160,13 +261,21 @@ object FloveraSkillRegistry {
             {
               "id": "skill-id",
               "path": ".flovera/skills/skill-id/SKILL.md",
-              "enabled": true
+              "enabled": true,
+              "titleEn": "Skill title",
+              "titleZh": "Skill 中文标题",
+              "descriptionEn": "Use when ...",
+              "descriptionZh": "用于..."
             }
           ]
         }
         ```
 
-        A skill is active only when it is enabled in the manifest and its `SKILL.md` exists. The user and agent may edit built-in skills, add custom skills, disable skills, or replace the manifest.
+        A skill entry is visible to the agent only when `enabled=true` and its `SKILL.md` exists. Disabled skills are not injected into `Available Flovera skills`, but the user and agent may still inspect `.flovera/skills` directly with ordinary file tools.
+
+        The manifest is the console-facing control surface. Keep `enabled`, English description, and Chinese description explicit and synchronized with the frontmatter when possible. The request-body skill entry uses the English description only; Chinese metadata is for user-facing console readability. The `SKILL.md` frontmatter should still include `name`, `description`, and optional `description_zh` because the body remains portable.
+
+        The user and agent may edit built-in skills, add custom skills, disable skills, or replace the manifest.
 
         ## Design Rules
 
@@ -177,7 +286,7 @@ object FloveraSkillRegistry {
         - Use `assets/` for templates or files used as outputs.
         - Do not add README, changelog, install guide, or extra docs unless the user explicitly asks.
         - Do not put secrets or user-private runtime logs in a skill.
-        - After creating or changing a skill, verify the manifest path, frontmatter `name`, frontmatter `description`, and that the descriptor appears in the next prompt descriptor list when registered.
+        - After creating or changing a skill, verify the manifest path, frontmatter `name`, frontmatter `description`, optional `description_zh`, manifest `descriptionEn`, manifest `descriptionZh`, and that the descriptor appears in the next prompt descriptor list only when `enabled=true`.
       """.trimIndent()
 
       else -> ""
@@ -186,18 +295,24 @@ object FloveraSkillRegistry {
 
   private fun loadManifest(workspaceRoot: File, json: Json): FloveraSkillManifest {
     val manifest = File(workspaceRoot, SKILL_MANIFEST_PATH)
-    if (!manifest.isFile) return FloveraSkillManifest()
+    if (!manifest.isFile) return mergedDefaultManifest()
     return runCatching { json.decodeFromString<FloveraSkillManifest>(readUtf8Text(manifest)) }
-      .getOrDefault(FloveraSkillManifest())
+      .map { mergedDefaultManifest(it) }
+      .getOrDefault(mergedDefaultManifest())
   }
 
-  private fun descriptorFromSkillBody(id: String, path: String, body: String): FloveraSkillPromptDescriptor {
+  private fun descriptorFromRegistration(registration: FloveraSkillRegistration, body: String): FloveraSkillPromptDescriptor {
     val metadata = frontmatter(body)
     return FloveraSkillPromptDescriptor(
-      id = id,
-      path = path,
-      name = metadata["name"].orEmpty().ifBlank { id },
-      description = metadata["description"].orEmpty().ifBlank { firstHeading(body).ifBlank { "No description provided." } },
+      id = registration.id,
+      path = registration.path,
+      name = metadata["name"].orEmpty().ifBlank { registration.id },
+      descriptionEn = registration.descriptionEn
+        .ifBlank { metadata["description"].orEmpty() }
+        .ifBlank { firstHeading(body).ifBlank { "No description provided." } },
+      descriptionZh = registration.descriptionZh
+        .ifBlank { metadata["description_zh"].orEmpty() }
+        .ifBlank { registration.descriptionEn },
     )
   }
 
@@ -234,10 +349,22 @@ object FloveraSkillRegistry {
     return file
   }
 
-  private fun FloveraSkillPromptDescriptor.toPromptLine(): String {
-    return "- $id (`$name`): $description Path: $path."
-  }
+  private fun FloveraSkillPromptDescriptor.toPromptLine(): String = "- $id (`$name`): $descriptionEn. Path: $path."
 
   const val SKILL_MANIFEST_PATH = ".flovera/skills/manifest.json"
   private const val MAX_PROMPT_SKILLS = 12
+
+  private fun defaultRegistration(
+    id: String,
+    titleEn: String,
+    titleZh: String,
+    descriptionEn: String,
+    descriptionZh: String,
+  ): FloveraSkillRegistration = FloveraSkillRegistration(
+    id = id,
+    titleEn = titleEn,
+    titleZh = titleZh,
+    descriptionEn = descriptionEn,
+    descriptionZh = descriptionZh,
+  )
 }

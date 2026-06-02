@@ -20,6 +20,7 @@ data class WorkspaceSnapshot(
   val snapshots: List<WorkspaceSnapshotRecord>,
   val settingsProposals: List<WorkspaceSettingsProposal>,
   val controlledToolProposals: List<WorkspaceControlledToolProposal>,
+  val floveraSkills: List<FloveraSkillConsoleEntry>,
 )
 
 class WorkspaceController(context: Context, workspaceId: String) {
@@ -181,6 +182,8 @@ class WorkspaceController(context: Context, workspaceId: String) {
 
   fun deleteControlledToolProposal(path: String): Boolean = workspace.deleteControlledToolProposal(path)
 
+  fun setFloveraSkillEnabled(id: String, enabled: Boolean): Boolean = workspace.setFloveraSkillEnabled(id, enabled)
+
   fun snapshot(currentSelectedHtmlPath: String): WorkspaceSnapshot {
     val htmlFiles = workspace.listHtmlFiles()
     val selectedHtmlPath = chooseHtmlPath(currentSelectedHtmlPath, htmlFiles)
@@ -196,6 +199,7 @@ class WorkspaceController(context: Context, workspaceId: String) {
       snapshots = workspace.listSnapshots(),
       settingsProposals = workspace.listSettingsProposals(),
       controlledToolProposals = workspace.listControlledToolProposals(),
+      floveraSkills = workspace.listFloveraSkills(),
     )
   }
 

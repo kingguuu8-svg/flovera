@@ -190,23 +190,50 @@ class WorkspaceFileTreeInstrumentedTest {
 
     val manifest = workspace.readFile(".flovera/skills/manifest.json")
     val skill = workspace.readFile(".flovera/skills/flovera-android-webview-app/SKILL.md")
+    val pythonSkill = workspace.readFile(".flovera/skills/flovera-python-workspace-command/SKILL.md")
     val skillCreator = workspace.readFile(".flovera/skills/flovera-skill-creator/SKILL.md")
 
     assertTrue(manifest.contains("\"id\": \"flovera-android-webview-app\""))
+    assertTrue(manifest.contains("\"id\": \"flovera-python-workspace-command\""))
     assertTrue(manifest.contains("\"id\": \"flovera-skill-creator\""))
     assertFalse(manifest.contains("\"id\": \"flovera-context-handoff\""))
+    assertTrue(manifest.contains("\"enabled\": true"))
+    assertTrue(manifest.contains("\"descriptionEn\""))
+    assertTrue(manifest.contains("\"descriptionZh\""))
     assertTrue(manifest.contains(".flovera/skills/flovera-android-webview-app/SKILL.md"))
+    assertTrue(manifest.contains(".flovera/skills/flovera-python-workspace-command/SKILL.md"))
     assertTrue(manifest.contains(".flovera/skills/flovera-skill-creator/SKILL.md"))
     assertTrue(skill.contains("# Flovera Android WebView App"))
     assertTrue(skill.startsWith("---"))
     assertTrue(skill.contains("artifact_diagnose"))
+    assertTrue(pythonSkill.contains("name: flovera-python-workspace-command"))
+    assertTrue(pythonSkill.contains("description_zh:"))
+    assertTrue(pythonSkill.contains("workspace_command_run"))
+    assertTrue(pythonSkill.contains("python_package_install"))
+    assertTrue(pythonSkill.contains("artifact_inspect"))
     assertTrue(skillCreator.contains("name: flovera-skill-creator"))
     assertTrue(skillCreator.contains("description: Use when the user asks Flovera to create"))
+    assertTrue(skillCreator.contains("description_zh:"))
     assertTrue(skillCreator.contains(".flovera/skills/<skill-id>/"))
     assertTrue(skillCreator.contains(".flovera/skills/manifest.json"))
+    assertTrue(skillCreator.contains("\"enabled\": true"))
+    assertTrue(skillCreator.contains("\"descriptionEn\""))
+    assertTrue(skillCreator.contains("\"descriptionZh\""))
 
     assertTrue(workspace.editFile(".flovera/skills/flovera-android-webview-app/SKILL.md", "artifact_diagnose", "artifact_diagnose immediately").contains("Edited"))
     assertTrue(workspace.readFile(".flovera/skills/flovera-android-webview-app/SKILL.md").contains("artifact_diagnose immediately"))
+
+    val enabledDescriptors = workspace.readFloveraSkillPromptDescriptors()
+    assertTrue(enabledDescriptors.contains("flovera-python-workspace-command"))
+    assertTrue(enabledDescriptors.contains("Use when a task needs Python execution"))
+    assertFalse(enabledDescriptors.contains("ZH:"))
+    assertFalse(enabledDescriptors.contains("用于需要在 Flovera 内运行 Python"))
+    val consoleEntries = workspace.listFloveraSkills().associateBy { it.id }
+    assertTrue(consoleEntries["flovera-python-workspace-command"]?.descriptionZh.orEmpty().contains("用于需要在 Flovera 内运行 Python"))
+    assertTrue(workspace.setFloveraSkillEnabled("flovera-python-workspace-command", false))
+    val disabledDescriptors = workspace.readFloveraSkillPromptDescriptors()
+    assertFalse(disabledDescriptors.contains("flovera-python-workspace-command"))
+    assertTrue(workspace.readFile(".flovera/skills/flovera-python-workspace-command/SKILL.md").contains("workspace_command_run"))
 
     workspace.writeFile(
       ".flovera/skills/custom-demo/SKILL.md",
@@ -230,7 +257,11 @@ class WorkspaceFileTreeInstrumentedTest {
             {
               "id": "custom-demo",
               "path": ".flovera/skills/custom-demo/SKILL.md",
-              "enabled": true
+              "enabled": true,
+              "titleEn": "Custom Demo",
+              "titleZh": "自定义示例",
+              "descriptionEn": "Use when the user wants a custom registered skill.",
+              "descriptionZh": "用于用户需要自定义注册 skill 时。"
             }
           ]
         }
@@ -240,7 +271,8 @@ class WorkspaceFileTreeInstrumentedTest {
     val descriptors = workspace.readFloveraSkillPromptDescriptors()
     assertTrue(descriptors.contains("custom-demo"))
     assertTrue(descriptors.contains("Use when the user wants a custom registered skill."))
-    assertFalse(descriptors.contains("flovera-android-webview-app"))
+    assertFalse(descriptors.contains("用于用户需要自定义注册 skill 时。"))
+    assertTrue(descriptors.contains("flovera-android-webview-app"))
   }
 
   @Test
@@ -1981,6 +2013,17 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"pythonPackageCatalogPath\""))
     assertTrue(capabilities.contains("\"pythonBuiltInPackages\""))
     assertTrue(capabilities.contains("\"openpyxl\""))
+    assertTrue(capabilities.contains("\"skillSystem\": true"))
+    assertTrue(capabilities.contains("\"skillManifestPath\": \".flovera/skills/manifest.json\""))
+    assertTrue(capabilities.contains("\"skillBodyPathGlob\": \".flovera/skills/<skill-id>/SKILL.md\""))
+    assertTrue(capabilities.contains("\"skillActivationViaReadFile\": true"))
+    assertTrue(capabilities.contains("\"skillDescriptorsInPrompt\": true"))
+    assertTrue(capabilities.contains("\"skillFilesEditable\": true"))
+    assertTrue(capabilities.contains("\"skillRegistrationEditable\": true"))
+    assertTrue(capabilities.contains("\"skillConsoleManagement\": true"))
+    assertTrue(capabilities.contains("\"skillEnableSwitch\": true"))
+    assertTrue(capabilities.contains("\"skillBilingualDescriptions\": true"))
+    assertTrue(capabilities.contains("\"skillDisabledStillReadable\": true"))
     assertTrue(capabilities.contains("\"artifactInspect\": true"))
     assertTrue(capabilities.contains("\"artifactInspectFormats\""))
     assertTrue(capabilities.contains("\"workspaceArtifacts\": true"))

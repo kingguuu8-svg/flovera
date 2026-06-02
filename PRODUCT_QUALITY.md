@@ -409,19 +409,23 @@ for cross-run prompt reconstruction and future compression/skills retention.
   activation metadata and a path back to the skill body.
 - Skill registry baseline is implemented with the standard editable
   `.flovera/skills/<skill-id>/SKILL.md` directory shape and
-  `.flovera/skills/manifest.json` registration. Compact descriptors are
-  injected into the request from the current workspace registry; when a skill is
-  relevant the agent reads the registered `SKILL.md` through normal
-  `read_file`, and that read is retained as active-critical tool context.
-  Built-in skills are seed files only and may be edited or replaced by the
-  user/agent to match the local environment. The seeded
-  `flovera-skill-creator` skill documents the standard folder shape,
-  `SKILL.md` frontmatter requirements, registration file format, and validation
-  checks so the agent can create or update skills through ordinary workspace
-  file tools.
+  `.flovera/skills/manifest.json` registration. Compact English descriptors
+  for enabled skills are injected into the request from the current workspace
+  registry; when a skill is relevant the agent reads the registered `SKILL.md`
+  through normal `read_file`, and that read is retained as active-critical tool
+  context. The settings console lists registered skills with bilingual
+  descriptions and an enable switch. Disabling a skill only removes its English
+  descriptor from the next request; the user and agent may still inspect or edit
+  `.flovera/skills` directly. Built-in skills are seed files only and may be
+  edited or replaced by the user/agent to match the local environment. The
+  seeded Python workspace command skill documents the command-first Python
+  path, while `flovera-skill-creator` documents the standard folder shape,
+  `SKILL.md` frontmatter requirements, bilingual registration fields, enable
+  state, and validation checks so the agent can create or update skills through
+  ordinary workspace file tools.
 - Remaining work: expand the extractor from generic summaries into richer
-  structured file/artifact facts and add a UI surface for managing registered
-  skills.
+  structured file/artifact facts and polish the console skill management UI if
+  large user registries need grouping or search.
 
 
 ### Interleaved Model Conversation Streaming

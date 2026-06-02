@@ -28,6 +28,7 @@ import com.flovera.app.workspace.WorkspaceArtifactJob
 import com.flovera.app.workspace.WorkspaceController
 import com.flovera.app.workspace.WorkspaceControlledToolProposal
 import com.flovera.app.workspace.WorkspaceFileNode
+import com.flovera.app.workspace.FloveraSkillConsoleEntry
 import com.flovera.app.workspace.WorkspaceLocalAppServer
 import com.flovera.app.workspace.WorkspacePythonHttpRuntime
 import com.flovera.app.workspace.WorkspacePythonHttpRuntimeStatus
@@ -77,6 +78,7 @@ data class AgentScreenState(
   val workspaceSnapshots: List<WorkspaceSnapshotRecord> = emptyList(),
   val settingsProposals: List<WorkspaceSettingsProposal> = emptyList(),
   val controlledToolProposals: List<WorkspaceControlledToolProposal> = emptyList(),
+  val floveraSkills: List<FloveraSkillConsoleEntry> = emptyList(),
   val status: String = "Idle",
   val isRunning: Boolean = false,
   val assistantDraft: SessionMessage? = null,
@@ -226,6 +228,7 @@ class AgentController(
       workspaceSnapshots = workspaceSnapshot.snapshots,
       settingsProposals = workspaceSnapshot.settingsProposals,
       controlledToolProposals = workspaceSnapshot.controlledToolProposals,
+      floveraSkills = workspaceSnapshot.floveraSkills,
       status = settingsLoad.warning ?: "Ready",
     )
     if (initialHtmlLoading) {
@@ -544,6 +547,11 @@ class AgentController(
   fun dismissControlledToolProposal(path: String) {
     val deleted = workspaceController.deleteControlledToolProposal(path)
     refreshWorkspaceState(status = if (deleted) "Tool proposal dismissed" else "Tool proposal not found")
+  }
+
+  fun setFloveraSkillEnabled(id: String, enabled: Boolean) {
+    val updated = workspaceController.setFloveraSkillEnabled(id, enabled)
+    refreshWorkspaceState(status = if (updated) "Skill ${if (enabled) "enabled" else "disabled"}: $id" else "Skill not found: $id")
   }
 
   fun workspaceFileUri(path: String): Uri? {
@@ -1260,6 +1268,7 @@ class AgentController(
         workspaceSnapshots = workspaceSnapshot.snapshots,
         settingsProposals = workspaceSnapshot.settingsProposals,
         controlledToolProposals = workspaceSnapshot.controlledToolProposals,
+        floveraSkills = workspaceSnapshot.floveraSkills,
         isRunning = isRunning,
         assistantDraft = if (isRunning) it.assistantDraft else null,
         status = statusAfterAuthority,

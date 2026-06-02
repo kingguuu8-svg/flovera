@@ -4968,6 +4968,23 @@ private fun SettingsDialog(
           color = MaterialTheme.colorScheme.onSurfaceVariant,
           style = MaterialTheme.typography.bodySmall,
         )
+        Text(t(language, "Skills", "Skills"), style = MaterialTheme.typography.titleSmall)
+        Text(
+          t(
+            language,
+            "Enabled skills enter the request as visible descriptors. Disabled skills stay editable under .flovera/skills.",
+            "开启的 skill 会作为入口说明进入请求体。关闭的 skill 仍可在 .flovera/skills 下编辑和查看。",
+          ),
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
+          style = MaterialTheme.typography.bodySmall,
+        )
+        state.floveraSkills.forEach { skill ->
+          FloveraSkillSettingsItem(
+            skill = skill,
+            language = language,
+            onEnabledChange = { enabled -> controller.setFloveraSkillEnabled(skill.id, enabled) },
+          )
+        }
         if (state.settingsProposals.isNotEmpty()) {
           Text(t(language, "Pending proposals", "\u5f85\u786e\u8ba4\u63d0\u6848"), style = MaterialTheme.typography.titleSmall)
           state.settingsProposals.forEach { proposal ->
@@ -5107,6 +5124,58 @@ private fun HtmlFilePickerRow(
           },
         )
       }
+    }
+  }
+}
+
+@Composable
+private fun FloveraSkillSettingsItem(
+  skill: com.flovera.app.workspace.FloveraSkillConsoleEntry,
+  language: String,
+  onEnabledChange: (Boolean) -> Unit,
+) {
+  val title = if (language == "zh") skill.titleZh.ifBlank { skill.titleEn } else skill.titleEn.ifBlank { skill.titleZh }
+  val primaryDescription = if (language == "zh") {
+    skill.descriptionZh.ifBlank { skill.descriptionEn }
+  } else {
+    skill.descriptionEn.ifBlank { skill.descriptionZh }
+  }
+  val secondaryDescription = if (language == "zh") skill.descriptionEn else skill.descriptionZh
+  Surface(
+    modifier = Modifier.fillMaxWidth(),
+    shape = RoundedCornerShape(8.dp),
+    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f),
+  ) {
+    Row(
+      modifier = Modifier.fillMaxWidth().padding(10.dp),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(title.ifBlank { skill.id }, style = MaterialTheme.typography.bodyMedium)
+        Text(
+          primaryDescription,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
+          style = MaterialTheme.typography.bodySmall,
+        )
+        if (secondaryDescription.isNotBlank() && secondaryDescription != primaryDescription) {
+          Text(
+            secondaryDescription,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall,
+          )
+        }
+        Text(
+          skill.path,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
+          style = MaterialTheme.typography.labelSmall,
+        )
+      }
+      Switch(
+        checked = skill.enabled,
+        onCheckedChange = onEnabledChange,
+        modifier = Modifier.semantics { contentDescription = "Skill ${skill.id} switch" },
+      )
     }
   }
 }
