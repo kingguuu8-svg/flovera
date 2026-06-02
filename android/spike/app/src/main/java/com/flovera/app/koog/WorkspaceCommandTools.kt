@@ -52,6 +52,8 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.codehaus.groovy.control.CompilationUnit
 import org.codehaus.groovy.control.CompilerConfiguration
 import org.codehaus.groovy.tools.FileSystemCompiler
@@ -86,13 +88,15 @@ class WorkspaceCommandRunTool(
   )
 
   override suspend fun execute(args: Args): String {
-    val result = runCatching {
-      WorkspaceCommandGateway(
-        workspace = workspace,
-        networkEnabled = networkEnabled,
-        authorityMode = authorityMode,
-      ).run(args)
-    }.getOrElse { it.message ?: it.toString() }
+    val result = withContext(Dispatchers.IO) {
+      runCatching {
+        WorkspaceCommandGateway(
+          workspace = workspace,
+          networkEnabled = networkEnabled,
+          authorityMode = authorityMode,
+        ).run(args)
+      }.getOrElse { it.message ?: it.toString() }
+    }
     recorder.record(
       name,
       "argv=${args.argv.commandSummary()}, cwd=${args.cwd}, timeoutMs=${args.timeoutMs}",
