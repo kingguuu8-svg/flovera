@@ -4,6 +4,7 @@ import ai.koog.agents.core.tools.SimpleTool
 import ai.koog.agents.core.tools.annotations.LLMDescription
 import ai.koog.serialization.typeToken
 import android.os.Build
+import android.os.Process
 import com.android.tools.r8.CompilationMode
 import com.android.tools.r8.D8
 import com.android.tools.r8.D8Command
@@ -22,6 +23,7 @@ import java.security.MessageDigest
 import javax.xml.parsers.DocumentBuilderFactory
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
+import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import kotlinx.serialization.Serializable
@@ -366,7 +368,12 @@ private class GroovyCommandAdapter(
 
     val stdout = ByteArrayOutputStream()
     val stderr = ByteArrayOutputStream()
-    val executor = Executors.newSingleThreadExecutor()
+    val executor = Executors.newSingleThreadExecutor { runnable ->
+      Thread {
+        Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
+        runnable.run()
+      }.apply { name = "flovera-groovy-worker" }
+    }
     val future = executor.submit(Callable {
       runGroovyScript(
         scriptFile = scriptFile,
@@ -412,8 +419,11 @@ private class GroovyCommandAdapter(
   }
 
   private fun groovyErrorText(throwable: Throwable, existingStderr: String): String {
+    val classified = classifyGroovyFailure(throwable, existingStderr)
     return buildString {
       if (existingStderr.isNotBlank()) appendLine(existingStderr.trimEnd())
+      appendLine("failureCategory=${classified.category}")
+      appendLine("failureHint=${classified.hint}")
       appendLine("Groovy spike failed: ${throwable::class.java.name}: ${throwable.message.orEmpty()}")
       var cause = throwable.cause
       var depth = 0
@@ -428,19 +438,68 @@ private class GroovyCommandAdapter(
     }
   }
 
+  private fun classifyGroovyFailure(throwable: Throwable, existingStderr: String): GroovyFailureClassification {
+    val chain = mutableListOf<String>()
+    var current: Throwable? = throwable
+    var depth = 0
+    while (current != null && depth < 8) {
+      chain += "${current::class.java.name}: ${current.message.orEmpty()}"
+      current = current.cause
+      depth += 1
+    }
+    val text = chain.joinToString("\n") + "\n" + existingStderr
+    return when {
+      "cancel.flag" in text || "cancelled" in text.lowercase() -> GroovyFailureClassification(
+        "jvm_build_cancelled",
+        "JVM 构建被取消。删除取消标记后可从已完成的缓存继续重试。",
+      )
+      "Unable to resolve Maven artifact" in text || "UnknownHostException" in text || "FileNotFoundException" in text && ".pom" in text -> GroovyFailureClassification(
+        "maven_resolution_failed",
+        "Maven 坐标、网络或仓库不可用。检查 libs/maven.json、network 设置和依赖版本。",
+      )
+      "D8" in text || "com.android.tools.r8" in text || "Dex" in text && "failed" in text.lowercase() -> GroovyFailureClassification(
+        "d8_conversion_failed",
+        "JVM jar 或脚本 class 转 dex 失败。依赖可能使用了 Android 不兼容字节码、API 或过大的库树。",
+      )
+      "Multiple dex files define" in text || "NoClassDefFoundError" in text || "ClassNotFoundException" in text -> GroovyFailureClassification(
+        "android_class_loading_failed",
+        "dex 类加载失败。可能是依赖冲突、缺少传递依赖，或 Android 运行时不支持该 JVM 库。",
+      )
+      "MultipleCompilationErrorsException" in text || "CompilationFailedException" in text -> GroovyFailureClassification(
+        "groovy_compile_failed",
+        "Groovy 脚本编译失败。检查 import、语法和 Maven 依赖是否已经可用。",
+      )
+      else -> GroovyFailureClassification(
+        "groovy_runtime_failed",
+        "脚本运行或 JVM 准备阶段失败。查看 .flovera/logs/jvm-build.jsonl 的最后阶段定位是编译还是运行。",
+      )
+    }
+  }
+
   private fun runGroovyScript(
     scriptFile: File,
     scriptArgs: List<String>,
     stdout: ByteArrayOutputStream,
     stderr: ByteArrayOutputStream,
   ): Any? {
-    normalizeGroovyAndroidJavaVersion()
-    val artifacts = JvmArtifactManager(workspace)
-    val workspaceJars = artifacts.workspaceJars() + artifacts.mavenJars(networkEnabled)
-    val libraryDex = artifacts.ensureLibraryDex(workspaceJars)
-    val scriptDex = artifacts.ensureGroovyScriptDex(scriptFile, workspaceJars, libraryDex)
     val outWriter = PrintWriter(stdout.writer(StandardCharsets.UTF_8), true)
     val errWriter = PrintWriter(stderr.writer(StandardCharsets.UTF_8), true)
+    normalizeGroovyAndroidJavaVersion()
+    val build = JvmBuildScheduler(workspace.root, errWriter)
+    val buildOutput = build.exclusive("groovy:${workspace.workspaceRelativePath(scriptFile)}") {
+      val artifacts = JvmArtifactManager(workspace, build)
+      val workspaceJars = artifacts.workspaceJars() + artifacts.mavenJars(networkEnabled)
+      build.stage(
+        name = "jvm.artifacts.selected",
+        detail = "${workspaceJars.size} jar(s), ${workspaceJars.sumOf { it.sizeBytes }} bytes",
+        cooldownMs = adaptiveCooldownMs(workspaceJars.size, workspaceJars.sumOf { it.sizeBytes }, baseMs = 80),
+      ) {
+        workspaceJars
+      }
+      val libraryDex = artifacts.ensureLibraryDex(workspaceJars)
+      val scriptDex = artifacts.ensureGroovyScriptDex(scriptFile, workspaceJars, libraryDex)
+      JvmGroovyBuildOutput(libraryDex = libraryDex, scriptDex = scriptDex)
+    }
     val binding = Binding().apply {
       setVariable("args", scriptArgs.toTypedArray())
       setVariable("argv", scriptArgs)
@@ -448,11 +507,10 @@ private class GroovyCommandAdapter(
       setVariable("out", outWriter)
       setVariable("err", errWriter)
     }
-    val dexPath = listOf(scriptDex.dexFile.absolutePath, libraryDex?.dexFile?.absolutePath)
-      .filterNotNull()
+    val dexPath = (listOf(buildOutput.scriptDex.dexFile.absolutePath) + buildOutput.libraryDex.dexPathsOrEmpty())
       .joinToString(File.pathSeparator)
-    val loader = DexClassLoader(dexPath, scriptDex.optimizedDir.absolutePath, null, javaClass.classLoader)
-    val scriptClass = loader.loadClass(scriptDex.mainClassName).asSubclass(Script::class.java)
+    val loader = DexClassLoader(dexPath, buildOutput.scriptDex.optimizedDir.absolutePath, null, javaClass.classLoader)
+    val scriptClass = loader.loadClass(buildOutput.scriptDex.mainClassName).asSubclass(Script::class.java)
     val script = scriptClass.getDeclaredConstructor().newInstance()
     script.binding = binding
     return FloveraGroovyFile.withWorkspaceRoot(workspace.root) { script.run() }
@@ -466,6 +524,7 @@ private class GroovyCommandAdapter(
 
 private class JvmArtifactManager(
   private val workspace: WorkspaceManager,
+  private val scheduler: JvmBuildScheduler,
 ) {
   private val root: File = workspace.root.canonicalFile
   private val cacheRoot: File = File(root, ".flovera/runtime/jvm-artifacts").canonicalFile
@@ -495,8 +554,15 @@ private class JvmArtifactManager(
       repositoryRoot = File(cacheRoot, "maven/repository"),
       repositories = request.repositories,
       networkEnabled = networkEnabled,
+      scheduler = scheduler,
     )
-    return resolver.resolve(request.dependencies).map { file ->
+    return scheduler.stage(
+      name = "maven.resolve",
+      detail = "${request.dependencies.size} root coordinate(s)",
+      cooldownMs = 150,
+    ) {
+      resolver.resolve(request.dependencies)
+    }.map { file ->
       val canonical = file.canonicalFile
       JvmJarArtifact(
         file = canonical,
@@ -547,7 +613,7 @@ private class JvmArtifactManager(
     if (jars.isEmpty()) return null
     val key = sha256(
       buildString {
-        appendLine("flovera-jvm-library-dex-v1")
+        appendLine("flovera-jvm-library-dex-v2-per-jar")
         appendLine("api=${Build.VERSION.SDK_INT}")
         jars.forEach { jar ->
           appendLine("${jar.relativePath}:${jar.sha256}:${jar.sizeBytes}")
@@ -556,24 +622,55 @@ private class JvmArtifactManager(
     )
     val dexDir = File(cacheRoot, "libs/$key/dex")
     val optimizedDir = File(cacheRoot, "libs/$key/optimized")
-    val dexFile = File(dexDir, "classes.dex")
-    if (!dexFile.isFile) {
-      dexDir.mkdirs()
-      optimizedDir.mkdirs()
-      val command = D8Command.builder()
-        .setMode(CompilationMode.DEBUG)
-        .setMinApiLevel(Build.VERSION.SDK_INT)
-        .setOutput(dexDir.toPath(), OutputMode.DexIndexed)
-        .addProgramFiles(jars.map { it.file.toPath() })
-        .build()
-      D8.run(command)
-      markDexReadOnly(dexDir)
-      File(dexDir.parentFile, "artifacts.txt").writeText(
-        jars.joinToString("\n") { "${it.relativePath} ${it.sha256} ${it.sizeBytes}" },
-        StandardCharsets.UTF_8,
+    val manifestFile = File(dexDir.parentFile, "artifacts.txt")
+    dexDir.mkdirs()
+    optimizedDir.mkdirs()
+    val dexArtifacts = jars.mapIndexed { index, jar ->
+      val jarKey = sha256(
+        buildString {
+          appendLine("flovera-jvm-library-jar-dex-v1")
+          appendLine("api=${Build.VERSION.SDK_INT}")
+          appendLine("${jar.relativePath}:${jar.sha256}:${jar.sizeBytes}")
+        }.toByteArray(StandardCharsets.UTF_8),
       )
+      val jarDexDir = File(dexDir, "${index.toString().padStart(3, '0')}-$jarKey")
+      val dexFile = File(jarDexDir, "classes.dex")
+      if (!dexFile.isFile) {
+        scheduler.stage(
+          name = "d8.library.jar",
+          detail = "${jar.relativePath} ${jar.sizeBytes} bytes",
+          cooldownMs = adaptiveCooldownMs(1, jar.sizeBytes, baseMs = 350),
+        ) {
+          jarDexDir.mkdirs()
+          val command = D8Command.builder()
+            .setMode(CompilationMode.DEBUG)
+            .setMinApiLevel(Build.VERSION.SDK_INT)
+            .setOutput(jarDexDir.toPath(), OutputMode.DexIndexed)
+            .addProgramFiles(jar.file.toPath())
+            .build()
+          D8.run(command)
+          markDexReadOnly(jarDexDir)
+        }
+      } else {
+        scheduler.markCacheHit("d8.library.jar", jarKey)
+      }
+      JvmLibraryDexArtifact(dexFile = dexFile, source = jar.relativePath, key = jarKey)
     }
-    return JvmLibraryDex(dexFile = dexFile, optimizedDir = optimizedDir, key = key)
+    if (!manifestFile.isFile) {
+      scheduler.stage(
+        name = "d8.library.manifest",
+        detail = "${dexArtifacts.size} jar dex artifact(s)",
+        cooldownMs = adaptiveCooldownMs(jars.size, jars.sumOf { it.sizeBytes }, baseMs = 150),
+      ) {
+        manifestFile.writeText(
+          dexArtifacts.joinToString("\n") { "${it.source} ${it.key} ${it.dexFile.length()}" },
+          StandardCharsets.UTF_8,
+        )
+      }
+    } else {
+      scheduler.markCacheHit("d8.library", key)
+    }
+    return JvmLibraryDex(dexFiles = dexArtifacts.map { it.dexFile }, optimizedDir = optimizedDir, key = key)
   }
 
   fun ensureGroovyScriptDex(
@@ -609,11 +706,17 @@ private class JvmArtifactManager(
       dexDir.mkdirs()
       sourceDir.mkdirs()
       val compileSource = transformedGroovySource(scriptFile, sourceDir)
-      compileGroovyToClasses(compileSource, classDir, libraryDex)
+      scheduler.stage(name = "groovy.compile", detail = workspace.workspaceRelativePath(scriptFile), cooldownMs = 250) {
+        compileGroovyToClasses(compileSource, classDir, libraryDex)
+      }
       val mainClassName = findGroovyScriptClassName(scriptFile, classDir)
-      compileClassesToDex(classDir, dexDir, jars)
-      markDexReadOnly(dexDir)
-      mainClassFile.writeText(mainClassName, StandardCharsets.UTF_8)
+      scheduler.stage(name = "d8.script", detail = mainClassName, cooldownMs = 250) {
+        compileClassesToDex(classDir, dexDir, jars)
+        markDexReadOnly(dexDir)
+        mainClassFile.writeText(mainClassName, StandardCharsets.UTF_8)
+      }
+    } else {
+      scheduler.markCacheHit("groovy.script", key)
     }
     return GroovyScriptDex(
       dexFile = dexFile,
@@ -632,7 +735,7 @@ private class JvmArtifactManager(
       javaClass.classLoader
     } else {
       DexClassLoader(
-        libraryDex.dexFile.absolutePath,
+        libraryDex.dexPath,
         libraryDex.optimizedDir.absolutePath,
         null,
         javaClass.classLoader,
@@ -698,6 +801,142 @@ private class JvmArtifactManager(
   }
 }
 
+private class JvmBuildScheduler(
+  private val workspaceRoot: File,
+  private val progressWriter: PrintWriter,
+) {
+  private val logFile: File = File(workspaceRoot, ".flovera/logs/jvm-build.jsonl")
+  private val stateFile: File = File(workspaceRoot, ".flovera/runtime/jvm-artifacts/build-state.json")
+  private val cancelFile: File = File(workspaceRoot, ".flovera/runtime/jvm-artifacts/cancel.flag")
+
+  fun <T> exclusive(label: String, block: () -> T): T {
+    val waitStartedAt = System.currentTimeMillis()
+    checkCancelled()
+    log("jvm.queue.wait", label)
+    LOCK.acquire()
+    val waitedMs = System.currentTimeMillis() - waitStartedAt
+    return try {
+      writeState(phase = "jvm.queue.acquired", detail = label, status = "running")
+      log("jvm.queue.acquired", "$label waitedMs=$waitedMs")
+      coolDown(120)
+      block()
+    } finally {
+      try {
+        coolDown(120)
+        log("jvm.queue.released", label)
+      } finally {
+        LOCK.release()
+      }
+    }
+  }
+
+  fun <T> stage(name: String, detail: String, cooldownMs: Long = 0, block: () -> T): T {
+    val startedAt = System.currentTimeMillis()
+    checkCancelled()
+    writeState(phase = name, detail = detail, status = "running")
+    log("$name.start", detail)
+    return try {
+      val result = block()
+      val elapsedMs = System.currentTimeMillis() - startedAt
+      writeState(phase = name, detail = detail, status = "done", elapsedMs = elapsedMs)
+      log("$name.done", "$detail elapsedMs=$elapsedMs")
+      coolDown(cooldownMs)
+      checkCancelled()
+      result
+    } catch (throwable: Throwable) {
+      val elapsedMs = System.currentTimeMillis() - startedAt
+      writeState(
+        phase = name,
+        detail = detail,
+        status = "failed",
+        elapsedMs = elapsedMs,
+        error = "${throwable::class.java.simpleName}: ${throwable.message.orEmpty()}",
+      )
+      log("$name.fail", "$detail elapsedMs=$elapsedMs error=${throwable::class.java.simpleName}: ${throwable.message.orEmpty()}")
+      throw throwable
+    }
+  }
+
+  fun markCacheHit(name: String, key: String) {
+    checkCancelled()
+    writeState(phase = name, detail = key.take(16), status = "cache_hit")
+    log("$name.cache_hit", key.take(16))
+    coolDown(40)
+  }
+
+  private fun checkCancelled() {
+    if (cancelFile.isFile) {
+      error("JVM build cancelled by .flovera/runtime/jvm-artifacts/cancel.flag")
+    }
+  }
+
+  private fun coolDown(ms: Long) {
+    if (ms <= 0) return
+    runCatching {
+      val runtime = Runtime.getRuntime()
+      val usedBytes = runtime.totalMemory() - runtime.freeMemory()
+      if (runtime.maxMemory() > 0 && usedBytes > runtime.maxMemory() * 3 / 4) {
+        System.gc()
+        Thread.sleep(150)
+      }
+      Thread.sleep(ms.coerceAtMost(2_000))
+    }.onFailure { throwable ->
+      if (throwable is InterruptedException) Thread.currentThread().interrupt()
+    }
+  }
+
+  private fun log(phase: String, detail: String) {
+    val runtime = Runtime.getRuntime()
+    val usedBytes = runtime.totalMemory() - runtime.freeMemory()
+    val line = JsonObject(
+      mapOf(
+        "ts" to JsonPrimitive(System.currentTimeMillis()),
+        "phase" to JsonPrimitive(phase),
+        "detail" to JsonPrimitive(detail),
+        "thread" to JsonPrimitive(Thread.currentThread().name),
+        "usedMemoryBytes" to JsonPrimitive(usedBytes),
+        "maxMemoryBytes" to JsonPrimitive(runtime.maxMemory()),
+      ),
+    ).toString()
+    runCatching {
+      logFile.parentFile?.mkdirs()
+      logFile.appendText(line + "\n", StandardCharsets.UTF_8)
+    }
+    progressWriter.println("[jvm-build] $phase $detail")
+  }
+
+  private fun writeState(
+    phase: String,
+    detail: String,
+    status: String,
+    elapsedMs: Long? = null,
+    error: String? = null,
+  ) {
+    val runtime = Runtime.getRuntime()
+    val usedBytes = runtime.totalMemory() - runtime.freeMemory()
+    val fields = mutableMapOf<String, kotlinx.serialization.json.JsonElement>(
+      "ts" to JsonPrimitive(System.currentTimeMillis()),
+      "phase" to JsonPrimitive(phase),
+      "detail" to JsonPrimitive(detail),
+      "status" to JsonPrimitive(status),
+      "thread" to JsonPrimitive(Thread.currentThread().name),
+      "usedMemoryBytes" to JsonPrimitive(usedBytes),
+      "maxMemoryBytes" to JsonPrimitive(runtime.maxMemory()),
+      "cancelPath" to JsonPrimitive(".flovera/runtime/jvm-artifacts/cancel.flag"),
+    )
+    elapsedMs?.let { fields["elapsedMs"] = JsonPrimitive(it) }
+    error?.let { fields["error"] = JsonPrimitive(it) }
+    runCatching {
+      stateFile.parentFile?.mkdirs()
+      stateFile.writeText(JsonObject(fields).toString(), StandardCharsets.UTF_8)
+    }
+  }
+
+  companion object {
+    private val LOCK = Semaphore(1, true)
+  }
+}
+
 private data class JvmJarArtifact(
   val file: File,
   val relativePath: String,
@@ -706,8 +945,16 @@ private data class JvmJarArtifact(
 )
 
 private data class JvmLibraryDex(
-  val dexFile: File,
+  val dexFiles: List<File>,
   val optimizedDir: File,
+  val key: String,
+) {
+  val dexPath: String get() = dexFiles.joinToString(File.pathSeparator) { it.absolutePath }
+}
+
+private data class JvmLibraryDexArtifact(
+  val dexFile: File,
+  val source: String,
   val key: String,
 )
 
@@ -717,6 +964,20 @@ private data class GroovyScriptDex(
   val mainClassName: String,
   val key: String,
 )
+
+private data class JvmGroovyBuildOutput(
+  val libraryDex: JvmLibraryDex?,
+  val scriptDex: GroovyScriptDex,
+)
+
+private data class GroovyFailureClassification(
+  val category: String,
+  val hint: String,
+)
+
+private fun JvmLibraryDex?.dexPathsOrEmpty(): List<String> {
+  return this?.dexFiles?.map { it.absolutePath }.orEmpty()
+}
 
 private data class MavenRequest(
   val repositories: List<String>,
@@ -760,6 +1021,7 @@ private class MavenArtifactResolver(
   private val repositoryRoot: File,
   private val repositories: List<String>,
   private val networkEnabled: Boolean,
+  private val scheduler: JvmBuildScheduler,
 ) {
   private val xmlFactory = DocumentBuilderFactory.newInstance().apply {
     isNamespaceAware = false
@@ -777,13 +1039,21 @@ private class MavenArtifactResolver(
       val coordinate = queue.removeFirst()
       val existing = resolved[coordinate.key]
       if (existing != null) continue
-      ensureArtifactFile(coordinate, "pom")
+      scheduler.stage(name = "maven.pom", detail = coordinate.gav, cooldownMs = 80) {
+        ensureArtifactFile(coordinate, "pom")
+      }
       resolved[coordinate.key] = coordinate
-      parsePom(coordinate).dependencies.forEach { dependency ->
+      scheduler.stage(name = "maven.parsePom", detail = coordinate.gav, cooldownMs = 40) {
+        parsePom(coordinate)
+      }.dependencies.forEach { dependency ->
         if (dependency.key !in resolved) queue.add(dependency)
       }
     }
-    return resolved.values.map { coordinate -> ensureArtifactFile(coordinate, "jar") }
+    return resolved.values.map { coordinate ->
+      scheduler.stage(name = "maven.jar", detail = coordinate.gav, cooldownMs = 120) {
+        ensureArtifactFile(coordinate, "jar")
+      }
+    }
   }
 
   private fun parsePom(coordinate: MavenCoordinate): MavenPomInfo {
@@ -925,6 +1195,11 @@ private fun sha256(bytes: ByteArray): String {
   return MessageDigest.getInstance("SHA-256")
     .digest(bytes)
     .joinToString("") { "%02x".format(it) }
+}
+
+private fun adaptiveCooldownMs(itemCount: Int, totalBytes: Long, baseMs: Long): Long {
+  val sizeMb = totalBytes / (1024L * 1024L)
+  return (baseMs + itemCount * 90L + sizeMb * 18L).coerceIn(baseMs, 2_000L)
 }
 
 private val mavenJson = Json { ignoreUnknownKeys = true }

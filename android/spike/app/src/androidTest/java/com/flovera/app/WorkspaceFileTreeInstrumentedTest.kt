@@ -1120,9 +1120,39 @@ class WorkspaceFileTreeInstrumentedTest {
     )
 
     assertTrue(result, result.contains("authorization=allowed authority=full risk=groovy.workspace_script"))
+    assertTrue(result, result.contains("[jvm-build] jvm.queue.acquired"))
     assertTrue(result, result.contains("groovy-args=alpha"))
     assertTrue(result, result.contains("groovy-return"))
     assertTrue(workspace.readFile("out/groovy.txt").contains("groovy ok alpha"))
+    assertTrue(File(workspace.root, ".flovera/logs/jvm-build.jsonl").readText().contains("groovy.compile"))
+    assertTrue(File(workspace.root, ".flovera/runtime/jvm-artifacts/build-state.json").readText().contains("\"status\":\"done\""))
+  }
+
+  @Test
+  fun workspaceCommandRunGroovyBuildCanBeCancelledByFlag() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "workspace-command-groovy-cancel-${System.currentTimeMillis()}")
+    workspace.writeFile(
+      "tools/cancelled.groovy",
+      "out.println('should-not-run')",
+      createAutoSnapshot = false,
+    )
+    File(workspace.root, ".flovera/runtime/jvm-artifacts/cancel.flag").apply {
+      parentFile?.mkdirs()
+      writeText("cancel")
+    }
+    val tool = WorkspaceCommandRunTool(workspace, ToolEventRecorder(), authorityMode = "full")
+
+    val result = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("groovy", "tools/cancelled.groovy"),
+        snapshotBeforeRun = false,
+      ),
+    )
+
+    assertTrue(result, result.contains("Workspace command status=error exitCode=1"))
+    assertTrue(result, result.contains("failureCategory=jvm_build_cancelled"))
+    assertFalse(result, result.contains("should-not-run"))
   }
 
   @Test
@@ -1188,6 +1218,7 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(result, result.contains("jar-runtime-ok"))
     assertTrue(workspace.readFile("out/jar.txt").contains("jar-FILE"))
     assertTrue(File(workspace.root, ".flovera/runtime/jvm-artifacts/libs").walkTopDown().any { it.name == "classes.dex" })
+    assertTrue(File(workspace.root, ".flovera/logs/jvm-build.jsonl").readText().contains("d8.library.jar"))
 
     val cachedResult = tool.execute(
       WorkspaceCommandRunTool.Args(
@@ -1719,6 +1750,15 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"jvmMavenDefaultRepositories\""))
     assertTrue(capabilities.contains("\"https://repo1.maven.org/maven2\""))
     assertTrue(capabilities.contains("\"jvmMavenTransitiveDependencies\": \"basic_compile_runtime_scope\""))
+    assertTrue(capabilities.contains("\"jvmBuildScheduler\": true"))
+    assertTrue(capabilities.contains("\"jvmBuildSchedulerMode\": \"serialized_throttled_checkpointed_cache\""))
+    assertTrue(capabilities.contains("\"jvmBuildProgressLogPath\": \".flovera/logs/jvm-build.jsonl\""))
+    assertTrue(capabilities.contains("\"jvmBuildStatePath\": \".flovera/runtime/jvm-artifacts/build-state.json\""))
+    assertTrue(capabilities.contains("\"jvmBuildCancelFlagPath\": \".flovera/runtime/jvm-artifacts/cancel.flag\""))
+    assertTrue(capabilities.contains("\"jvmBuildErrorClassification\": true"))
+    assertTrue(capabilities.contains("\"jvmLibraryDexMode\": \"per_jar_low_peak_memory\""))
+    assertTrue(capabilities.contains("\"appCrashLogPath\": \".flovera/logs/app-crash.jsonl\""))
+    assertTrue(capabilities.contains("\"androidHistoricalExitLogging\": true"))
     assertTrue(capabilities.contains("\"workspaceCommandShellAccess\": false"))
     assertTrue(capabilities.contains("\"pythonPackageInstall\": true"))
     assertTrue(capabilities.contains("\"pythonPackageCatalogPath\""))
