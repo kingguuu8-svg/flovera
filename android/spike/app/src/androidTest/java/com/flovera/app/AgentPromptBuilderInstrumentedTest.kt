@@ -167,6 +167,10 @@ class AgentPromptBuilderInstrumentedTest {
     assertTrue(userInput.contains("Workspace user rules from AGENT.md:"))
     assertTrue(userInput.contains(workspaceRule))
     assertTrue(userInput.contains("Recent session history:"))
+    assertTrue(userInput.contains("Available Flovera skills:"))
+    assertTrue(userInput.contains("flovera-android-webview-app"))
+    assertTrue(userInput.contains(".flovera/skills/flovera-android-webview-app/SKILL.md"))
+    assertTrue(userInput.contains("read its SKILL.md with read_file"))
     assertTrue(userInput.contains("Current user request:"))
   }
 

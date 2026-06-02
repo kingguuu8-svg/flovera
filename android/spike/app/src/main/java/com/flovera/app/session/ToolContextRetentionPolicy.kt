@@ -27,14 +27,15 @@ object ToolContextRetentionPolicy {
     if (!success) {
       return ToolRetentionDecision(
         success = false,
-        resultKind = kindFor(normalizedName),
+        resultKind = kindFor(normalizedName, args),
         retentionPriority = RETENTION_ACTIVE_CRITICAL,
         retentionReason = "failed tool output must remain available for retry and diagnosis",
       )
     }
 
-    val kind = kindFor(normalizedName)
+    val kind = kindFor(normalizedName, args)
     val priority = when (kind) {
+      "skill_read" -> RETENTION_ACTIVE_CRITICAL
       "file_write",
       "artifact_validation" -> RETENTION_STRUCTURED_MEMORY
       "command",
@@ -111,9 +112,10 @@ object ToolContextRetentionPolicy {
     }
   }
 
-  private fun kindFor(name: String): String {
+  private fun kindFor(name: String, args: String = ""): String {
     return when {
       name in setOf("write_file", "edit_file") -> "file_write"
+      name == "read_file" && isSkillReadArgs(args) -> "skill_read"
       name == "read_file" -> "file_read"
       name == "workspace_search" -> "search"
       name == "artifact_inspect" || name == "artifact_diagnose" -> "artifact_validation"
@@ -126,12 +128,22 @@ object ToolContextRetentionPolicy {
 
   private fun reasonFor(priority: String, kind: String, args: String): String {
     return when (priority) {
+      RETENTION_ACTIVE_CRITICAL -> if (kind == "skill_read") {
+        "skill body read is active task guidance and should remain available while the task is current"
+      } else {
+        args.takeIf { it.isNotBlank() } ?: "active context is needed for recovery"
+      }
       RETENTION_STRUCTURED_MEMORY -> "successful $kind records changed artifacts or validation facts"
       RETENTION_RECENT_FULL -> "recent $kind output may be needed by the next model request"
       RETENTION_SUMMARY_ONLY -> "successful generic output is kept as a bounded summary"
       RETENTION_UI_ONLY -> "status-only output is display state, not model context"
       else -> args.takeIf { it.isNotBlank() } ?: "classified by tool kind"
     }
+  }
+
+  private fun isSkillReadArgs(args: String): Boolean {
+    val normalized = args.replace('\\', '/')
+    return normalized.contains("path=.flovera/skills/") && normalized.contains("/SKILL.md")
   }
 
   private fun looksLikeFailure(result: String): Boolean {

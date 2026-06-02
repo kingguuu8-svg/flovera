@@ -2,6 +2,7 @@ package com.flovera.app.koog
 
 import com.flovera.app.session.AgentSession
 import com.flovera.app.session.RuntimeSessionHistory
+import com.flovera.app.workspace.FloveraSkillRegistry
 
 object AgentPromptBuilder {
   fun systemPrompt(
@@ -28,6 +29,7 @@ object AgentPromptBuilder {
     session: AgentSession,
     workspaceUserRules: String,
     currentVisibleInput: String = input,
+    floveraSkillDescriptors: String = FloveraSkillRegistry.defaultPromptDescriptors(),
   ): String {
     val history = RuntimeSessionHistory.promptText(
       session = session,
@@ -40,6 +42,11 @@ object AgentPromptBuilder {
 
       Recent session history:
       ${history.ifBlank { "(empty)" }}
+
+      Available Flovera skills:
+      ${floveraSkillDescriptors.ifBlank { "(none registered)" }}
+
+      If one of these skills is materially relevant, read its SKILL.md with read_file before applying it. Do not treat the descriptor as the full skill body.
 
       Current user request:
       $input
@@ -88,6 +95,7 @@ Stable Flovera runtime boundary:
 Tool routing:
 - Use workspace_search before broad manual scanning for files or snippets by keyword, identifier, API path, or error text.
 - Use read_file for text inspection, edit_file for focused replacements, and write_file for new files or intentional full rewrites.
+- Flovera skills use the standard editable structure `.flovera/skills/<skill-id>/SKILL.md`, with registration in `.flovera/skills/manifest.json`. The request prompt lists compact skill descriptors only. When a listed skill is materially relevant, read that SKILL.md with read_file and follow the full instructions. The user and agent may create, edit, or register skills through ordinary workspace file tools.
 - Use workspace_command_run for Python execution by default, including calculation, file generation, algorithm validation, local scripting, `python -c` snippets, and Python scripts with command-line arguments such as `["python", "tools/check.py", "--input", "data.csv"]`.
 - Use workspace_command_run for Groovy only when JVM access is materially useful. Put pure JVM jars under `libs/`, or declare Maven coordinates in `libs/maven.json` as `{ "dependencies": ["group:artifact:version"] }`; import them from `.groovy`, and expect Android-incompatible APIs or native JVM artifacts to fail during D8/dex loading. For one-off compatibility tests, prefer a temporary Maven config such as `.flovera/jvm/test-maven.json` and pass environment `{ "FLOVERA_JVM_MAVEN_CONFIG": ".flovera/jvm/test-maven.json" }` so old default dependencies do not pollute the run. For large document libraries, expect the first run to spend time preparing Maven artifacts and dex caches; do not treat slow progress as failure while `[jvm-build]` progress is still moving.
 - Use python_run only as the explicit fallback for direct multiline evaluator/session-global workflows when that tool is enabled. Treat unsupported commands as platform gaps instead of inventing shell access.

@@ -36,4 +36,20 @@ class ToolEventRecorderInstrumentedTest {
     assertEquals("file_write", writeFile.resultKind)
     assertEquals(ToolContextRetentionPolicy.RETENTION_STRUCTURED_MEMORY, writeFile.retentionPriority)
   }
+
+  @Test
+  fun recorderTreatsSkillReadsAsActiveContext() {
+    val recorder = ToolEventRecorder()
+    recorder.record(
+      "read_file",
+      "path=.flovera/skills/flovera-android-webview-app/SKILL.md",
+      "# Flovera Android WebView App",
+    )
+
+    val event = recorder.snapshot().single()
+    assertEquals(true, event.success)
+    assertEquals("skill_read", event.resultKind)
+    assertEquals(ToolContextRetentionPolicy.RETENTION_ACTIVE_CRITICAL, event.retentionPriority)
+    assertTrue(event.retentionReason.contains("skill body read"))
+  }
 }

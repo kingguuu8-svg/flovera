@@ -1030,6 +1030,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
           settingsViewPath = ".flovera/settings-view.json",
           capabilitiesPath = ".flovera/capabilities.json",
           proposalsPath = ".flovera/proposals",
+          skillsManifestPath = ".flovera/skills/manifest.json",
         ),
       ),
       overwrite = false,
@@ -1050,6 +1051,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     safeFile(".flovera/proposals").mkdirs()
     safeFile(".flovera/tools").mkdirs()
     safeFile(".flovera/jobs").mkdirs()
+    safeFile(".flovera/skills").mkdirs()
     safeFile(".flovera/python/site-packages").mkdirs()
     safeFile(".flovera/python/wheels").mkdirs()
     if (!staleArtifactJobsChecked) {
@@ -1068,9 +1070,29 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
       overwrite = true,
       createAutoSnapshot = false,
     )
+    ensureFloveraSkills()
+  }
+
+  private fun ensureFloveraSkills() {
+    writeFile(
+      path = ".flovera/skills/manifest.json",
+      content = json.encodeToString(FloveraSkillManifest()),
+      overwrite = false,
+      createAutoSnapshot = false,
+    )
+    FloveraSkillRegistry.defaultRegistrations.forEach { registration ->
+      writeFile(
+        path = registration.path,
+        content = FloveraSkillRegistry.defaultSkillBody(registration.id),
+        overwrite = false,
+        createAutoSnapshot = false,
+      )
+    }
   }
 
   fun readAgentRules(): String = readFile("AGENT.md")
+
+  fun readFloveraSkillPromptDescriptors(): String = FloveraSkillRegistry.promptDescriptors(root, json)
 
   fun listSnapshots(): List<WorkspaceSnapshotRecord> = snapshotStore.list()
 
@@ -1852,7 +1874,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     if (path.startsWith(".flovera/retrieval") || path.startsWith(".flovera/cache")) return false
     if (path.startsWith(".flovera/")) {
       return scope == WORKSPACE_SEARCH_SCOPE_INTERNAL ||
-        (scope == WORKSPACE_SEARCH_SCOPE_APP_METADATA && path.startsWith(".flovera/proposals"))
+        (scope == WORKSPACE_SEARCH_SCOPE_APP_METADATA && (path.startsWith(".flovera/proposals") || path.startsWith(".flovera/skills")))
     }
     if (path.startsWith(".") || path.contains("/.")) return false
     if (isWorkspaceIgnored(path, isDirectory = true, ignoreRules = ignoreRules)) return false
@@ -1890,11 +1912,19 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
         normalized == ".flovera/manifest.json" ||
           normalized == ".flovera/settings-view.json" ||
           normalized == ".flovera/capabilities.json" ||
+          normalized == ".flovera/skills/manifest.json" ||
+          isFloveraSkillPath(normalized) ||
           normalized.startsWith(".flovera/proposals/")
       }
       WORKSPACE_SEARCH_SCOPE_INTERNAL -> true
       else -> false
     }
+  }
+
+  private fun isFloveraSkillPath(path: String): Boolean {
+    val normalized = path.replace('\\', '/')
+    return normalized == ".flovera/skills/manifest.json" ||
+      (normalized.startsWith(".flovera/skills/") && normalized.endsWith("/SKILL.md"))
   }
 
   private fun isLikelyTextFile(file: File): Boolean {
@@ -2617,6 +2647,7 @@ data class FloveraWorkspaceManifest(
   val settingsViewPath: String,
   val capabilitiesPath: String,
   val proposalsPath: String,
+  val skillsManifestPath: String = ".flovera/skills/manifest.json",
 )
 
 @Serializable
@@ -2802,6 +2833,13 @@ data class FloveraCapabilities(
   val pythonPackageCatalogPath: String = ".flovera/python/wheel-catalog.json",
   val pythonWorkspaceSitePackagesPath: String = ".flovera/python/site-packages",
   val pythonToolManifestPath: String = ".flovera/tools/manifest.json",
+  val skillSystem: Boolean = true,
+  val skillManifestPath: String = ".flovera/skills/manifest.json",
+  val skillBodyPathGlob: String = ".flovera/skills/<skill-id>/SKILL.md",
+  val skillActivationViaReadFile: Boolean = true,
+  val skillDescriptorsInPrompt: Boolean = true,
+  val skillFilesEditable: Boolean = true,
+  val skillRegistrationEditable: Boolean = true,
   val pythonBuiltInPackages: List<String> = listOf("lxml", "python-docx", "openpyxl", "XlsxWriter", "pypdf", "Markdown", "Jinja2"),
   val webSearch: Boolean = false,
   val settingsView: Boolean = true,

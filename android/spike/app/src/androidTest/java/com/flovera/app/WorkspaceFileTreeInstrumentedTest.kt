@@ -184,6 +184,57 @@ class WorkspaceFileTreeInstrumentedTest {
   }
 
   @Test
+  fun seedWorkspaceIncludesEditableRegisteredFloveraSkills() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "seed-skills-${System.currentTimeMillis()}").also { it.ensureSeedFiles() }
+
+    val manifest = workspace.readFile(".flovera/skills/manifest.json")
+    val skill = workspace.readFile(".flovera/skills/flovera-android-webview-app/SKILL.md")
+
+    assertTrue(manifest.contains("\"id\": \"flovera-android-webview-app\""))
+    assertTrue(manifest.contains(".flovera/skills/flovera-android-webview-app/SKILL.md"))
+    assertTrue(skill.contains("# Flovera Android WebView App"))
+    assertTrue(skill.contains("artifact_diagnose"))
+
+    assertTrue(workspace.editFile(".flovera/skills/flovera-android-webview-app/SKILL.md", "artifact_diagnose", "artifact_diagnose immediately").contains("Edited"))
+    assertTrue(workspace.readFile(".flovera/skills/flovera-android-webview-app/SKILL.md").contains("artifact_diagnose immediately"))
+
+    workspace.writeFile(
+      ".flovera/skills/custom-demo/SKILL.md",
+      """
+        ---
+        name: custom-demo
+        description: Use when the user wants a custom registered skill.
+        ---
+
+        # Custom Demo
+
+        Follow the user's local preference.
+      """.trimIndent(),
+    )
+    workspace.writeFile(
+      ".flovera/skills/manifest.json",
+      """
+        {
+          "version": 1,
+          "skills": [
+            {
+              "id": "custom-demo",
+              "path": ".flovera/skills/custom-demo/SKILL.md",
+              "enabled": true
+            }
+          ]
+        }
+      """.trimIndent(),
+    )
+
+    val descriptors = workspace.readFloveraSkillPromptDescriptors()
+    assertTrue(descriptors.contains("custom-demo"))
+    assertTrue(descriptors.contains("Use when the user wants a custom registered skill."))
+    assertFalse(descriptors.contains("flovera-android-webview-app"))
+  }
+
+  @Test
   fun artifactDiagnoseToolReportsRegistrationState() = runBlocking {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val workspace = WorkspaceManager(context, "artifact-diagnose-${System.currentTimeMillis()}").also { it.ensureSeedFiles() }
@@ -783,6 +834,9 @@ class WorkspaceFileTreeInstrumentedTest {
     val internalMetadataResult = tool.execute(
       WorkspaceSearchTool.Args(query = "internalonlymarker", scope = "workspace_app_metadata"),
     )
+    val skillMetadataResult = tool.execute(
+      WorkspaceSearchTool.Args(query = "artifact_diagnose", scope = "workspace_app_metadata"),
+    )
     val internalResult = tool.execute(
       WorkspaceSearchTool.Args(query = "internalonlymarker", scope = "workspace_internal"),
     )
@@ -793,6 +847,7 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(publicResult.contains("No matches"))
     assertTrue(metadataResult.contains(".flovera/proposals/search-tool.json:1"))
     assertTrue(internalMetadataResult.contains("No matches"))
+    assertTrue(skillMetadataResult.contains(".flovera/skills/flovera-android-webview-app/SKILL.md"))
     assertTrue(internalResult.contains(".flovera/internal/debug.txt:1"))
     assertTrue(retrievalResult.contains("No matches"))
   }

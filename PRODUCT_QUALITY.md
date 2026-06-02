@@ -407,8 +407,17 @@ for cross-run prompt reconstruction and future compression/skills retention.
 - Treat skill reads as future tool events that can reuse the same retention
   policy: active task gets high-priority context, compacted history keeps
   activation metadata and a path back to the skill body.
-- Remaining work: add a first-class skills registry/read path and expand the
-  extractor from generic summaries into richer structured file/artifact facts.
+- Skill registry baseline is implemented with the standard editable
+  `.flovera/skills/<skill-id>/SKILL.md` directory shape and
+  `.flovera/skills/manifest.json` registration. Compact descriptors are
+  injected into the request from the current workspace registry; when a skill is
+  relevant the agent reads the registered `SKILL.md` through normal
+  `read_file`, and that read is retained as active-critical tool context.
+  Built-in skills are seed files only and may be edited or replaced by the
+  user/agent to match the local environment.
+- Remaining work: expand the extractor from generic summaries into richer
+  structured file/artifact facts and add a UI surface for managing registered
+  skills.
 
 
 ### Interleaved Model Conversation Streaming

@@ -174,6 +174,7 @@ class KoogAgentRuntime(
           input = input,
           session = session,
           workspaceUserRules = workspaceUserRules,
+          floveraSkillDescriptors = workspace.readFloveraSkillPromptDescriptors(),
         ),
         sessionId = agentRunId,
       )

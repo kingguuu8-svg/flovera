@@ -49,6 +49,7 @@ object AgentRequestFootprintBuilder {
       session = session,
       workspaceUserRules = workspaceUserRules,
       currentVisibleInput = currentVisibleInput,
+      floveraSkillDescriptors = workspace.readFloveraSkillPromptDescriptors(),
     )
     val toolDescriptors = workspaceToolRegistry(
       workspace = workspace,
