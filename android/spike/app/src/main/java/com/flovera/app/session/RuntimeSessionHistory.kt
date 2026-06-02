@@ -20,9 +20,9 @@ object RuntimeSessionHistory {
       .filter { it.role == SESSION_ROLE_COMPRESSION || it.content.isNotBlank() }
     val dividerIndex = messages.indexOfLast { it.role == SESSION_ROLE_COMPRESSION }
     if (dividerIndex < 0) {
-      return messages
+      val retained = messages
         .takeLast(maxMessages)
-        .map { it.toRuntimeEntry() }
+      return retained.toRuntimeEntries()
     }
 
     val divider = messages[dividerIndex]
@@ -30,14 +30,13 @@ object RuntimeSessionHistory {
       .drop(dividerIndex + 1)
       .filterNot { it.role == SESSION_ROLE_COMPRESSION }
       .takeLast((maxMessages - 1).coerceAtLeast(0))
-      .map { it.toRuntimeEntry() }
 
     return listOf(
       RuntimeHistoryEntry(
         role = "handoff_summary",
         content = divider.content.normalized(HANDOFF_CONTENT_LIMIT),
       ),
-    ) + afterDivider
+    ) + afterDivider.toRuntimeEntries()
   }
 
   fun promptText(
@@ -84,6 +83,14 @@ object RuntimeSessionHistory {
       role = role,
       content = content.normalized(MESSAGE_CONTENT_LIMIT),
     )
+  }
+
+  private fun List<SessionMessage>.toRuntimeEntries(): List<RuntimeHistoryEntry> {
+    return flatMapIndexed { index, message ->
+      val distanceFromNewestMessage = lastIndex - index
+      listOf(message.toRuntimeEntry()) +
+        ToolContextRetentionPolicy.slicesForMessage(message, distanceFromNewestMessage)
+    }
   }
 
   private fun String.normalized(limit: Int): String {

@@ -39,6 +39,12 @@ data class ToolEvent(
   val args: String,
   val result: String,
   val timestampMillis: Long = System.currentTimeMillis(),
+  val success: Boolean = true,
+  val resultKind: String = "generic",
+  val outputChars: Int = result.length,
+  val outputTruncated: Boolean = false,
+  val retentionPriority: String = ToolContextRetentionPolicy.RETENTION_RECENT_FULL,
+  val retentionReason: String = "",
 )
 
 @Serializable

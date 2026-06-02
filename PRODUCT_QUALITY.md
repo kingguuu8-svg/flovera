@@ -384,6 +384,32 @@ This is observability for the run loop, not hidden reasoning.
   coalesced only within the same contiguous text segment, never across tool or
   guidance boundaries.
 
+### Runtime Context Retention
+
+Status: Baseline implemented for persisted tool history. Tool events now carry
+bounded retention metadata (`success`, `resultKind`, `outputChars`,
+`outputTruncated`, `retentionPriority`, and `retentionReason`) at record time.
+`RuntimeSessionHistory` no longer treats every persisted tool result as the
+same kind of prompt history: it uses `ToolContextRetentionPolicy` to emit
+`tool_context` slices where failed tools remain active-critical, recent command,
+read, search, and network outputs stay full only while fresh, successful
+artifact/file-write validation becomes structured memory, generic successes
+become summaries, and status-only outputs are UI-only. Current Koog run-loop
+tool results are still delivered directly inside the active run; this policy is
+for cross-run prompt reconstruction and future compression/skills retention.
+
+- Keep full session logs and conversation transcript available for UI/debug
+  without forcing every tool result back into the next provider request.
+- Preserve failed tool output with higher priority so retries and recovery do
+  not lose the actionable error tail.
+- Downgrade older successful tool results into summaries or structured facts
+  instead of replaying large stdout/stderr blocks.
+- Treat skill reads as future tool events that can reuse the same retention
+  policy: active task gets high-priority context, compacted history keeps
+  activation metadata and a path back to the skill body.
+- Remaining work: add a first-class skills registry/read path and expand the
+  extractor from generic summaries into richer structured file/artifact facts.
+
 
 ### Interleaved Model Conversation Streaming
 
