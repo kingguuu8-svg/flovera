@@ -32,6 +32,9 @@ import java.io.PrintWriter
 import java.net.URL
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
+import java.util.jar.JarEntry
+import java.util.jar.JarFile
+import java.util.jar.JarOutputStream
 import javax.xml.parsers.DocumentBuilderFactory
 import java.util.concurrent.Callable
 import java.util.concurrent.CountDownLatch
@@ -781,7 +784,7 @@ private class JvmArtifactManager(
     if (jars.isEmpty()) return null
     val key = sha256(
       buildString {
-        appendLine("flovera-jvm-library-dex-v2-per-jar")
+        appendLine("flovera-jvm-library-dex-v3-resource-jar")
         appendLine("api=${Build.VERSION.SDK_INT}")
         jars.forEach { jar ->
           appendLine("${jar.relativePath}:${jar.sha256}:${jar.sizeBytes}")
@@ -796,33 +799,39 @@ private class JvmArtifactManager(
     val dexArtifacts = jars.mapIndexed { index, jar ->
       val jarKey = sha256(
         buildString {
-          appendLine("flovera-jvm-library-jar-dex-v1")
+          appendLine("flovera-jvm-library-jar-dex-v2-resource-jar")
           appendLine("api=${Build.VERSION.SDK_INT}")
           appendLine("${jar.relativePath}:${jar.sha256}:${jar.sizeBytes}")
         }.toByteArray(StandardCharsets.UTF_8),
       )
       val jarDexDir = File(dexDir, "${index.toString().padStart(3, '0')}-$jarKey")
-      val dexFile = File(jarDexDir, "classes.dex")
-      if (!dexFile.isFile) {
+      val dexJarFile = File(jarDexDir, "artifact.dex.jar")
+      if (!dexJarFile.isFile) {
         scheduler.stage(
           name = "d8.library.jar",
           detail = "${jar.relativePath} ${jar.sizeBytes} bytes",
           cooldownMs = adaptiveCooldownMs(1, jar.sizeBytes, baseMs = 350),
         ) {
+          jarDexDir.deleteRecursively()
           jarDexDir.mkdirs()
+          val rawDexDir = File(jarDexDir, "raw-dex")
+          rawDexDir.mkdirs()
           val command = D8Command.builder()
             .setMode(CompilationMode.DEBUG)
             .setMinApiLevel(Build.VERSION.SDK_INT)
-            .setOutput(jarDexDir.toPath(), OutputMode.DexIndexed)
+            .setOutput(rawDexDir.toPath(), OutputMode.DexIndexed)
             .addProgramFiles(jar.file.toPath())
             .build()
           D8.run(command)
-          markDexReadOnly(jarDexDir)
+          packageDexJarWithResources(jar.file, rawDexDir, dexJarFile)
+          rawDexDir.deleteRecursively()
+          dexJarFile.setReadable(true, true)
+          dexJarFile.setWritable(false, false)
         }
       } else {
         scheduler.markCacheHit("d8.library.jar", jarKey)
       }
-      JvmLibraryDexArtifact(dexFile = dexFile, source = jar.relativePath, key = jarKey)
+      JvmLibraryDexArtifact(dexFile = dexJarFile, source = jar.relativePath, key = jarKey)
     }
     if (!manifestFile.isFile) {
       scheduler.stage(
@@ -962,6 +971,59 @@ private class JvmArtifactManager(
         dexFile.setReadable(true, true)
         dexFile.setWritable(false, false)
       }
+  }
+
+  private fun packageDexJarWithResources(sourceJar: File, dexDir: File, outputJar: File) {
+    val dexFiles = dexDir.walkTopDown()
+      .filter { it.isFile && it.extension.equals("dex", ignoreCase = true) }
+      .sortedBy { it.name }
+      .toList()
+    if (dexFiles.isEmpty()) {
+      error("D8 produced no dex files for ${sourceJar.name}.")
+    }
+    val tempJar = File(outputJar.parentFile, "${outputJar.name}.tmp")
+    val written = linkedSetOf<String>()
+    JarOutputStream(tempJar.outputStream().buffered()).use { output ->
+      dexFiles.forEach { dexFile ->
+        val entryName = dexFile.relativeTo(dexDir).invariantSeparatorsPath
+        writeJarEntry(output, written, entryName, dexFile.readBytes())
+      }
+      JarFile(sourceJar).use { inputJar ->
+        val entries = inputJar.entries()
+        while (entries.hasMoreElements()) {
+          val entry = entries.nextElement()
+          val name = entry.name
+          if (entry.isDirectory || shouldDropOriginalJarEntry(name)) continue
+          inputJar.getInputStream(entry).use { input ->
+            val copy = JarEntry(name).apply { time = entry.time }
+            if (!written.add(name)) return@use
+            output.putNextEntry(copy)
+            input.copyTo(output)
+            output.closeEntry()
+          }
+        }
+      }
+    }
+    if (outputJar.isFile) outputJar.delete()
+    if (!tempJar.renameTo(outputJar)) {
+      tempJar.copyTo(outputJar, overwrite = true)
+      tempJar.delete()
+    }
+  }
+
+  private fun writeJarEntry(output: JarOutputStream, written: MutableSet<String>, name: String, bytes: ByteArray) {
+    if (!written.add(name)) return
+    output.putNextEntry(JarEntry(name))
+    output.write(bytes)
+    output.closeEntry()
+  }
+
+  private fun shouldDropOriginalJarEntry(name: String): Boolean {
+    if (name.endsWith(".class", ignoreCase = true)) return true
+    if (name.matches(Regex("classes\\d*\\.dex"))) return true
+    val upperName = name.uppercase()
+    return upperName.startsWith("META-INF/") &&
+      (upperName.endsWith(".SF") || upperName.endsWith(".RSA") || upperName.endsWith(".DSA"))
   }
 
   private fun isInsideWorkspace(file: File): Boolean {

@@ -751,11 +751,14 @@ separated from the UI process.
 Heavy JVM preparation is now guarded by a serialized throttled scheduler:
 Maven resolution, artifact download, library D8 conversion, Groovy compilation,
 and script D8 conversion write progress to `.flovera/logs/jvm-build.jsonl`.
-Library jars are converted one jar at a time and then loaded as a multi-dex
-classpath, which lowers D8 peak memory for heavy document stacks such as POI and
-PDFBox. The scheduler reuses checkpointed cache outputs and inserts adaptive
-cool-down windows so repeated document-library runs slow down instead of
-saturating the Android app process. The current phase writes
+Library jars are converted one jar at a time into resource-preserving dex jars
+and then loaded as a multi-dex classpath. This keeps non-class jar resources
+such as `META-INF/services`, properties, schemas, and templates alongside
+`classes.dex`, which expands the usable JVM substrate for libraries that rely on
+classpath resources while still lowering D8 peak memory for heavy document
+stacks such as POI and PDFBox. The scheduler reuses checkpointed cache outputs
+and inserts adaptive cool-down windows so repeated document-library runs slow
+down instead of saturating the Android app process. The current phase writes
 `.flovera/runtime/jvm-artifacts/build-state.json`, checks
 `.flovera/runtime/jvm-artifacts/cancel.flag` at stage boundaries, lowers Groovy
 worker thread priority, and classifies Maven/D8/class-loading/Groovy/runtime
@@ -763,7 +766,8 @@ failures in tool stderr. Process crashes and Android historical exit
 reasons are mirrored to `.flovera/logs/app-crash.jsonl` on the next app start so
 whole-process failures are diagnosable even when no session message is written.
 This supports pure JVM jars and direct Maven coordinates as reusable library
-sources; full Maven/Gradle builds, BOMs, exclusions, classifiers, and advanced
+sources, including jar resources that survive dex packaging. Full Maven/Gradle
+builds, BOMs, exclusions, classifiers, Android-missing Java SE APIs, and advanced
 conflict mediation remain deferred. The older direct evaluator tool
 `python_run` is disabled by default to keep the request tool schema smaller and
 reduce routing ambiguity; it can be restored as a fallback through

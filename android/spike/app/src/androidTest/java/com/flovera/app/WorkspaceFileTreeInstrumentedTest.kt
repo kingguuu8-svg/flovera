@@ -18,6 +18,7 @@ import com.flovera.app.config.SettingsStore
 import com.flovera.app.workspace.WorkspaceController
 import com.flovera.app.workspace.FloveraSettingsView
 import com.flovera.app.workspace.WorkspaceManager
+import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.Closeable
 import java.net.HttpURLConnection
@@ -25,6 +26,10 @@ import java.net.ServerSocket
 import java.net.URL
 import java.nio.charset.StandardCharsets
 import java.util.Base64
+import java.util.jar.JarEntry
+import java.util.jar.JarInputStream
+import java.util.jar.JarFile
+import java.util.jar.JarOutputStream
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
@@ -44,6 +49,26 @@ import org.junit.Test
 
 private const val TEST_HELPER_JAR_BASE64 =
   "UEsDBBQACAgIAH2mwVwAAAAAAAAAAAAAAAAJAAQATUVUQS1JTkYv/soAAAMAUEsHCAAAAAACAAAAAAAAAFBLAwQUAAgICAB9psFcAAAAAAAAAAAAAAAAFAAAAE1FVEEtSU5GL01BTklGRVNULk1G803My0xLLS7RDUstKs7Mz7NSMNQz4OVyLkpNLElN0XWqBAqY6xnoGVooaPhmJhflF+enlWjycvFyAQBQSwcIBZVIozsAAAA6AAAAUEsDBAoAAAgAAH2mwVwAAAAAAAAAAAAAAAAFAAAAZGVtby9QSwMEFAAICAgAfabBXAAAAAAAAAAAAAAAABEAAABkZW1vL0hlbHBlci5jbGFzc31RTU/CQBB9S4FCqYKIoih+i4UEG423Gg+SGA9EEkETj4VusKS0pLT+LvUAiSb+AH+UcSoQIhh3k9md2Zn33ux8fr19ADiDIiEEQURYRgRRhlRHf9JVS7fbaq3Z4S2PIXpu2qZ3wSAoxXsRMYbsNKnuuabdvvRNy+CuBBFCDAmGcEd3y4G7IGMRSQLRez1uGwxlpTpbrRXnQmNALY4lpEUsy8hgZaLO90xLrTot3eLEdFurNRjS1dknTUIWayLWZeSw8auzEQdDwnPuSJZb0fuEVFDmMeaVaUFXeRlb2GaIec4EK6P8kStil1gM3nXUa24RE+mtOAaRJaumzW/8bpO7Db0ZNBLpPzq+N5Xx/wdpDFLd8d0WvzKD6sQI/zjIwwl2aKrBCtGmuYJhj7w8nYzOSGkI9kIXhn2y0Z+ggDgOcDhOPSU/iObeIT4MEU9LA8ilV6QGWKXbAJvPM/URsoUfyqNvUEsHCBvf9YJkAQAAXgIAAFBLAQIUABQACAgIAH2mwVwAAAAAAgAAAAAAAAAJAAQAAAAAAAAAAAAAAAAAAABNRVRBLUlORi/+ygAAUEsBAhQAFAAICAgAfabBXAWVSKM7AAAAOgAAABQAAAAAAAAAAAAAAAAAPQAAAE1FVEEtSU5GL01BTklGRVNULk1GUEsBAgoACgAACAAAfabBXAAAAAAAAAAAAAAAAAUAAAAAAAAAAAAAAAAAugAAAGRlbW8vUEsBAhQAFAAICAgAfabBXBvf9YJkAQAAXgIAABEAAAAAAAAAAAAAAAAA3QAAAGRlbW8vSGVscGVyLmNsYXNzUEsFBgAAAAAEAAQA7wAAAIACAAAAAA=="
+
+private fun writeTestHelperJarWithResource(target: File, resourcePath: String, resourceText: String) {
+  target.outputStream().buffered().use { fileOutput ->
+    JarOutputStream(fileOutput).use { output ->
+      JarInputStream(ByteArrayInputStream(Base64.getDecoder().decode(TEST_HELPER_JAR_BASE64))).use { input ->
+        generateSequence { input.nextJarEntry }.forEach { entry ->
+          if (!entry.isDirectory) {
+            output.putNextEntry(JarEntry(entry.name))
+            input.copyTo(output)
+            output.closeEntry()
+          }
+          input.closeEntry()
+        }
+      }
+      output.putNextEntry(JarEntry(resourcePath))
+      output.write(resourceText.toByteArray(StandardCharsets.UTF_8))
+      output.closeEntry()
+    }
+  }
+}
 
 class WorkspaceFileTreeInstrumentedTest {
   @Test
@@ -1218,7 +1243,7 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(result, result.contains("jar-ALPHA"))
     assertTrue(result, result.contains("jar-runtime-ok"))
     assertTrue(workspace.readFile("out/jar.txt").contains("jar-FILE"))
-    assertTrue(File(workspace.root, ".flovera/runtime/jvm-artifacts/libs").walkTopDown().any { it.name == "classes.dex" })
+    assertTrue(File(workspace.root, ".flovera/runtime/jvm-artifacts/libs").walkTopDown().any { it.name == "artifact.dex.jar" })
     assertTrue(File(workspace.root, ".flovera/logs/jvm-build.jsonl").readText().contains("d8.library.jar"))
 
     val cachedResult = tool.execute(
@@ -1232,6 +1257,52 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(cachedResult, cachedResult.contains("jar-BETA"))
     assertTrue(cachedResult, cachedResult.contains("d8.library.jar.cache_hit"))
     assertTrue(cachedResult, cachedResult.contains("groovy.script.cache_hit"))
+  }
+
+  @Test
+  fun workspaceCommandRunPreservesJarResourcesForGroovy() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "workspace-command-groovy-jar-resource-${System.currentTimeMillis()}")
+    val libsDir = File(workspace.root, "libs")
+    libsDir.mkdirs()
+    writeTestHelperJarWithResource(
+      target = File(libsDir, "helper-resource.jar"),
+      resourcePath = "demo/template.txt",
+      resourceText = "resource-ok",
+    )
+    workspace.writeFile(
+      "tools/use_helper_resource.groovy",
+      """
+      import demo.Helper
+
+      def stream = Helper.class.classLoader.getResourceAsStream("demo/template.txt")
+      if (stream == null) {
+        throw new IllegalStateException("resource missing")
+      }
+      def text = stream.getText("UTF-8")
+      out.println(Helper.shout(text))
+      return text
+      """.trimIndent(),
+      createAutoSnapshot = false,
+    )
+    val tool = WorkspaceCommandRunTool(workspace, ToolEventRecorder(), authorityMode = "full")
+
+    val result = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("groovy", "tools/use_helper_resource.groovy"),
+        snapshotBeforeRun = false,
+      ),
+    )
+
+    assertTrue(result, result.contains("Workspace command status=ok exitCode=0"))
+    assertTrue(result, result.contains("jar-RESOURCE-OK"))
+    val dexJar = File(workspace.root, ".flovera/runtime/jvm-artifacts/libs").walkTopDown()
+      .firstOrNull { it.name == "artifact.dex.jar" }
+    assertNotNull(dexJar)
+    JarFile(dexJar).use { jar ->
+      assertNotNull(jar.getEntry("classes.dex"))
+      assertNotNull(jar.getEntry("demo/template.txt"))
+    }
   }
 
   @Test
@@ -1759,7 +1830,8 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"jvmBuildStatePath\": \".flovera/runtime/jvm-artifacts/build-state.json\""))
     assertTrue(capabilities.contains("\"jvmBuildCancelFlagPath\": \".flovera/runtime/jvm-artifacts/cancel.flag\""))
     assertTrue(capabilities.contains("\"jvmBuildErrorClassification\": true"))
-    assertTrue(capabilities.contains("\"jvmLibraryDexMode\": \"per_jar_low_peak_memory\""))
+    assertTrue(capabilities.contains("\"jvmLibraryDexMode\": \"per_jar_resource_preserving_dex_jar\""))
+    assertTrue(capabilities.contains("\"jvmLibraryResourcesPreserved\": true"))
     assertTrue(capabilities.contains("\"jvmWorkerProcess\": true"))
     assertTrue(capabilities.contains("\"jvmWorkerProcessName\": \":jvmworker\""))
     assertTrue(capabilities.contains("\"appCrashLogPath\": \".flovera/logs/app-crash.jsonl\""))
