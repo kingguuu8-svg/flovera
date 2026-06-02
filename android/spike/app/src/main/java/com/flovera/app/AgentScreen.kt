@@ -241,6 +241,7 @@ private enum class AgentPanel {
   ArtifactJobs,
   Files,
   Snapshots,
+  Skills,
   AgentFile,
   Settings,
 }
@@ -413,6 +414,13 @@ fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
     )
 
     AgentPanel.Snapshots -> SnapshotsDialog(
+      state = state,
+      controller = controller,
+      language = language,
+      onDismiss = ::dismissTopPanel,
+    )
+
+    AgentPanel.Skills -> SkillsDialog(
       state = state,
       controller = controller,
       language = language,
@@ -2222,6 +2230,13 @@ private fun ConversationDialog(
                   onClick = {
                     moreMenuOpen = false
                     onOpenPanel(AgentPanel.Snapshots)
+                  },
+                )
+                DropdownMenuItem(
+                  text = { Text(t(language, "Skills", "\u6280\u80fd")) },
+                  onClick = {
+                    moreMenuOpen = false
+                    onOpenPanel(AgentPanel.Skills)
                   },
                 )
                 DropdownMenuItem(
@@ -4647,6 +4662,59 @@ private fun Context.findActivity(): Activity? {
 }
 
 @Composable
+private fun SkillsDialog(
+  state: AgentScreenState,
+  controller: AgentController,
+  language: String,
+  onDismiss: () -> Unit,
+) {
+  AlertDialog(
+    onDismissRequest = onDismiss,
+    title = { Text(t(language, "Skills", "\u6280\u80fd")) },
+    text = {
+      Column(
+        modifier = Modifier.fillMaxWidth().heightIn(max = 560.dp).verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+      ) {
+        Text(
+          t(
+            language,
+            "Enabled skills enter the next request as visible descriptors. Disabled skills stay editable under .flovera/skills.",
+            "\u5f00\u542f\u7684\u6280\u80fd\u4f1a\u4f5c\u4e3a\u5165\u53e3\u8bf4\u660e\u8fdb\u5165\u4e0b\u4e00\u6b21\u8bf7\u6c42\u4f53\u3002\u5173\u95ed\u7684\u6280\u80fd\u4ecd\u53ef\u5728 .flovera/skills \u4e0b\u7f16\u8f91\u548c\u67e5\u770b\u3002",
+          ),
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
+          style = MaterialTheme.typography.bodySmall,
+        )
+        if (state.floveraSkills.isEmpty()) {
+          Text(
+            t(
+              language,
+              "No registered skills. Add entries in .flovera/skills/manifest.json.",
+              "\u6682\u65e0\u5df2\u6ce8\u518c\u7684\u6280\u80fd\u3002\u53ef\u5728 .flovera/skills/manifest.json \u4e2d\u6dfb\u52a0\u5165\u53e3\u3002",
+            ),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall,
+          )
+        } else {
+          state.floveraSkills.forEach { skill ->
+            FloveraSkillSettingsItem(
+              skill = skill,
+              language = language,
+              onEnabledChange = { enabled -> controller.setFloveraSkillEnabled(skill.id, enabled) },
+            )
+          }
+        }
+      }
+    },
+    confirmButton = {
+      TextButton(onClick = onDismiss) {
+        Text(t(language, "Done", "\u5b8c\u6210"))
+      }
+    },
+  )
+}
+
+@Composable
 private fun SettingsDialog(
   state: AgentScreenState,
   controller: AgentController,
@@ -4968,23 +5036,6 @@ private fun SettingsDialog(
           color = MaterialTheme.colorScheme.onSurfaceVariant,
           style = MaterialTheme.typography.bodySmall,
         )
-        Text(t(language, "Skills", "Skills"), style = MaterialTheme.typography.titleSmall)
-        Text(
-          t(
-            language,
-            "Enabled skills enter the request as visible descriptors. Disabled skills stay editable under .flovera/skills.",
-            "开启的 skill 会作为入口说明进入请求体。关闭的 skill 仍可在 .flovera/skills 下编辑和查看。",
-          ),
-          color = MaterialTheme.colorScheme.onSurfaceVariant,
-          style = MaterialTheme.typography.bodySmall,
-        )
-        state.floveraSkills.forEach { skill ->
-          FloveraSkillSettingsItem(
-            skill = skill,
-            language = language,
-            onEnabledChange = { enabled -> controller.setFloveraSkillEnabled(skill.id, enabled) },
-          )
-        }
         if (state.settingsProposals.isNotEmpty()) {
           Text(t(language, "Pending proposals", "\u5f85\u786e\u8ba4\u63d0\u6848"), style = MaterialTheme.typography.titleSmall)
           state.settingsProposals.forEach { proposal ->
@@ -5140,7 +5191,6 @@ private fun FloveraSkillSettingsItem(
   } else {
     skill.descriptionEn.ifBlank { skill.descriptionZh }
   }
-  val secondaryDescription = if (language == "zh") skill.descriptionEn else skill.descriptionZh
   Surface(
     modifier = Modifier.fillMaxWidth(),
     shape = RoundedCornerShape(8.dp),
@@ -5158,13 +5208,6 @@ private fun FloveraSkillSettingsItem(
           color = MaterialTheme.colorScheme.onSurfaceVariant,
           style = MaterialTheme.typography.bodySmall,
         )
-        if (secondaryDescription.isNotBlank() && secondaryDescription != primaryDescription) {
-          Text(
-            secondaryDescription,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.bodySmall,
-          )
-        }
         Text(
           skill.path,
           color = MaterialTheme.colorScheme.onSurfaceVariant,
