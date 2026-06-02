@@ -1179,6 +1179,16 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(result, result.contains("Workspace command status=error exitCode=1"))
     assertTrue(result, result.contains("failureCategory=jvm_build_cancelled"))
     assertFalse(result, result.contains("should-not-run"))
+    assertFalse(File(workspace.root, ".flovera/runtime/jvm-artifacts/cancel.flag").exists())
+
+    val retryResult = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("groovy", "tools/cancelled.groovy"),
+        snapshotBeforeRun = false,
+      ),
+    )
+    assertTrue(retryResult, retryResult.contains("Workspace command status=ok exitCode=0"))
+    assertTrue(retryResult, retryResult.contains("should-not-run"))
   }
 
   @Test
@@ -1357,6 +1367,70 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(result, result.contains("jar-ALPHA"))
     assertTrue(result, result.contains("maven-runtime-ok"))
     assertTrue(File(workspace.root, ".flovera/runtime/jvm-artifacts/maven/repository/demo/helper/1.0/helper-1.0.jar").isFile)
+  }
+
+  @Test
+  fun workspaceCommandRunCanOverrideMavenConfigForOneGroovyRun() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "workspace-command-groovy-maven-override-${System.currentTimeMillis()}")
+    val repoDir = File(workspace.root, "test-maven-repo")
+    val artifactDir = File(repoDir, "demo/helper/1.0")
+    artifactDir.mkdirs()
+    File(artifactDir, "helper-1.0.jar").writeBytes(Base64.getDecoder().decode(TEST_HELPER_JAR_BASE64))
+    File(artifactDir, "helper-1.0.pom").writeText(
+      """
+      <project>
+        <modelVersion>4.0.0</modelVersion>
+        <groupId>demo</groupId>
+        <artifactId>helper</artifactId>
+        <version>1.0</version>
+      </project>
+      """.trimIndent(),
+      StandardCharsets.UTF_8,
+    )
+    workspace.writeFile(
+      "libs/maven.json",
+      """
+      {
+        "dependencies": ["demo:missing:1.0"]
+      }
+      """.trimIndent(),
+      createAutoSnapshot = false,
+    )
+    workspace.writeFile(
+      ".flovera/jvm/test-maven.json",
+      """
+      {
+        "repositories": ["${repoDir.toURI().toString().trimEnd('/')}"],
+        "dependencies": ["demo:helper:1.0"]
+      }
+      """.trimIndent(),
+      createAutoSnapshot = false,
+    )
+    workspace.writeFile(
+      "tools/use_maven_override.groovy",
+      """
+      import demo.Helper
+
+      out.println(Helper.shout("override"))
+      return "maven-override-ok"
+      """.trimIndent(),
+      createAutoSnapshot = false,
+    )
+    val tool = WorkspaceCommandRunTool(workspace, ToolEventRecorder(), authorityMode = "full")
+
+    val result = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("groovy", "tools/use_maven_override.groovy"),
+        snapshotBeforeRun = false,
+        environment = mapOf("FLOVERA_JVM_MAVEN_CONFIG" to ".flovera/jvm/test-maven.json"),
+      ),
+    )
+
+    assertTrue(result, result.contains("Workspace command status=ok exitCode=0"))
+    assertTrue(result, result.contains("jar-OVERRIDE"))
+    assertTrue(result, result.contains("maven-override-ok"))
+    assertFalse(result, result.contains("demo:missing:1.0"))
   }
 
   @Test
@@ -1829,9 +1903,11 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"jvmBuildProgressLogPath\": \".flovera/logs/jvm-build.jsonl\""))
     assertTrue(capabilities.contains("\"jvmBuildStatePath\": \".flovera/runtime/jvm-artifacts/build-state.json\""))
     assertTrue(capabilities.contains("\"jvmBuildCancelFlagPath\": \".flovera/runtime/jvm-artifacts/cancel.flag\""))
+    assertTrue(capabilities.contains("\"jvmBuildCancelFlagMode\": \"one_shot_consumed\""))
     assertTrue(capabilities.contains("\"jvmBuildErrorClassification\": true"))
     assertTrue(capabilities.contains("\"jvmLibraryDexMode\": \"per_jar_resource_preserving_dex_jar\""))
     assertTrue(capabilities.contains("\"jvmLibraryResourcesPreserved\": true"))
+    assertTrue(capabilities.contains("\"jvmMavenConfigOverrideEnv\": \"FLOVERA_JVM_MAVEN_CONFIG\""))
     assertTrue(capabilities.contains("\"jvmWorkerProcess\": true"))
     assertTrue(capabilities.contains("\"jvmWorkerProcessName\": \":jvmworker\""))
     assertTrue(capabilities.contains("\"appCrashLogPath\": \".flovera/logs/app-crash.jsonl\""))

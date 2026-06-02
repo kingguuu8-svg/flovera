@@ -760,10 +760,15 @@ stacks such as POI and PDFBox. The scheduler reuses checkpointed cache outputs
 and inserts adaptive cool-down windows so repeated document-library runs slow
 down instead of saturating the Android app process. The current phase writes
 `.flovera/runtime/jvm-artifacts/build-state.json`, checks
-`.flovera/runtime/jvm-artifacts/cancel.flag` at stage boundaries, lowers Groovy
-worker thread priority, and classifies Maven/D8/class-loading/Groovy/runtime
-failures in tool stderr. Process crashes and Android historical exit
-reasons are mirrored to `.flovera/logs/app-crash.jsonl` on the next app start so
+`.flovera/runtime/jvm-artifacts/cancel.flag` at stage boundaries, consumes that
+cancel marker after the first observed cancellation so the next JVM run can
+continue from checkpointed caches, lowers Groovy worker thread priority, and
+classifies Maven/D8/class-loading/Groovy/runtime failures in tool stderr.
+Single Groovy runs can also pass `FLOVERA_JVM_MAVEN_CONFIG` to use one
+workspace-relative Maven config file for that run instead of merging the default
+`libs/maven.json` and `.flovera/jvm/maven.json`, which keeps one-off
+compatibility tests from inheriting stale heavy dependency sets. Process crashes
+and Android historical exit reasons are mirrored to `.flovera/logs/app-crash.jsonl` on the next app start so
 whole-process failures are diagnosable even when no session message is written.
 This supports pure JVM jars and direct Maven coordinates as reusable library
 sources, including jar resources that survive dex packaging. Full Maven/Gradle

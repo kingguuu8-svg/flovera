@@ -86,7 +86,7 @@ class WorkspaceCommandRunTool(
     val scope: String = "workspace_public",
     @property:LLMDescription("Whether to create an automatic workspace snapshot before running the command.")
     val snapshotBeforeRun: Boolean = true,
-    @property:LLMDescription("Optional environment variables for this bounded command. Values are restored after the run.")
+    @property:LLMDescription("Optional environment variables for this bounded command. Values are restored after the run. Groovy supports FLOVERA_JVM_MAVEN_CONFIG=<workspace-relative-json> to use one Maven config file for this run instead of the default merged libs/maven.json and .flovera/jvm/maven.json files.")
     val environment: Map<String, String> = emptyMap(),
   )
 
@@ -409,6 +409,7 @@ private class GroovyCommandAdapter(
       runGroovyScript(
         scriptFile = scriptFile,
         scriptArgs = argv.drop(2),
+        environment = args.environment,
         stdout = stdout,
         stderr = stderr,
       )
@@ -510,6 +511,7 @@ private class GroovyCommandAdapter(
   private fun runGroovyScript(
     scriptFile: File,
     scriptArgs: List<String>,
+    environment: Map<String, String>,
     stdout: ByteArrayOutputStream,
     stderr: ByteArrayOutputStream,
   ): Any? {
@@ -519,7 +521,7 @@ private class GroovyCommandAdapter(
     val build = JvmBuildScheduler(workspace.root, errWriter)
     val buildOutput = build.exclusive("groovy:${workspace.workspaceRelativePath(scriptFile)}") {
       val artifacts = JvmArtifactManager(workspace, build)
-      val workspaceJars = artifacts.workspaceJars() + artifacts.mavenJars(networkEnabled)
+      val workspaceJars = artifacts.workspaceJars() + artifacts.mavenJars(networkEnabled, environment)
       build.stage(
         name = "jvm.artifacts.selected",
         detail = "${workspaceJars.size} jar(s), ${workspaceJars.sumOf { it.sizeBytes }} bytes",
@@ -719,8 +721,8 @@ private class JvmArtifactManager(
       .toList()
   }
 
-  fun mavenJars(networkEnabled: Boolean): List<JvmJarArtifact> {
-    val request = readMavenRequest() ?: return emptyList()
+  fun mavenJars(networkEnabled: Boolean, environment: Map<String, String>): List<JvmJarArtifact> {
+    val request = readMavenRequest(environment) ?: return emptyList()
     val resolver = MavenArtifactResolver(
       repositoryRoot = File(cacheRoot, "maven/repository"),
       repositories = request.repositories,
@@ -744,11 +746,8 @@ private class JvmArtifactManager(
     }
   }
 
-  private fun readMavenRequest(): MavenRequest? {
-    val configFiles = listOf(
-      File(root, "libs/maven.json"),
-      File(root, ".flovera/jvm/maven.json"),
-    ).map { it.canonicalFile }.filter { it.isFile && isInsideWorkspace(it) }
+  private fun readMavenRequest(environment: Map<String, String>): MavenRequest? {
+    val configFiles = mavenConfigFiles(environment)
     if (configFiles.isEmpty()) return null
     val repositories = linkedSetOf("https://repo1.maven.org/maven2")
     val dependencies = linkedSetOf<MavenCoordinate>()
@@ -763,6 +762,24 @@ private class JvmArtifactManager(
     }
     if (dependencies.isEmpty()) return null
     return MavenRequest(repositories = repositories.toList(), dependencies = dependencies.toList())
+  }
+
+  private fun mavenConfigFiles(environment: Map<String, String>): List<File> {
+    val overridePath = environment["FLOVERA_JVM_MAVEN_CONFIG"]?.trim().orEmpty()
+    if (overridePath.isNotBlank()) {
+      val file = File(root, overridePath).canonicalFile
+      if (!isInsideWorkspace(file)) {
+        error("FLOVERA_JVM_MAVEN_CONFIG escapes workspace: $overridePath")
+      }
+      if (!file.isFile) {
+        error("FLOVERA_JVM_MAVEN_CONFIG file does not exist: $overridePath")
+      }
+      return listOf(file)
+    }
+    return listOf(
+      File(root, "libs/maven.json"),
+      File(root, ".flovera/jvm/maven.json"),
+    ).map { it.canonicalFile }.filter { it.isFile && isInsideWorkspace(it) }
   }
 
   private fun parseMavenDependency(element: kotlinx.serialization.json.JsonElement): MavenCoordinate? {
@@ -1096,7 +1113,9 @@ private class JvmBuildScheduler(
 
   private fun checkCancelled() {
     if (cancelFile.isFile) {
-      error("JVM build cancelled by .flovera/runtime/jvm-artifacts/cancel.flag")
+      val consumed = cancelFile.delete()
+      val suffix = if (consumed) " The cancel flag was consumed." else " The cancel flag could not be deleted."
+      error("JVM build cancelled by .flovera/runtime/jvm-artifacts/cancel.flag.$suffix")
     }
   }
 
