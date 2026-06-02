@@ -726,6 +726,49 @@ capability state.
     tools are enabled;
   - unapproved MCP proposals remain inert and cannot be called by the agent.
 
+### Flovera MCP Adapter Skill
+
+Status: Backlog, not implemented in the runtime. The current Groovy/JVM
+workspace command substrate is strong enough for Flovera to rewrite selected MCP
+servers as workspace-local JVM/Groovy adapters, but this should first land as a
+skill and scaffold process rather than as a large built-in MCP runtime.
+
+The intent is to let Flovera analyze an MCP repository, README, package
+metadata, or tool schema as a source specification, then generate and test a
+workspace adapter under a stable shape such as:
+
+```text
+.flovera/mcp/adapters/<name>/
+  manifest.json
+  maven.json
+  adapter.groovy
+  tests.json
+  adapter-report.md
+```
+
+- The skill should classify the source MCP server by dependency shape:
+  filesystem, HTTP/REST, Markdown/HTML, SQLite, Git/JGit, SaaS API, browser,
+  shell, Docker, native binary, or unsupported desktop/runtime dependency.
+- The generated adapter should expose a small JVM/Groovy contract for listing
+  tools/resources and calling them, while keeping all file access inside the
+  workspace and all dependency declarations inside the adapter-local
+  `maven.json`.
+- Adapter smoke tests must run through `workspace_command_run groovy` with
+  `FLOVERA_JVM_MAVEN_CONFIG` pointing at the adapter-local Maven config so
+  stale workspace dependencies do not pollute the run.
+- The skill should produce an `adapter-report.md` that records implemented
+  tools, unsupported tools, permissions, Maven dependencies, verification
+  results, and Android/JVM incompatibilities found during the run.
+- The first useful target classes are filesystem, fetch/HTTP, Markdown/HTML,
+  SQLite, REST API, and later JGit/GitHub-style adapters. Playwright, Docker,
+  arbitrary shell daemons, npm/npx execution, and native binary servers should
+  be classified as unsupported or external-endpoint-only.
+- This backlog item is complete only when the skill can take at least one simple
+  MCP-style source package/spec, generate a JVM/Groovy adapter, run smoke tests,
+  and leave a report without modifying Flovera's built-in tool registry. A later
+  product step may promote successful adapters into an app-owned registry or
+  `mcp_call` gateway.
+
 ### Workspace Shell And JGit
 
 Status: Baseline command runtime started. Flovera now exposes one default
