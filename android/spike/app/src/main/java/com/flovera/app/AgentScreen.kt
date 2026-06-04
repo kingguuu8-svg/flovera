@@ -1,20 +1,16 @@
 ﻿package com.flovera.app
 
 import android.Manifest
-import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.content.ContextWrapper
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.graphics.Bitmap
 import android.graphics.pdf.PdfRenderer
 import android.os.Build
-import android.os.PowerManager
-import android.provider.Settings
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -128,13 +124,15 @@ import io.noties.markwon.Markwon
 import io.noties.markwon.ext.tables.TablePlugin
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import androidx.core.app.ActivityCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.flovera.app.agent.AgentContextBudget
 import com.flovera.app.config.AppSettings
 import com.flovera.app.config.WorkspaceSecret
 import com.flovera.app.config.normalizeBraveSearchApiKey
 import com.flovera.app.koog.ModelProviderCatalog
+import com.flovera.app.platform.AndroidPermissionCapabilities
+import com.flovera.app.platform.AndroidPermissionType
+import com.flovera.app.platform.findActivity
 import com.flovera.app.session.ContextUsageRecord
 import com.flovera.app.session.ConversationTranscriptEvent
 import com.flovera.app.session.AgentRunTimelineEvent
@@ -178,8 +176,6 @@ private val FloveraDesignAssistantBubble = Color(0xFFEEF2F1)
 private val FloveraDesignDarkSettingMask = Color(0xFF5A3446)
 private val FloveraDesignDarkSettingOnMask = Color(0xFFFFD8E7)
 private const val WebChromeColorSampleDelayMs = 120L
-private const val BACKGROUND_NOTIFICATION_PERMISSION_REQUEST_CODE = 1202
-
 @Composable
 private fun floveraDesignFrontendEnabled(): Boolean {
   return LocalContext.current.resources.getBoolean(R.bool.design_frontend_style_enabled)
@@ -244,6 +240,7 @@ private enum class AgentPanel {
   Snapshots,
   Skills,
   Secrets,
+  Permissions,
   AgentFile,
   Settings,
 }
@@ -432,6 +429,11 @@ fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
     AgentPanel.Secrets -> SecretsDialog(
       state = state,
       controller = controller,
+      language = language,
+      onDismiss = ::dismissTopPanel,
+    )
+
+    AgentPanel.Permissions -> PermissionsDialog(
       language = language,
       onDismiss = ::dismissTopPanel,
     )
@@ -2253,6 +2255,13 @@ private fun ConversationDialog(
                   onClick = {
                     moreMenuOpen = false
                     onOpenPanel(AgentPanel.Secrets)
+                  },
+                )
+                DropdownMenuItem(
+                  text = { Text(t(language, "Permissions", "\u6743\u9650")) },
+                  onClick = {
+                    moreMenuOpen = false
+                    onOpenPanel(AgentPanel.Permissions)
                   },
                 )
                 DropdownMenuItem(
@@ -4623,58 +4632,128 @@ private fun AgentFileDialog(
 }
 
 private fun requestBackgroundKeepAlivePermissions(context: Context) {
-  val activity = context.findActivity() ?: return
-  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+  val activity = context.findActivity()
+  if (activity != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
     activity.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
   ) {
-    ActivityCompat.requestPermissions(
-      activity,
-      arrayOf(Manifest.permission.POST_NOTIFICATIONS),
-      BACKGROUND_NOTIFICATION_PERMISSION_REQUEST_CODE,
-    )
+    AndroidPermissionCapabilities.requestRuntimePermissions(activity)
   }
+  AndroidPermissionCapabilities.openPermission(context, "battery_optimization")
+}
 
-  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-    val powerManager = activity.getSystemService(PowerManager::class.java)
-    if (powerManager?.isIgnoringBatteryOptimizations(activity.packageName) != true) {
-      val requestIntent = Intent(
-        Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
-        Uri.parse("package:${activity.packageName}"),
-      )
-      val opened = runCatching { activity.startActivity(requestIntent) }.isSuccess
-      if (!opened) {
-        openAppDetailsSettings(activity)
+private fun openAppNotificationSettings(context: Context) {
+  AndroidPermissionCapabilities.openPermission(context, "notifications")
+}
+
+@Composable
+private fun PermissionsDialog(
+  language: String,
+  onDismiss: () -> Unit,
+) {
+  val context = LocalContext.current
+  var refreshKey by remember { mutableStateOf(0) }
+  val statuses = remember(refreshKey, context) { AndroidPermissionCapabilities.status(context) }
+  val activity = context.findActivity()
+
+  AlertDialog(
+    onDismissRequest = onDismiss,
+    title = { Text(t(language, "Permissions", "\u6743\u9650")) },
+    text = {
+      Column(
+        modifier = Modifier.fillMaxWidth().heightIn(max = 560.dp).verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+      ) {
+        Text(
+          t(
+            language,
+            "Grant Android permissions here. Flovera opens the Android system page or runtime permission dialog directly.",
+            "\u5728\u8fd9\u91cc\u6388\u6743 Android \u6743\u9650\u3002Flovera \u4f1a\u76f4\u63a5\u6253\u5f00\u7cfb\u7edf\u9875\u9762\u6216\u8fd0\u884c\u65f6\u6743\u9650\u5f39\u7a97\u3002",
+          ),
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
+          style = MaterialTheme.typography.bodySmall,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+          Button(
+            onClick = {
+              activity?.let(AndroidPermissionCapabilities::requestRuntimePermissions)
+              refreshKey += 1
+            },
+            enabled = activity != null,
+          ) {
+            Text(t(language, "Grant runtime", "\u6388\u6743\u8fd0\u884c\u65f6\u6743\u9650"))
+          }
+          OutlinedButton(
+            onClick = {
+              AndroidPermissionCapabilities.openAppDetails(context)
+              refreshKey += 1
+            },
+          ) {
+            Text(t(language, "App settings", "\u5e94\u7528\u8bbe\u7f6e"))
+          }
+        }
+        statuses.forEach { status ->
+          PermissionStatusItem(
+            status = status,
+            language = language,
+            onOpen = {
+              AndroidPermissionCapabilities.openPermission(context, status.capability.id)
+              refreshKey += 1
+            },
+          )
+        }
+      }
+    },
+    confirmButton = {
+      TextButton(onClick = onDismiss) {
+        Text(t(language, "Done", "\u5b8c\u6210"))
+      }
+    },
+  )
+}
+
+@Composable
+private fun PermissionStatusItem(
+  status: com.flovera.app.platform.AndroidPermissionStatus,
+  language: String,
+  onOpen: () -> Unit,
+) {
+  val label = if (language == "zh") status.capability.labelZh else status.capability.labelEn
+  val statusText = permissionStateLabel(language, status.state)
+  Surface(
+    modifier = Modifier.fillMaxWidth(),
+    shape = RoundedCornerShape(8.dp),
+    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f),
+    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.28f)),
+  ) {
+    Row(
+      modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
+      horizontalArrangement = Arrangement.spacedBy(8.dp),
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(label, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+        Text(
+          "${status.capability.id} · $statusText",
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
+          style = MaterialTheme.typography.bodySmall,
+        )
+      }
+      if (status.capability.type == AndroidPermissionType.Special || status.state == "denied") {
+        TextButton(onClick = onOpen) {
+          Text(t(language, "Open", "\u6253\u5f00"))
+        }
       }
     }
   }
 }
 
-private fun openAppNotificationSettings(context: Context) {
-  val activity = context.findActivity() ?: return
-  val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-    Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-      .putExtra(Settings.EXTRA_APP_PACKAGE, activity.packageName)
-  } else {
-    Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${activity.packageName}"))
+private fun permissionStateLabel(language: String, state: String): String {
+  return when (state) {
+    "granted" -> t(language, "Granted", "\u5df2\u6388\u6743")
+    "denied" -> t(language, "Not granted", "\u672a\u6388\u6743")
+    "not_applicable" -> t(language, "Not applicable", "\u4e0d\u9002\u7528")
+    else -> state
   }
-  runCatching { activity.startActivity(intent) }.onFailure { openAppDetailsSettings(activity) }
-}
-
-private fun openAppDetailsSettings(activity: Activity) {
-  runCatching {
-    activity.startActivity(
-      Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${activity.packageName}")),
-    )
-  }
-}
-
-private fun Context.findActivity(): Activity? {
-  var current: Context? = this
-  while (current is ContextWrapper) {
-    if (current is Activity) return current
-    current = current.baseContext
-  }
-  return null
 }
 
 @Composable

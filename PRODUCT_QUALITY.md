@@ -835,7 +835,8 @@ workspace adapter under a stable shape such as:
 Status: Baseline command runtime started. Flovera now exposes one default
 execution entry, `workspace_command_run`, with argv-shaped execution, workspace
 cwd, timeouts, output limits, snapshots, and audit/tool events. The first
-supported runtimes are `python`/`python3` and an experimental
+supported runtimes are `python`/`python3`, embedded local `git`/JGit,
+app-owned `android` permission/status commands, and an experimental
 Full-Authority-only `groovy` adapter, routed through a command gateway that
 classifies risk, checks authority mode, writes `.flovera/logs/workspace-command.jsonl`,
 and dispatches to approved runtime adapters. Python reuses the existing
@@ -881,9 +882,12 @@ conflict mediation remain deferred. The older direct evaluator tool
 `python_run` is disabled by default to keep the request tool schema smaller and
 reduce routing ambiguity; it can be restored as a fallback through
 `pythonRunToolFallbackEnabled` in app settings/settings proposals. This is not
-Android shell access and does not enable `sh`, `bash`, `npm`, `git`, daemons,
-shell operators, or arbitrary OS commands. Embedded JGit, MCP-on-JVM, and
-broader shell-compatible commands remain deferred.
+Android shell access and does not enable `sh`, `bash`, `npm`, daemons,
+shell operators, remotes, push, or arbitrary OS commands. Git is local-only
+through embedded JGit and supports `init`, `status`, `diff`, `log`, `show`,
+`branch`, `add`, and `commit`. Android command support currently exposes app
+info, permission status, and system permission page intents; it does not grant
+permissions without user action or expose Android shell.
 
 - Done: expose a workspace-scoped command surface for selected command
   runtimes, starting with Python when shell-style execution is more natural than
@@ -912,29 +916,32 @@ broader shell-compatible commands remain deferred.
 - Done: move Groovy JVM preparation and execution behind a bound service running
   in the isolated `:jvmworker` process. Tool output includes the worker process
   marker, and worker IPC failures are reported separately from script failures.
+- Done: add local embedded JGit as a `workspace_command_run` profile with
+  workspace-bounded `init/status/diff/log/show/branch/add/commit`, bounded
+  output, unsupported-command errors, and the same audit log boundary.
+- Done: add an app-owned Android command profile for `android app info`,
+  `android permission status`, and permission/system settings intents, plus a
+  user-facing Permissions panel that can request runtime permissions and open
+  special Android authorization pages.
 - Next hardening target: promote the worker to a foreground service during very
   long JVM builds if Android background process pressure still kills the worker
   before checkpointed work can resume.
-- Next target: keep expanding command runtimes, such as Git/JGit, only when
-  they can reuse the same execution boundary.
+- Next target: keep expanding command runtimes only when they can reuse the same
+  execution boundary and have clear Android/workspace permission behavior.
 - Keep ordinary file operations as app-owned tools (`read`, `edit`, `search`,
   artifact diagnostics) because those are safer, more inspectable, and easier
   for the UI to connect to workspace state.
 - Treat Git as a CLI-like workspace capability from the agent's point of view,
-  not as a long list of narrow UI buttons. The first useful subset should be
-  `git status`, `git diff`, branch inspection, commit creation, and log viewing.
-- If JGit is adopted, wrap it in a small command-compatible adapter with
-  workspace path boundaries, output limits, timeouts, audit events, and clear
-  unsupported-command errors instead of exposing unrestricted library internals.
+  not as a long list of narrow UI buttons. The implemented subset is local-only
+  JGit and intentionally excludes push/remote credential flows.
 - Do not add repository mutation such as checkout, reset, clean, rebase, or
   force operations until restore/snapshot behavior and user confirmation
   boundaries are explicit.
-- Acceptance criteria before implementation:
-  - the agent can inspect diffs and repository state inside the Android
-    workspace without leaving the workspace boundary;
-  - large diffs are paged or bounded instead of flooding conversation context;
-  - mutation commands are auditable and recoverable through snapshots or an
-    equivalent rollback path;
+- Verification gate:
+  - instrumented tests cover JGit init/status/add/commit/diff/log through
+    `workspace_command_run`;
+  - large Git output is bounded by the command gateway output limit;
+  - mutation commands are recorded in `.flovera/logs/workspace-command.jsonl`;
   - unsupported Git behavior fails with a precise explanation rather than a
     misleading partial result.
 
@@ -1143,25 +1150,25 @@ validator or `artifact_inspect` successor with richer DOM diagnostics.
 
 ### Android App Permission Expansion
 
-Status: Deferred behind permission product design. Existing permissions cover
-current app needs, but no new high-impact Android capability has been designed,
-gated, or exposed as an agent tool. Do not add broad permissions speculatively;
-each new permission must start from a concrete user workflow, in-app grant UI,
-denial fallback, narrow agent tool schema, and audit record.
+Status: Baseline permission entry implemented. Flovera now declares a broad
+development-stage permission set and exposes a top-level Permissions panel
+beside preview/snapshots/skills/secrets. The panel can request runtime
+permissions directly and open Android system pages for notification, battery
+optimization, overlay, all-files, unknown-app install, and exact-alarm access.
+The agent can inspect permission state through `workspace_command_run`
+`["android","permission","status"]` and open a specific system page through
+`["android","permission","open","<permission-id>"]`. This is still an app-owned
+adapter, not Android shell access.
 
-- Inventory additional Android permissions and app capabilities that could make
-  Flovera more useful, then group them by user value, privacy risk, and Android
-  version behavior before implementation.
+- Keep inventory and status generation centralized in the app permission
+  capability list so UI and agent metadata do not drift.
 - Candidate permission surfaces include scoped media/document access,
   notifications, camera, microphone, location, contacts, calendar, nearby
   devices, clipboard-related flows, accessibility integrations, and background
   execution limits where Android allows them.
-- Each permission must have a concrete product use case, an in-app explanation,
-  a runtime request path, a denial fallback, and an audit trail when the agent
-  can influence behavior through that permission.
-- Do not expose newly granted Android capabilities directly to the agent until
-  they are represented as narrow app-owned tools with explicit schemas,
-  permission gates, timeouts, output limits, and event records.
+- Do not expose newly granted high-impact Android behavior directly to the agent
+  until it is represented as narrow app-owned command profiles with explicit
+  schemas, permission gates, timeouts, output limits, and event records.
 - Keep high-risk permissions opt-in and reversible, with settings that show
   current grant state and what agent/tool features depend on the grant.
 - Treat accessibility, contacts, calendar, microphone, camera, and precise

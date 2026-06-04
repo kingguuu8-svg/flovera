@@ -21,12 +21,14 @@ import com.android.tools.r8.CompilationMode
 import com.android.tools.r8.D8
 import com.android.tools.r8.D8Command
 import com.android.tools.r8.OutputMode
+import com.flovera.app.platform.AndroidPermissionCapabilities
 import com.flovera.app.workspace.WorkspaceManager
 import dalvik.system.DexClassLoader
 import groovy.lang.Binding
 import groovy.lang.GroovyClassLoader
 import groovy.lang.Script
 import java.io.ByteArrayOutputStream
+import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.PrintWriter
 import java.net.URL
@@ -60,7 +62,19 @@ import kotlinx.coroutines.withContext
 import org.codehaus.groovy.control.CompilationUnit
 import org.codehaus.groovy.control.CompilerConfiguration
 import org.codehaus.groovy.tools.FileSystemCompiler
+import org.eclipse.jgit.api.Git
+import org.eclipse.jgit.dircache.DirCache
+import org.eclipse.jgit.dircache.DirCacheEntry
+import org.eclipse.jgit.diff.DiffFormatter
+import org.eclipse.jgit.lib.Constants
+import org.eclipse.jgit.lib.FileMode
+import org.eclipse.jgit.lib.Repository
+import org.eclipse.jgit.revwalk.RevWalk
+import org.eclipse.jgit.storage.file.FileRepositoryBuilder
+import org.eclipse.jgit.treewalk.CanonicalTreeParser
+import org.eclipse.jgit.treewalk.EmptyTreeIterator
 import org.w3c.dom.Element
+import java.time.Instant
 
 class WorkspaceCommandRunTool(
   private val workspace: WorkspaceManager,
@@ -71,11 +85,11 @@ class WorkspaceCommandRunTool(
 ) : SimpleTool<WorkspaceCommandRunTool.Args>(
   argsType = typeToken<Args>(),
   name = "workspace_command_run",
-  description = "Primary bounded command-style execution surface for Flovera-owned workspace runtimes. Use this for normal Python execution, including user requests like \"use Python\", generated scripts, project commands, and python -c code. This is not Android shell access: supported command runtimes are python/python3 and an experimental Groovy spike with workspace libs/*.jar classpath support, cwd, timeout, output limits, snapshots, and workspace boundaries.",
+  description = "Primary bounded command-style execution surface for Flovera-owned workspace runtimes. Use this for normal Python execution, generated scripts, project commands, local Git/JGit work, Android permission/status commands, and groovy scripts when JVM access is useful. This is not Android shell access: supported command profiles are python/python3, groovy, git, and android, with cwd, timeout, output limits, snapshots, audit records, and workspace boundaries.",
 ) {
   @Serializable
   data class Args(
-    @property:LLMDescription("Command argv array. Supported now: [\"python\", \"script.py\", ...], [\"python3\", \"script.py\", ...], or [\"python\", \"-c\", \"code\", ...]. Do not use shell syntax.")
+    @property:LLMDescription("Command argv array. Supported now: python/python3, groovy, git, and android command profiles. Do not use shell syntax.")
     val argv: List<String>,
     @property:LLMDescription("Relative workspace directory to use as cwd. Use '.' for the workspace root.")
     val cwd: String = ".",
@@ -120,6 +134,8 @@ class WorkspaceCommandGateway(
   private val adapters: List<WorkspaceCommandAdapter> = listOf(
     PythonCommandAdapter(workspace, networkEnabled, secretEnvironment),
     GroovyCommandAdapter(workspace, networkEnabled, secretEnvironment),
+    GitCommandAdapter(workspace),
+    AndroidCommandAdapter(workspace.applicationContext),
   )
 
   fun run(args: WorkspaceCommandRunTool.Args): String {
@@ -127,7 +143,7 @@ class WorkspaceCommandGateway(
     if (argv.isEmpty()) {
       val risk = WorkspaceCommandRisk.unsupported("missing")
       return denied(
-        message = "Missing command argv. Supported now: python/python3 workspace scripts or python -c code.",
+        message = "Missing command argv. Supported now: python/python3, groovy, git, and android command profiles.",
         args = args,
         argv = emptyList(),
         risk = risk,
@@ -139,7 +155,7 @@ class WorkspaceCommandGateway(
     if (adapter == null) {
       val risk = WorkspaceCommandRisk.unsupported(command)
       return denied(
-        message = "Unsupported workspace command: ${argv.first()}. Supported now: python, python3, and experimental groovy. Android shell, npm, and git are not enabled through this tool yet.",
+        message = "Unsupported workspace command: ${argv.first()}. Supported now: python, python3, experimental groovy, git, and android command profiles. Android shell, npm, daemons, and shell operators are not enabled through this tool.",
         args = args,
         argv = argv,
         risk = risk,
@@ -343,6 +359,427 @@ private class PythonCommandAdapter(
       "_flovera_sys.argv = [\"-c\"] + $encodedArgs\n" +
       "del _flovera_sys\n" +
       normalizedCode
+  }
+}
+
+private class GitCommandAdapter(
+  private val workspace: WorkspaceManager,
+) : WorkspaceCommandAdapter {
+  override val commandNames: Set<String> = setOf("git")
+
+  override fun classify(argv: List<String>): WorkspaceCommandRisk {
+    val subcommand = argv.getOrNull(1)?.lowercase().orEmpty()
+    return when (subcommand) {
+      "status", "diff", "log", "show", "branch" -> WorkspaceCommandRisk("git.read", listOf("workspace.read", "git.read"))
+      "init", "add", "commit" -> WorkspaceCommandRisk("git.write", listOf("workspace.read", "workspace.write", "git.write"))
+      "" -> WorkspaceCommandRisk("git.invalid", listOf("workspace.read", "git.read"))
+      else -> WorkspaceCommandRisk("git.unsupported", listOf("workspace.read", "git:$subcommand"))
+    }
+  }
+
+  override fun execute(argv: List<String>, args: WorkspaceCommandRunTool.Args): PythonRunResult {
+    val startedAt = System.currentTimeMillis()
+    val maxOutputChars = args.maxOutputChars.coerceIn(FloveraPythonRuntime.MIN_OUTPUT_CHARS, FloveraPythonRuntime.MAX_OUTPUT_CHARS)
+    val subcommand = argv.getOrNull(1)?.lowercase().orEmpty()
+    val cwd = runCatching { workspace.workspaceRuntimeDirectory(args.cwd) }.getOrElse {
+      return gitError(startedAt, "Command cwd is invalid: ${args.cwd}\n")
+    }
+    if (!cwd.exists()) return gitError(startedAt, "Command cwd does not exist: ${args.cwd}\n")
+    if (!cwd.isDirectory) return gitError(startedAt, "Command cwd is not a directory: ${args.cwd}\n")
+    return runCatching {
+      val output = when (subcommand) {
+        "init" -> initRepository()
+        "status" -> withRepository { repo -> status(repo) }
+        "diff" -> withRepository { repo -> diff(repo, argv.drop(2), maxOutputChars) }
+        "log" -> withRepository { repo -> log(repo, argv.drop(2), maxOutputChars) }
+        "show" -> withRepository { repo -> show(repo, argv.drop(2), maxOutputChars) }
+        "branch" -> withRepository { repo -> branch(repo) }
+        "add" -> withRepository { repo -> add(repo, argv.drop(2)) }
+        "commit" -> withRepository { repo -> commit(repo, argv.drop(2)) }
+        "" -> "git command requires a subcommand, for example: git status\n"
+        else -> "Unsupported git subcommand: $subcommand. Supported: init, status, diff, log, show, branch, add, commit.\n"
+      }
+      val bounded = boundedText(output, maxOutputChars)
+      PythonRunResult(
+        status = if (subcommand.isBlank() || subcommand !in SUPPORTED_GIT_SUBCOMMANDS) "error" else "ok",
+        exitCode = if (subcommand.isBlank() || subcommand !in SUPPORTED_GIT_SUBCOMMANDS) 1 else 0,
+        stdout = bounded.text,
+        stdoutTruncated = bounded.truncated,
+        elapsedMs = elapsedSince(startedAt),
+      )
+    }.getOrElse { throwable ->
+      gitError(startedAt, "Git command failed: ${throwable.message ?: throwable::class.java.name}\n")
+    }
+  }
+
+  private fun initRepository(): String {
+    Git.init().setDirectory(workspace.root).call().use { git ->
+      ensureGitExcludes(git.repository)
+      return "initialized=true\nworkTree=${workspace.workspaceRelativePath(git.repository.workTree)}\ngitDir=${git.repository.directory.name}\n"
+    }
+  }
+
+  private fun <T> withRepository(block: (Repository) -> T): T {
+    val builder = FileRepositoryBuilder()
+      .readEnvironment()
+      .findGitDir(workspace.root)
+    val gitDir = builder.gitDir ?: error("Workspace is not a Git repository. Run `git init` first.")
+    val root = workspace.root.canonicalFile
+    val canonicalGitDir = gitDir.canonicalFile
+    if (canonicalGitDir.path != root.path && !canonicalGitDir.path.startsWith(root.path + File.separator)) {
+      error("Git directory escapes workspace.")
+    }
+    return builder.build().use { repo ->
+      ensureGitExcludes(repo)
+      block(repo)
+    }
+  }
+
+  private fun ensureGitExcludes(repo: Repository) {
+    val infoDir = File(repo.directory, "info")
+    val excludeFile = File(infoDir, "exclude")
+    infoDir.mkdirs()
+    val existing = if (excludeFile.isFile) excludeFile.readText() else ""
+    val additions = FLOVERA_GIT_EXCLUDES.filterNot { pattern ->
+      existing.lineSequence().any { it.trim() == pattern }
+    }
+    if (additions.isEmpty()) return
+    excludeFile.appendText(
+      buildString {
+        if (existing.isNotBlank() && !existing.endsWith("\n")) appendLine()
+        additions.forEach { appendLine(it) }
+      },
+    )
+  }
+
+  private fun status(repo: Repository): String {
+    Git(repo).use { git ->
+      val status = git.status().call()
+      return buildString {
+        appendLine("branch=${repo.branch.orEmpty()}")
+        appendLine("clean=${status.isClean}")
+        appendGitSet("added", status.added)
+        appendGitSet("changed", status.changed)
+        appendGitSet("modified", status.modified)
+        appendGitSet("missing", status.missing)
+        appendGitSet("removed", status.removed)
+        appendGitSet("untracked", status.untracked)
+        appendGitSet("conflicting", status.conflicting)
+      }
+    }
+  }
+
+  private fun diff(repo: Repository, flags: List<String>, maxOutputChars: Int): String {
+    return runCatching {
+      Git(repo).use { git ->
+        val stdout = ByteArrayOutputStream()
+        DiffFormatter(stdout).use { formatter ->
+          formatter.setRepository(repo)
+          formatter.setDetectRenames(true)
+          val cached = "--cached" in flags || "--staged" in flags
+          val diffs = if (cached) git.diff().setCached(true).call() else git.diff().call()
+          diffs.forEach { formatter.format(it) }
+        }
+        val text = stdout.toString(StandardCharsets.UTF_8.name())
+        text.ifBlank { "(no diff)\n" }.take(maxOutputChars + 1)
+      }
+    }.getOrElse { throwable ->
+      fallbackWorkingTreeDiff(repo, throwable, maxOutputChars)
+    }
+  }
+
+  private fun fallbackWorkingTreeDiff(repo: Repository, throwable: Throwable, maxOutputChars: Int): String {
+    return buildString {
+      appendLine("diffFallback=working_tree_full_file")
+      appendLine("fallbackReason=${throwable.message ?: throwable::class.java.name}")
+      workspace.root.walkTopDown()
+        .onEnter { directory ->
+          val relative = workspace.workspaceRelativePath(directory).replace('\\', '/')
+          relative.isBlank() || relative !in setOf(".git") && !isFloveraRuntimeGitPath(relative)
+        }
+        .filter { it.isFile }
+        .map { workspace.workspaceRelativePath(it).replace('\\', '/') }
+        .filter { it.isNotBlank() && !isFloveraRuntimeGitPath(it) && !it.startsWith(".git/") }
+        .sorted()
+        .forEach { path ->
+          if (length > maxOutputChars) return@forEach
+          appendLine("diff --flovera-fallback a/$path b/$path")
+          appendLine("--- a/$path")
+          appendLine("+++ b/$path")
+          val file = File(repo.workTree, path)
+          file.readLines().forEach { line ->
+            if (length <= maxOutputChars) appendLine("+$line")
+          }
+        }
+    }.take(maxOutputChars + 1)
+  }
+
+  private fun log(repo: Repository, args: List<String>, maxOutputChars: Int): String {
+    val limit = args.firstOrNull { it.startsWith("-n") }
+      ?.removePrefix("-n")
+      ?.toIntOrNull()
+      ?.coerceIn(1, 50)
+      ?: 10
+    Git(repo).use { git ->
+      val commits = runCatching { git.log().setMaxCount(limit).call().toList() }
+        .getOrElse { emptyList() }
+      if (commits.isEmpty()) return "(no commits)\n"
+      return commits.joinToString("\n") { commit ->
+        "${commit.name.take(12)} ${commit.authorIdent.`when`.time} ${commit.shortMessage}"
+      }.plus("\n").take(maxOutputChars + 1)
+    }
+  }
+
+  private fun show(repo: Repository, args: List<String>, maxOutputChars: Int): String {
+    val rev = args.firstOrNull { !it.startsWith("-") } ?: Constants.HEAD
+    val objectId = repo.resolve(rev) ?: error("Cannot resolve revision: $rev")
+    RevWalk(repo).use { walk ->
+      val commit = walk.parseCommit(objectId)
+      val parentTree = commit.parents.firstOrNull()?.let { parent -> walk.parseCommit(parent.id).tree }
+      val output = ByteArrayOutputStream()
+      output.writer(StandardCharsets.UTF_8).use { writer ->
+        writer.appendLine("commit ${commit.name}")
+        writer.appendLine("author ${commit.authorIdent.name} <${commit.authorIdent.emailAddress}>")
+        writer.appendLine("date ${commit.authorIdent.`when`}")
+        writer.appendLine()
+        writer.appendLine(commit.fullMessage.trimEnd())
+        writer.appendLine()
+      }
+      DiffFormatter(output).use { formatter ->
+        formatter.setRepository(repo)
+        formatter.setDetectRenames(true)
+        val newTree = CanonicalTreeParser().also { parser ->
+          repo.newObjectReader().use { reader -> parser.reset(reader, commit.tree.id) }
+        }
+        val oldTree = parentTree?.let { tree ->
+          CanonicalTreeParser().also { parser ->
+            repo.newObjectReader().use { reader -> parser.reset(reader, tree.id) }
+          }
+        } ?: EmptyTreeIterator()
+        formatter.scan(oldTree, newTree).forEach { formatter.format(it) }
+      }
+      return output.toString(StandardCharsets.UTF_8.name()).take(maxOutputChars + 1)
+    }
+  }
+
+  private fun branch(repo: Repository): String {
+    Git(repo).use { git ->
+      val branches = git.branchList().call()
+      return buildString {
+        appendLine("current=${repo.branch.orEmpty()}")
+        branches.forEach { ref ->
+          appendLine(ref.name.removePrefix("refs/heads/"))
+        }
+      }
+    }
+  }
+
+  private fun add(repo: Repository, patterns: List<String>): String {
+    val normalized = expandGitPatterns(normalizeGitPatterns(patterns.ifEmpty { listOf(".") }))
+    writeIndexEntries(repo, normalized)
+    return "added=${normalized.joinToString(",")}\n"
+  }
+
+  private fun writeIndexEntries(repo: Repository, paths: List<String>) {
+    val selected = paths
+      .filter { path -> File(repo.workTree, path).isFile }
+      .distinct()
+      .sorted()
+    if (selected.isEmpty()) return
+    val selectedSet = selected.toSet()
+    val cache = DirCache.lock(repo, null)
+    try {
+      val entries = mutableListOf<DirCacheEntry>()
+      repeat(cache.entryCount) { index ->
+        val existing = cache.getEntry(index)
+        if (existing.pathString !in selectedSet) {
+          entries += DirCacheEntry(existing)
+        }
+      }
+      repo.newObjectInserter().use { inserter ->
+        selected.forEach { path ->
+          val file = File(repo.workTree, path)
+          val bytes = file.readBytes()
+          val objectId = ByteArrayInputStream(bytes).use { input ->
+            inserter.insert(Constants.OBJ_BLOB, bytes.size.toLong(), input)
+          }
+          val entry = DirCacheEntry(path).apply {
+            fileMode = FileMode.REGULAR_FILE
+            setObjectId(objectId)
+            setLength(bytes.size.toLong())
+            setLastModified(Instant.ofEpochMilli(file.lastModified()))
+          }
+          entries += entry
+        }
+        inserter.flush()
+        selected.forEach { path ->
+          val entry = entries.firstOrNull { it.pathString == path } ?: return@forEach
+          repo.open(entry.objectId).openStream().close()
+        }
+      }
+      val builder = cache.builder()
+      entries.sortedBy { it.pathString }.forEach { builder.add(it) }
+      builder.commit()
+    } finally {
+      cache.unlock()
+    }
+  }
+
+  private fun commit(repo: Repository, args: List<String>): String {
+    val message = gitCommitMessage(args)
+    if (message.isBlank()) return "git commit requires -m <message>.\n"
+    Git(repo).use { git ->
+      val commit = git.commit()
+        .setMessage(message)
+        .setAuthor("Flovera", "flovera@local")
+        .setCommitter("Flovera", "flovera@local")
+        .call()
+      return "commit=${commit.name}\nshort=${commit.name.take(12)}\nmessage=${commit.shortMessage}\n"
+    }
+  }
+
+  private fun normalizeGitPatterns(patterns: List<String>): List<String> {
+    return patterns
+      .map { it.replace('\\', '/').trim().trimStart('/') }
+      .filter { it.isNotBlank() }
+      .map {
+        require(!it.split('/').any { segment -> segment == ".." }) { "Git path escapes workspace: $it" }
+        it
+      }
+      .distinct()
+  }
+
+  private fun expandGitPatterns(patterns: List<String>): List<String> {
+    if (patterns.none { it == "." }) return patterns.filterNot(::isFloveraRuntimeGitPath)
+    val explicit = patterns.filterNot { it == "." }
+    val expanded = workspace.root.walkTopDown()
+      .onEnter { directory ->
+        val relative = workspace.workspaceRelativePath(directory).replace('\\', '/')
+        relative.isBlank() || relative !in setOf(".git") && !isFloveraRuntimeGitPath(relative)
+      }
+      .filter { it.isFile }
+      .map { workspace.workspaceRelativePath(it).replace('\\', '/') }
+      .filter { it.isNotBlank() && !isFloveraRuntimeGitPath(it) && !it.startsWith(".git/") }
+      .toList()
+    return (explicit + expanded).distinct()
+  }
+
+  private fun isFloveraRuntimeGitPath(path: String): Boolean {
+    val normalized = path.replace('\\', '/').trimStart('/')
+    return normalized == ".flovera/logs" ||
+      normalized == ".flovera/runtime" ||
+      normalized == ".flovera/jobs" ||
+      normalized.startsWith(".flovera/logs/") ||
+      normalized.startsWith(".flovera/runtime/") ||
+      normalized.startsWith(".flovera/jobs/")
+  }
+
+  private fun gitCommitMessage(args: List<String>): String {
+    val index = args.indexOf("-m").takeIf { it >= 0 } ?: args.indexOf("--message").takeIf { it >= 0 } ?: -1
+    if (index < 0) return ""
+    return args.getOrNull(index + 1)?.trim().orEmpty()
+  }
+
+  private fun StringBuilder.appendGitSet(name: String, values: Set<String>) {
+    if (values.isNotEmpty()) appendLine("$name=${values.sorted().joinToString(",")}")
+  }
+
+  private fun gitError(startedAt: Long, message: String): PythonRunResult {
+    return PythonRunResult(status = "error", exitCode = 1, stderr = message, elapsedMs = elapsedSince(startedAt))
+  }
+
+  private fun elapsedSince(startedAt: Long): Int {
+    return (System.currentTimeMillis() - startedAt).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+  }
+
+  private companion object {
+    val SUPPORTED_GIT_SUBCOMMANDS = setOf("init", "status", "diff", "log", "show", "branch", "add", "commit")
+    val FLOVERA_GIT_EXCLUDES = listOf(
+      ".flovera/logs/",
+      ".flovera/runtime/",
+      ".flovera/jobs/",
+    )
+  }
+}
+
+private class AndroidCommandAdapter(
+  private val context: Context,
+) : WorkspaceCommandAdapter {
+  override val commandNames: Set<String> = setOf("android")
+
+  override fun classify(argv: List<String>): WorkspaceCommandRisk {
+    val profile = argv.getOrNull(1)?.lowercase().orEmpty()
+    return when (profile) {
+      "app", "permission", "intent" -> WorkspaceCommandRisk("android.app", listOf("android.app"))
+      "" -> WorkspaceCommandRisk("android.invalid", listOf("android.app"))
+      else -> WorkspaceCommandRisk("android.unsupported", listOf("android:$profile"))
+    }
+  }
+
+  override fun execute(argv: List<String>, args: WorkspaceCommandRunTool.Args): PythonRunResult {
+    val startedAt = System.currentTimeMillis()
+    val maxOutputChars = args.maxOutputChars.coerceIn(FloveraPythonRuntime.MIN_OUTPUT_CHARS, FloveraPythonRuntime.MAX_OUTPUT_CHARS)
+    val output = when (argv.getOrNull(1)?.lowercase()) {
+      "app" -> appCommand(argv.drop(2))
+      "permission" -> permissionCommand(argv.drop(2))
+      "intent" -> intentCommand(argv.drop(2))
+      else -> "android command requires app, permission, or intent profile.\n"
+    }
+    val status = if (output.startsWith("error=")) "error" else "ok"
+    val bounded = boundedText(output, maxOutputChars)
+    return PythonRunResult(
+      status = status,
+      exitCode = if (status == "ok") 0 else 1,
+      stdout = if (status == "ok") bounded.text else "",
+      stderr = if (status == "ok") "" else bounded.text,
+      stdoutTruncated = status == "ok" && bounded.truncated,
+      stderrTruncated = status != "ok" && bounded.truncated,
+      elapsedMs = (System.currentTimeMillis() - startedAt).coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
+    )
+  }
+
+  private fun appCommand(args: List<String>): String {
+    return when (args.firstOrNull()?.lowercase()) {
+      "info" -> buildString {
+        appendLine("package=${context.packageName}")
+        appendLine("sdk=${Build.VERSION.SDK_INT}")
+        appendLine("permissionsPanel=available")
+        appendLine("commandProfiles=python,groovy,git,android")
+      }
+      else -> "error=unsupported android app command. Supported: android app info\n"
+    }
+  }
+
+  private fun permissionCommand(args: List<String>): String {
+    return when (args.firstOrNull()?.lowercase()) {
+      "status", null -> permissionStatus()
+      "open" -> {
+        val id = args.getOrNull(1).orEmpty().ifBlank { "app_details" }
+        val opened = AndroidPermissionCapabilities.openPermission(context, id)
+        "opened=$opened\npermission=$id\n"
+      }
+      else -> "error=unsupported android permission command. Supported: android permission status, android permission open <id>\n"
+    }
+  }
+
+  private fun intentCommand(args: List<String>): String {
+    return when (args.firstOrNull()?.lowercase()) {
+      "open" -> {
+        val id = args.getOrNull(1).orEmpty().ifBlank { "app_details" }
+        val opened = AndroidPermissionCapabilities.openPermission(context, id)
+        "opened=$opened\nintent=$id\n"
+      }
+      else -> "error=unsupported android intent command. Supported: android intent open <id>\n"
+    }
+  }
+
+  private fun permissionStatus(): String {
+    return buildString {
+      appendLine("permissions:")
+      AndroidPermissionCapabilities.status(context).forEach { status ->
+        appendLine("${status.capability.id}=${status.state}")
+      }
+    }
   }
 }
 
@@ -1442,6 +1879,11 @@ private data class BoundedText(
 
 private fun boundedText(stream: ByteArrayOutputStream, maxChars: Int): BoundedText {
   val text = stream.toString(StandardCharsets.UTF_8.name())
+  if (text.length <= maxChars) return BoundedText(text, false)
+  return BoundedText(text.take(maxChars), true)
+}
+
+private fun boundedText(text: String, maxChars: Int): BoundedText {
   if (text.length <= maxChars) return BoundedText(text, false)
   return BoundedText(text.take(maxChars), true)
 }

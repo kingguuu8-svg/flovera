@@ -65,6 +65,20 @@ object FloveraSkillRegistry {
       descriptionZh = "用于任务明显需要 Groovy、JVM 库、jar、Maven 坐标，或 CPython 难以覆盖的文档类库时。",
     ),
     defaultRegistration(
+      id = "flovera-git-workspace-command",
+      titleEn = "Flovera Git Workspace Command",
+      titleZh = "Flovera Git 工作区命令",
+      descriptionEn = "Use when a task needs local Git status, diff, history, staging, or commits inside the Flovera workspace through embedded JGit.",
+      descriptionZh = "用于需要在 Flovera 工作区内通过内置 JGit 查看 Git 状态、diff、历史、暂存或提交时。",
+    ),
+    defaultRegistration(
+      id = "flovera-android-command",
+      titleEn = "Flovera Android Command Profile",
+      titleZh = "Flovera Android 命令能力",
+      descriptionEn = "Use when a task needs Android app info, permission status, or opening Android system permission pages from Flovera.",
+      descriptionZh = "用于任务需要查看 Android 应用信息、权限状态，或从 Flovera 打开系统权限授权页面时。",
+    ),
+    defaultRegistration(
       id = "flovera-mcp-adapter",
       titleEn = "Flovera MCP Adapter Planning",
       titleZh = "Flovera MCP 适配规划",
@@ -207,6 +221,40 @@ object FloveraSkillRegistry {
         - For isolated tests, prefer a temporary Maven config and pass `FLOVERA_JVM_MAVEN_CONFIG=<workspace-relative-json>` in environment.
         - Expect Android-incompatible APIs or native JVM artifacts to fail during D8/dex loading. Use `failureCategory` and `.flovera/logs/jvm-build.jsonl` to locate the failing stage.
         - Heavy first runs may spend time resolving Maven and preparing dex caches. Do not treat slow progress as failure while jvm build progress is moving.
+      """.trimIndent()
+
+      "flovera-git-workspace-command" -> """
+        ---
+        name: flovera-git-workspace-command
+        description: Use when a task needs local Git status, diff, history, staging, or commits inside the Flovera workspace through embedded JGit.
+        description_zh: 用于需要在 Flovera 工作区内通过内置 JGit 查看 Git 状态、diff、历史、暂存或提交时。
+        ---
+
+        # Flovera Git Workspace Command
+
+        Required workflow:
+        - Use `workspace_command_run` with argv form. Supported Git subcommands are `init`, `status`, `diff`, `log`, `show`, `branch`, `add`, and `commit`.
+        - Run `["git", "status"]` before reporting repository state. If the workspace has no repository, run `["git", "init"]` only when Git history is useful for the task.
+        - Use `["git", "diff"]` before summarizing local changes. Use `["git", "add", "."]` and `["git", "commit", "-m", "message"]` only when the user asks to commit or the task explicitly requires a checkpoint.
+        - Git is embedded JGit, not system git. Do not use shell syntax, push, remote URLs, credentials, hooks, submodules, LFS, or OS git configuration.
+        - Keep commits local and workspace-bound. If remote sync is needed, report it as unsupported in this build.
+      """.trimIndent()
+
+      "flovera-android-command" -> """
+        ---
+        name: flovera-android-command
+        description: Use when a task needs Android app info, permission status, or opening Android system permission pages from Flovera.
+        description_zh: 用于任务需要查看 Android 应用信息、权限状态，或从 Flovera 打开系统权限授权页面时。
+        ---
+
+        # Flovera Android Command Profile
+
+        Required workflow:
+        - Use `workspace_command_run` with argv such as `["android", "app", "info"]` and `["android", "permission", "status"]`.
+        - If a permission is missing, ask the user to open Flovera's Permissions panel or use `["android", "permission", "open", "<permission-id>"]` to open the Android system page.
+        - Do not claim a permission is granted until `android permission status` reports `granted`.
+        - Android commands are app-owned adapters, not shell access. Do not use `adb`, `am`, `pm`, Android shell commands, hidden APIs, or background daemons.
+        - Permission ids include notifications, camera, microphone, location, contacts, calendar, media, bluetooth, battery_optimization, overlay, all_files, install_unknown_apps, and exact_alarm.
       """.trimIndent()
 
       "flovera-mcp-adapter" -> """
@@ -392,6 +440,14 @@ object FloveraSkillRegistry {
       "flovera-jvm-groovy" -> copy(
         titleZh = "Flovera JVM/Groovy 运行时",
         descriptionZh = "用于任务明显需要 Groovy、JVM 库、jar、Maven 坐标，或 CPython 难以覆盖的文档类库时。",
+      )
+      "flovera-git-workspace-command" -> copy(
+        titleZh = "Flovera Git 工作区命令",
+        descriptionZh = "用于需要在 Flovera 工作区内通过内置 JGit 查看 Git 状态、diff、历史、暂存或提交时。",
+      )
+      "flovera-android-command" -> copy(
+        titleZh = "Flovera Android 命令能力",
+        descriptionZh = "用于任务需要查看 Android 应用信息、权限状态，或从 Flovera 打开系统权限授权页面时。",
       )
       "flovera-mcp-adapter" -> copy(
         titleZh = "Flovera MCP 适配规划",

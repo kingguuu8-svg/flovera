@@ -192,10 +192,14 @@ class WorkspaceFileTreeInstrumentedTest {
     val manifest = workspace.readFile(".flovera/skills/manifest.json")
     val skill = workspace.readFile(".flovera/skills/flovera-android-webview-app/SKILL.md")
     val pythonSkill = workspace.readFile(".flovera/skills/flovera-python-workspace-command/SKILL.md")
+    val gitSkill = workspace.readFile(".flovera/skills/flovera-git-workspace-command/SKILL.md")
+    val androidSkill = workspace.readFile(".flovera/skills/flovera-android-command/SKILL.md")
     val skillCreator = workspace.readFile(".flovera/skills/flovera-skill-creator/SKILL.md")
 
     assertTrue(manifest.contains("\"id\": \"flovera-android-webview-app\""))
     assertTrue(manifest.contains("\"id\": \"flovera-python-workspace-command\""))
+    assertTrue(manifest.contains("\"id\": \"flovera-git-workspace-command\""))
+    assertTrue(manifest.contains("\"id\": \"flovera-android-command\""))
     assertTrue(manifest.contains("\"id\": \"flovera-skill-creator\""))
     assertFalse(manifest.contains("\"id\": \"flovera-context-handoff\""))
     assertTrue(manifest.contains("\"enabled\": true"))
@@ -212,6 +216,10 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(pythonSkill.contains("workspace_command_run"))
     assertTrue(pythonSkill.contains("python_package_install"))
     assertTrue(pythonSkill.contains("artifact_inspect"))
+    assertTrue(gitSkill.contains("embedded JGit"))
+    assertTrue(gitSkill.contains("[\"git\", \"status\"]"))
+    assertTrue(androidSkill.contains("[\"android\", \"permission\", \"status\"]"))
+    assertTrue(androidSkill.contains("Permissions panel"))
     assertTrue(skillCreator.contains("name: flovera-skill-creator"))
     assertTrue(skillCreator.contains("description: Use when the user asks Flovera to create"))
     assertTrue(skillCreator.contains("description_zh:"))
@@ -226,6 +234,8 @@ class WorkspaceFileTreeInstrumentedTest {
 
     val enabledDescriptors = workspace.readFloveraSkillPromptDescriptors()
     assertTrue(enabledDescriptors.contains("flovera-python-workspace-command"))
+    assertTrue(enabledDescriptors.contains("flovera-git-workspace-command"))
+    assertTrue(enabledDescriptors.contains("flovera-android-command"))
     assertTrue(enabledDescriptors.contains("Use when a task needs Python execution"))
     assertFalse(enabledDescriptors.contains("ZH:"))
     assertFalse(enabledDescriptors.contains("用于需要在 Flovera 内运行 Python"))
@@ -277,6 +287,7 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(descriptors.contains("Use when the user wants a custom registered skill."))
     assertFalse(descriptors.contains("用于用户需要自定义注册技能时。"))
     assertTrue(descriptors.contains("flovera-android-webview-app"))
+    assertTrue(descriptors.contains("flovera-git-workspace-command"))
   }
 
   @Test
@@ -1191,6 +1202,85 @@ class WorkspaceFileTreeInstrumentedTest {
   }
 
   @Test
+  fun workspaceCommandRunExecutesLocalJGitCommands() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "workspace-command-git-${System.currentTimeMillis()}")
+    val tool = WorkspaceCommandRunTool(workspace, ToolEventRecorder(), authorityMode = "full")
+
+    val init = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("git", "init"),
+        snapshotBeforeRun = false,
+      ),
+    )
+    workspace.writeFile("notes.md", "alpha\n", createAutoSnapshot = false)
+    val status = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("git", "status"),
+        snapshotBeforeRun = false,
+      ),
+    )
+    val add = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("git", "add", "."),
+        snapshotBeforeRun = false,
+      ),
+    )
+    val commit = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("git", "commit", "-m", "Add notes"),
+        snapshotBeforeRun = false,
+      ),
+    )
+    workspace.writeFile("notes.md", "alpha\nbeta\n", createAutoSnapshot = false)
+    val diff = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("git", "diff"),
+        snapshotBeforeRun = false,
+      ),
+    )
+    val log = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("git", "log", "-n1"),
+        snapshotBeforeRun = false,
+      ),
+    )
+
+    assertTrue(init, init.contains("risk=git.write"))
+    assertTrue(init, init.contains("initialized=true"))
+    assertTrue(status, status.contains("untracked=notes.md"))
+    assertTrue(add, add.contains("added=notes.md"))
+    assertTrue(commit, commit.contains("message=Add notes"))
+    assertTrue(diff, diff.contains("+beta"))
+    assertTrue(log, log.contains("Add notes"))
+  }
+
+  @Test
+  fun workspaceCommandRunReportsAndroidPermissionStatus() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "workspace-command-android-${System.currentTimeMillis()}")
+    val tool = WorkspaceCommandRunTool(workspace, ToolEventRecorder())
+
+    val app = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("android", "app", "info"),
+        snapshotBeforeRun = false,
+      ),
+    )
+    val permissions = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("android", "permission", "status"),
+        snapshotBeforeRun = false,
+      ),
+    )
+
+    assertTrue(app, app.contains("commandProfiles=python,groovy,git,android"))
+    assertTrue(permissions, permissions.contains("permissions:"))
+    assertTrue(permissions, permissions.contains("notifications="))
+    assertTrue(permissions, permissions.contains("battery_optimization="))
+  }
+
+  @Test
   fun workspaceCommandRunRejectsUnsupportedCommands() = runBlocking {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val workspace = WorkspaceManager(context, "workspace-command-unsupported-${System.currentTimeMillis()}")
@@ -2017,6 +2107,20 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"workspaceCommandSupportedCommands\""))
     assertTrue(capabilities.contains("\"python3\""))
     assertTrue(capabilities.contains("\"groovy\""))
+    assertTrue(capabilities.contains("\"git\""))
+    assertTrue(capabilities.contains("\"android\""))
+    assertTrue(capabilities.contains("\"workspaceCommandProfiles\""))
+    assertTrue(capabilities.contains("\"gitCommandRuntime\": true"))
+    assertTrue(capabilities.contains("\"gitCommandRuntimeMode\": \"embedded_jgit_local_workspace\""))
+    assertTrue(capabilities.contains("\"gitCommandSupportedSubcommands\""))
+    assertTrue(capabilities.contains("\"commit\""))
+    assertTrue(capabilities.contains("\"gitCommandRemoteOperations\": false"))
+    assertTrue(capabilities.contains("\"androidCommandRuntime\": true"))
+    assertTrue(capabilities.contains("\"androidCommandRuntimeMode\": \"app_owned_permission_status_and_system_intents\""))
+    assertTrue(capabilities.contains("\"androidPermissionConsole\": true"))
+    assertTrue(capabilities.contains("\"androidPermissionGrantEntry\": \"main_menu_permissions_panel\""))
+    assertTrue(capabilities.contains("\"androidPermissionIds\""))
+    assertTrue(capabilities.contains("\"overlay\""))
     assertTrue(capabilities.contains("\"groovyCommandRuntime\": true"))
     assertTrue(capabilities.contains("\"groovyCommandRuntimeStatus\": \"experimental_full_authority\""))
     assertTrue(capabilities.contains("\"groovyWorkspaceJarClasspath\": true"))
