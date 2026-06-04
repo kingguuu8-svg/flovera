@@ -4742,23 +4742,17 @@ private fun SecretsDialog(
   }
   var editingOriginalName by remember { mutableStateOf("") }
   var nameDraft by remember { mutableStateOf("") }
-  var labelDraft by remember { mutableStateOf("") }
-  var descriptionDraft by remember { mutableStateOf("") }
   var valueDraft by remember { mutableStateOf("") }
   var agentAllowedDraft by remember { mutableStateOf(true) }
   fun clearDraft() {
     editingOriginalName = ""
     nameDraft = ""
-    labelDraft = ""
-    descriptionDraft = ""
     valueDraft = ""
     agentAllowedDraft = true
   }
   fun editSecret(secret: WorkspaceSecret) {
     editingOriginalName = secret.normalizedName
-    nameDraft = secret.normalizedName
-    labelDraft = secret.label
-    descriptionDraft = secret.description
+    nameDraft = secret.displayLabel
     valueDraft = secret.value
     agentAllowedDraft = secret.agentAllowed
   }
@@ -4770,15 +4764,6 @@ private fun SecretsDialog(
         modifier = Modifier.fillMaxWidth().heightIn(max = 560.dp).verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(10.dp),
       ) {
-        Text(
-          t(
-            language,
-            "Save API keys here so skills can use them through same-name environment variables in workspace commands. If a key is pasted directly into chat, Flovera only warns; it does not block or mask it.",
-            "\u628a API key \u5b58\u5728\u8fd9\u91cc\u540e\uff0c\u6280\u80fd\u811a\u672c\u53ef\u5728 workspace \u547d\u4ee4\u91cc\u901a\u8fc7\u540c\u540d\u73af\u5883\u53d8\u91cf\u8bfb\u53d6\u3002\u82e5\u76f4\u63a5\u5728\u5bf9\u8bdd\u91cc\u53d1\u9001 key\uff0cFlovera \u53ea\u63d0\u9192\u98ce\u9669\uff0c\u4e0d\u62e6\u622a\u3001\u4e0d\u8131\u654f\u3002",
-          ),
-          color = MaterialTheme.colorScheme.onSurfaceVariant,
-          style = MaterialTheme.typography.bodySmall,
-        )
         if (secrets.isEmpty()) {
           Text(
             t(language, "No saved secrets.", "\u6682\u65e0\u5df2\u4fdd\u5b58\u7684\u5bc6\u94a5\u3002"),
@@ -4803,28 +4788,14 @@ private fun SecretsDialog(
         OutlinedTextField(
           value = nameDraft,
           onValueChange = { nameDraft = it },
-          label = { Text(t(language, "Environment name", "\u73af\u5883\u53d8\u91cf\u540d")) },
-          placeholder = { Text("AMAP_API_KEY") },
+          label = { Text(t(language, "Name", "\u540d\u79f0")) },
           singleLine = true,
-          modifier = Modifier.fillMaxWidth(),
-        )
-        OutlinedTextField(
-          value = labelDraft,
-          onValueChange = { labelDraft = it },
-          label = { Text(t(language, "Label", "\u540d\u79f0")) },
-          singleLine = true,
-          modifier = Modifier.fillMaxWidth(),
-        )
-        OutlinedTextField(
-          value = descriptionDraft,
-          onValueChange = { descriptionDraft = it },
-          label = { Text(t(language, "Description", "\u8bf4\u660e")) },
           modifier = Modifier.fillMaxWidth(),
         )
         OutlinedTextField(
           value = valueDraft,
           onValueChange = { valueDraft = it },
-          label = { Text(t(language, "Value", "\u503c")) },
+          label = { Text(t(language, "Secret", "\u5bc6\u94a5")) },
           singleLine = true,
           modifier = Modifier.fillMaxWidth(),
         )
@@ -4849,8 +4820,8 @@ private fun SecretsDialog(
               controller.saveWorkspaceSecret(
                 originalName = editingOriginalName,
                 name = nameDraft,
-                label = labelDraft,
-                description = descriptionDraft,
+                label = "",
+                description = "",
                 value = valueDraft,
                 agentAllowed = agentAllowedDraft,
               )

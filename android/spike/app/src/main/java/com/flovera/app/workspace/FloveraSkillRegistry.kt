@@ -74,17 +74,28 @@ object FloveraSkillRegistry {
     defaultRegistration(
       id = "flovera-skill-creator",
       titleEn = "Flovera Skill Creator",
-      titleZh = "Flovera Skill 创建器",
+      titleZh = "Flovera 技能创建器",
       descriptionEn = "Use when the user asks Flovera to create, edit, register, split, toggle, or organize skills under .flovera/skills.",
-      descriptionZh = "用于用户要求 Flovera 在 .flovera/skills 下创建、编辑、注册、拆分、开关或组织 skills。",
+      descriptionZh = "用于用户要求 Flovera 在 .flovera/skills 下创建、编辑、注册、拆分、开关或组织技能。",
     ),
-  )
+  ).map { it.withDefaultChineseText() }
 
   fun mergedDefaultManifest(existing: FloveraSkillManifest? = null): FloveraSkillManifest {
     if (existing == null) return FloveraSkillManifest(skills = defaultRegistrations)
     val existingById = existing.skills.associateBy { it.id }
     val mergedDefaults = defaultRegistrations.filterNot { it.id in existingById }
-    return existing.copy(skills = existing.skills + mergedDefaults)
+    val refreshedExisting = existing.skills.map { registration ->
+      val defaults = defaultRegistrations.firstOrNull { it.id == registration.id } ?: return@map registration
+      registration.copy(
+        path = registration.path.ifBlank { defaults.path },
+        titleEn = registration.titleEn.ifBlank { defaults.titleEn },
+        titleZh = registration.titleZh.takeUnless { it.isBlank() || it.looksLikeMojibake() } ?: defaults.titleZh,
+        descriptionEn = registration.descriptionEn.ifBlank { defaults.descriptionEn },
+        descriptionZh = registration.descriptionZh.takeUnless { it.isBlank() || it.looksLikeMojibake() }
+          ?: defaults.descriptionZh,
+      )
+    }
+    return existing.copy(skills = refreshedExisting + mergedDefaults)
   }
 
   fun defaultPromptDescriptors(): String {
@@ -218,7 +229,7 @@ object FloveraSkillRegistry {
         ---
         name: flovera-skill-creator
         description: Use when the user asks Flovera to create, edit, register, split, toggle, or organize skills under .flovera/skills.
-        description_zh: 用于用户要求 Flovera 在 .flovera/skills 下创建、编辑、注册、拆分、开关或组织 skills。
+        description_zh: 用于用户要求 Flovera 在 .flovera/skills 下创建、编辑、注册、拆分、开关或组织技能。
         ---
 
         # Flovera Skill Creator
@@ -290,7 +301,7 @@ object FloveraSkillRegistry {
       """.trimIndent()
 
       else -> ""
-    }
+    }.withDefaultChineseFrontmatter(id)
   }
 
   private fun loadManifest(workspaceRoot: File, json: Json): FloveraSkillManifest {
@@ -367,4 +378,43 @@ object FloveraSkillRegistry {
     descriptionEn = descriptionEn,
     descriptionZh = descriptionZh,
   )
+
+  private fun FloveraSkillRegistration.withDefaultChineseText(): FloveraSkillRegistration {
+    return when (id) {
+      "flovera-android-webview-app" -> copy(
+        titleZh = "Flovera Android WebView 应用",
+        descriptionZh = "用于创建或修复 Flovera 工作区应用、HTML 预览、移动 WebView、游戏、触控界面或 flovera.app.json 注册。",
+      )
+      "flovera-python-workspace-command" -> copy(
+        titleZh = "Flovera Python 工作区命令",
+        descriptionZh = "用于需要在 Flovera 内运行 Python、脚本、计算、文档生成、包检查或文件产出自动化的任务。",
+      )
+      "flovera-jvm-groovy" -> copy(
+        titleZh = "Flovera JVM/Groovy 运行时",
+        descriptionZh = "用于任务明显需要 Groovy、JVM 库、jar、Maven 坐标，或 CPython 难以覆盖的文档类库时。",
+      )
+      "flovera-mcp-adapter" -> copy(
+        titleZh = "Flovera MCP 适配规划",
+        descriptionZh = "用于规划或原型实现轻量的 Flovera 侧 MCP 适配器或 server 重写流程。",
+      )
+      "flovera-skill-creator" -> copy(
+        titleZh = "Flovera 技能创建器",
+        descriptionZh = "用于用户要求 Flovera 在 .flovera/skills 下创建、编辑、注册、拆分、开关或组织技能。",
+      )
+      else -> this
+    }
+  }
+
+  private fun String.withDefaultChineseFrontmatter(id: String): String {
+    val descriptionZh = defaultRegistrations.firstOrNull { it.id == id }?.descriptionZh ?: return this
+    val fixed = replace(Regex("""(?m)^description_zh:.*$"""), "description_zh: $descriptionZh")
+    if (id != "flovera-skill-creator") return fixed
+    return fixed
+      .replace(Regex(""""titleZh"\s*:\s*"[^"]*""""), "\"titleZh\": \"技能中文标题\"")
+      .replace(Regex(""""descriptionZh"\s*:\s*"[^"]*""""), "\"descriptionZh\": \"用于...\"")
+  }
+
+  private fun String.looksLikeMojibake(): Boolean {
+    return contains("鐢") || contains("搴") || contains("鍒") || contains("杩") || contains("閫") || contains("涓")
+  }
 }

@@ -143,21 +143,22 @@ class SettingsController(private val store: SettingsStore) {
     value: String,
     agentAllowed: Boolean,
   ): AppSettings {
-    val normalizedName = normalizeSecretName(name)
-    if (normalizedName.isBlank()) return settings
+    val displayName = name.trim().ifBlank { label.trim() }
+    if (displayName.isBlank()) return settings
     val normalizedOriginal = normalizeSecretName(originalName)
+    val current = normalizeWorkspaceSecrets(settings.workspaceSecrets)
+    val normalizedName = normalizedOriginal.ifBlank { nextWorkspaceSecretName(current) }
     val entry = WorkspaceSecret(
       name = normalizedName,
-      label = label.trim(),
-      description = description.trim(),
+      label = displayName,
+      description = "",
       value = value.trim(),
       agentAllowed = agentAllowed,
     )
-    val current = normalizeWorkspaceSecrets(settings.workspaceSecrets)
-      .filterNot { secret ->
-        secret.normalizedName == normalizedName || secret.normalizedName == normalizedOriginal
-      }
-    val updated = settings.copy(workspaceSecrets = (current + entry).sortedBy { it.normalizedName })
+    val updated = settings.copy(
+      workspaceSecrets = (current.filterNot { it.normalizedName == normalizedName } + entry)
+        .sortedBy { it.normalizedName },
+    )
     store.save(updated)
     return updated
   }
@@ -460,6 +461,13 @@ class SettingsController(private val store: SettingsStore) {
       .filter { it.value.isNotBlank() }
       .distinctBy { it.normalizedName }
       .sortedBy { it.normalizedName }
+  }
+
+  private fun nextWorkspaceSecretName(secrets: List<WorkspaceSecret>): String {
+    val used = secrets.map { it.normalizedName }.toSet()
+    var index = 1
+    while ("FLOVERA_SECRET_$index" in used) index += 1
+    return "FLOVERA_SECRET_$index"
   }
 
   private fun promoteRecentHtmlPath(current: List<String>, path: String): List<String> {

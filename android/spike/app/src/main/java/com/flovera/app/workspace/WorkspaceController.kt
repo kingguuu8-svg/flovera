@@ -96,7 +96,7 @@ class WorkspaceController(context: Context, workspaceId: String) {
             FloveraSecretRefView(
               name = secret.normalizedName,
               label = secret.displayLabel,
-              description = secret.description.trim(),
+              description = "",
               agentAllowed = secret.agentAllowed,
               valuePreview = if (secret.suffix.isBlank()) "" else "****${secret.suffix}",
             )

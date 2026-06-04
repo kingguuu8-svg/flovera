@@ -41,7 +41,7 @@ data class WorkspaceSecret(
 
   @Transient
   val displayLabel: String
-    = label.trim().ifBlank { normalizedName }
+    = label.trim().ifBlank { description.trim().ifBlank { normalizedName } }
 
   @Transient
   val suffix: String

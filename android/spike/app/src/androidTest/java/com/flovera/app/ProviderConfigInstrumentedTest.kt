@@ -1864,36 +1864,37 @@ class ProviderConfigInstrumentedTest {
       val saved = controller.saveWorkspaceSecret(
         settings = AppSettings(),
         originalName = "",
-        name = " amap api key ",
-        label = " Amap ",
-        description = " Maps ",
+        name = " Amap ",
+        label = "",
+        description = "",
         value = " secret-value ",
         agentAllowed = true,
       )
 
-      assertEquals("AMAP_API_KEY", saved.workspaceSecrets.single().name)
+      assertEquals("FLOVERA_SECRET_1", saved.workspaceSecrets.single().name)
       assertEquals("Amap", saved.workspaceSecrets.single().label)
-      assertEquals("Maps", saved.workspaceSecrets.single().description)
+      assertEquals("", saved.workspaceSecrets.single().description)
       assertEquals("secret-value", saved.workspaceSecrets.single().value)
-      assertEquals(mapOf("AMAP_API_KEY" to "secret-value"), saved.agentAllowedSecretEnvironment())
+      assertEquals(mapOf("FLOVERA_SECRET_1" to "secret-value"), saved.agentAllowedSecretEnvironment())
 
-      val disabled = controller.setWorkspaceSecretAgentAllowed(saved, "amap_api_key", false)
+      val disabled = controller.setWorkspaceSecretAgentAllowed(saved, "FLOVERA_SECRET_1", false)
       assertFalse(disabled.workspaceSecrets.single().agentAllowed)
       assertTrue(disabled.agentAllowedSecretEnvironment().isEmpty())
 
       val renamed = controller.saveWorkspaceSecret(
         settings = disabled,
-        originalName = "AMAP_API_KEY",
-        name = "zhipu key",
-        label = "Zhipu",
+        originalName = "FLOVERA_SECRET_1",
+        name = "Zhipu",
+        label = "",
         description = "",
         value = "zhipu-secret",
         agentAllowed = true,
       )
-      assertEquals("ZHIPU_KEY", renamed.workspaceSecrets.single().name)
+      assertEquals("FLOVERA_SECRET_1", renamed.workspaceSecrets.single().name)
+      assertEquals("Zhipu", renamed.workspaceSecrets.single().label)
       assertEquals("zhipu-secret", store.load().workspaceSecrets.single().value)
 
-      val deleted = controller.deleteWorkspaceSecret(renamed, "zhipu_key")
+      val deleted = controller.deleteWorkspaceSecret(renamed, "FLOVERA_SECRET_1")
       assertTrue(deleted.workspaceSecrets.isEmpty())
       assertTrue(store.load().workspaceSecrets.isEmpty())
     } finally {

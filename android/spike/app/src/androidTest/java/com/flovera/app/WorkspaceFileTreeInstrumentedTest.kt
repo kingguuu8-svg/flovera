@@ -230,7 +230,10 @@ class WorkspaceFileTreeInstrumentedTest {
     assertFalse(enabledDescriptors.contains("ZH:"))
     assertFalse(enabledDescriptors.contains("用于需要在 Flovera 内运行 Python"))
     val consoleEntries = workspace.listFloveraSkills().associateBy { it.id }
+    assertTrue(consoleEntries["flovera-python-workspace-command"]?.titleZh.orEmpty().contains("工作区命令"))
     assertTrue(consoleEntries["flovera-python-workspace-command"]?.descriptionZh.orEmpty().contains("用于需要在 Flovera 内运行 Python"))
+    assertTrue(consoleEntries["flovera-skill-creator"]?.titleZh.orEmpty().contains("技能创建器"))
+    assertFalse(consoleEntries["flovera-skill-creator"]?.descriptionZh.orEmpty().contains("组织 skills"))
     assertTrue(workspace.setFloveraSkillEnabled("flovera-python-workspace-command", false))
     val disabledDescriptors = workspace.readFloveraSkillPromptDescriptors()
     assertFalse(disabledDescriptors.contains("flovera-python-workspace-command"))
@@ -262,7 +265,7 @@ class WorkspaceFileTreeInstrumentedTest {
               "titleEn": "Custom Demo",
               "titleZh": "自定义示例",
               "descriptionEn": "Use when the user wants a custom registered skill.",
-              "descriptionZh": "用于用户需要自定义注册 skill 时。"
+              "descriptionZh": "用于用户需要自定义注册技能时。"
             }
           ]
         }
@@ -272,7 +275,7 @@ class WorkspaceFileTreeInstrumentedTest {
     val descriptors = workspace.readFloveraSkillPromptDescriptors()
     assertTrue(descriptors.contains("custom-demo"))
     assertTrue(descriptors.contains("Use when the user wants a custom registered skill."))
-    assertFalse(descriptors.contains("用于用户需要自定义注册 skill 时。"))
+    assertFalse(descriptors.contains("用于用户需要自定义注册技能时。"))
     assertTrue(descriptors.contains("flovera-android-webview-app"))
   }
 
@@ -1956,9 +1959,9 @@ class WorkspaceFileTreeInstrumentedTest {
           agentAuthorityMode = "assisted",
           workspaceSecrets = listOf(
             WorkspaceSecret(
-              name = "amap api key",
+              name = "FLOVERA_SECRET_1",
               label = "Amap",
-              description = "Maps and location APIs",
+              description = "legacy description should not be exposed",
               value = "secret-metadata-value-1234",
               agentAllowed = true,
             ),
@@ -2210,8 +2213,9 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(settingsView.contains("\"openRouterProviderPreferences\""))
     assertTrue(settingsView.contains("\"openRouterMinCodingScore\""))
     assertTrue(settingsView.contains("\"secretRefs\""))
-    assertTrue(settingsView.contains("\"AMAP_API_KEY\""))
+    assertTrue(settingsView.contains("\"FLOVERA_SECRET_1\""))
     assertTrue(settingsView.contains("\"Amap\""))
+    assertFalse(settingsView.contains("legacy description should not be exposed"))
     assertTrue(settingsView.contains("\"****1234\""))
     assertFalse(settingsView.contains("secret-metadata-value-1234"))
     assertTrue(settingsView.contains("\"providerInjectsOllamaNumCtx\""))

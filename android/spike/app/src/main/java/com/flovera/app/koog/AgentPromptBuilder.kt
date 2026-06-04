@@ -49,10 +49,10 @@ object AgentPromptBuilder {
 
       If one of these skills is materially relevant, read its SKILL.md with read_file before applying it. Do not treat the descriptor as the full skill body.
 
-      Available user-managed secret refs:
+      Available user-managed secrets:
       ${secretRefs.ifBlank { "(none)" }}
 
-      Use secret refs through environment variables with the same name when running workspace commands, for example os.environ.get("AMAP_API_KEY") in Python. The request only shows refs, not secret values. If the user directly provides an API key in chat, notify them that the key can be saved in Secrets for future use, then continue without blocking or masking it.
+      Secret values are not shown. Use the listed environment variable refs in workspace commands, for example os.environ.get("FLOVERA_SECRET_1") in Python. If the user directly provides an API key in chat, briefly tell them it can be saved in Secrets for future use, then continue without blocking or masking it.
 
       Current user request:
       $input

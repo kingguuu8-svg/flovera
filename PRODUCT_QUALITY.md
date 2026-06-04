@@ -589,8 +589,8 @@ Secrets are stored in the app settings store, which is encrypted by the existing
 settings persistence layer. Agent-visible entries enter the request only as
 environment-variable refs and are synchronized into `.flovera/settings-view.json`
 with a suffix preview; plaintext values are not written to workspace metadata or
-prompt text. Workspace Python commands receive allowed secrets as same-name
-environment variables. If a user directly pastes an API key into chat, Flovera's
+prompt text. Workspace Python commands receive allowed secrets through
+system-assigned stable environment variable refs. If a user directly pastes an API key into chat, Flovera's
 policy is notify-only: do not block, mask, or rewrite the user's content.
 
 Remaining scope:

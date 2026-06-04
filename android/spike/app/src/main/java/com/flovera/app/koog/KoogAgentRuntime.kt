@@ -180,9 +180,7 @@ class KoogAgentRuntime(
           workspaceUserRules = workspaceUserRules,
           floveraSkillDescriptors = workspace.readFloveraSkillPromptDescriptors(),
           secretRefs = settings.agentVisibleSecretRefs().joinToString("\n") { secret ->
-            val label = secret.displayLabel.takeIf { it != secret.normalizedName }?.let { " ($it)" }.orEmpty()
-            val description = secret.description.trim().takeIf { it.isNotBlank() }?.let { ": $it" }.orEmpty()
-            "- ${secret.normalizedName}$label$description"
+            "- ${secret.normalizedName}: ${secret.displayLabel}"
           },
         ),
         sessionId = agentRunId,
