@@ -581,6 +581,24 @@ user-facing inspection of applied changes.
   `apiKeyRef: deepseek.default`, so the agent can select a key slot without
   reading or copying the secret value.
 
+### Workspace Secret Manager
+
+Status: Baseline implemented. Flovera now has a user-managed Secrets panel at
+the same surface level as Preview, Snapshots, Skills, AGENT.md, and Settings.
+Secrets are stored in the app settings store, which is encrypted by the existing
+settings persistence layer. Agent-visible entries enter the request only as
+environment-variable refs and are synchronized into `.flovera/settings-view.json`
+with a suffix preview; plaintext values are not written to workspace metadata or
+prompt text. Workspace Python commands receive allowed secrets as same-name
+environment variables. If a user directly pastes an API key into chat, Flovera's
+policy is notify-only: do not block, mask, or rewrite the user's content.
+
+Remaining scope:
+- Add a Groovy/JVM-safe runtime accessor if JVM scripts need direct secret use;
+  do not claim `System.getenv` support until that path is verified.
+- Consider per-secret usage audit only if it stays lightweight and does not
+  make ordinary API-backed skills harder to create.
+
 ### Custom URL Routing And Request Model
 
 Status: Partially implemented for provider routing metadata. Provider profiles,

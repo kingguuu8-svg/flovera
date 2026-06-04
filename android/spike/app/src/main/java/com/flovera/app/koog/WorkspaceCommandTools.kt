@@ -67,6 +67,7 @@ class WorkspaceCommandRunTool(
   private val recorder: ToolEventRecorder,
   private val networkEnabled: Boolean = false,
   private val authorityMode: String = "safe",
+  private val secretEnvironment: Map<String, String> = emptyMap(),
 ) : SimpleTool<WorkspaceCommandRunTool.Args>(
   argsType = typeToken<Args>(),
   name = "workspace_command_run",
@@ -97,6 +98,7 @@ class WorkspaceCommandRunTool(
           workspace = workspace,
           networkEnabled = networkEnabled,
           authorityMode = authorityMode,
+          secretEnvironment = secretEnvironment,
         ).run(args)
       }.getOrElse { it.message ?: it.toString() }
     }
@@ -113,10 +115,11 @@ class WorkspaceCommandGateway(
   private val workspace: WorkspaceManager,
   private val networkEnabled: Boolean,
   private val authorityMode: String,
+  private val secretEnvironment: Map<String, String> = emptyMap(),
 ) {
   private val adapters: List<WorkspaceCommandAdapter> = listOf(
-    PythonCommandAdapter(workspace, networkEnabled),
-    GroovyCommandAdapter(workspace, networkEnabled),
+    PythonCommandAdapter(workspace, networkEnabled, secretEnvironment),
+    GroovyCommandAdapter(workspace, networkEnabled, secretEnvironment),
   )
 
   fun run(args: WorkspaceCommandRunTool.Args): String {
@@ -263,6 +266,7 @@ private interface WorkspaceCommandAdapter {
 private class PythonCommandAdapter(
   private val workspace: WorkspaceManager,
   private val networkEnabled: Boolean,
+  private val secretEnvironment: Map<String, String>,
 ) : WorkspaceCommandAdapter {
   override val commandNames: Set<String> = setOf("python", "python3")
 
@@ -282,7 +286,7 @@ private class PythonCommandAdapter(
       return PythonRunResult(status = "error", exitCode = 1, stderr = "Python command requires a script path or -c code, for example: python tools/check.py\n")
     }
 
-    val python = FloveraPythonRuntime(workspace, networkEnabled)
+    val python = FloveraPythonRuntime(workspace, networkEnabled, secretEnvironment)
     val timeoutMs = args.timeoutMs.coerceIn(FloveraPythonRuntime.MIN_TIMEOUT_MS, FloveraPythonRuntime.MAX_TIMEOUT_MS)
     val maxOutputChars = args.maxOutputChars.coerceIn(FloveraPythonRuntime.MIN_OUTPUT_CHARS, FloveraPythonRuntime.MAX_OUTPUT_CHARS)
     val cwdFile = workspace.workspaceRuntimeDirectory(args.cwd)
@@ -345,6 +349,7 @@ private class PythonCommandAdapter(
 private class GroovyCommandAdapter(
   private val workspace: WorkspaceManager,
   private val networkEnabled: Boolean,
+  private val secretEnvironment: Map<String, String>,
   private val useIsolatedWorker: Boolean = true,
 ) : WorkspaceCommandAdapter {
   override val commandNames: Set<String> = setOf("groovy")
@@ -372,7 +377,7 @@ private class GroovyCommandAdapter(
         appContext = workspace.applicationContext,
         workspaceId = workspace.root.name,
         networkEnabled = networkEnabled,
-      ).runGroovy(argv, args)
+      ).runGroovy(argv, args.copy(environment = secretEnvironment + args.environment))
     }
 
     val timeoutMs = args.timeoutMs.coerceIn(FloveraPythonRuntime.MIN_TIMEOUT_MS, FloveraPythonRuntime.MAX_TIMEOUT_MS)
@@ -409,7 +414,7 @@ private class GroovyCommandAdapter(
       runGroovyScript(
         scriptFile = scriptFile,
         scriptArgs = argv.drop(2),
-        environment = args.environment,
+        environment = secretEnvironment + args.environment,
         stdout = stdout,
         stderr = stderr,
       )
@@ -593,6 +598,7 @@ class JvmWorkerService : Service() {
       val directResult = GroovyCommandAdapter(
         workspace = workspace,
         networkEnabled = networkEnabled,
+        secretEnvironment = emptyMap(),
         useIsolatedWorker = false,
       ).execute(argv, args)
       directResult.copy(stderr = workerHeader() + directResult.stderr)

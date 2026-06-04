@@ -554,6 +554,39 @@ class AgentController(
     refreshWorkspaceState(status = if (updated) "Skill ${if (enabled) "enabled" else "disabled"}: $id" else "Skill not found: $id")
   }
 
+  fun saveWorkspaceSecret(
+    originalName: String,
+    name: String,
+    label: String,
+    description: String,
+    value: String,
+    agentAllowed: Boolean,
+  ) {
+    val settings = settingsController.saveWorkspaceSecret(
+      settings = _state.value.settings,
+      originalName = originalName,
+      name = name,
+      label = label,
+      description = description,
+      value = value,
+      agentAllowed = agentAllowed,
+    )
+    refreshWorkspaceState(settings = settings, status = "Secret saved: ${name.trim()}")
+  }
+
+  fun deleteWorkspaceSecret(name: String) {
+    val settings = settingsController.deleteWorkspaceSecret(_state.value.settings, name)
+    refreshWorkspaceState(settings = settings, status = "Secret deleted: ${name.trim()}")
+  }
+
+  fun setWorkspaceSecretAgentAllowed(name: String, allowed: Boolean) {
+    val settings = settingsController.setWorkspaceSecretAgentAllowed(_state.value.settings, name, allowed)
+    refreshWorkspaceState(
+      settings = settings,
+      status = "Secret ${if (allowed) "enabled" else "disabled"} for agent: ${name.trim()}",
+    )
+  }
+
   fun workspaceFileUri(path: String): Uri? {
     val file = workspaceController.exportableFile(path) ?: return null
     return FileProvider.getUriForFile(appContext, "${appContext.packageName}.workspacefiles", file)

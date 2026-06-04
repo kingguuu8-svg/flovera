@@ -53,6 +53,7 @@ class AgentPromptBuilderInstrumentedTest {
         messages = listOf(SessionMessage(role = "assistant", content = "previous answer")),
       ),
       workspaceUserRules = workspaceRule,
+      secretRefs = "- AMAP_API_KEY (Amap): Maps and location APIs",
     )
 
     assertTrue(systemPrompt.contains("System rules in this prompt have the highest priority"))
@@ -168,6 +169,10 @@ class AgentPromptBuilderInstrumentedTest {
     assertTrue(userInput.contains(workspaceRule))
     assertTrue(userInput.contains("Recent session history:"))
     assertTrue(userInput.contains("Available Flovera skills:"))
+    assertTrue(userInput.contains("Available user-managed secret refs:"))
+    assertTrue(userInput.contains("AMAP_API_KEY"))
+    assertTrue(userInput.contains("Secrets for future use"))
+    assertFalse(userInput.contains("plain-secret-value"))
     assertTrue(userInput.contains("flovera-android-webview-app"))
     assertTrue(userInput.contains("flovera-python-workspace-command"))
     assertTrue(userInput.contains("flovera-skill-creator"))

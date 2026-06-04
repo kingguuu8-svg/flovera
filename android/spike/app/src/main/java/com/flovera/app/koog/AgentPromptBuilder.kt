@@ -30,6 +30,7 @@ object AgentPromptBuilder {
     workspaceUserRules: String,
     currentVisibleInput: String = input,
     floveraSkillDescriptors: String = FloveraSkillRegistry.defaultPromptDescriptors(),
+    secretRefs: String = "",
   ): String {
     val history = RuntimeSessionHistory.promptText(
       session = session,
@@ -47,6 +48,11 @@ object AgentPromptBuilder {
       ${floveraSkillDescriptors.ifBlank { "(none registered)" }}
 
       If one of these skills is materially relevant, read its SKILL.md with read_file before applying it. Do not treat the descriptor as the full skill body.
+
+      Available user-managed secret refs:
+      ${secretRefs.ifBlank { "(none)" }}
+
+      Use secret refs through environment variables with the same name when running workspace commands, for example os.environ.get("AMAP_API_KEY") in Python. The request only shows refs, not secret values. If the user directly provides an API key in chat, notify them that the key can be saved in Secrets for future use, then continue without blocking or masking it.
 
       Current user request:
       $input

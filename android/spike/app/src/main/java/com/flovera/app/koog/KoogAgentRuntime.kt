@@ -23,6 +23,8 @@ import com.flovera.app.agent.AgentRunEventSink
 import com.flovera.app.agent.AgentRunEventType
 import com.flovera.app.config.AGENT_ITERATIONS_INTERNAL_GUARD
 import com.flovera.app.config.AppSettings
+import com.flovera.app.config.agentAllowedSecretEnvironment
+import com.flovera.app.config.agentVisibleSecretRefs
 import com.flovera.app.session.AgentSession
 import com.flovera.app.workspace.WorkspaceManager
 import kotlinx.coroutines.CancellationException
@@ -138,6 +140,7 @@ class KoogAgentRuntime(
     val apiKey = settings.apiKeyFor(provider.id)
     require(apiKey.isNotBlank()) { "${provider.label} API key is not configured." }
     val webSearchAvailable = settings.networkEnabled && settings.webSearchEnabled && settings.braveSearchApiKey.isNotBlank()
+    val secretEnvironment = settings.agentAllowedSecretEnvironment()
     val modelContext = ModelProviderCatalog.contextFor(settings)
     val workspaceUserRules = workspace.readAgentRules()
     val client = clientFactory(provider, apiKey, settings)
@@ -158,6 +161,7 @@ class KoogAgentRuntime(
         authorityMode = settings.agentAuthorityMode,
         webSearchEnabled = webSearchAvailable,
         braveSearchApiKey = settings.braveSearchApiKey,
+        secretEnvironment = secretEnvironment,
       ),
       systemPrompt = AgentPromptBuilder.systemPrompt(
         networkEnabled = settings.networkEnabled,
@@ -175,6 +179,11 @@ class KoogAgentRuntime(
           session = session,
           workspaceUserRules = workspaceUserRules,
           floveraSkillDescriptors = workspace.readFloveraSkillPromptDescriptors(),
+          secretRefs = settings.agentVisibleSecretRefs().joinToString("\n") { secret ->
+            val label = secret.displayLabel.takeIf { it != secret.normalizedName }?.let { " ($it)" }.orEmpty()
+            val description = secret.description.trim().takeIf { it.isNotBlank() }?.let { ": $it" }.orEmpty()
+            "- ${secret.normalizedName}$label$description"
+          },
         ),
         sessionId = agentRunId,
       )

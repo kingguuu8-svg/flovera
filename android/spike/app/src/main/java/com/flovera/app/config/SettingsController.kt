@@ -134,6 +134,55 @@ class SettingsController(private val store: SettingsStore) {
     return updated
   }
 
+  fun saveWorkspaceSecret(
+    settings: AppSettings,
+    originalName: String,
+    name: String,
+    label: String,
+    description: String,
+    value: String,
+    agentAllowed: Boolean,
+  ): AppSettings {
+    val normalizedName = normalizeSecretName(name)
+    if (normalizedName.isBlank()) return settings
+    val normalizedOriginal = normalizeSecretName(originalName)
+    val entry = WorkspaceSecret(
+      name = normalizedName,
+      label = label.trim(),
+      description = description.trim(),
+      value = value.trim(),
+      agentAllowed = agentAllowed,
+    )
+    val current = normalizeWorkspaceSecrets(settings.workspaceSecrets)
+      .filterNot { secret ->
+        secret.normalizedName == normalizedName || secret.normalizedName == normalizedOriginal
+      }
+    val updated = settings.copy(workspaceSecrets = (current + entry).sortedBy { it.normalizedName })
+    store.save(updated)
+    return updated
+  }
+
+  fun deleteWorkspaceSecret(settings: AppSettings, name: String): AppSettings {
+    val normalizedName = normalizeSecretName(name)
+    val updated = settings.copy(
+      workspaceSecrets = normalizeWorkspaceSecrets(settings.workspaceSecrets)
+        .filterNot { it.normalizedName == normalizedName },
+    )
+    store.save(updated)
+    return updated
+  }
+
+  fun setWorkspaceSecretAgentAllowed(settings: AppSettings, name: String, allowed: Boolean): AppSettings {
+    val normalizedName = normalizeSecretName(name)
+    val updated = settings.copy(
+      workspaceSecrets = normalizeWorkspaceSecrets(settings.workspaceSecrets).map { secret ->
+        if (secret.normalizedName == normalizedName) secret.copy(agentAllowed = allowed) else secret
+      },
+    )
+    store.save(updated)
+    return updated
+  }
+
   fun applySettingsProposal(settings: AppSettings, changes: SettingsProposalChanges): AppSettings {
     val provider = changes.provider
       ?.let { ModelProviderCatalog.findProvider(it.trim()) }
@@ -272,6 +321,7 @@ class SettingsController(private val store: SettingsStore) {
       openRouterProvider = settings.openRouterProvider.copy(
         minCodingScore = settings.openRouterProvider.minCodingScore?.let { normalizeOpenRouterMinCodingScore(it) },
       ),
+      workspaceSecrets = normalizeWorkspaceSecrets(settings.workspaceSecrets),
     )
   }
 
@@ -390,6 +440,26 @@ class SettingsController(private val store: SettingsStore) {
     return paths.map { it.trim() }
       .filter { it.isNotBlank() }
       .distinct()
+  }
+
+  private fun normalizeWorkspaceSecrets(secrets: List<WorkspaceSecret>): List<WorkspaceSecret> {
+    return secrets
+      .mapNotNull { secret ->
+        val name = normalizeSecretName(secret.name)
+        if (name.isBlank()) {
+          null
+        } else {
+          secret.copy(
+            name = name,
+            label = secret.label.trim(),
+            description = secret.description.trim(),
+            value = secret.value.trim(),
+          )
+        }
+      }
+      .filter { it.value.isNotBlank() }
+      .distinctBy { it.normalizedName }
+      .sortedBy { it.normalizedName }
   }
 
   private fun promoteRecentHtmlPath(current: List<String>, path: String): List<String> {

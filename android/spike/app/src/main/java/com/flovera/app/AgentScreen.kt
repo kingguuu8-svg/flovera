@@ -132,6 +132,7 @@ import androidx.core.app.ActivityCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.flovera.app.agent.AgentContextBudget
 import com.flovera.app.config.AppSettings
+import com.flovera.app.config.WorkspaceSecret
 import com.flovera.app.config.normalizeBraveSearchApiKey
 import com.flovera.app.koog.ModelProviderCatalog
 import com.flovera.app.session.ContextUsageRecord
@@ -242,6 +243,7 @@ private enum class AgentPanel {
   Files,
   Snapshots,
   Skills,
+  Secrets,
   AgentFile,
   Settings,
 }
@@ -421,6 +423,13 @@ fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
     )
 
     AgentPanel.Skills -> SkillsDialog(
+      state = state,
+      controller = controller,
+      language = language,
+      onDismiss = ::dismissTopPanel,
+    )
+
+    AgentPanel.Secrets -> SecretsDialog(
       state = state,
       controller = controller,
       language = language,
@@ -2237,6 +2246,13 @@ private fun ConversationDialog(
                   onClick = {
                     moreMenuOpen = false
                     onOpenPanel(AgentPanel.Skills)
+                  },
+                )
+                DropdownMenuItem(
+                  text = { Text(t(language, "Secrets", "\u5bc6\u94a5")) },
+                  onClick = {
+                    moreMenuOpen = false
+                    onOpenPanel(AgentPanel.Secrets)
                   },
                 )
                 DropdownMenuItem(
@@ -4715,6 +4731,152 @@ private fun SkillsDialog(
 }
 
 @Composable
+private fun SecretsDialog(
+  state: AgentScreenState,
+  controller: AgentController,
+  language: String,
+  onDismiss: () -> Unit,
+) {
+  val secrets = remember(state.settings.workspaceSecrets) {
+    state.settings.workspaceSecrets.sortedBy { it.normalizedName }
+  }
+  var editingOriginalName by remember { mutableStateOf("") }
+  var nameDraft by remember { mutableStateOf("") }
+  var labelDraft by remember { mutableStateOf("") }
+  var descriptionDraft by remember { mutableStateOf("") }
+  var valueDraft by remember { mutableStateOf("") }
+  var agentAllowedDraft by remember { mutableStateOf(true) }
+  fun clearDraft() {
+    editingOriginalName = ""
+    nameDraft = ""
+    labelDraft = ""
+    descriptionDraft = ""
+    valueDraft = ""
+    agentAllowedDraft = true
+  }
+  fun editSecret(secret: WorkspaceSecret) {
+    editingOriginalName = secret.normalizedName
+    nameDraft = secret.normalizedName
+    labelDraft = secret.label
+    descriptionDraft = secret.description
+    valueDraft = secret.value
+    agentAllowedDraft = secret.agentAllowed
+  }
+  AlertDialog(
+    onDismissRequest = onDismiss,
+    title = { Text(t(language, "Secrets", "\u5bc6\u94a5")) },
+    text = {
+      Column(
+        modifier = Modifier.fillMaxWidth().heightIn(max = 560.dp).verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+      ) {
+        Text(
+          t(
+            language,
+            "Save API keys here so skills can use them through same-name environment variables in workspace commands. If a key is pasted directly into chat, Flovera only warns; it does not block or mask it.",
+            "\u628a API key \u5b58\u5728\u8fd9\u91cc\u540e\uff0c\u6280\u80fd\u811a\u672c\u53ef\u5728 workspace \u547d\u4ee4\u91cc\u901a\u8fc7\u540c\u540d\u73af\u5883\u53d8\u91cf\u8bfb\u53d6\u3002\u82e5\u76f4\u63a5\u5728\u5bf9\u8bdd\u91cc\u53d1\u9001 key\uff0cFlovera \u53ea\u63d0\u9192\u98ce\u9669\uff0c\u4e0d\u62e6\u622a\u3001\u4e0d\u8131\u654f\u3002",
+          ),
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
+          style = MaterialTheme.typography.bodySmall,
+        )
+        if (secrets.isEmpty()) {
+          Text(
+            t(language, "No saved secrets.", "\u6682\u65e0\u5df2\u4fdd\u5b58\u7684\u5bc6\u94a5\u3002"),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall,
+          )
+        } else {
+          secrets.forEach { secret ->
+            WorkspaceSecretItem(
+              secret = secret,
+              language = language,
+              onEdit = { editSecret(secret) },
+              onDelete = { controller.deleteWorkspaceSecret(secret.normalizedName) },
+              onAllowedChange = { allowed -> controller.setWorkspaceSecretAgentAllowed(secret.normalizedName, allowed) },
+            )
+          }
+        }
+        Text(
+          if (editingOriginalName.isBlank()) t(language, "Add secret", "\u6dfb\u52a0\u5bc6\u94a5") else t(language, "Edit secret", "\u7f16\u8f91\u5bc6\u94a5"),
+          style = MaterialTheme.typography.titleSmall,
+        )
+        OutlinedTextField(
+          value = nameDraft,
+          onValueChange = { nameDraft = it },
+          label = { Text(t(language, "Environment name", "\u73af\u5883\u53d8\u91cf\u540d")) },
+          placeholder = { Text("AMAP_API_KEY") },
+          singleLine = true,
+          modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+          value = labelDraft,
+          onValueChange = { labelDraft = it },
+          label = { Text(t(language, "Label", "\u540d\u79f0")) },
+          singleLine = true,
+          modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+          value = descriptionDraft,
+          onValueChange = { descriptionDraft = it },
+          label = { Text(t(language, "Description", "\u8bf4\u660e")) },
+          modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+          value = valueDraft,
+          onValueChange = { valueDraft = it },
+          label = { Text(t(language, "Value", "\u503c")) },
+          singleLine = true,
+          modifier = Modifier.fillMaxWidth(),
+        )
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Text(
+            t(language, "Visible to agent", "\u5bf9 agent \u53ef\u89c1"),
+            style = MaterialTheme.typography.bodyMedium,
+          )
+          Switch(
+            checked = agentAllowedDraft,
+            onCheckedChange = { agentAllowedDraft = it },
+            modifier = Modifier.semantics { contentDescription = "Secret visible to agent switch" },
+          )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+          Button(
+            onClick = {
+              controller.saveWorkspaceSecret(
+                originalName = editingOriginalName,
+                name = nameDraft,
+                label = labelDraft,
+                description = descriptionDraft,
+                value = valueDraft,
+                agentAllowed = agentAllowedDraft,
+              )
+              clearDraft()
+            },
+            enabled = nameDraft.isNotBlank() && valueDraft.isNotBlank(),
+          ) {
+            Text(t(language, "Save", "\u4fdd\u5b58"))
+          }
+          if (editingOriginalName.isNotBlank() || nameDraft.isNotBlank() || valueDraft.isNotBlank()) {
+            OutlinedButton(onClick = ::clearDraft) {
+              Text(t(language, "Clear", "\u6e05\u7a7a"))
+            }
+          }
+        }
+      }
+    },
+    confirmButton = {
+      TextButton(onClick = onDismiss) {
+        Text(t(language, "Done", "\u5b8c\u6210"))
+      }
+    },
+  )
+}
+
+@Composable
 private fun SettingsDialog(
   state: AgentScreenState,
   controller: AgentController,
@@ -5219,6 +5381,61 @@ private fun FloveraSkillSettingsItem(
         onCheckedChange = onEnabledChange,
         modifier = Modifier.semantics { contentDescription = "Skill ${skill.id} switch" },
       )
+    }
+  }
+}
+
+@Composable
+private fun WorkspaceSecretItem(
+  secret: WorkspaceSecret,
+  language: String,
+  onEdit: () -> Unit,
+  onDelete: () -> Unit,
+  onAllowedChange: (Boolean) -> Unit,
+) {
+  Surface(
+    modifier = Modifier.fillMaxWidth(),
+    shape = RoundedCornerShape(8.dp),
+    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f),
+  ) {
+    Column(
+      modifier = Modifier.fillMaxWidth().padding(10.dp),
+      verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+          Text(secret.displayLabel, style = MaterialTheme.typography.bodyMedium)
+          Text(
+            "${secret.normalizedName} ${if (secret.suffix.isBlank()) "" else "****${secret.suffix}"}".trim(),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.labelSmall,
+          )
+          if (secret.description.isNotBlank()) {
+            Text(
+              secret.description,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+              style = MaterialTheme.typography.bodySmall,
+            )
+          }
+        }
+        Switch(
+          checked = secret.agentAllowed,
+          onCheckedChange = onAllowedChange,
+          modifier = Modifier.semantics { contentDescription = "Secret ${secret.normalizedName} switch" },
+        )
+      }
+      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        TextButton(onClick = onEdit) {
+          Text(t(language, "Edit", "\u7f16\u8f91"))
+        }
+        TextButton(onClick = onDelete) {
+          Text(t(language, "Delete", "\u5220\u9664"))
+        }
+      }
     }
   }
 }

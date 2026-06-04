@@ -17,12 +17,13 @@ fun workspaceToolRegistry(
   authorityMode: String = "safe",
   webSearchEnabled: Boolean = false,
   braveSearchApiKey: String = "",
+  secretEnvironment: Map<String, String> = emptyMap(),
 ): ToolRegistry = ToolRegistry {
   tool(ListFilesTool(workspace, recorder))
   tool(WorkspaceSearchTool(workspace, recorder))
-  tool(WorkspaceCommandRunTool(workspace, recorder, networkEnabled, authorityMode))
+  tool(WorkspaceCommandRunTool(workspace, recorder, networkEnabled, authorityMode, secretEnvironment))
   if (pythonRunToolFallbackEnabled) {
-    tool(PythonRunTool(workspace, recorder, networkEnabled))
+    tool(PythonRunTool(workspace, recorder, networkEnabled, secretEnvironment))
   }
   tool(PythonPackageInstallTool(workspace, recorder, networkEnabled))
   tool(ArtifactInspectTool(workspace, recorder))

@@ -2736,6 +2736,16 @@ data class FloveraSettingsView(
   val compressionThresholdPercent: Int? = null,
   val apiKeyRef: String = "",
   val braveSearchApiKeyRef: String = "",
+  val secretRefs: List<FloveraSecretRefView> = emptyList(),
+)
+
+@Serializable
+data class FloveraSecretRefView(
+  val name: String = "",
+  val label: String = "",
+  val description: String = "",
+  val agentAllowed: Boolean = true,
+  val valuePreview: String = "",
 )
 
 @Serializable
@@ -2879,6 +2889,11 @@ data class FloveraCapabilities(
   val skillEnableSwitch: Boolean = true,
   val skillBilingualDescriptions: Boolean = true,
   val skillDisabledStillReadable: Boolean = true,
+  val secretManager: Boolean = true,
+  val secretRefsInPrompt: Boolean = true,
+  val secretValuesInPrompt: Boolean = false,
+  val secretWorkspaceCommandEnvironmentInjection: Boolean = true,
+  val secretDirectPastePolicy: String = "notify_only_no_masking_no_blocking",
   val pythonBuiltInPackages: List<String> = listOf("lxml", "python-docx", "openpyxl", "XlsxWriter", "pypdf", "Markdown", "Jinja2"),
   val webSearch: Boolean = false,
   val settingsView: Boolean = true,

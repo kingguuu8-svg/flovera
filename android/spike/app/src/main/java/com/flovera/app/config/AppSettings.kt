@@ -1,6 +1,7 @@
 package com.flovera.app.config
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 import kotlinx.serialization.json.JsonObject
 
 const val AGENT_ITERATIONS_UNLIMITED = 0
@@ -25,6 +26,27 @@ data class OpenRouterProviderSettings(
   val providerPreferences: JsonObject = JsonObject(emptyMap()),
   val minCodingScore: Double? = null,
 )
+
+@Serializable
+data class WorkspaceSecret(
+  val name: String,
+  val label: String = "",
+  val description: String = "",
+  val value: String = "",
+  val agentAllowed: Boolean = true,
+) {
+  @Transient
+  val normalizedName: String
+    = normalizeSecretName(name)
+
+  @Transient
+  val displayLabel: String
+    = label.trim().ifBlank { normalizedName }
+
+  @Transient
+  val suffix: String
+    = value.trim().takeLast(4)
+}
 
 @Serializable
 data class AppSettings(
@@ -55,6 +77,7 @@ data class AppSettings(
   val modelContextOverrides: Map<String, ModelContextOverride> = emptyMap(),
   val customOpenAIProvider: CustomOpenAIProviderSettings = CustomOpenAIProviderSettings(),
   val openRouterProvider: OpenRouterProviderSettings = OpenRouterProviderSettings(),
+  val workspaceSecrets: List<WorkspaceSecret> = emptyList(),
 ) {
   fun apiKeyFor(providerId: String = provider): String {
     val keyed = providerApiKeys[providerId].orEmpty()
@@ -101,4 +124,29 @@ data class AppSettings(
       return "${providerId.trim()}:${modelId.trim()}"
     }
   }
+}
+
+fun normalizeSecretName(value: String): String {
+  val normalized = value.trim()
+    .uppercase()
+    .replace(Regex("[^A-Z0-9_]"), "_")
+    .replace(Regex("_+"), "_")
+    .trim('_')
+  return normalized.take(64)
+}
+
+fun AppSettings.agentAllowedSecretEnvironment(): Map<String, String> {
+  return workspaceSecrets
+    .mapNotNull { secret ->
+      val name = secret.normalizedName
+      val value = secret.value.trim()
+      if (secret.agentAllowed && name.isNotBlank() && value.isNotBlank()) name to value else null
+    }
+    .toMap()
+}
+
+fun AppSettings.agentVisibleSecretRefs(): List<WorkspaceSecret> {
+  return workspaceSecrets
+    .filter { it.agentAllowed && it.normalizedName.isNotBlank() && it.value.isNotBlank() }
+    .sortedBy { it.normalizedName }
 }

@@ -15,6 +15,7 @@ class PythonRunTool(
   private val workspace: WorkspaceManager,
   private val recorder: ToolEventRecorder,
   private val networkEnabled: Boolean = false,
+  private val secretEnvironment: Map<String, String> = emptyMap(),
 ) : SimpleTool<PythonRunTool.Args>(
   argsType = typeToken<Args>(),
   name = "python_run",
@@ -44,7 +45,7 @@ class PythonRunTool(
 
   override suspend fun execute(args: Args): String {
     val result = runCatching {
-      FloveraPythonRuntime(workspace, networkEnabled).run(args)
+      FloveraPythonRuntime(workspace, networkEnabled, secretEnvironment).run(args)
     }.getOrElse { it.message ?: it.toString() }
     recorder.record(
       name,
@@ -122,6 +123,7 @@ class PythonPackageInstallTool(
 class FloveraPythonRuntime(
   private val workspace: WorkspaceManager,
   private val networkEnabled: Boolean,
+  private val secretEnvironment: Map<String, String> = emptyMap(),
 ) {
   fun run(args: PythonRunTool.Args): String {
     val cwd = workspace.workspaceRuntimeDirectory(args.cwd)
@@ -156,7 +158,7 @@ class FloveraPythonRuntime(
       args.resetSession,
       args.scope,
       networkEnabled,
-      json.encodeToString(args.environment),
+      json.encodeToString(secretEnvironment + args.environment),
     ).toString()
     return json.decodeFromString<PythonRunResult>(jsonText)
   }

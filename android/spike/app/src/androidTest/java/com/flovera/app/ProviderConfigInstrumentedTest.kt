@@ -18,6 +18,7 @@ import com.flovera.app.config.OpenRouterProviderSettings
 import com.flovera.app.config.SettingsProposalChanges
 import com.flovera.app.config.SettingsController
 import com.flovera.app.config.SettingsStore
+import com.flovera.app.config.agentAllowedSecretEnvironment
 import com.flovera.app.koog.ModelContextSpec
 import com.flovera.app.koog.ModelProviderCatalog
 import com.flovera.app.koog.ProviderRequestContext
@@ -1848,6 +1849,53 @@ class ProviderConfigInstrumentedTest {
 
       val normalized = controller.setLanguage(zh, "missing")
       assertEquals("en", normalized.language)
+    } finally {
+      store.save(original)
+    }
+  }
+
+  @Test
+  fun settingsControllerPersistsWorkspaceSecrets() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val store = SettingsStore(context)
+    val original = store.load()
+    try {
+      val controller = SettingsController(store)
+      val saved = controller.saveWorkspaceSecret(
+        settings = AppSettings(),
+        originalName = "",
+        name = " amap api key ",
+        label = " Amap ",
+        description = " Maps ",
+        value = " secret-value ",
+        agentAllowed = true,
+      )
+
+      assertEquals("AMAP_API_KEY", saved.workspaceSecrets.single().name)
+      assertEquals("Amap", saved.workspaceSecrets.single().label)
+      assertEquals("Maps", saved.workspaceSecrets.single().description)
+      assertEquals("secret-value", saved.workspaceSecrets.single().value)
+      assertEquals(mapOf("AMAP_API_KEY" to "secret-value"), saved.agentAllowedSecretEnvironment())
+
+      val disabled = controller.setWorkspaceSecretAgentAllowed(saved, "amap_api_key", false)
+      assertFalse(disabled.workspaceSecrets.single().agentAllowed)
+      assertTrue(disabled.agentAllowedSecretEnvironment().isEmpty())
+
+      val renamed = controller.saveWorkspaceSecret(
+        settings = disabled,
+        originalName = "AMAP_API_KEY",
+        name = "zhipu key",
+        label = "Zhipu",
+        description = "",
+        value = "zhipu-secret",
+        agentAllowed = true,
+      )
+      assertEquals("ZHIPU_KEY", renamed.workspaceSecrets.single().name)
+      assertEquals("zhipu-secret", store.load().workspaceSecrets.single().value)
+
+      val deleted = controller.deleteWorkspaceSecret(renamed, "zhipu_key")
+      assertTrue(deleted.workspaceSecrets.isEmpty())
+      assertTrue(store.load().workspaceSecrets.isEmpty())
     } finally {
       store.save(original)
     }

@@ -89,6 +89,18 @@ class WorkspaceController(context: Context, workspaceId: String) {
         compressionThresholdPercent = modelContext.compressionThresholdPercent,
         apiKeyRef = if (settings.apiKeyFor(provider.id).isBlank()) "" else "${provider.id}.default",
         braveSearchApiKeyRef = if (settings.braveSearchApiKey.isBlank()) "" else "brave.default",
+        secretRefs = settings.workspaceSecrets
+          .filter { it.normalizedName.isNotBlank() && it.value.isNotBlank() }
+          .sortedBy { it.normalizedName }
+          .map { secret ->
+            FloveraSecretRefView(
+              name = secret.normalizedName,
+              label = secret.displayLabel,
+              description = secret.description.trim(),
+              agentAllowed = secret.agentAllowed,
+              valuePreview = if (secret.suffix.isBlank()) "" else "****${secret.suffix}",
+            )
+          },
       ),
       providerProfileCatalog = ModelProviderCatalog.providers.map { provider ->
         val profile = ModelProviderCatalog.runtimeProfileFor(provider, settings)

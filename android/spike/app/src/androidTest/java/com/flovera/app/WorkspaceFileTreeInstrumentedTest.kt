@@ -9,6 +9,7 @@ import com.flovera.app.koog.FloveraPythonRuntime
 import com.flovera.app.koog.PythonRunTool
 import com.flovera.app.koog.PythonPackageInstallTool
 import com.flovera.app.config.AppSettings
+import com.flovera.app.config.WorkspaceSecret
 import com.flovera.app.koog.ToolEventRecorder
 import com.flovera.app.koog.WorkspaceCommandRunTool
 import com.flovera.app.koog.WorkspaceSearchTool
@@ -1161,6 +1162,32 @@ class WorkspaceFileTreeInstrumentedTest {
   }
 
   @Test
+  fun workspaceCommandRunInjectsAllowedSecretsIntoPythonEnvironment() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "workspace-command-secret-env-${System.currentTimeMillis()}")
+    val tool = WorkspaceCommandRunTool(
+      workspace = workspace,
+      recorder = ToolEventRecorder(),
+      authorityMode = "full",
+      secretEnvironment = mapOf("AMAP_API_KEY" to "secret-env-value"),
+    )
+
+    val result = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf(
+          "python",
+          "-c",
+          "import os; print('secret=' + os.environ.get('AMAP_API_KEY', 'missing'))",
+        ),
+        snapshotBeforeRun = false,
+      ),
+    )
+
+    assertTrue(result, result.contains("Workspace command status=ok exitCode=0"))
+    assertTrue(result, result.contains("secret=secret-env-value"))
+  }
+
+  @Test
   fun workspaceCommandRunRejectsUnsupportedCommands() = runBlocking {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val workspace = WorkspaceManager(context, "workspace-command-unsupported-${System.currentTimeMillis()}")
@@ -1927,6 +1954,15 @@ class WorkspaceFileTreeInstrumentedTest {
           webSearchEnabled = true,
           backgroundKeepAliveEnabled = true,
           agentAuthorityMode = "assisted",
+          workspaceSecrets = listOf(
+            WorkspaceSecret(
+              name = "amap api key",
+              label = "Amap",
+              description = "Maps and location APIs",
+              value = "secret-metadata-value-1234",
+              agentAllowed = true,
+            ),
+          ),
         ),
       )
     }
@@ -2024,6 +2060,11 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"skillEnableSwitch\": true"))
     assertTrue(capabilities.contains("\"skillBilingualDescriptions\": true"))
     assertTrue(capabilities.contains("\"skillDisabledStillReadable\": true"))
+    assertTrue(capabilities.contains("\"secretManager\": true"))
+    assertTrue(capabilities.contains("\"secretRefsInPrompt\": true"))
+    assertTrue(capabilities.contains("\"secretValuesInPrompt\": false"))
+    assertTrue(capabilities.contains("\"secretWorkspaceCommandEnvironmentInjection\": true"))
+    assertTrue(capabilities.contains("\"secretDirectPastePolicy\": \"notify_only_no_masking_no_blocking\""))
     assertTrue(capabilities.contains("\"artifactInspect\": true"))
     assertTrue(capabilities.contains("\"artifactInspectFormats\""))
     assertTrue(capabilities.contains("\"workspaceArtifacts\": true"))
@@ -2168,6 +2209,11 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(settingsView.contains("\"backgroundKeepAliveEnabled\": true"))
     assertTrue(settingsView.contains("\"openRouterProviderPreferences\""))
     assertTrue(settingsView.contains("\"openRouterMinCodingScore\""))
+    assertTrue(settingsView.contains("\"secretRefs\""))
+    assertTrue(settingsView.contains("\"AMAP_API_KEY\""))
+    assertTrue(settingsView.contains("\"Amap\""))
+    assertTrue(settingsView.contains("\"****1234\""))
+    assertFalse(settingsView.contains("secret-metadata-value-1234"))
     assertTrue(settingsView.contains("\"providerInjectsOllamaNumCtx\""))
     assertTrue(settingsView.contains("\"providerInjectsOpenRouterRouting\""))
     assertTrue(settingsView.contains("\"providerRequestHookIds\""))
