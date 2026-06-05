@@ -1165,7 +1165,11 @@ now exposes permission-gated Android system APIs:
 
 - notifications: post and cancel;
 - camera and microphone: capture/record directly into workspace files;
-- location: return a current or last-known location;
+- location: use a fresh system cache when available, otherwise query enabled
+  fused/network/GPS/passive providers concurrently, with an explicit
+  last-known fallback. Results expose source, age, accuracy, and enabled
+  providers so the agent does not mistake a missing GPS fix for total location
+  failure;
 - contacts: list, search, create, and delete;
 - calendar: list calendars/events, create events, and delete events;
 - media: list images/video/audio and import selected MediaStore items into the

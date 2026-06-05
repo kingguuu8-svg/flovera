@@ -221,6 +221,8 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(androidSkill.contains("[\"android\", \"help\"]"))
     assertTrue(androidSkill.contains("camera"))
     assertTrue(androidSkill.contains("microphone"))
+    assertTrue(androidSkill.contains("enabledProviders"))
+    assertTrue(androidSkill.contains("do not infer that GPS or network positioning failed"))
     assertTrue(androidSkill.contains("Permissions panel"))
     assertTrue(skillCreator.contains("name: flovera-skill-creator"))
     assertTrue(skillCreator.contains("description: Use when the user asks Flovera to create"))
@@ -1474,13 +1476,11 @@ class WorkspaceFileTreeInstrumentedTest {
     )
     serverThread.join(3_000)
 
-    assertTrue(
-      location,
-      location.contains("\"latitude\"") ||
-        location.contains("location timed out") ||
-        location.contains("location unavailable") ||
-        location.contains("no enabled location provider"),
-    )
+    assertTrue(location, location.contains("status=ok"))
+    assertTrue(location, location.contains("\"latitude\""))
+    assertTrue(location, location.contains("\"source\""))
+    assertTrue(location, location.contains("\"ageMs\""))
+    assertTrue(location, location.contains("\"enabledProviders\""))
     assertTrue(overlay, overlay.contains("\"shown\":true"))
     assertTrue(overlayHidden, overlayHidden.contains("\"hidden\":true"))
     assertTrue(foregroundStarted, foregroundStarted.contains("\"started\":true"))

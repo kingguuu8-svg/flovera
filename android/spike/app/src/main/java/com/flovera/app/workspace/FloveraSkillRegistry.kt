@@ -252,6 +252,7 @@ object FloveraSkillRegistry {
         Required workflow:
         - Use `workspace_command_run` with argv. Run `["android", "help"]` when exact available syntax is needed.
         - Core read APIs: `["android","location","current"]`, contacts `list/search`, calendar `calendars/events`, media `list`, Bluetooth `paired/scan`, storage `list`, foreground `status`, permission `status`.
+        - Location uses fresh system cache when available, otherwise requests enabled fused/network/GPS/passive providers concurrently. Read `source`, `ageMs`, `accuracyMeters`, and `enabledProviders` before describing precision or failure; do not infer that GPS or network positioning failed unless the command reports it.
         - Core action APIs: notification `post/cancel`, camera `capture --output`, microphone `record --output --duration-ms`, contacts `create/delete`, calendar `create/delete`, media/storage `import --output`, overlay `show/hide`, package `install --path`, alarm `schedule/cancel`, network `get`, foreground `start/stop`, and intent `open-url/share/dial`.
         - Camera captures and microphone recordings write directly into workspace-relative output paths. Media and shared-storage imports also require an explicit workspace output path.
         - If a permission is missing, ask the user to open Flovera's Permissions panel and tap Grant all. Flovera batches runtime requests, then opens each required special-permission system page in sequence.

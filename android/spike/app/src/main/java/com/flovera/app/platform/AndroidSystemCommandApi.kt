@@ -52,6 +52,7 @@ import java.util.TimeZone
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import org.json.JSONArray
 import org.json.JSONObject
@@ -190,12 +191,15 @@ class AndroidSystemCommandApi(
     val value = currentLocation(timeoutMs)
     return ok(
       JSONObject()
-        .put("latitude", value.latitude)
-        .put("longitude", value.longitude)
-        .put("accuracyMeters", value.accuracy.toDouble())
-        .put("altitudeMeters", value.altitude)
-        .put("provider", value.provider)
-        .put("time", value.time)
+        .put("latitude", value.location.latitude)
+        .put("longitude", value.location.longitude)
+        .put("accuracyMeters", value.location.accuracy.toDouble())
+        .put("altitudeMeters", value.location.altitude)
+        .put("provider", value.location.provider)
+        .put("time", value.location.time)
+        .put("ageMs", value.ageMs)
+        .put("source", value.source)
+        .put("enabledProviders", JSONArray(value.enabledProviders))
         .toString(2),
     )
   }
@@ -682,28 +686,86 @@ class AndroidSystemCommandApi(
     }
   }
 
-  private fun currentLocation(timeoutMs: Long): Location {
+  private fun currentLocation(timeoutMs: Long): AndroidLocationSnapshot {
     val manager = appContext.getSystemService(LocationManager::class.java)
-    val provider = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
-      .firstOrNull { runCatching { manager.isProviderEnabled(it) }.getOrDefault(false) }
-      ?: error("no enabled location provider")
+    require(manager.isLocationEnabled) { "Android location services are disabled" }
+    val providers = listOf(
+      LocationManager.FUSED_PROVIDER,
+      LocationManager.NETWORK_PROVIDER,
+      LocationManager.GPS_PROVIDER,
+      LocationManager.PASSIVE_PROVIDER,
+    ).distinct().filter { provider ->
+      runCatching { manager.isProviderEnabled(provider) }.getOrDefault(false)
+    }
+    require(providers.isNotEmpty()) { "no enabled location provider" }
+
+    val initialLocations = providers.mapNotNull { provider ->
+      runCatching { manager.getLastKnownLocation(provider) }.getOrNull()
+    }
+    bestLocation(initialLocations, MAX_FRESH_LOCATION_AGE_MS)?.let { location ->
+      return locationSnapshot(location, "last_known_fresh", providers)
+    }
+
     val latch = CountDownLatch(1)
     val value = AtomicReference<Location?>()
+    val remaining = AtomicInteger(providers.size)
     val executor = Executors.newSingleThreadExecutor()
-    val cancellation = CancellationSignal()
+    val cancellations = providers.map { CancellationSignal() }
     try {
-      manager.getCurrentLocation(provider, cancellation, executor) {
-        value.set(it)
-        latch.countDown()
+      providers.forEachIndexed { index, provider ->
+        runCatching {
+          manager.getCurrentLocation(provider, cancellations[index], executor) { location ->
+            if (location != null && value.compareAndSet(null, location)) {
+              latch.countDown()
+            } else if (remaining.decrementAndGet() == 0) {
+              latch.countDown()
+            }
+          }
+        }.onFailure {
+          if (remaining.decrementAndGet() == 0) latch.countDown()
+        }
       }
       if (!latch.await(timeoutMs, TimeUnit.MILLISECONDS)) {
-        cancellation.cancel()
-        return manager.getLastKnownLocation(provider) ?: error("location timed out after ${timeoutMs}ms")
+        cancellations.forEach(CancellationSignal::cancel)
       }
-      return value.get() ?: manager.getLastKnownLocation(provider) ?: error("location unavailable")
+      value.get()?.let { return locationSnapshot(it, "current", providers) }
+      val fallbackLocations = providers.mapNotNull { provider ->
+        runCatching { manager.getLastKnownLocation(provider) }.getOrNull()
+      }
+      val fallback = bestLocation(fallbackLocations, maxAgeMs = null)
+        ?: error("location unavailable after ${timeoutMs}ms; enabled providers=${providers.joinToString()}")
+      return locationSnapshot(fallback, "last_known_fallback", providers)
     } finally {
+      cancellations.forEach(CancellationSignal::cancel)
       executor.shutdownNow()
     }
+  }
+
+  private fun bestLocation(locations: List<Location>, maxAgeMs: Long?): Location? {
+    val now = System.currentTimeMillis()
+    val candidates = if (maxAgeMs == null) {
+      locations
+    } else {
+      locations.filter { location -> (now - location.time).coerceAtLeast(0L) <= maxAgeMs }
+    }
+    return candidates.minWithOrNull(
+      compareBy<Location> { (now - it.time).coerceAtLeast(0L) / LOCATION_AGE_BUCKET_MS }
+        .thenBy { it.accuracy }
+        .thenByDescending { it.time },
+    )
+  }
+
+  private fun locationSnapshot(
+    location: Location,
+    source: String,
+    providers: List<String>,
+  ): AndroidLocationSnapshot {
+    return AndroidLocationSnapshot(
+      location = location,
+      source = source,
+      ageMs = (System.currentTimeMillis() - location.time).coerceAtLeast(0L),
+      enabledProviders = providers,
+    )
   }
 
   private fun capturePhoto(output: File, lens: String) {
@@ -976,8 +1038,17 @@ class AndroidSystemCommandApi(
     private const val DAY_MS = 86_400_000L
     private const val MAX_IMPORTED_MEDIA_BYTES = 50 * 1024 * 1024
     private const val CAMERA_TIMEOUT_MS = 20_000L
+    private const val MAX_FRESH_LOCATION_AGE_MS = 2 * 60_000L
+    private const val LOCATION_AGE_BUCKET_MS = 15_000L
   }
 }
+
+private data class AndroidLocationSnapshot(
+  val location: Location,
+  val source: String,
+  val ageMs: Long,
+  val enabledProviders: List<String>,
+)
 
 class AndroidSystemAlarmReceiver : BroadcastReceiver() {
   override fun onReceive(context: Context, intent: Intent) {
