@@ -79,6 +79,13 @@ object FloveraSkillRegistry {
       descriptionZh = "用于任务需要调用受权限控制的 Android 系统 API，例如相机、录音、位置、联系人、日历、媒体、蓝牙、通知、提醒、悬浮窗、存储、安装器、网络、前台服务或系统 Intent。",
     ),
     defaultRegistration(
+      id = "flovera-desktop-operation",
+      titleEn = "Flovera Desktop Operation",
+      titleZh = "Flovera 桌面操作",
+      descriptionEn = "Use when the user asks Flovera to inspect or operate another Android app, complete a cross-app workflow, or resume an interrupted desktop task.",
+      descriptionZh = "用于用户要求 Flovera 查看或操作其他 Android 应用、完成跨应用流程，或恢复被中断的桌面任务。",
+    ),
+    defaultRegistration(
       id = "flovera-mcp-adapter",
       titleEn = "Flovera MCP Adapter Planning",
       titleZh = "Flovera MCP 适配规划",
@@ -261,6 +268,29 @@ object FloveraSkillRegistry {
         - Do not claim a native action succeeded from intent launch alone. Use the command result and verify workspace outputs when an action produces a file.
         - Android commands are app-owned adapters, not shell access. Do not use `adb`, `am`, `pm`, Android shell commands, hidden APIs, or invented native bridges.
         - Permission ids include notifications, camera, microphone, fine_location, coarse_location, contacts_read, contacts_write, calendar_read, calendar_write, media_images, media_video, media_audio, bluetooth_scan, bluetooth_connect, battery_optimization, overlay, all_files, install_unknown_apps, exact_alarm, internet, and foreground_service.
+      """.trimIndent()
+
+      "flovera-desktop-operation" -> """
+        ---
+        name: flovera-desktop-operation
+        description: Use when the user asks Flovera to inspect or operate another Android app, complete a cross-app workflow, or resume an interrupted desktop task.
+        description_zh: 用于用户要求 Flovera 查看或操作其他 Android 应用、完成跨应用流程，或恢复被中断的桌面任务。
+        ---
+
+        # Flovera Desktop Operation
+
+        Required workflow:
+        - Check `["android","ui","status"]`. If Accessibility is unavailable, ask the user to enable Desktop operation accessibility from Flovera Permissions; use `["android","ui","open-settings"]` only to open the Android page.
+        - Start once with `["android","ui","task","start","--goal","<user goal>"]`, or inspect the persisted task and resume it after interruption.
+        - Before every action, call `["android","ui","inspect"]` and select a semantic node by node-id, visible text, or resource-id. Prefer semantic nodes over coordinate taps.
+        - Every mutating action requires a stable unique `--action-id`. Reusing an already confirmed action-id is a no-op, which prevents duplicate actions after retries or process recovery.
+        - Provide `--expect-text` or `--expect-package` whenever the expected result is known. Without an explicit expectation Flovera still requires the semantic screen digest to change.
+        - Supported actions include `launch --package`, `click`, `set-text --value`, `tap`, `swipe`, and `global --action back|home|recents|notifications|quick-settings`.
+        - Use `wait --text/--package` and inspect again after every action. Do not infer success from a gesture being accepted.
+        - `screenshot --output <workspace.png>` captures the current screen for diagnostics. Current provider requests are text-only, so do not claim the model interpreted screenshot pixels unless a future vision adapter explicitly reports that it did.
+        - If login, CAPTCHA, biometric confirmation, a protected system dialog, lock screen, payment, or an unverified action blocks progress, run `ui task intervention --reason`. Tell the user exactly what must be done.
+        - After the user resolves the blocker, run `ui task resume`, inspect the current screen, and continue from the last confirmed action-id. Never replay earlier actions blindly.
+        - Complete with `ui task complete --summary`, or cancel explicitly. Do not leave a finished workflow marked active.
       """.trimIndent()
 
       "flovera-mcp-adapter" -> """

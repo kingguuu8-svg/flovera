@@ -1,5 +1,6 @@
 <resources>
     <string name="app_name">Flovera</string>
+    <string name="accessibility_service_description">Allows Flovera to inspect and operate the current Android interface for user-started desktop tasks.</string>
     <bool name="style_showcase_mode">false</bool>
     <bool name="design_frontend_style_enabled">false</bool>
 </resources>

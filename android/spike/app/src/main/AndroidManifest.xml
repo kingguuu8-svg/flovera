@@ -60,6 +60,26 @@
             android:process=":jvmworker"
             android:stopWithTask="false" />
 
+        <service
+            android:name="com.flovera.app.platform.FloveraAccessibilityService"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:process=":accessibility"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/flovera_accessibility_service" />
+        </service>
+
+        <provider
+            android:name="com.flovera.app.platform.DesktopAutomationProvider"
+            android:authorities="${applicationId}.desktopautomation"
+            android:exported="false"
+            android:process=":accessibility" />
+
         <receiver
             android:name="com.flovera.app.platform.AndroidSystemAlarmReceiver"
             android:exported="false" />

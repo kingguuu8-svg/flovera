@@ -6,6 +6,7 @@ import android.app.AlarmManager
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
+import android.content.ComponentName
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -197,6 +198,12 @@ object AndroidPermissionCapabilities {
       minSdk = Build.VERSION_CODES.S,
     ),
     AndroidPermissionCapability(
+      id = "accessibility",
+      labelEn = "Desktop operation accessibility",
+      labelZh = "桌面操作无障碍服务",
+      type = AndroidPermissionType.Special,
+    ),
+    AndroidPermissionCapability(
       id = "internet",
       labelEn = "Internet",
       labelZh = "网络",
@@ -299,6 +306,7 @@ object AndroidPermissionCapabilities {
           "denied"
         }
       }
+      "accessibility" -> if (isAccessibilityServiceEnabled(context)) "granted" else "denied"
       else -> "unknown"
     }
   }
@@ -337,9 +345,21 @@ object AndroidPermissionCapabilities {
       } else {
         appDetailsIntent(context)
       }
+      "accessibility" -> Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
       "app_details" -> appDetailsIntent(context)
       else -> null
     }
+  }
+
+  private fun isAccessibilityServiceEnabled(context: Context): Boolean {
+    val expected = ComponentName(context, FloveraAccessibilityService::class.java)
+    val enabled = Settings.Secure.getString(
+      context.contentResolver,
+      Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
+    ).orEmpty()
+    return enabled.split(':')
+      .mapNotNull(ComponentName::unflattenFromString)
+      .any { it == expected }
   }
 
   private fun appDetailsIntent(context: Context): Intent {

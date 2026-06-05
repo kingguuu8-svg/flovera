@@ -43,6 +43,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import com.flovera.app.R
 import com.flovera.app.agent.AgentRunForegroundService
+import com.flovera.app.agent.AgentRunNotifications
 import com.flovera.app.workspace.WorkspaceManager
 import java.io.File
 import java.net.HttpURLConnection
@@ -69,6 +70,7 @@ class AndroidSystemCommandApi(
   private val networkEnabled: Boolean,
 ) {
   private val appContext = context.applicationContext
+  private val desktopAutomation by lazy { DesktopAutomationClient(appContext) }
 
   fun execute(argv: List<String>): AndroidSystemCommandResult {
     val profile = argv.firstOrNull()?.lowercase().orEmpty()
@@ -93,6 +95,7 @@ class AndroidSystemCommandApi(
         "network" -> network(args)
         "foreground" -> foreground(args)
         "intent" -> intent(args)
+        "ui" -> ui(args)
         else -> fail("unsupported Android profile: $profile. Run `android help` for supported profiles.")
       }
     }.getOrElse { throwable ->
@@ -162,6 +165,193 @@ class AndroidSystemCommandApi(
       }
       else -> fail("supported: android notification post --title <text> --body <text> [--id <int>] | cancel")
     }
+  }
+
+  private fun ui(args: AndroidCommandArgs): AndroidSystemCommandResult {
+    return when (args.command("status")) {
+      "status" -> {
+        val service = runCatching { desktopAutomation.status() }.getOrElse { error ->
+          JSONObject().put("connected", false).put("bridgeError", error.message.orEmpty())
+        }
+        ok(
+          service
+            .put("permissionState", permissionState("accessibility"))
+            .put("task", DesktopAutomationStore.load(appContext).toJson())
+            .toString(2),
+        )
+      }
+      "open-settings" -> ok(
+        JSONObject()
+          .put("opened", AndroidPermissionCapabilities.openPermission(appContext, "accessibility"))
+          .toString(),
+      )
+      "inspect" -> {
+        val maxNodes = args.int("max-nodes", 300).coerceIn(1, 1_000)
+        ok(desktopAutomation.inspect(maxNodes).toString(2))
+      }
+      "screenshot" -> {
+        val output = args.string("output", "captures/desktop-${System.currentTimeMillis()}.png")
+        val file = workspaceOutputFile(output)
+        workspace.createAutomaticSnapshot("android_ui_screenshot")
+        val result = desktopAutomation.screenshot(file)
+          .put("output", workspace.workspaceRelativePath(file))
+        ok(result.toString(2))
+      }
+      "wait" -> {
+        val result = desktopAutomation.waitFor(
+          text = args.string("text"),
+          packageName = args.string("package"),
+          timeoutMs = args.long("timeout-ms", 10_000L).coerceIn(250L, 60_000L),
+        )
+        ok(result.toString(2))
+      }
+      "task" -> desktopTask(args)
+      "launch" -> desktopAction(args, "launch") {
+        val packageName = args.required("package")
+        require(desktopAutomation.launch(packageName)) { "app has no launchable activity or launch was rejected: $packageName" }
+        JSONObject().put("launched", true).put("package", packageName)
+      }
+      "click" -> desktopAction(args, "click") {
+        val clicked = desktopAutomation.click(
+          nodeId = args.string("node-id"),
+          text = args.string("text"),
+          resourceId = args.string("resource-id"),
+        )
+        require(clicked) { "matching node was not found or could not be clicked" }
+        JSONObject().put("clicked", true)
+      }
+      "set-text", "input" -> desktopAction(args, "set-text") {
+        val changed = desktopAutomation.setText(
+          nodeId = args.string("node-id"),
+          text = args.string("text"),
+          resourceId = args.string("resource-id"),
+          value = args.required("value"),
+        )
+        require(changed) { "matching editable node was not found or rejected text input" }
+        JSONObject().put("textSet", true)
+      }
+      "tap" -> desktopAction(args, "tap") {
+        val completed = desktopAutomation.tap(
+          x = args.requiredInt("x"),
+          y = args.requiredInt("y"),
+          timeoutMs = args.long("gesture-timeout-ms", 3_000L),
+        )
+        require(completed) { "tap gesture was rejected or cancelled" }
+        JSONObject().put("tapped", true)
+      }
+      "swipe" -> desktopAction(args, "swipe") {
+        val completed = desktopAutomation.swipe(
+          startX = args.requiredInt("start-x"),
+          startY = args.requiredInt("start-y"),
+          endX = args.requiredInt("end-x"),
+          endY = args.requiredInt("end-y"),
+          durationMs = args.long("duration-ms", 500L),
+          timeoutMs = args.long("gesture-timeout-ms", 5_000L),
+        )
+        require(completed) { "swipe gesture was rejected or cancelled" }
+        JSONObject().put("swiped", true)
+      }
+      "global" -> desktopAction(args, "global") {
+        val action = args.required("action")
+        require(desktopAutomation.global(action)) {
+          "global action was rejected: $action"
+        }
+        JSONObject().put("globalAction", action)
+      }
+      else -> fail(
+        "supported: android ui status|open-settings|inspect|screenshot|wait|task|launch|click|set-text|tap|swipe|global",
+      )
+    }
+  }
+
+  private fun desktopTask(args: AndroidCommandArgs): AndroidSystemCommandResult {
+    val task = when (args.positional(1).lowercase().ifBlank { "status" }) {
+      "status" -> DesktopAutomationStore.load(appContext)
+      "start" -> DesktopAutomationStore.start(appContext, args.required("goal"))
+      "intervention", "pause" -> {
+        val reason = args.required("reason")
+        notifyDesktopIntervention(reason)
+        DesktopAutomationStore.intervention(appContext, reason)
+      }
+      "resume" -> DesktopAutomationStore.resume(appContext)
+      "complete" -> DesktopAutomationStore.finish(appContext, "completed", args.string("summary"))
+      "cancel" -> DesktopAutomationStore.finish(appContext, "cancelled", args.string("summary"))
+      else -> return fail("supported: android ui task status|start|intervention|resume|complete|cancel")
+    }
+    return ok(JSONObject().put("task", task.toJson()).toString(2))
+  }
+
+  private fun desktopAction(
+    args: AndroidCommandArgs,
+    action: String,
+    operation: () -> JSONObject,
+  ): AndroidSystemCommandResult {
+    val task = DesktopAutomationStore.load(appContext)
+    require(task.status == "active") { "start or resume a desktop task before executing UI actions" }
+    val actionId = args.required("action-id")
+    if (DesktopAutomationStore.alreadyConfirmed(appContext, actionId)) {
+      return ok(
+        JSONObject()
+          .put("alreadyConfirmed", true)
+          .put("actionId", actionId)
+          .put("task", DesktopAutomationStore.load(appContext).toJson())
+          .toString(2),
+      )
+    }
+
+    return try {
+      val before = desktopAutomation.inspect(300)
+      require(!before.optBoolean("keyguardLocked")) {
+        "device is locked; unlock it before resuming the desktop task"
+      }
+      val operationResult = operation()
+      val timeoutMs = args.long("verify-timeout-ms", 8_000L).coerceIn(250L, 60_000L)
+      val expectedText = args.string("expect-text")
+      val expectedPackage = args.string("expect-package")
+      val verification = if (expectedText.isNotBlank() || expectedPackage.isNotBlank()) {
+        desktopAutomation.waitFor(expectedText, expectedPackage, timeoutMs)
+      } else {
+        desktopAutomation.waitForChange(before.optString("screenDigest"), timeoutMs)
+      }
+      require(verification.optBoolean("matched")) {
+        "UI action executed but its expected result was not observed"
+      }
+      val resultSummary = verification.toString()
+      val updatedTask = DesktopAutomationStore.actionConfirmed(
+        context = appContext,
+        actionId = actionId,
+        action = action,
+        result = resultSummary,
+      )
+      ok(
+        JSONObject()
+          .put("actionId", actionId)
+          .put("action", action)
+          .put("operation", operationResult)
+          .put("verification", verification)
+          .put("task", updatedTask.toJson())
+          .toString(2),
+      )
+    } catch (error: Throwable) {
+      DesktopAutomationStore.intervention(
+        appContext,
+        "Desktop action $action ($actionId) needs review: ${error.message.orEmpty()}",
+      )
+      notifyDesktopIntervention(
+        "Action $action needs review before Flovera can continue: ${error.message.orEmpty()}",
+      )
+      throw error
+    }
+  }
+
+  private fun notifyDesktopIntervention(reason: String) {
+    AgentRunNotifications.postNormal(
+      context = appContext,
+      title = "Flovera desktop task needs attention",
+      body = reason.take(240),
+      ongoing = false,
+      priority = NotificationCompat.PRIORITY_DEFAULT,
+    )
   }
 
   private fun camera(args: AndroidCommandArgs): AndroidSystemCommandResult {
@@ -472,6 +662,7 @@ class AndroidSystemCommandApi(
             "network get",
             "foreground start|stop|status",
             "intent open|open-url|share|dial",
+            "ui status|open-settings|inspect|screenshot|wait|task|launch|click|set-text|tap|swipe|global",
           ),
         ),
       )
@@ -967,6 +1158,12 @@ class AndroidSystemCommandApi(
     require(state == "granted") { "permission $id is $state; grant it from Flovera Permissions" }
   }
 
+  private fun permissionState(id: String): String {
+    val capability = AndroidPermissionCapabilities.capabilities.firstOrNull { it.id == id }
+      ?: return "unknown"
+    return AndroidPermissionCapabilities.stateFor(appContext, capability)
+  }
+
   private fun requireAnyPermission(vararg ids: String) {
     val granted = ids.any { id ->
       AndroidPermissionCapabilities.capabilities.firstOrNull { it.id == id }
@@ -1031,6 +1228,7 @@ class AndroidSystemCommandApi(
       "network",
       "foreground",
       "intent",
+      "ui",
     )
     private const val SYSTEM_CHANNEL_ID = "flovera_system_actions"
     private const val DEFAULT_NOTIFICATION_ID = 7201
@@ -1147,6 +1345,8 @@ private class AndroidCommandArgs(private val values: List<String>) {
   fun long(name: String, default: Long): Long = string(name).toLongOrNull() ?: default
 
   fun requiredLong(name: String): Long = required(name).toLongOrNull() ?: error("--$name must be an integer")
+
+  fun requiredInt(name: String): Int = required(name).toIntOrNull() ?: error("--$name must be an integer")
 
   private fun optionIndex(name: String): Int {
     return values.indexOfFirst { it == "--$name" }

@@ -86,7 +86,7 @@ class WorkspaceCommandRunTool(
 ) : SimpleTool<WorkspaceCommandRunTool.Args>(
   argsType = typeToken<Args>(),
   name = "workspace_command_run",
-  description = "Primary bounded command-style execution surface for Flovera-owned workspace runtimes. Use this for normal Python execution, generated scripts, project commands, local Git/JGit work, Android system APIs, and groovy scripts when JVM access is useful. This is not Android shell access: supported command profiles are python/python3, groovy, git, and android. The android profile provides permission-gated notifications, camera capture, microphone recording, location, contacts, calendar, media, Bluetooth, overlay, external storage, APK installer, exact alarms, network, foreground service, and system intents.",
+  description = "Primary bounded command-style execution surface for Flovera-owned workspace runtimes. Use this for normal Python execution, generated scripts, project commands, local Git/JGit work, Android system APIs, cross-app accessibility operations, and groovy scripts when JVM access is useful. This is not Android shell access: supported command profiles are python/python3, groovy, git, and android. The android profile provides permission-gated native APIs and an android ui surface for semantic inspection, screenshots, verified gestures, app launch, and persistent desktop-task recovery.",
 ) {
   @Serializable
   data class Args(
@@ -714,7 +714,7 @@ private class AndroidCommandAdapter(
     return when (profile) {
       "app", "permission", "intent", "notification", "location", "contacts", "calendar", "media",
       "bluetooth", "overlay", "storage", "package", "alarm", "network", "foreground", "camera",
-      "microphone", "help", "capabilities" -> WorkspaceCommandRisk(
+      "microphone", "ui", "help", "capabilities" -> WorkspaceCommandRisk(
         "android.$profile",
         listOf("android.app", "android.$profile"),
       )

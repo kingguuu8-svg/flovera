@@ -1182,6 +1182,19 @@ now exposes permission-gated Android system APIs:
 - network: bounded HTTP GET while the Flovera Network setting is enabled;
 - foreground service: start, stop, and inspect Flovera's foreground keep-alive;
 - intents: permission pages, URLs/maps, share sheets, and dialer.
+- desktop operation: an Accessibility-backed `android ui` profile can inspect
+  the active semantic tree, capture a workspace screenshot, launch apps,
+  click/set text/tap/swipe/use global actions, and wait for expected text or
+  package changes. Mutating actions require stable action IDs, persist the last
+  confirmed action, and verify the resulting semantic state before success.
+  Login, CAPTCHA, biometric, payment, protected-dialog, lock-screen, and
+  unverified states become explicit user-intervention checkpoints rather than
+  guessed continuation.
+
+Desktop operation currently uses semantic accessibility data for agent
+reasoning. Screenshots are captured as workspace PNG diagnostics, but the
+provider request layer remains text-only; pixel-level model vision is not yet
+claimed.
 
 Every action checks the corresponding Android permission before execution.
 Binary results and imports use explicit workspace-relative output paths.
@@ -1204,10 +1217,10 @@ still an app-owned adapter, not Android shell access.
   corresponding status entry and command API is incomplete.
 - Keep high-risk permissions opt-in and reversible, with settings that show
   current grant state and what agent/tool features depend on the grant.
-- Keep accessibility outside the current command surface until its service and
-  user-consent model are designed. Contacts, calendar, microphone, camera, and
-  precise location are implemented as explicit permission-gated commands and
-  must remain visible and reversible from the Permissions panel.
+- Accessibility desktop operation is implemented as an explicit, reversible
+  permission-gated command surface. It must stop at lock screens and password
+  fields, persist an intervention checkpoint, and require an explicit resume
+  before any further mutating action.
 
 ### Controlled Python Runtime
 

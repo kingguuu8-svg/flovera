@@ -12,6 +12,7 @@ import com.flovera.app.config.AppSettings
 import com.flovera.app.config.WorkspaceSecret
 import com.flovera.app.koog.ToolEventRecorder
 import com.flovera.app.koog.WorkspaceCommandRunTool
+import com.flovera.app.platform.DesktopAutomationClient
 import com.flovera.app.koog.WorkspaceSearchTool
 import com.flovera.app.koog.workspaceToolRegistry
 import com.flovera.app.web.FloveraWebBridge
@@ -194,12 +195,14 @@ class WorkspaceFileTreeInstrumentedTest {
     val pythonSkill = workspace.readFile(".flovera/skills/flovera-python-workspace-command/SKILL.md")
     val gitSkill = workspace.readFile(".flovera/skills/flovera-git-workspace-command/SKILL.md")
     val androidSkill = workspace.readFile(".flovera/skills/flovera-android-command/SKILL.md")
+    val desktopSkill = workspace.readFile(".flovera/skills/flovera-desktop-operation/SKILL.md")
     val skillCreator = workspace.readFile(".flovera/skills/flovera-skill-creator/SKILL.md")
 
     assertTrue(manifest.contains("\"id\": \"flovera-android-webview-app\""))
     assertTrue(manifest.contains("\"id\": \"flovera-python-workspace-command\""))
     assertTrue(manifest.contains("\"id\": \"flovera-git-workspace-command\""))
     assertTrue(manifest.contains("\"id\": \"flovera-android-command\""))
+    assertTrue(manifest.contains("\"id\": \"flovera-desktop-operation\""))
     assertTrue(manifest.contains("\"id\": \"flovera-skill-creator\""))
     assertFalse(manifest.contains("\"id\": \"flovera-context-handoff\""))
     assertTrue(manifest.contains("\"enabled\": true"))
@@ -224,6 +227,10 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(androidSkill.contains("enabledProviders"))
     assertTrue(androidSkill.contains("do not infer that GPS or network positioning failed"))
     assertTrue(androidSkill.contains("Permissions panel"))
+    assertTrue(desktopSkill.contains("name: flovera-desktop-operation"))
+    assertTrue(desktopSkill.contains("--action-id"))
+    assertTrue(desktopSkill.contains("Never replay earlier actions blindly"))
+    assertTrue(desktopSkill.contains("provider requests are text-only"))
     assertTrue(skillCreator.contains("name: flovera-skill-creator"))
     assertTrue(skillCreator.contains("description: Use when the user asks Flovera to create"))
     assertTrue(skillCreator.contains("description_zh:"))
@@ -1491,6 +1498,244 @@ class WorkspaceFileTreeInstrumentedTest {
   }
 
   @Test
+  fun workspaceCommandRunPersistsDesktopTaskInterventionAndResume() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "workspace-command-desktop-task-${System.currentTimeMillis()}")
+    val tool = WorkspaceCommandRunTool(workspace, ToolEventRecorder())
+
+    val started = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("android", "ui", "task", "start", "--goal", "Open Android settings"),
+        snapshotBeforeRun = false,
+      ),
+    )
+    val intervention = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("android", "ui", "task", "intervention", "--reason", "User confirmation required"),
+        snapshotBeforeRun = false,
+      ),
+    )
+    val blockedWhileIntervening = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("android", "ui", "global", "--action", "home", "--action-id", "blocked-during-intervention"),
+        snapshotBeforeRun = false,
+      ),
+    )
+    val resumed = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("android", "ui", "task", "resume"),
+        snapshotBeforeRun = false,
+      ),
+    )
+    val completed = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("android", "ui", "task", "complete", "--summary", "Verified"),
+        snapshotBeforeRun = false,
+      ),
+    )
+
+    assertTrue(started, started.contains("\"status\": \"active\""))
+    assertTrue(intervention, intervention.contains("\"status\": \"intervention\""))
+    assertTrue(intervention, intervention.contains("User confirmation required"))
+    assertTrue(blockedWhileIntervening, blockedWhileIntervening.contains("start or resume a desktop task"))
+    assertTrue(resumed, resumed.contains("\"status\": \"active\""))
+    assertTrue(completed, completed.contains("\"status\": \"completed\""))
+  }
+
+  @Test
+  fun workspaceCommandRunOperatesAnotherAppWithVerifiedIdempotentAction() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "workspace-command-desktop-live-${System.currentTimeMillis()}")
+    val tool = WorkspaceCommandRunTool(workspace, ToolEventRecorder())
+
+    val status = tool.execute(
+      WorkspaceCommandRunTool.Args(argv = listOf("android", "ui", "status"), snapshotBeforeRun = false),
+    )
+    assertTrue(status, status.contains("\"connected\": true"))
+
+    tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("android", "ui", "task", "start", "--goal", "Inspect Android settings"),
+        snapshotBeforeRun = false,
+      ),
+    )
+    val launchArgs = WorkspaceCommandRunTool.Args(
+      argv = listOf(
+        "android", "ui", "launch",
+        "--package", "com.android.settings",
+        "--action-id", "open-settings-1",
+        "--expect-package", "com.android.settings",
+        "--verify-timeout-ms", "10000",
+      ),
+      snapshotBeforeRun = false,
+    )
+    val launched = tool.execute(launchArgs)
+    val duplicate = tool.execute(launchArgs)
+    val inspected = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("android", "ui", "inspect", "--max-nodes", "500"),
+        snapshotBeforeRun = false,
+      ),
+    )
+    val screenshot = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("android", "ui", "screenshot", "--output", "captures/settings.png"),
+        snapshotBeforeRun = false,
+      ),
+    )
+    tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("android", "ui", "task", "complete", "--summary", "Settings inspected"),
+        snapshotBeforeRun = false,
+      ),
+    )
+
+    assertTrue(launched, launched.contains("\"actionId\": \"open-settings-1\""))
+    assertTrue(launched, launched.contains("\"matched\": true"))
+    assertTrue(duplicate, duplicate.contains("\"alreadyConfirmed\": true"))
+    assertTrue(inspected, inspected.contains("\"package\": \"com.android.settings\""))
+    assertTrue(inspected, inspected.contains("\"nodes\""))
+    assertTrue(screenshot, screenshot.contains("\"mimeType\"") && screenshot.contains("image") && screenshot.contains("png"))
+    assertTrue(File(workspace.root, "captures/settings.png").length() > 0L)
+  }
+
+  @Test
+  fun workspaceCommandRunSeedsRecoverableDesktopAction() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "workspace-command-desktop-recovery-seed-${System.currentTimeMillis()}")
+    val tool = WorkspaceCommandRunTool(workspace, ToolEventRecorder())
+    val status = tool.execute(
+      WorkspaceCommandRunTool.Args(argv = listOf("android", "ui", "status"), snapshotBeforeRun = false),
+    )
+    assertTrue(status, status.contains("\"connected\": true"))
+    tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("android", "ui", "task", "start", "--goal", "Recover without replay"),
+        snapshotBeforeRun = false,
+      ),
+    )
+    val launched = tool.execute(recoverableSettingsLaunchArgs())
+    assertTrue(launched, launched.contains("\"actionId\": \"recoverable-open-settings\""))
+    assertTrue(launched, launched.contains("\"matched\": true"))
+    assertTrue(launched, launched.contains("recoverable-open-settings"))
+  }
+
+  @Test
+  fun workspaceCommandRunResumesDesktopActionWithoutReplay() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "workspace-command-desktop-recovery-resume-${System.currentTimeMillis()}")
+    val tool = WorkspaceCommandRunTool(workspace, ToolEventRecorder())
+    val status = tool.execute(
+      WorkspaceCommandRunTool.Args(argv = listOf("android", "ui", "status"), snapshotBeforeRun = false),
+    )
+    assertTrue(status, status.contains("\"connected\": true"))
+    assertTrue(status, status.contains("\"status\": \"intervention\""))
+    assertTrue(status, status.contains("restarted"))
+
+    val resumed = tool.execute(
+      WorkspaceCommandRunTool.Args(argv = listOf("android", "ui", "task", "resume"), snapshotBeforeRun = false),
+    )
+    val duplicate = tool.execute(recoverableSettingsLaunchArgs())
+    val completed = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("android", "ui", "task", "complete", "--summary", "Recovered without replay"),
+        snapshotBeforeRun = false,
+      ),
+    )
+
+    assertTrue(resumed, resumed.contains("\"status\": \"active\""))
+    assertTrue(duplicate, duplicate.contains("\"alreadyConfirmed\": true"))
+    assertTrue(completed, completed.contains("\"status\": \"completed\""))
+  }
+
+  @Test
+  fun workspaceCommandRunInputsAndClicksAcrossAppBoundary() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "workspace-command-desktop-input-${System.currentTimeMillis()}")
+    val tool = WorkspaceCommandRunTool(workspace, ToolEventRecorder())
+    tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("android", "ui", "task", "start", "--goal", "Fill and submit another app"),
+        snapshotBeforeRun = false,
+      ),
+    )
+    val available = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf(
+          "android", "ui", "wait",
+          "--package", "com.flovera.app.test",
+          "--timeout-ms", "10000",
+        ),
+        snapshotBeforeRun = false,
+      ),
+    )
+    assertTrue(available, available.contains("\"matched\": true"))
+
+    val client = DesktopAutomationClient(context)
+    val firstInspection = client.inspect(200)
+    val inputNodeId = firstInspection.getJSONArray("nodes").let { nodes ->
+      (0 until nodes.length())
+        .map(nodes::getJSONObject)
+        .first { it.optBoolean("editable") }
+        .getString("nodeId")
+    }
+    val input = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf(
+          "android", "ui", "set-text",
+          "--node-id", inputNodeId,
+          "--value", "hello from Flovera",
+          "--action-id", "fixture-input",
+          "--expect-text", "hello from Flovera",
+        ),
+        snapshotBeforeRun = false,
+      ),
+    )
+    assertTrue(input, input.contains("\"matched\": true"))
+
+    val secondInspection = client.inspect(200)
+    val submitNodeId = secondInspection.getJSONArray("nodes").let { nodes ->
+      (0 until nodes.length())
+        .map(nodes::getJSONObject)
+        .first { it.optString("text") == "Submit" || it.optString("description") == "Submit" }
+        .getString("nodeId")
+    }
+    val submitted = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf(
+          "android", "ui", "click",
+          "--node-id", submitNodeId,
+          "--action-id", "fixture-submit",
+          "--expect-text", "Submitted: hello from Flovera",
+        ),
+        snapshotBeforeRun = false,
+      ),
+    )
+    val completed = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("android", "ui", "task", "complete", "--summary", "Cross-app form submitted"),
+        snapshotBeforeRun = false,
+      ),
+    )
+
+    assertTrue(submitted, submitted.contains("\"matched\": true"))
+    assertTrue(completed, completed.contains("\"status\": \"completed\""))
+  }
+
+  private fun recoverableSettingsLaunchArgs(): WorkspaceCommandRunTool.Args {
+    return WorkspaceCommandRunTool.Args(
+      argv = listOf(
+        "android", "ui", "launch",
+        "--package", "com.android.settings",
+        "--action-id", "recoverable-open-settings",
+        "--expect-package", "com.android.settings",
+        "--verify-timeout-ms", "10000",
+      ),
+      snapshotBeforeRun = false,
+    )
+  }
+
+  @Test
   fun workspaceCommandRunRejectsUnsupportedCommands() = runBlocking {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val workspace = WorkspaceManager(context, "workspace-command-unsupported-${System.currentTimeMillis()}")
@@ -2345,8 +2590,15 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"androidPermissionGrantEntry\": \"main_menu_permissions_panel_grant_all\""))
     assertTrue(capabilities.contains("\"androidRuntimePermissionBatchRequest\": true"))
     assertTrue(capabilities.contains("\"androidSpecialPermissionSequentialFlow\": true"))
+    assertTrue(capabilities.contains("\"androidDesktopOperation\": true"))
+    assertTrue(capabilities.contains("\"androidDesktopOperationMode\": \"accessibility_semantic_first\""))
+    assertTrue(capabilities.contains("\"androidDesktopTaskPersistence\": true"))
+    assertTrue(capabilities.contains("\"androidDesktopActionIdempotency\": true"))
+    assertTrue(capabilities.contains("\"androidDesktopPostActionVerification\": true"))
+    assertTrue(capabilities.contains("\"androidDesktopScreenshotVisionInput\": false"))
     assertTrue(capabilities.contains("\"androidPermissionIds\""))
     assertTrue(capabilities.contains("\"overlay\""))
+    assertTrue(capabilities.contains("\"accessibility\""))
     assertTrue(capabilities.contains("\"groovyCommandRuntime\": true"))
     assertTrue(capabilities.contains("\"groovyCommandRuntimeStatus\": \"experimental_full_authority\""))
     assertTrue(capabilities.contains("\"groovyWorkspaceJarClasspath\": true"))
