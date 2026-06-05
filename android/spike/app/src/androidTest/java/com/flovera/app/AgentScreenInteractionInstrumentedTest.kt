@@ -563,6 +563,10 @@ class AgentScreenInteractionInstrumentedTest {
     composeRule.onNodeWithText("Sessions").assertIsDisplayed()
     composeRule.onNodeWithText("Open Preview").assertIsDisplayed()
     composeRule.onNodeWithText("Files").assertIsDisplayed()
+    composeRule.onNodeWithText("Permissions").performClick()
+    composeRule.onNodeWithText("Grant all").assertIsDisplayed()
+    composeRule.onNodeWithText("Done").performClick()
+    composeRule.onNodeWithContentDescription("More").performClick()
     composeRule.onNodeWithText("AGENT.md").assertIsDisplayed()
     composeRule.onNodeWithText("Settings").assertIsDisplayed()
   }

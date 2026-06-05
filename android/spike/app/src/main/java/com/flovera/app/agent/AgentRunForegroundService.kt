@@ -9,19 +9,27 @@ import androidx.core.app.NotificationCompat
 import com.flovera.app.config.SettingsStore
 
 class AgentRunForegroundService : Service() {
+  override fun onCreate() {
+    super.onCreate()
+    running = true
+  }
+
   override fun onBind(intent: Intent?): IBinder? = null
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     return when (intent?.action) {
       ACTION_RUNNING -> {
+        mode = "agent_run"
         startRunning(intent.getStringExtra(EXTRA_BODY).orEmpty())
         START_NOT_STICKY
       }
       ACTION_KEEP_ALIVE -> {
+        mode = "keep_alive"
         startKeepAlive()
         START_STICKY
       }
       ACTION_STOP_KEEP_ALIVE -> {
+        mode = "stopping"
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
         START_NOT_STICKY
@@ -68,6 +76,12 @@ class AgentRunForegroundService : Service() {
     }
   }
 
+  override fun onDestroy() {
+    running = false
+    mode = "stopped"
+    super.onDestroy()
+  }
+
   private fun startRunning(body: String) {
     AgentRunNotifications.ensureChannel(this)
     val notification = AgentRunNotifications.build(
@@ -105,6 +119,8 @@ class AgentRunForegroundService : Service() {
   }
 
   companion object {
+    @Volatile private var running: Boolean = false
+    @Volatile private var mode: String = "stopped"
     private const val ACTION_RUNNING = "com.flovera.app.agent.RUNNING"
     private const val ACTION_FINISHED = "com.flovera.app.agent.FINISHED"
     private const val ACTION_INTERRUPTED = "com.flovera.app.agent.INTERRUPTED"
@@ -142,5 +158,9 @@ class AgentRunForegroundService : Service() {
       return Intent(context, AgentRunForegroundService::class.java)
         .setAction(ACTION_STOP_KEEP_ALIVE)
     }
+
+    fun isServiceRunning(): Boolean = running
+
+    fun currentMode(): String = mode
   }
 }

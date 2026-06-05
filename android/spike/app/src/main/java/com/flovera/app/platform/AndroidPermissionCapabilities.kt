@@ -114,6 +114,14 @@ object AndroidPermissionCapabilities {
       minSdk = Build.VERSION_CODES.TIRAMISU,
     ),
     AndroidPermissionCapability(
+      id = "media_visual_selected",
+      labelEn = "Selected images and video",
+      labelZh = "选中的图片和视频",
+      type = AndroidPermissionType.Runtime,
+      permission = Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED,
+      minSdk = Build.VERSION_CODES.UPSIDE_DOWN_CAKE,
+    ),
+    AndroidPermissionCapability(
       id = "media_video",
       labelEn = "Video",
       labelZh = "视频",
@@ -211,15 +219,30 @@ object AndroidPermissionCapabilities {
   }
 
   fun requestRuntimePermissions(activity: Activity): List<String> {
-    val permissions = capabilities
-      .filter { it.type == AndroidPermissionType.Runtime && isSdkSupported(it) }
-      .mapNotNull { it.permission }
-      .filter { activity.checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
-      .distinct()
+    val permissions = missingRuntimePermissions(activity)
     if (permissions.isNotEmpty()) {
       ActivityCompat.requestPermissions(activity, permissions.toTypedArray(), FLOVERA_PERMISSION_REQUEST_CODE)
     }
     return permissions
+  }
+
+  fun missingRuntimePermissions(context: Context): List<String> {
+    return capabilities
+      .filter { it.type == AndroidPermissionType.Runtime && isSdkSupported(it) }
+      .mapNotNull { it.permission }
+      .filter { context.checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+      .distinct()
+  }
+
+  fun deniedSpecialPermissionIds(context: Context): List<String> {
+    return capabilities
+      .filter { it.type == AndroidPermissionType.Special && isSdkSupported(it) }
+      .filter { stateFor(context, it) != "granted" }
+      .map { it.id }
+  }
+
+  fun permissionIntent(context: Context, id: String): Intent? {
+    return specialPermissionIntent(context, id)
   }
 
   fun openPermission(context: Context, id: String): Boolean {

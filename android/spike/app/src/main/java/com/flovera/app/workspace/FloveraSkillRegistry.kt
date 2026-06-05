@@ -75,8 +75,8 @@ object FloveraSkillRegistry {
       id = "flovera-android-command",
       titleEn = "Flovera Android Command Profile",
       titleZh = "Flovera Android 命令能力",
-      descriptionEn = "Use when a task needs Android app info, permission status, or opening Android system permission pages from Flovera.",
-      descriptionZh = "用于任务需要查看 Android 应用信息、权限状态，或从 Flovera 打开系统权限授权页面时。",
+      descriptionEn = "Use when a task needs permission-gated Android system APIs such as camera, microphone, location, contacts, calendar, media, Bluetooth, notifications, alarms, overlay, storage, installer, network, foreground service, or system intents.",
+      descriptionZh = "用于任务需要调用受权限控制的 Android 系统 API，例如相机、录音、位置、联系人、日历、媒体、蓝牙、通知、提醒、悬浮窗、存储、安装器、网络、前台服务或系统 Intent。",
     ),
     defaultRegistration(
       id = "flovera-mcp-adapter",
@@ -243,18 +243,23 @@ object FloveraSkillRegistry {
       "flovera-android-command" -> """
         ---
         name: flovera-android-command
-        description: Use when a task needs Android app info, permission status, or opening Android system permission pages from Flovera.
-        description_zh: 用于任务需要查看 Android 应用信息、权限状态，或从 Flovera 打开系统权限授权页面时。
+        description: Use when a task needs permission-gated Android system APIs such as camera, microphone, location, contacts, calendar, media, Bluetooth, notifications, alarms, overlay, storage, installer, network, foreground service, or system intents.
+        description_zh: 用于任务需要调用受权限控制的 Android 系统 API，例如相机、录音、位置、联系人、日历、媒体、蓝牙、通知、提醒、悬浮窗、存储、安装器、网络、前台服务或系统 Intent。
         ---
 
         # Flovera Android Command Profile
 
         Required workflow:
-        - Use `workspace_command_run` with argv such as `["android", "app", "info"]` and `["android", "permission", "status"]`.
-        - If a permission is missing, ask the user to open Flovera's Permissions panel or use `["android", "permission", "open", "<permission-id>"]` to open the Android system page.
+        - Use `workspace_command_run` with argv. Run `["android", "help"]` when exact available syntax is needed.
+        - Core read APIs: `["android","location","current"]`, contacts `list/search`, calendar `calendars/events`, media `list`, Bluetooth `paired/scan`, storage `list`, foreground `status`, permission `status`.
+        - Core action APIs: notification `post/cancel`, camera `capture --output`, microphone `record --output --duration-ms`, contacts `create/delete`, calendar `create/delete`, media/storage `import --output`, overlay `show/hide`, package `install --path`, alarm `schedule/cancel`, network `get`, foreground `start/stop`, and intent `open-url/share/dial`.
+        - Camera captures and microphone recordings write directly into workspace-relative output paths. Media and shared-storage imports also require an explicit workspace output path.
+        - If a permission is missing, ask the user to open Flovera's Permissions panel and tap Grant all. Flovera batches runtime requests, then opens each required special-permission system page in sequence.
+        - Use `["android", "permission", "open", "<permission-id>"]` only when a specific permission needs to be reopened.
         - Do not claim a permission is granted until `android permission status` reports `granted`.
-        - Android commands are app-owned adapters, not shell access. Do not use `adb`, `am`, `pm`, Android shell commands, hidden APIs, or background daemons.
-        - Permission ids include notifications, camera, microphone, location, contacts, calendar, media, bluetooth, battery_optimization, overlay, all_files, install_unknown_apps, and exact_alarm.
+        - Do not claim a native action succeeded from intent launch alone. Use the command result and verify workspace outputs when an action produces a file.
+        - Android commands are app-owned adapters, not shell access. Do not use `adb`, `am`, `pm`, Android shell commands, hidden APIs, or invented native bridges.
+        - Permission ids include notifications, camera, microphone, fine_location, coarse_location, contacts_read, contacts_write, calendar_read, calendar_write, media_images, media_video, media_audio, bluetooth_scan, bluetooth_connect, battery_optimization, overlay, all_files, install_unknown_apps, exact_alarm, internet, and foreground_service.
       """.trimIndent()
 
       "flovera-mcp-adapter" -> """
@@ -447,7 +452,7 @@ object FloveraSkillRegistry {
       )
       "flovera-android-command" -> copy(
         titleZh = "Flovera Android 命令能力",
-        descriptionZh = "用于任务需要查看 Android 应用信息、权限状态，或从 Flovera 打开系统权限授权页面时。",
+        descriptionZh = "用于任务需要调用受权限控制的 Android 系统 API，例如相机、录音、位置、联系人、日历、媒体、蓝牙、通知、提醒、悬浮窗、存储、安装器、网络、前台服务或系统 Intent。",
       )
       "flovera-mcp-adapter" -> copy(
         titleZh = "Flovera MCP 适配规划",

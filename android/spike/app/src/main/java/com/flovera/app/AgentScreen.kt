@@ -90,6 +90,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -125,6 +126,9 @@ import io.noties.markwon.ext.tables.TablePlugin
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.flovera.app.agent.AgentContextBudget
 import com.flovera.app.config.AppSettings
 import com.flovera.app.config.WorkspaceSecret
@@ -4654,6 +4658,15 @@ private fun PermissionsDialog(
   var refreshKey by remember { mutableStateOf(0) }
   val statuses = remember(refreshKey, context) { AndroidPermissionCapabilities.status(context) }
   val activity = context.findActivity()
+  val lifecycleOwner = LocalLifecycleOwner.current
+
+  DisposableEffect(lifecycleOwner) {
+    val observer = LifecycleEventObserver { _, event ->
+      if (event == Lifecycle.Event.ON_RESUME) refreshKey += 1
+    }
+    lifecycleOwner.lifecycle.addObserver(observer)
+    onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+  }
 
   AlertDialog(
     onDismissRequest = onDismiss,
@@ -4666,8 +4679,8 @@ private fun PermissionsDialog(
         Text(
           t(
             language,
-            "Grant Android permissions here. Flovera opens the Android system page or runtime permission dialog directly.",
-            "\u5728\u8fd9\u91cc\u6388\u6743 Android \u6743\u9650\u3002Flovera \u4f1a\u76f4\u63a5\u6253\u5f00\u7cfb\u7edf\u9875\u9762\u6216\u8fd0\u884c\u65f6\u6743\u9650\u5f39\u7a97\u3002",
+            "Grant Android permissions here. Flovera requests runtime permissions together, then opens each required Android system permission page in sequence.",
+            "\u5728\u8fd9\u91cc\u7edf\u4e00\u6388\u6743 Android \u6743\u9650\u3002Flovera \u4f1a\u5148\u6279\u91cf\u8bf7\u6c42\u8fd0\u884c\u65f6\u6743\u9650\uff0c\u518d\u4f9d\u6b21\u6253\u5f00\u9700\u8981\u7684 Android \u7cfb\u7edf\u6388\u6743\u9875\u3002",
           ),
           color = MaterialTheme.colorScheme.onSurfaceVariant,
           style = MaterialTheme.typography.bodySmall,
@@ -4675,12 +4688,13 @@ private fun PermissionsDialog(
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
           Button(
             onClick = {
-              activity?.let(AndroidPermissionCapabilities::requestRuntimePermissions)
+              (activity as? MainActivity)?.requestAllAndroidPermissions()
+                ?: activity?.let(AndroidPermissionCapabilities::requestRuntimePermissions)
               refreshKey += 1
             },
             enabled = activity != null,
           ) {
-            Text(t(language, "Grant runtime", "\u6388\u6743\u8fd0\u884c\u65f6\u6743\u9650"))
+            Text(t(language, "Grant all", "\u6388\u6743\u5168\u90e8"))
           }
           OutlinedButton(
             onClick = {

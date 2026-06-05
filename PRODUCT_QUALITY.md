@@ -921,8 +921,9 @@ permissions without user action or expose Android shell.
   output, unsupported-command errors, and the same audit log boundary.
 - Done: add an app-owned Android command profile for `android app info`,
   `android permission status`, and permission/system settings intents, plus a
-  user-facing Permissions panel that can request runtime permissions and open
-  special Android authorization pages.
+  user-facing Permissions panel whose Grant all flow batches missing runtime
+  permissions and then opens each missing special Android authorization page
+  in sequence.
 - Next hardening target: promote the worker to a foreground service during very
   long JVM builds if Android background process pressure still kills the worker
   before checkpointed work can resume.
@@ -1150,15 +1151,39 @@ validator or `artifact_inspect` successor with richer DOM diagnostics.
 
 ### Android App Permission Expansion
 
-Status: Baseline permission entry implemented. Flovera now declares a broad
+Status: Permission entry and command API mapping implemented. Flovera declares a broad
 development-stage permission set and exposes a top-level Permissions panel
-beside preview/snapshots/skills/secrets. The panel can request runtime
-permissions directly and open Android system pages for notification, battery
-optimization, overlay, all-files, unknown-app install, and exact-alarm access.
+beside preview/snapshots/skills/secrets. Its Grant all action requests all
+missing runtime permissions together and then automatically walks the user
+through the Android system pages for battery optimization, overlay, all-files,
+unknown-app install, and exact-alarm access. Individual permission entries
+remain available as recovery paths for vendor-specific settings behavior.
 The agent can inspect permission state through `workspace_command_run`
 `["android","permission","status"]` and open a specific system page through
-`["android","permission","open","<permission-id>"]`. This is still an app-owned
-adapter, not Android shell access.
+`["android","permission","open","<permission-id>"]`. The same command profile
+now exposes permission-gated Android system APIs:
+
+- notifications: post and cancel;
+- camera and microphone: capture/record directly into workspace files;
+- location: return a current or last-known location;
+- contacts: list, search, create, and delete;
+- calendar: list calendars/events, create events, and delete events;
+- media: list images/video/audio and import selected MediaStore items into the
+  workspace;
+- Bluetooth: list paired devices and run bounded discovery;
+- overlay: show and hide bounded app-owned overlay messages;
+- shared storage: list and import files when all-files access is granted;
+- package installer: open Android's installer for a workspace APK;
+- exact alarms: schedule and cancel notification reminders;
+- network: bounded HTTP GET while the Flovera Network setting is enabled;
+- foreground service: start, stop, and inspect Flovera's foreground keep-alive;
+- intents: permission pages, URLs/maps, share sheets, and dialer.
+
+Every action checks the corresponding Android permission before execution.
+Binary results and imports use explicit workspace-relative output paths.
+Installer, share, dial, URL, and permission actions intentionally open Android
+system UI and do not pretend user confirmation has already happened. This is
+still an app-owned adapter, not Android shell access.
 
 - Keep inventory and status generation centralized in the app permission
   capability list so UI and agent metadata do not drift.
@@ -1166,14 +1191,19 @@ adapter, not Android shell access.
   notifications, camera, microphone, location, contacts, calendar, nearby
   devices, clipboard-related flows, accessibility integrations, and background
   execution limits where Android allows them.
-- Do not expose newly granted high-impact Android behavior directly to the agent
-  until it is represented as narrow app-owned command profiles with explicit
-  schemas, permission gates, timeouts, output limits, and event records.
+- Done: expose the declared permission-backed capabilities through the existing
+  single `workspace_command_run` tool as the `android` command profile, keeping
+  explicit argv schemas, permission checks, output limits, workspace path
+  validation, and command audit events.
+- Keep future Android permissions and actions in the same centralized
+  permission-to-command mapping. Adding a manifest permission without a
+  corresponding status entry and command API is incomplete.
 - Keep high-risk permissions opt-in and reversible, with settings that show
   current grant state and what agent/tool features depend on the grant.
-- Treat accessibility, contacts, calendar, microphone, camera, and precise
-  location as high-impact capabilities that require separate design approval
-  before implementation.
+- Keep accessibility outside the current command surface until its service and
+  user-consent model are designed. Contacts, calendar, microphone, camera, and
+  precise location are implemented as explicit permission-gated commands and
+  must remain visible and reversible from the Permissions panel.
 
 ### Controlled Python Runtime
 

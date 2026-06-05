@@ -218,7 +218,9 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(pythonSkill.contains("artifact_inspect"))
     assertTrue(gitSkill.contains("embedded JGit"))
     assertTrue(gitSkill.contains("[\"git\", \"status\"]"))
-    assertTrue(androidSkill.contains("[\"android\", \"permission\", \"status\"]"))
+    assertTrue(androidSkill.contains("[\"android\", \"help\"]"))
+    assertTrue(androidSkill.contains("camera"))
+    assertTrue(androidSkill.contains("microphone"))
     assertTrue(androidSkill.contains("Permissions panel"))
     assertTrue(skillCreator.contains("name: flovera-skill-creator"))
     assertTrue(skillCreator.contains("description: Use when the user asks Flovera to create"))
@@ -1259,7 +1261,7 @@ class WorkspaceFileTreeInstrumentedTest {
   fun workspaceCommandRunReportsAndroidPermissionStatus() = runBlocking {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val workspace = WorkspaceManager(context, "workspace-command-android-${System.currentTimeMillis()}")
-    val tool = WorkspaceCommandRunTool(workspace, ToolEventRecorder())
+    val tool = WorkspaceCommandRunTool(workspace, ToolEventRecorder(), networkEnabled = true)
 
     val app = tool.execute(
       WorkspaceCommandRunTool.Args(
@@ -1273,11 +1275,219 @@ class WorkspaceFileTreeInstrumentedTest {
         snapshotBeforeRun = false,
       ),
     )
+    val help = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("android", "help"),
+        snapshotBeforeRun = false,
+      ),
+    )
 
-    assertTrue(app, app.contains("commandProfiles=python,groovy,git,android"))
-    assertTrue(permissions, permissions.contains("permissions:"))
-    assertTrue(permissions, permissions.contains("notifications="))
-    assertTrue(permissions, permissions.contains("battery_optimization="))
+    assertTrue(app, app.contains("\"permissionsPanel\": true"))
+    assertTrue(app, app.contains("\"profiles\""))
+    assertTrue(permissions, permissions.contains("\"permissions\""))
+    assertTrue(permissions, permissions.contains("\"id\": \"notifications\""))
+    assertTrue(permissions, permissions.contains("\"id\": \"battery_optimization\""))
+    listOf(
+      "notification",
+      "camera",
+      "microphone",
+      "location",
+      "contacts",
+      "calendar",
+      "media",
+      "bluetooth",
+      "overlay",
+      "storage",
+      "package",
+      "alarm",
+      "network",
+      "foreground",
+      "intent",
+    ).forEach { profile ->
+      assertTrue("missing profile=$profile\n$help", help.contains("\"$profile\""))
+    }
+    assertTrue(help, help.contains("contacts list|search|create|delete"))
+    assertTrue(help, help.contains("calendar calendars|events|create|delete"))
+    assertTrue(help, help.contains("camera capture"))
+    assertTrue(help, help.contains("microphone record"))
+  }
+
+  @Test
+  fun workspaceCommandRunCallsReadOnlyAndroidSystemApis() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "workspace-command-android-read-${System.currentTimeMillis()}")
+    val tool = WorkspaceCommandRunTool(workspace, ToolEventRecorder(), networkEnabled = true)
+
+    val contacts = tool.execute(
+      WorkspaceCommandRunTool.Args(argv = listOf("android", "contacts", "list", "--limit", "2"), snapshotBeforeRun = false),
+    )
+    val calendars = tool.execute(
+      WorkspaceCommandRunTool.Args(argv = listOf("android", "calendar", "calendars", "--limit", "2"), snapshotBeforeRun = false),
+    )
+    val media = tool.execute(
+      WorkspaceCommandRunTool.Args(argv = listOf("android", "media", "list", "--type", "images", "--limit", "2"), snapshotBeforeRun = false),
+    )
+    val bluetooth = tool.execute(
+      WorkspaceCommandRunTool.Args(argv = listOf("android", "bluetooth", "paired"), snapshotBeforeRun = false),
+    )
+    val storage = tool.execute(
+      WorkspaceCommandRunTool.Args(argv = listOf("android", "storage", "list", "--path", ".", "--limit", "2"), snapshotBeforeRun = false),
+    )
+    val foreground = tool.execute(
+      WorkspaceCommandRunTool.Args(argv = listOf("android", "foreground", "status"), snapshotBeforeRun = false),
+    )
+
+    assertTrue(contacts, contacts.contains("\"contacts\""))
+    assertTrue(calendars, calendars.contains("\"calendars\""))
+    assertTrue(media, media.contains("\"items\""))
+    assertTrue(bluetooth, bluetooth.contains("\"devices\""))
+    assertTrue(storage, storage.contains("\"items\""))
+    assertTrue(foreground, foreground.contains("\"running\""))
+  }
+
+  @Test
+  fun workspaceCommandRunPostsAndCancelsAndroidNotificationAndAlarm() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "workspace-command-android-alert-${System.currentTimeMillis()}")
+    val tool = WorkspaceCommandRunTool(workspace, ToolEventRecorder())
+    val notificationId = 7821
+    val alarmId = 7822
+    val atMs = System.currentTimeMillis() + 10 * 60 * 1000L
+
+    val posted = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("android", "notification", "post", "--title", "Flovera API test", "--body", "notification path", "--id", notificationId.toString()),
+        snapshotBeforeRun = false,
+      ),
+    )
+    val cancelled = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("android", "notification", "cancel", "--id", notificationId.toString()),
+        snapshotBeforeRun = false,
+      ),
+    )
+    val scheduled = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf(
+          "android", "alarm", "schedule",
+          "--id", alarmId.toString(),
+          "--at-ms", atMs.toString(),
+          "--title", "Flovera API test",
+          "--body", "alarm path",
+        ),
+        snapshotBeforeRun = false,
+      ),
+    )
+    val alarmCancelled = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("android", "alarm", "cancel", "--id", alarmId.toString()),
+        snapshotBeforeRun = false,
+      ),
+    )
+
+    assertTrue(posted, posted.contains("\"posted\":true"))
+    assertTrue(cancelled, cancelled.contains("\"cancelled\":true"))
+    assertTrue(scheduled, scheduled.contains("\"scheduled\": true"))
+    assertTrue(alarmCancelled, alarmCancelled.contains("\"cancelled\":true"))
+  }
+
+  @Test
+  fun workspaceCommandRunCapturesCameraAndMicrophoneIntoWorkspace() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "workspace-command-android-capture-${System.currentTimeMillis()}")
+    val tool = WorkspaceCommandRunTool(workspace, ToolEventRecorder())
+
+    val camera = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("android", "camera", "capture", "--output", "captures/test.jpg", "--lens", "back"),
+        timeoutMs = 30_000,
+        snapshotBeforeRun = false,
+      ),
+    )
+    val microphone = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("android", "microphone", "record", "--output", "recordings/test.m4a", "--duration-ms", "500"),
+        timeoutMs = 10_000,
+        snapshotBeforeRun = false,
+      ),
+    )
+
+    assertTrue(camera, camera.contains("captures\\/test.jpg"))
+    assertTrue(File(workspace.root, "captures/test.jpg").length() > 0)
+    assertTrue(microphone, microphone.contains("recordings\\/test.m4a"))
+    assertTrue(File(workspace.root, "recordings/test.m4a").length() > 0)
+  }
+
+  @Test
+  fun workspaceCommandRunCallsLocationOverlayForegroundAndNetworkApis() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "workspace-command-android-native-${System.currentTimeMillis()}")
+    val tool = WorkspaceCommandRunTool(workspace, ToolEventRecorder(), networkEnabled = true)
+    val server = ServerSocket(0)
+    val serverThread = thread(start = true) {
+      server.use { socket ->
+        socket.accept().use { client ->
+          client.getInputStream().bufferedReader().readLine()
+          while (client.getInputStream().available() > 0) client.getInputStream().read()
+          val body = """{"native":"ok"}"""
+          client.getOutputStream().bufferedWriter().use { writer ->
+            writer.write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${body.toByteArray().size}\r\nConnection: close\r\n\r\n$body")
+          }
+        }
+      }
+    }
+
+    val location = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("android", "location", "current", "--timeout-ms", "3000"),
+        timeoutMs = 5_000,
+        snapshotBeforeRun = false,
+      ),
+    )
+    val overlay = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("android", "overlay", "show", "--text", "Flovera API test", "--duration-ms", "500"),
+        snapshotBeforeRun = false,
+      ),
+    )
+    val overlayHidden = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("android", "overlay", "hide"),
+        snapshotBeforeRun = false,
+      ),
+    )
+    val foregroundStarted = tool.execute(
+      WorkspaceCommandRunTool.Args(argv = listOf("android", "foreground", "start"), snapshotBeforeRun = false),
+    )
+    delay(200)
+    val foregroundStatus = tool.execute(
+      WorkspaceCommandRunTool.Args(argv = listOf("android", "foreground", "status"), snapshotBeforeRun = false),
+    )
+    val foregroundStopped = tool.execute(
+      WorkspaceCommandRunTool.Args(argv = listOf("android", "foreground", "stop"), snapshotBeforeRun = false),
+    )
+    val network = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("android", "network", "get", "--url", "http://127.0.0.1:${server.localPort}/health"),
+        snapshotBeforeRun = false,
+      ),
+    )
+    serverThread.join(3_000)
+
+    assertTrue(
+      location,
+      location.contains("\"latitude\"") ||
+        location.contains("location timed out") ||
+        location.contains("location unavailable") ||
+        location.contains("no enabled location provider"),
+    )
+    assertTrue(overlay, overlay.contains("\"shown\":true"))
+    assertTrue(overlayHidden, overlayHidden.contains("\"hidden\":true"))
+    assertTrue(foregroundStarted, foregroundStarted.contains("\"started\":true"))
+    assertTrue(foregroundStatus, foregroundStatus.contains("\"running\": true") || foregroundStatus.contains("\"running\":true"))
+    assertTrue(foregroundStopped, foregroundStopped.contains("\"stopped\":true"))
+    assertTrue(network, network.contains("\"statusCode\": 200"))
+    assertTrue(network, network.contains("\\\"native\\\":\\\"ok\\\""))
   }
 
   @Test
@@ -2116,9 +2326,25 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"commit\""))
     assertTrue(capabilities.contains("\"gitCommandRemoteOperations\": false"))
     assertTrue(capabilities.contains("\"androidCommandRuntime\": true"))
-    assertTrue(capabilities.contains("\"androidCommandRuntimeMode\": \"app_owned_permission_status_and_system_intents\""))
+    assertTrue(capabilities.contains("\"androidCommandRuntimeMode\": \"app_owned_permission_gated_system_apis\""))
+    assertTrue(capabilities.contains("\"androidSystemApiProfiles\""))
+    assertTrue(capabilities.contains("\"notification\""))
+    assertTrue(capabilities.contains("\"camera\""))
+    assertTrue(capabilities.contains("\"microphone\""))
+    assertTrue(capabilities.contains("\"contacts\""))
+    assertTrue(capabilities.contains("\"calendar\""))
+    assertTrue(capabilities.contains("\"media\""))
+    assertTrue(capabilities.contains("\"bluetooth\""))
+    assertTrue(capabilities.contains("\"storage\""))
+    assertTrue(capabilities.contains("\"package\""))
+    assertTrue(capabilities.contains("\"alarm\""))
+    assertTrue(capabilities.contains("\"foreground\""))
+    assertTrue(capabilities.contains("\"androidPermissionChecksBeforeAction\": true"))
+    assertTrue(capabilities.contains("\"androidBinaryOutputsToWorkspace\": true"))
     assertTrue(capabilities.contains("\"androidPermissionConsole\": true"))
-    assertTrue(capabilities.contains("\"androidPermissionGrantEntry\": \"main_menu_permissions_panel\""))
+    assertTrue(capabilities.contains("\"androidPermissionGrantEntry\": \"main_menu_permissions_panel_grant_all\""))
+    assertTrue(capabilities.contains("\"androidRuntimePermissionBatchRequest\": true"))
+    assertTrue(capabilities.contains("\"androidSpecialPermissionSequentialFlow\": true"))
     assertTrue(capabilities.contains("\"androidPermissionIds\""))
     assertTrue(capabilities.contains("\"overlay\""))
     assertTrue(capabilities.contains("\"groovyCommandRuntime\": true"))

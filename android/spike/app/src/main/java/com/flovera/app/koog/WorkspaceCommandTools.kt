@@ -22,6 +22,7 @@ import com.android.tools.r8.D8
 import com.android.tools.r8.D8Command
 import com.android.tools.r8.OutputMode
 import com.flovera.app.platform.AndroidPermissionCapabilities
+import com.flovera.app.platform.AndroidSystemCommandApi
 import com.flovera.app.workspace.WorkspaceManager
 import dalvik.system.DexClassLoader
 import groovy.lang.Binding
@@ -85,7 +86,7 @@ class WorkspaceCommandRunTool(
 ) : SimpleTool<WorkspaceCommandRunTool.Args>(
   argsType = typeToken<Args>(),
   name = "workspace_command_run",
-  description = "Primary bounded command-style execution surface for Flovera-owned workspace runtimes. Use this for normal Python execution, generated scripts, project commands, local Git/JGit work, Android permission/status commands, and groovy scripts when JVM access is useful. This is not Android shell access: supported command profiles are python/python3, groovy, git, and android, with cwd, timeout, output limits, snapshots, audit records, and workspace boundaries.",
+  description = "Primary bounded command-style execution surface for Flovera-owned workspace runtimes. Use this for normal Python execution, generated scripts, project commands, local Git/JGit work, Android system APIs, and groovy scripts when JVM access is useful. This is not Android shell access: supported command profiles are python/python3, groovy, git, and android. The android profile provides permission-gated notifications, camera capture, microphone recording, location, contacts, calendar, media, Bluetooth, overlay, external storage, APK installer, exact alarms, network, foreground service, and system intents.",
 ) {
   @Serializable
   data class Args(
@@ -135,7 +136,7 @@ class WorkspaceCommandGateway(
     PythonCommandAdapter(workspace, networkEnabled, secretEnvironment),
     GroovyCommandAdapter(workspace, networkEnabled, secretEnvironment),
     GitCommandAdapter(workspace),
-    AndroidCommandAdapter(workspace.applicationContext),
+    AndroidCommandAdapter(workspace, networkEnabled),
   )
 
   fun run(args: WorkspaceCommandRunTool.Args): String {
@@ -703,14 +704,20 @@ private class GitCommandAdapter(
 }
 
 private class AndroidCommandAdapter(
-  private val context: Context,
+  private val workspace: WorkspaceManager,
+  private val networkEnabled: Boolean,
 ) : WorkspaceCommandAdapter {
   override val commandNames: Set<String> = setOf("android")
 
   override fun classify(argv: List<String>): WorkspaceCommandRisk {
     val profile = argv.getOrNull(1)?.lowercase().orEmpty()
     return when (profile) {
-      "app", "permission", "intent" -> WorkspaceCommandRisk("android.app", listOf("android.app"))
+      "app", "permission", "intent", "notification", "location", "contacts", "calendar", "media",
+      "bluetooth", "overlay", "storage", "package", "alarm", "network", "foreground", "camera",
+      "microphone", "help", "capabilities" -> WorkspaceCommandRisk(
+        "android.$profile",
+        listOf("android.app", "android.$profile"),
+      )
       "" -> WorkspaceCommandRisk("android.invalid", listOf("android.app"))
       else -> WorkspaceCommandRisk("android.unsupported", listOf("android:$profile"))
     }
@@ -719,67 +726,21 @@ private class AndroidCommandAdapter(
   override fun execute(argv: List<String>, args: WorkspaceCommandRunTool.Args): PythonRunResult {
     val startedAt = System.currentTimeMillis()
     val maxOutputChars = args.maxOutputChars.coerceIn(FloveraPythonRuntime.MIN_OUTPUT_CHARS, FloveraPythonRuntime.MAX_OUTPUT_CHARS)
-    val output = when (argv.getOrNull(1)?.lowercase()) {
-      "app" -> appCommand(argv.drop(2))
-      "permission" -> permissionCommand(argv.drop(2))
-      "intent" -> intentCommand(argv.drop(2))
-      else -> "android command requires app, permission, or intent profile.\n"
-    }
-    val status = if (output.startsWith("error=")) "error" else "ok"
-    val bounded = boundedText(output, maxOutputChars)
+    val result = AndroidSystemCommandApi(
+      context = workspace.applicationContext,
+      workspace = workspace,
+      networkEnabled = networkEnabled,
+    ).execute(argv.drop(1))
+    val bounded = boundedText(result.output, maxOutputChars)
     return PythonRunResult(
-      status = status,
-      exitCode = if (status == "ok") 0 else 1,
-      stdout = if (status == "ok") bounded.text else "",
-      stderr = if (status == "ok") "" else bounded.text,
-      stdoutTruncated = status == "ok" && bounded.truncated,
-      stderrTruncated = status != "ok" && bounded.truncated,
+      status = result.status,
+      exitCode = result.exitCode,
+      stdout = if (result.status == "ok") bounded.text else "",
+      stderr = if (result.status == "ok") "" else bounded.text,
+      stdoutTruncated = result.status == "ok" && bounded.truncated,
+      stderrTruncated = result.status != "ok" && bounded.truncated,
       elapsedMs = (System.currentTimeMillis() - startedAt).coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
     )
-  }
-
-  private fun appCommand(args: List<String>): String {
-    return when (args.firstOrNull()?.lowercase()) {
-      "info" -> buildString {
-        appendLine("package=${context.packageName}")
-        appendLine("sdk=${Build.VERSION.SDK_INT}")
-        appendLine("permissionsPanel=available")
-        appendLine("commandProfiles=python,groovy,git,android")
-      }
-      else -> "error=unsupported android app command. Supported: android app info\n"
-    }
-  }
-
-  private fun permissionCommand(args: List<String>): String {
-    return when (args.firstOrNull()?.lowercase()) {
-      "status", null -> permissionStatus()
-      "open" -> {
-        val id = args.getOrNull(1).orEmpty().ifBlank { "app_details" }
-        val opened = AndroidPermissionCapabilities.openPermission(context, id)
-        "opened=$opened\npermission=$id\n"
-      }
-      else -> "error=unsupported android permission command. Supported: android permission status, android permission open <id>\n"
-    }
-  }
-
-  private fun intentCommand(args: List<String>): String {
-    return when (args.firstOrNull()?.lowercase()) {
-      "open" -> {
-        val id = args.getOrNull(1).orEmpty().ifBlank { "app_details" }
-        val opened = AndroidPermissionCapabilities.openPermission(context, id)
-        "opened=$opened\nintent=$id\n"
-      }
-      else -> "error=unsupported android intent command. Supported: android intent open <id>\n"
-    }
-  }
-
-  private fun permissionStatus(): String {
-    return buildString {
-      appendLine("permissions:")
-      AndroidPermissionCapabilities.status(context).forEach { status ->
-        appendLine("${status.capability.id}=${status.state}")
-      }
-    }
   }
 }
 
