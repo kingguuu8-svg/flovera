@@ -1184,13 +1184,16 @@ now exposes permission-gated Android system APIs:
 - intents: permission pages, URLs/maps, share sheets, and dialer.
 - desktop operation: an Accessibility-backed `android ui` profile can inspect
   the active semantic tree, filter inspection by text/description/resource-id,
-  expand a subtree by node id, capture a workspace screenshot, launch apps,
+  expand a subtree by node id, capture a workspace screenshot, launch apps
+  with optional explicit activity fallback,
   click/set text by text/description/resource-id/node-id, tap/swipe/use global
-  actions, swipe until target text appears, and wait for expected text or
-  package changes. Mutating actions require stable action IDs, persist the last
-  confirmed action, update app-owned runtime feedback so the user can see that
-  Flovera is operating the phone, and verify the resulting semantic state
-  before success. Login, CAPTCHA, biometric, payment, protected-dialog,
+  actions, accept start/end or from/to swipe coordinate names, swipe until
+  target text appears, and wait for expected text or package changes. Mutating
+  actions require stable action IDs, persist the last confirmed action, update
+  app-owned runtime feedback so the user can see that Flovera is operating the
+  phone, keep terminal feedback visible briefly, use stronger completion
+  notification/vibration when available, and verify the resulting semantic
+  state before success. Login, CAPTCHA, biometric, payment, protected-dialog,
   lock-screen, and unverified states become explicit user-intervention
   checkpoints rather than guessed continuation.
 

@@ -3,6 +3,7 @@ package com.flovera.app.platform
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.app.KeyguardManager
+import android.content.ComponentName
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Path
@@ -257,8 +258,15 @@ class FloveraAccessibilityService : AccessibilityService() {
     return performGlobalAction(globalAction)
   }
 
-  fun launchApp(packageName: String): Boolean {
-    val launchIntent = packageManager.getLaunchIntentForPackage(packageName) ?: return false
+  fun launchApp(packageName: String, activityName: String): Boolean {
+    val explicitIntent = if (activityName.isNotBlank()) {
+      Intent(Intent.ACTION_MAIN)
+        .addCategory(Intent.CATEGORY_LAUNCHER)
+        .setComponent(ComponentName(packageName, activityName))
+    } else {
+      null
+    }
+    val launchIntent = explicitIntent ?: packageManager.getLaunchIntentForPackage(packageName) ?: return false
     startActivity(launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     return true
   }

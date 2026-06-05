@@ -229,6 +229,9 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(desktopSkill.contains("name: flovera-desktop-operation"))
     assertTrue(desktopSkill.contains("click --text"))
     assertTrue(desktopSkill.contains("swipe --until-text"))
+    assertTrue(desktopSkill.contains("--from-x/--from-y/--to-x/--to-y"))
+    assertTrue(desktopSkill.contains("launch --package [--activity <activity-class>]"))
+    assertTrue(desktopSkill.contains("stronger notification/vibration"))
     assertTrue(desktopSkill.contains("inspect --filter-text"))
     assertTrue(desktopSkill.contains("--action-id"))
     assertTrue(desktopSkill.contains("Never replay earlier actions blindly"))
@@ -1676,6 +1679,19 @@ class WorkspaceFileTreeInstrumentedTest {
         snapshotBeforeRun = false,
       ),
     )
+    val launched = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf(
+          "android", "ui", "launch",
+          "--package", "com.flovera.app.test",
+          "--activity", "com.flovera.app.DesktopAutomationFixtureActivity",
+          "--action-id", "fixture-explicit-launch",
+          "--expect-package", "com.flovera.app.test",
+          "--verify-timeout-ms", "10000",
+        ),
+        snapshotBeforeRun = false,
+      ),
+    )
     val available = tool.execute(
       WorkspaceCommandRunTool.Args(
         argv = listOf(
@@ -1686,6 +1702,8 @@ class WorkspaceFileTreeInstrumentedTest {
         snapshotBeforeRun = false,
       ),
     )
+    assertTrue(launched, launched.contains("\"launched\": true"))
+    assertTrue(launched, launched.contains("\"activity\": \"com.flovera.app.DesktopAutomationFixtureActivity\""))
     assertTrue(available, available.contains("\"matched\": true"))
 
     val filteredInspection = tool.execute(
@@ -1726,10 +1744,10 @@ class WorkspaceFileTreeInstrumentedTest {
       WorkspaceCommandRunTool.Args(
         argv = listOf(
           "android", "ui", "swipe",
-          "--start-x", "540",
-          "--start-y", "1900",
-          "--end-x", "540",
-          "--end-y", "650",
+          "--from-x", "540",
+          "--from-y", "1900",
+          "--to-x", "540",
+          "--to-y", "650",
           "--until-text", "Lower target",
           "--max-swipes", "6",
           "--action-id", "fixture-scroll-lower-target",
@@ -1750,6 +1768,7 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(lowerTarget, lowerTarget.contains("\"swipes\""))
     assertTrue(lowerTarget, lowerTarget.contains("\"feedback\""))
     assertTrue(completed, completed.contains("\"status\": \"completed\""))
+    assertTrue(completed, completed.contains("\"durationMs\": 8000"))
   }
 
   private fun recoverableSettingsLaunchArgs(): WorkspaceCommandRunTool.Args {
@@ -2626,8 +2645,11 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"androidDesktopActionIdempotency\": true"))
     assertTrue(capabilities.contains("\"androidDesktopPostActionVerification\": true"))
     assertTrue(capabilities.contains("\"androidDesktopRuntimeFeedback\": true"))
+    assertTrue(capabilities.contains("\"androidDesktopCompletionStrongFeedback\": true"))
     assertTrue(capabilities.contains("\"androidDesktopSemanticClick\": true"))
     assertTrue(capabilities.contains("\"androidDesktopSwipeUntilText\": true"))
+    assertTrue(capabilities.contains("\"androidDesktopSwipeCoordinateAliases\": true"))
+    assertTrue(capabilities.contains("\"androidDesktopLaunchActivityFallback\": true"))
     assertTrue(capabilities.contains("\"androidDesktopInspectFilters\": true"))
     assertTrue(capabilities.contains("\"androidDesktopAccessibilityDiagnosis\": true"))
     assertTrue(capabilities.contains("\"androidDesktopScreenshotVisionInput\": false"))

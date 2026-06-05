@@ -31,6 +31,8 @@ import android.os.CancellationSignal
 import android.os.Environment
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.provider.CalendarContract
 import android.provider.ContactsContract
 import android.provider.MediaStore
@@ -223,9 +225,15 @@ class AndroidSystemCommandApi(
       "task" -> desktopTask(args)
       "launch" -> desktopAction(args, "launch") {
         val packageName = args.required("package")
-        desktopFeedback("正在操作手机", "打开应用：$packageName", ongoing = true)
-        require(desktopAutomation.launch(packageName)) { "app has no launchable activity or launch was rejected: $packageName" }
-        JSONObject().put("launched", true).put("package", packageName)
+        val activityName = args.string("activity")
+        desktopFeedback("正在操作手机", "打开应用：${activityName.ifBlank { packageName }}", ongoing = true)
+        require(desktopAutomation.launch(packageName, activityName)) {
+          "app has no launchable activity or launch was rejected: $packageName"
+        }
+        JSONObject()
+          .put("launched", true)
+          .put("package", packageName)
+          .put("activity", activityName)
       }
       "click" -> desktopAction(args, "click") {
         desktopFeedback("正在操作手机", "点击：${desktopSelectorLabel(args)}", ongoing = true)
@@ -266,10 +274,10 @@ class AndroidSystemCommandApi(
         if (untilText.isNotBlank()) {
           val result = desktopAutomation.swipeUntilText(
             text = untilText,
-            startX = args.requiredInt("start-x"),
-            startY = args.requiredInt("start-y"),
-            endX = args.requiredInt("end-x"),
-            endY = args.requiredInt("end-y"),
+            startX = args.requiredIntAny("start-x", "from-x"),
+            startY = args.requiredIntAny("start-y", "from-y"),
+            endX = args.requiredIntAny("end-x", "to-x"),
+            endY = args.requiredIntAny("end-y", "to-y"),
             durationMs = args.long("duration-ms", 500L),
             timeoutMs = args.long("gesture-timeout-ms", 5_000L),
             maxSwipes = args.int("max-swipes", 5),
@@ -278,10 +286,10 @@ class AndroidSystemCommandApi(
           result
         } else {
           val completed = desktopAutomation.swipe(
-            startX = args.requiredInt("start-x"),
-            startY = args.requiredInt("start-y"),
-            endX = args.requiredInt("end-x"),
-            endY = args.requiredInt("end-y"),
+            startX = args.requiredIntAny("start-x", "from-x"),
+            startY = args.requiredIntAny("start-y", "from-y"),
+            endX = args.requiredIntAny("end-x", "to-x"),
+            endY = args.requiredIntAny("end-y", "to-y"),
             durationMs = args.long("duration-ms", 500L),
             timeoutMs = args.long("gesture-timeout-ms", 5_000L),
           )
@@ -319,11 +327,9 @@ class AndroidSystemCommandApi(
       }
       "complete" -> DesktopAutomationStore.finish(appContext, "completed", args.string("summary")).also {
         desktopFeedback("手机操作已完成", args.string("summary").ifBlank { "任务完成" }, ongoing = false)
-        AndroidOverlayController.hide(appContext, DESKTOP_FEEDBACK_OVERLAY_ID)
       }
       "cancel" -> DesktopAutomationStore.finish(appContext, "cancelled", args.string("summary")).also {
         desktopFeedback("手机操作已取消", args.string("summary").ifBlank { "任务取消" }, ongoing = false)
-        AndroidOverlayController.hide(appContext, DESKTOP_FEEDBACK_OVERLAY_ID)
       }
       else -> return fail("supported: android ui task status|start|intervention|resume|complete|cancel")
     }
@@ -423,31 +429,36 @@ class AndroidSystemCommandApi(
           appContext,
           DESKTOP_FEEDBACK_OVERLAY_ID,
           "$title\n$body",
-          if (ongoing) 300_000L else 2_500L,
+          if (ongoing) DESKTOP_FEEDBACK_ONGOING_MS else DESKTOP_FEEDBACK_DONE_MS,
         )
       }.onSuccess { overlayShown = true }
     }
     if (permissionState("notifications") == "granted") {
       runCatching {
         ensureNotificationChannel()
-        val notification = NotificationCompat.Builder(appContext, SYSTEM_CHANNEL_ID)
+        if (!ongoing) ensureDesktopCompletionChannel()
+        val notification = NotificationCompat.Builder(appContext, if (ongoing) SYSTEM_CHANNEL_ID else DESKTOP_COMPLETION_CHANNEL_ID)
           .setSmallIcon(R.mipmap.ic_launcher)
           .setContentTitle(title)
           .setContentText(body)
           .setStyle(NotificationCompat.BigTextStyle().bigText(body))
           .setOngoing(ongoing)
           .setAutoCancel(!ongoing)
-          .setPriority(NotificationCompat.PRIORITY_LOW)
+          .setPriority(if (ongoing) NotificationCompat.PRIORITY_LOW else NotificationCompat.PRIORITY_HIGH)
+          .setDefaults(if (ongoing) 0 else NotificationCompat.DEFAULT_VIBRATE)
+          .setVibrate(if (ongoing) null else DESKTOP_COMPLETION_VIBRATION)
           .build()
         NotificationManagerCompat.from(appContext).notify(DESKTOP_FEEDBACK_NOTIFICATION_ID, notification)
       }.onSuccess { notificationPosted = true }
     }
+    if (!ongoing) vibrateDesktopCompletion()
     return JSONObject()
       .put("title", title)
       .put("detail", body)
       .put("ongoing", ongoing)
       .put("overlayShown", overlayShown)
       .put("notificationPosted", notificationPosted)
+      .put("durationMs", if (ongoing) DESKTOP_FEEDBACK_ONGOING_MS else DESKTOP_FEEDBACK_DONE_MS)
       .also { lastDesktopFeedback = it }
   }
 
@@ -1305,6 +1316,26 @@ class AndroidSystemCommandApi(
     )
   }
 
+  private fun ensureDesktopCompletionChannel() {
+    val manager = appContext.getSystemService(NotificationManager::class.java)
+    val channel = NotificationChannel(
+      DESKTOP_COMPLETION_CHANNEL_ID,
+      "Flovera desktop completion",
+      NotificationManager.IMPORTANCE_HIGH,
+    ).apply {
+      enableVibration(true)
+      vibrationPattern = DESKTOP_COMPLETION_VIBRATION
+    }
+    manager.createNotificationChannel(channel)
+  }
+
+  private fun vibrateDesktopCompletion() {
+    runCatching {
+      appContext.getSystemService(Vibrator::class.java)
+        .vibrate(VibrationEffect.createWaveform(DESKTOP_COMPLETION_VIBRATION, -1))
+    }
+  }
+
   private fun ok(output: String): AndroidSystemCommandResult = AndroidSystemCommandResult("ok", output)
 
   private fun fail(message: String): AndroidSystemCommandResult = AndroidSystemCommandResult("error", "error=$message\n")
@@ -1356,10 +1387,14 @@ class AndroidSystemCommandApi(
       "ui",
     )
     private const val SYSTEM_CHANNEL_ID = "flovera_system_actions"
+    private const val DESKTOP_COMPLETION_CHANNEL_ID = "flovera_desktop_completion"
     private const val DEFAULT_NOTIFICATION_ID = 7201
     private const val DESKTOP_FEEDBACK_NOTIFICATION_ID = 7310
     private const val DESKTOP_FEEDBACK_OVERLAY_ID = "desktop-operation"
+    private const val DESKTOP_FEEDBACK_ONGOING_MS = 300_000L
+    private const val DESKTOP_FEEDBACK_DONE_MS = 8_000L
     private const val DEFAULT_ALARM_ID = 7301
+    private val DESKTOP_COMPLETION_VIBRATION = longArrayOf(0, 120, 80, 180)
     private const val DAY_MS = 86_400_000L
     private const val MAX_IMPORTED_MEDIA_BYTES = 50 * 1024 * 1024
     private const val CAMERA_TIMEOUT_MS = 20_000L
@@ -1422,7 +1457,7 @@ private object AndroidOverlayController {
 
   fun show(context: Context, id: String, text: String, durationMs: Long) {
     handler.post {
-      hide(context, id)
+      hideOnMain(context, id)
       val manager = context.getSystemService(WindowManager::class.java)
       val view = TextView(context).apply {
         this.text = text
@@ -1448,10 +1483,12 @@ private object AndroidOverlayController {
   }
 
   fun hide(context: Context, id: String) {
-    handler.post {
-      val view = views.remove(id) ?: return@post
-      runCatching { context.getSystemService(WindowManager::class.java).removeView(view) }
-    }
+    handler.post { hideOnMain(context, id) }
+  }
+
+  private fun hideOnMain(context: Context, id: String) {
+    val view = views.remove(id) ?: return
+    runCatching { context.getSystemService(WindowManager::class.java).removeView(view) }
   }
 }
 
@@ -1474,6 +1511,14 @@ private class AndroidCommandArgs(private val values: List<String>) {
   fun requiredLong(name: String): Long = required(name).toLongOrNull() ?: error("--$name must be an integer")
 
   fun requiredInt(name: String): Int = required(name).toIntOrNull() ?: error("--$name must be an integer")
+
+  fun requiredIntAny(vararg names: String): Int {
+    names.forEach { name ->
+      val value = string(name)
+      if (value.isNotBlank()) return value.toIntOrNull() ?: error("--$name must be an integer")
+    }
+    error("--${names.first()} is required")
+  }
 
   fun has(name: String): Boolean = optionIndex(name) >= 0
 

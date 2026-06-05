@@ -71,7 +71,13 @@ class DesktopAutomationProvider : ContentProvider() {
           maxSwipes = input.getInt("maxSwipes", 5),
         )
         METHOD_GLOBAL -> JSONObject().put("completed", service.global(input.getString("action").orEmpty()))
-        METHOD_LAUNCH -> JSONObject().put("completed", service.launchApp(input.getString("package").orEmpty()))
+        METHOD_LAUNCH -> JSONObject().put(
+          "completed",
+          service.launchApp(
+            packageName = input.getString("package").orEmpty(),
+            activityName = input.getString("activity").orEmpty(),
+          ),
+        )
         METHOD_WAIT -> service.waitFor(
           text = input.getString("text").orEmpty(),
           packageName = input.getString("package").orEmpty(),
@@ -230,9 +236,12 @@ class DesktopAutomationClient(context: Context) {
     Bundle().apply { putString("action", action) },
   ).optBoolean("completed")
 
-  fun launch(packageName: String): Boolean = call(
+  fun launch(packageName: String, activityName: String = ""): Boolean = call(
     DesktopAutomationProvider.METHOD_LAUNCH,
-    Bundle().apply { putString("package", packageName) },
+    Bundle().apply {
+      putString("package", packageName)
+      putString("activity", activityName)
+    },
   ).optBoolean("completed")
 
   fun waitFor(text: String, packageName: String, timeoutMs: Long): JSONObject = call(
