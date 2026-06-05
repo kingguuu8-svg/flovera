@@ -280,16 +280,18 @@ object FloveraSkillRegistry {
         # Flovera Desktop Operation
 
         Required workflow:
-        - Check `["android","ui","status"]`. If Accessibility is unavailable, ask the user to enable Desktop operation accessibility from Flovera Permissions; use `["android","ui","open-settings"]` only to open the Android page.
-        - Start once with `["android","ui","task","start","--goal","<user goal>"]`, or inspect the persisted task and resume it after interruption.
-        - Before every action, call `["android","ui","inspect"]` and select a semantic node by node-id, visible text, or resource-id. Prefer semantic nodes over coordinate taps.
+        - Check `["android","ui","status"]`. If Accessibility is unavailable, use the returned diagnosis, ask the user to enable Desktop operation accessibility from Flovera Permissions, and use `["android","ui","open-settings"]` only to open the Android page.
+        - Start once with `["android","ui","task","start","--goal","<user goal>"]`, or inspect the persisted task and continue it after interruption. Continue means re-identify the current screen first; it does not mean Android is still at the old foreground page.
+        - Prefer semantic actions: `click --text`, `click --description`, `click --resource-id`, `set-text --text/--description/--resource-id`, and `swipe --until-text`. Use `inspect --filter-text`, `inspect --filter-description`, `inspect --filter-resource-id`, or `inspect --node-id <id> --subtree` when full-tree inspection is too large.
+        - Fall back to raw node-id only after inspecting the current screen. Fall back to coordinates only for touch-heavy UI that exposes no usable semantic node.
         - Every mutating action requires a stable unique `--action-id`. Reusing an already confirmed action-id is a no-op, which prevents duplicate actions after retries or process recovery.
         - Provide `--expect-text` or `--expect-package` whenever the expected result is known. Without an explicit expectation Flovera still requires the semantic screen digest to change.
-        - Supported actions include `launch --package`, `click`, `set-text --value`, `tap`, `swipe`, and `global --action back|home|recents|notifications|quick-settings`.
-        - Use `wait --text/--package` and inspect again after every action. Do not infer success from a gesture being accepted.
+        - Supported actions include `launch --package`, `click`, `set-text --value`, `tap`, `swipe`, `swipe --until-text`, and `global --action back|home|recents|notifications|quick-settings`.
+        - Use `wait --text/--package` and post-action `--expect-*` checks. Do not infer success from a gesture being accepted.
+        - Each desktop operation command updates app-owned feedback as "Flovera is operating the phone" plus the current action such as click, input, swipe, or wait. Do not replace this with filler narration; add natural-language progress only when it helps the user understand a decision.
         - `screenshot --output <workspace.png>` captures the current screen for diagnostics. Current provider requests are text-only, so do not claim the model interpreted screenshot pixels unless a future vision adapter explicitly reports that it did.
         - If login, CAPTCHA, biometric confirmation, a protected system dialog, lock screen, payment, or an unverified action blocks progress, run `ui task intervention --reason`. Tell the user exactly what must be done.
-        - After the user resolves the blocker, run `ui task resume`, inspect the current screen, and continue from the last confirmed action-id. Never replay earlier actions blindly.
+        - After the user resolves the blocker, run `ui task resume`, inspect the current screen, and rebuild the scene if needed before continuing from the last confirmed action-id. Never replay earlier actions blindly.
         - Complete with `ui task complete --summary`, or cancel explicitly. Do not leave a finished workflow marked active.
       """.trimIndent()
 

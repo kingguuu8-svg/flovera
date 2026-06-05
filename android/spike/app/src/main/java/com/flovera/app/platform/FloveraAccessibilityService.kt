@@ -77,14 +77,27 @@ class FloveraAccessibilityService : AccessibilityService() {
       .put("latestEventAtMillis", latestEventAtMillis)
   }
 
-  fun inspect(maxNodes: Int): JSONObject {
-    val root = awaitActiveRoot()
+  fun inspect(
+    maxNodes: Int,
+    textFilter: String = "",
+    descriptionFilter: String = "",
+    resourceIdFilter: String = "",
+    nodeId: String = "",
+    subtree: Boolean = false,
+  ): JSONObject {
+    val baseRoot = awaitActiveRoot()
+    val root = if (subtree && nodeId.isNotBlank()) nodeAtPath(baseRoot, nodeId)
+      ?: error("subtree node was not found: $nodeId")
+    else baseRoot
     val nodes = JSONArray()
     val queue = ArrayDeque<NodePath>()
-    queue.add(NodePath(root, "0"))
+    queue.add(NodePath(root, if (subtree && nodeId.isNotBlank()) nodeId else "0"))
     while (queue.isNotEmpty() && nodes.length() < maxNodes) {
       val current = queue.removeFirst()
-      nodes.put(nodeJson(current.node, current.path))
+      val currentJson = nodeJson(current.node, current.path)
+      if (currentJson.matchesFilters(textFilter, descriptionFilter, resourceIdFilter)) {
+        nodes.put(currentJson)
+      }
       for (index in 0 until current.node.childCount) {
         current.node.getChild(index)?.let { child ->
           queue.add(NodePath(child, "${current.path}.$index"))
@@ -97,6 +110,10 @@ class FloveraAccessibilityService : AccessibilityService() {
       .put("keyguardLocked", keyguardLocked())
       .put("nodeCount", nodes.length())
       .put("truncated", queue.isNotEmpty())
+      .put("filterText", textFilter)
+      .put("filterDescription", descriptionFilter)
+      .put("filterResourceId", resourceIdFilter)
+      .put("subtreeRoot", if (subtree) nodeId else "")
       .put("screenDigest", screenDigest(nodes))
       .put("nodes", nodes)
   }
@@ -145,8 +162,8 @@ class FloveraAccessibilityService : AccessibilityService() {
     }
   }
 
-  fun click(nodeId: String, text: String, resourceId: String): Boolean {
-    val node = findNode(nodeId, text, resourceId) ?: return false
+  fun click(nodeId: String, text: String, description: String, resourceId: String): Boolean {
+    val node = findNode(nodeId, text, description, resourceId) ?: return false
     var target: AccessibilityNodeInfo? = node
     while (target != null) {
       if (target.isClickable && target.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
@@ -157,8 +174,8 @@ class FloveraAccessibilityService : AccessibilityService() {
     return tap(bounds.centerX(), bounds.centerY(), DEFAULT_GESTURE_TIMEOUT_MS)
   }
 
-  fun setText(nodeId: String, textMatch: String, resourceId: String, value: String): Boolean {
-    val node = findNode(nodeId, textMatch, resourceId)
+  fun setText(nodeId: String, textMatch: String, description: String, resourceId: String, value: String): Boolean {
+    val node = findNode(nodeId, textMatch, description, resourceId)
       ?: activeApplicationRoot()?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
       ?: return false
     if (node.isPassword) return false
@@ -184,6 +201,48 @@ class FloveraAccessibilityService : AccessibilityService() {
         .build(),
       timeoutMs,
     )
+  }
+
+  fun swipeUntilText(
+    text: String,
+    startX: Int,
+    startY: Int,
+    endX: Int,
+    endY: Int,
+    durationMs: Long,
+    timeoutMs: Long,
+    maxSwipes: Int,
+  ): JSONObject {
+    require(text.isNotBlank()) { "swipe-until-text requires non-empty text" }
+    var lastDigest = ""
+    repeat(maxSwipes.coerceIn(1, 20)) { index ->
+      val before = runCatching { inspect(MAX_WAIT_INSPECTION_NODES) }.getOrNull()
+      if (before?.optJSONArray("nodes").containsText(text)) {
+        return JSONObject()
+          .put("matched", true)
+          .put("text", text)
+          .put("swipes", index)
+          .put("package", before?.optString("package").orEmpty())
+          .put("screenDigest", before?.optString("screenDigest").orEmpty())
+      }
+      require(swipe(startX, startY, endX, endY, durationMs, timeoutMs)) { "swipe gesture was rejected or cancelled" }
+      Thread.sleep(WAIT_POLL_MS)
+      val after = runCatching { inspect(MAX_WAIT_INSPECTION_NODES) }.getOrNull()
+      lastDigest = after?.optString("screenDigest").orEmpty()
+      if (after?.optJSONArray("nodes").containsText(text)) {
+        return JSONObject()
+          .put("matched", true)
+          .put("text", text)
+          .put("swipes", index + 1)
+          .put("package", after?.optString("package").orEmpty())
+          .put("screenDigest", lastDigest)
+      }
+    }
+    return JSONObject()
+      .put("matched", false)
+      .put("text", text)
+      .put("swipes", maxSwipes.coerceIn(1, 20))
+      .put("screenDigest", lastDigest)
   }
 
   fun global(action: String): Boolean {
@@ -276,7 +335,7 @@ class FloveraAccessibilityService : AccessibilityService() {
     return completed.get()
   }
 
-  private fun findNode(nodeId: String, text: String, resourceId: String): AccessibilityNodeInfo? {
+  private fun findNode(nodeId: String, text: String, description: String, resourceId: String): AccessibilityNodeInfo? {
     val root = runCatching { awaitActiveRoot() }.getOrNull() ?: return null
     if (nodeId.isNotBlank()) return nodeAtPath(root, nodeId)
     if (resourceId.isNotBlank()) {
@@ -284,10 +343,32 @@ class FloveraAccessibilityService : AccessibilityService() {
     }
     if (text.isNotBlank()) {
       val normalized = text.trim()
-      root.findAccessibilityNodeInfosByText(normalized).firstOrNull { node ->
-        node.safeText().contains(normalized, ignoreCase = true) ||
-          node.contentDescription?.toString().orEmpty().contains(normalized, ignoreCase = true)
+      matchingNode(root) { node -> node.safeText().contains(normalized, ignoreCase = true) }?.let { return it }
+      matchingNode(root) { node ->
+        node.contentDescription?.toString().orEmpty().contains(normalized, ignoreCase = true)
       }?.let { return it }
+    }
+    if (description.isNotBlank()) {
+      val normalized = description.trim()
+      matchingNode(root) { node ->
+        node.contentDescription?.toString().orEmpty().contains(normalized, ignoreCase = true)
+      }?.let { return it }
+    }
+    return null
+  }
+
+  private fun matchingNode(
+    root: AccessibilityNodeInfo,
+    predicate: (AccessibilityNodeInfo) -> Boolean,
+  ): AccessibilityNodeInfo? {
+    val queue = ArrayDeque<AccessibilityNodeInfo>()
+    queue.add(root)
+    while (queue.isNotEmpty()) {
+      val node = queue.removeFirst()
+      if (predicate(node)) return node
+      for (index in 0 until node.childCount) {
+        node.getChild(index)?.let(queue::add)
+      }
     }
     return null
   }
@@ -338,6 +419,12 @@ class FloveraAccessibilityService : AccessibilityService() {
       }
     }
     return false
+  }
+
+  private fun JSONObject.matchesFilters(text: String, description: String, resourceId: String): Boolean {
+    return (text.isBlank() || optString("text").contains(text, ignoreCase = true)) &&
+      (description.isBlank() || optString("description").contains(description, ignoreCase = true)) &&
+      (resourceId.isBlank() || optString("resourceId").contains(resourceId, ignoreCase = true))
   }
 
   private fun screenDigest(nodes: JSONArray): String {

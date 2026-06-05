@@ -1183,13 +1183,16 @@ now exposes permission-gated Android system APIs:
 - foreground service: start, stop, and inspect Flovera's foreground keep-alive;
 - intents: permission pages, URLs/maps, share sheets, and dialer.
 - desktop operation: an Accessibility-backed `android ui` profile can inspect
-  the active semantic tree, capture a workspace screenshot, launch apps,
-  click/set text/tap/swipe/use global actions, and wait for expected text or
+  the active semantic tree, filter inspection by text/description/resource-id,
+  expand a subtree by node id, capture a workspace screenshot, launch apps,
+  click/set text by text/description/resource-id/node-id, tap/swipe/use global
+  actions, swipe until target text appears, and wait for expected text or
   package changes. Mutating actions require stable action IDs, persist the last
-  confirmed action, and verify the resulting semantic state before success.
-  Login, CAPTCHA, biometric, payment, protected-dialog, lock-screen, and
-  unverified states become explicit user-intervention checkpoints rather than
-  guessed continuation.
+  confirmed action, update app-owned runtime feedback so the user can see that
+  Flovera is operating the phone, and verify the resulting semantic state
+  before success. Login, CAPTCHA, biometric, payment, protected-dialog,
+  lock-screen, and unverified states become explicit user-intervention
+  checkpoints rather than guessed continuation.
 
 Desktop operation currently uses semantic accessibility data for agent
 reasoning. Screenshots are captured as workspace PNG diagnostics, but the
@@ -1219,7 +1222,9 @@ still an app-owned adapter, not Android shell access.
   current grant state and what agent/tool features depend on the grant.
 - Accessibility desktop operation is implemented as an explicit, reversible
   permission-gated command surface. It must stop at lock screens and password
-  fields, persist an intervention checkpoint, and require an explicit resume
+  fields, persist an intervention checkpoint, diagnose disconnected/denied
+  Accessibility state without pretending Android allows silent re-enable, and
+  require an explicit continue/resume plus current-screen re-identification
   before any further mutating action.
 
 ### Controlled Python Runtime

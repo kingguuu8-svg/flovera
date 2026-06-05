@@ -17,13 +17,21 @@ class DesktopAutomationProvider : ContentProvider() {
       val input = extras ?: Bundle.EMPTY
       val json = when (method) {
         METHOD_STATUS -> service.statusJson()
-        METHOD_INSPECT -> service.inspect(input.getInt("maxNodes", 300))
+        METHOD_INSPECT -> service.inspect(
+          maxNodes = input.getInt("maxNodes", 300),
+          textFilter = input.getString("textFilter").orEmpty(),
+          descriptionFilter = input.getString("descriptionFilter").orEmpty(),
+          resourceIdFilter = input.getString("resourceIdFilter").orEmpty(),
+          nodeId = input.getString("nodeId").orEmpty(),
+          subtree = input.getBoolean("subtree", false),
+        )
         METHOD_SCREENSHOT -> service.screenshot(java.io.File(input.getString("output").orEmpty()))
         METHOD_CLICK -> JSONObject().put(
           "completed",
           service.click(
             nodeId = input.getString("nodeId").orEmpty(),
             text = input.getString("text").orEmpty(),
+            description = input.getString("description").orEmpty(),
             resourceId = input.getString("resourceId").orEmpty(),
           ),
         )
@@ -32,6 +40,7 @@ class DesktopAutomationProvider : ContentProvider() {
           service.setText(
             nodeId = input.getString("nodeId").orEmpty(),
             textMatch = input.getString("text").orEmpty(),
+            description = input.getString("description").orEmpty(),
             resourceId = input.getString("resourceId").orEmpty(),
             value = input.getString("value").orEmpty(),
           ),
@@ -50,6 +59,16 @@ class DesktopAutomationProvider : ContentProvider() {
             durationMs = input.getLong("durationMs"),
             timeoutMs = input.getLong("timeoutMs"),
           ),
+        )
+        METHOD_SWIPE_UNTIL_TEXT -> service.swipeUntilText(
+          text = input.getString("text").orEmpty(),
+          startX = input.getInt("startX"),
+          startY = input.getInt("startY"),
+          endX = input.getInt("endX"),
+          endY = input.getInt("endY"),
+          durationMs = input.getLong("durationMs"),
+          timeoutMs = input.getLong("timeoutMs"),
+          maxSwipes = input.getInt("maxSwipes", 5),
         )
         METHOD_GLOBAL -> JSONObject().put("completed", service.global(input.getString("action").orEmpty()))
         METHOD_LAUNCH -> JSONObject().put("completed", service.launchApp(input.getString("package").orEmpty()))
@@ -94,6 +113,7 @@ class DesktopAutomationProvider : ContentProvider() {
     const val METHOD_SET_TEXT = "set_text"
     const val METHOD_TAP = "tap"
     const val METHOD_SWIPE = "swipe"
+    const val METHOD_SWIPE_UNTIL_TEXT = "swipe_until_text"
     const val METHOD_GLOBAL = "global"
     const val METHOD_LAUNCH = "launch"
     const val METHOD_WAIT = "wait"
@@ -109,9 +129,23 @@ class DesktopAutomationClient(context: Context) {
 
   fun status(): JSONObject = call(DesktopAutomationProvider.METHOD_STATUS)
 
-  fun inspect(maxNodes: Int): JSONObject = call(
+  fun inspect(
+    maxNodes: Int,
+    textFilter: String = "",
+    descriptionFilter: String = "",
+    resourceIdFilter: String = "",
+    nodeId: String = "",
+    subtree: Boolean = false,
+  ): JSONObject = call(
     DesktopAutomationProvider.METHOD_INSPECT,
-    Bundle().apply { putInt("maxNodes", maxNodes) },
+    Bundle().apply {
+      putInt("maxNodes", maxNodes)
+      putString("textFilter", textFilter)
+      putString("descriptionFilter", descriptionFilter)
+      putString("resourceIdFilter", resourceIdFilter)
+      putString("nodeId", nodeId)
+      putBoolean("subtree", subtree)
+    },
   )
 
   fun screenshot(output: java.io.File): JSONObject = call(
@@ -119,20 +153,22 @@ class DesktopAutomationClient(context: Context) {
     Bundle().apply { putString("output", output.absolutePath) },
   )
 
-  fun click(nodeId: String, text: String, resourceId: String): Boolean = call(
+  fun click(nodeId: String, text: String, description: String, resourceId: String): Boolean = call(
     DesktopAutomationProvider.METHOD_CLICK,
     Bundle().apply {
       putString("nodeId", nodeId)
       putString("text", text)
+      putString("description", description)
       putString("resourceId", resourceId)
     },
   ).optBoolean("completed")
 
-  fun setText(nodeId: String, text: String, resourceId: String, value: String): Boolean = call(
+  fun setText(nodeId: String, text: String, description: String, resourceId: String, value: String): Boolean = call(
     DesktopAutomationProvider.METHOD_SET_TEXT,
     Bundle().apply {
       putString("nodeId", nodeId)
       putString("text", text)
+      putString("description", description)
       putString("resourceId", resourceId)
       putString("value", value)
     },
@@ -165,6 +201,29 @@ class DesktopAutomationClient(context: Context) {
       putLong("timeoutMs", timeoutMs)
     },
   ).optBoolean("completed")
+
+  fun swipeUntilText(
+    text: String,
+    startX: Int,
+    startY: Int,
+    endX: Int,
+    endY: Int,
+    durationMs: Long,
+    timeoutMs: Long,
+    maxSwipes: Int,
+  ): JSONObject = call(
+    DesktopAutomationProvider.METHOD_SWIPE_UNTIL_TEXT,
+    Bundle().apply {
+      putString("text", text)
+      putInt("startX", startX)
+      putInt("startY", startY)
+      putInt("endX", endX)
+      putInt("endY", endY)
+      putLong("durationMs", durationMs)
+      putLong("timeoutMs", timeoutMs)
+      putInt("maxSwipes", maxSwipes)
+    },
+  )
 
   fun global(action: String): Boolean = call(
     DesktopAutomationProvider.METHOD_GLOBAL,

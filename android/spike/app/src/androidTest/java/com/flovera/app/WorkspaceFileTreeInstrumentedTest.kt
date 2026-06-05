@@ -12,7 +12,6 @@ import com.flovera.app.config.AppSettings
 import com.flovera.app.config.WorkspaceSecret
 import com.flovera.app.koog.ToolEventRecorder
 import com.flovera.app.koog.WorkspaceCommandRunTool
-import com.flovera.app.platform.DesktopAutomationClient
 import com.flovera.app.koog.WorkspaceSearchTool
 import com.flovera.app.koog.workspaceToolRegistry
 import com.flovera.app.web.FloveraWebBridge
@@ -228,6 +227,9 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(androidSkill.contains("do not infer that GPS or network positioning failed"))
     assertTrue(androidSkill.contains("Permissions panel"))
     assertTrue(desktopSkill.contains("name: flovera-desktop-operation"))
+    assertTrue(desktopSkill.contains("click --text"))
+    assertTrue(desktopSkill.contains("swipe --until-text"))
+    assertTrue(desktopSkill.contains("inspect --filter-text"))
     assertTrue(desktopSkill.contains("--action-id"))
     assertTrue(desktopSkill.contains("Never replay earlier actions blindly"))
     assertTrue(desktopSkill.contains("provider requests are text-only"))
@@ -1543,6 +1545,21 @@ class WorkspaceFileTreeInstrumentedTest {
   }
 
   @Test
+  fun workspaceCommandRunReportsDesktopAccessibilityDiagnosis() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "workspace-command-desktop-diagnosis-${System.currentTimeMillis()}")
+    val tool = WorkspaceCommandRunTool(workspace, ToolEventRecorder())
+
+    val status = tool.execute(
+      WorkspaceCommandRunTool.Args(argv = listOf("android", "ui", "status"), snapshotBeforeRun = false),
+    )
+
+    assertTrue(status, status.contains("\"diagnosis\""))
+    assertTrue(status, status.contains("\"accessibilityPermission\""))
+    assertTrue(status, status.contains("\"recommendation\""))
+  }
+
+  @Test
   fun workspaceCommandRunOperatesAnotherAppWithVerifiedIdempotentAction() = runBlocking {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val workspace = WorkspaceManager(context, "workspace-command-desktop-live-${System.currentTimeMillis()}")
@@ -1671,19 +1688,17 @@ class WorkspaceFileTreeInstrumentedTest {
     )
     assertTrue(available, available.contains("\"matched\": true"))
 
-    val client = DesktopAutomationClient(context)
-    val firstInspection = client.inspect(200)
-    val inputNodeId = firstInspection.getJSONArray("nodes").let { nodes ->
-      (0 until nodes.length())
-        .map(nodes::getJSONObject)
-        .first { it.optBoolean("editable") }
-        .getString("nodeId")
-    }
+    val filteredInspection = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("android", "ui", "inspect", "--filter-description", "Desktop input", "--max-nodes", "50"),
+        snapshotBeforeRun = false,
+      ),
+    )
     val input = tool.execute(
       WorkspaceCommandRunTool.Args(
         argv = listOf(
           "android", "ui", "set-text",
-          "--node-id", inputNodeId,
+          "--description", "Desktop input",
           "--value", "hello from Flovera",
           "--action-id", "fixture-input",
           "--expect-text", "hello from Flovera",
@@ -1691,22 +1706,33 @@ class WorkspaceFileTreeInstrumentedTest {
         snapshotBeforeRun = false,
       ),
     )
+    assertTrue(filteredInspection, filteredInspection.contains("\"filterDescription\": \"Desktop input\""))
+    assertTrue(filteredInspection, filteredInspection.contains("\"editable\": true"))
     assertTrue(input, input.contains("\"matched\": true"))
+    assertTrue(input, input.contains("\"feedback\""))
 
-    val secondInspection = client.inspect(200)
-    val submitNodeId = secondInspection.getJSONArray("nodes").let { nodes ->
-      (0 until nodes.length())
-        .map(nodes::getJSONObject)
-        .first { it.optString("text") == "Submit" || it.optString("description") == "Submit" }
-        .getString("nodeId")
-    }
     val submitted = tool.execute(
       WorkspaceCommandRunTool.Args(
         argv = listOf(
           "android", "ui", "click",
-          "--node-id", submitNodeId,
+          "--text", "Submit",
           "--action-id", "fixture-submit",
           "--expect-text", "Submitted: hello from Flovera",
+        ),
+        snapshotBeforeRun = false,
+      ),
+    )
+    val lowerTarget = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf(
+          "android", "ui", "swipe",
+          "--start-x", "540",
+          "--start-y", "1900",
+          "--end-x", "540",
+          "--end-y", "650",
+          "--until-text", "Lower target",
+          "--max-swipes", "6",
+          "--action-id", "fixture-scroll-lower-target",
         ),
         snapshotBeforeRun = false,
       ),
@@ -1719,6 +1745,10 @@ class WorkspaceFileTreeInstrumentedTest {
     )
 
     assertTrue(submitted, submitted.contains("\"matched\": true"))
+    assertTrue(submitted, submitted.contains("\"feedback\""))
+    assertTrue(lowerTarget, lowerTarget.contains("\"matched\": true"))
+    assertTrue(lowerTarget, lowerTarget.contains("\"swipes\""))
+    assertTrue(lowerTarget, lowerTarget.contains("\"feedback\""))
     assertTrue(completed, completed.contains("\"status\": \"completed\""))
   }
 
@@ -2595,6 +2625,11 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"androidDesktopTaskPersistence\": true"))
     assertTrue(capabilities.contains("\"androidDesktopActionIdempotency\": true"))
     assertTrue(capabilities.contains("\"androidDesktopPostActionVerification\": true"))
+    assertTrue(capabilities.contains("\"androidDesktopRuntimeFeedback\": true"))
+    assertTrue(capabilities.contains("\"androidDesktopSemanticClick\": true"))
+    assertTrue(capabilities.contains("\"androidDesktopSwipeUntilText\": true"))
+    assertTrue(capabilities.contains("\"androidDesktopInspectFilters\": true"))
+    assertTrue(capabilities.contains("\"androidDesktopAccessibilityDiagnosis\": true"))
     assertTrue(capabilities.contains("\"androidDesktopScreenshotVisionInput\": false"))
     assertTrue(capabilities.contains("\"androidPermissionIds\""))
     assertTrue(capabilities.contains("\"overlay\""))

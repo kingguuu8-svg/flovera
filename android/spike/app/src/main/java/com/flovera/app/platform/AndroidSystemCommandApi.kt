@@ -34,6 +34,7 @@ import android.os.HandlerThread
 import android.provider.CalendarContract
 import android.provider.ContactsContract
 import android.provider.MediaStore
+import android.provider.Settings
 import android.view.Gravity
 import android.view.WindowManager
 import android.widget.TextView
@@ -71,6 +72,7 @@ class AndroidSystemCommandApi(
 ) {
   private val appContext = context.applicationContext
   private val desktopAutomation by lazy { DesktopAutomationClient(appContext) }
+  private var lastDesktopFeedback: JSONObject? = null
 
   fun execute(argv: List<String>): AndroidSystemCommandResult {
     val profile = argv.firstOrNull()?.lowercase().orEmpty()
@@ -173,9 +175,11 @@ class AndroidSystemCommandApi(
         val service = runCatching { desktopAutomation.status() }.getOrElse { error ->
           JSONObject().put("connected", false).put("bridgeError", error.message.orEmpty())
         }
+        if (!service.optBoolean("connected")) notifyDesktopIntervention("Flovera desktop operation is disconnected. Open Accessibility settings and re-enable Flovera.")
         ok(
           service
             .put("permissionState", permissionState("accessibility"))
+            .put("diagnosis", desktopDiagnosis(service))
             .put("task", DesktopAutomationStore.load(appContext).toJson())
             .toString(2),
         )
@@ -187,7 +191,17 @@ class AndroidSystemCommandApi(
       )
       "inspect" -> {
         val maxNodes = args.int("max-nodes", 300).coerceIn(1, 1_000)
-        ok(desktopAutomation.inspect(maxNodes).toString(2))
+        desktopFeedback("正在操作手机", "检查当前界面", ongoing = true)
+        ok(
+          desktopAutomation.inspect(
+            maxNodes = maxNodes,
+            textFilter = args.string("filter-text"),
+            descriptionFilter = args.string("filter-description"),
+            resourceIdFilter = args.string("filter-resource-id"),
+            nodeId = args.string("node-id"),
+            subtree = args.has("subtree"),
+          ).toString(2),
+        )
       }
       "screenshot" -> {
         val output = args.string("output", "captures/desktop-${System.currentTimeMillis()}.png")
@@ -198,6 +212,7 @@ class AndroidSystemCommandApi(
         ok(result.toString(2))
       }
       "wait" -> {
+        desktopFeedback("正在操作手机", "等待：${args.string("text").ifBlank { args.string("package").ifBlank { "界面变化" } }}", ongoing = true)
         val result = desktopAutomation.waitFor(
           text = args.string("text"),
           packageName = args.string("package"),
@@ -208,22 +223,27 @@ class AndroidSystemCommandApi(
       "task" -> desktopTask(args)
       "launch" -> desktopAction(args, "launch") {
         val packageName = args.required("package")
+        desktopFeedback("正在操作手机", "打开应用：$packageName", ongoing = true)
         require(desktopAutomation.launch(packageName)) { "app has no launchable activity or launch was rejected: $packageName" }
         JSONObject().put("launched", true).put("package", packageName)
       }
       "click" -> desktopAction(args, "click") {
+        desktopFeedback("正在操作手机", "点击：${desktopSelectorLabel(args)}", ongoing = true)
         val clicked = desktopAutomation.click(
           nodeId = args.string("node-id"),
           text = args.string("text"),
+          description = args.string("description"),
           resourceId = args.string("resource-id"),
         )
         require(clicked) { "matching node was not found or could not be clicked" }
         JSONObject().put("clicked", true)
       }
       "set-text", "input" -> desktopAction(args, "set-text") {
+        desktopFeedback("正在操作手机", "输入：${args.required("value").take(24)}", ongoing = true)
         val changed = desktopAutomation.setText(
           nodeId = args.string("node-id"),
           text = args.string("text"),
+          description = args.string("description"),
           resourceId = args.string("resource-id"),
           value = args.required("value"),
         )
@@ -231,6 +251,7 @@ class AndroidSystemCommandApi(
         JSONObject().put("textSet", true)
       }
       "tap" -> desktopAction(args, "tap") {
+        desktopFeedback("正在操作手机", "点击坐标：${args.requiredInt("x")},${args.requiredInt("y")}", ongoing = true)
         val completed = desktopAutomation.tap(
           x = args.requiredInt("x"),
           y = args.requiredInt("y"),
@@ -240,19 +261,37 @@ class AndroidSystemCommandApi(
         JSONObject().put("tapped", true)
       }
       "swipe" -> desktopAction(args, "swipe") {
-        val completed = desktopAutomation.swipe(
-          startX = args.requiredInt("start-x"),
-          startY = args.requiredInt("start-y"),
-          endX = args.requiredInt("end-x"),
-          endY = args.requiredInt("end-y"),
-          durationMs = args.long("duration-ms", 500L),
-          timeoutMs = args.long("gesture-timeout-ms", 5_000L),
-        )
-        require(completed) { "swipe gesture was rejected or cancelled" }
-        JSONObject().put("swiped", true)
+        val untilText = args.string("until-text")
+        desktopFeedback("正在操作手机", if (untilText.isBlank()) "滑动" else "滑动：查找 $untilText", ongoing = true)
+        if (untilText.isNotBlank()) {
+          val result = desktopAutomation.swipeUntilText(
+            text = untilText,
+            startX = args.requiredInt("start-x"),
+            startY = args.requiredInt("start-y"),
+            endX = args.requiredInt("end-x"),
+            endY = args.requiredInt("end-y"),
+            durationMs = args.long("duration-ms", 500L),
+            timeoutMs = args.long("gesture-timeout-ms", 5_000L),
+            maxSwipes = args.int("max-swipes", 5),
+          )
+          require(result.optBoolean("matched")) { "target text was not observed after swiping: $untilText" }
+          result
+        } else {
+          val completed = desktopAutomation.swipe(
+            startX = args.requiredInt("start-x"),
+            startY = args.requiredInt("start-y"),
+            endX = args.requiredInt("end-x"),
+            endY = args.requiredInt("end-y"),
+            durationMs = args.long("duration-ms", 500L),
+            timeoutMs = args.long("gesture-timeout-ms", 5_000L),
+          )
+          require(completed) { "swipe gesture was rejected or cancelled" }
+          JSONObject().put("swiped", true)
+        }
       }
       "global" -> desktopAction(args, "global") {
         val action = args.required("action")
+        desktopFeedback("正在操作手机", "系统操作：$action", ongoing = true)
         require(desktopAutomation.global(action)) {
           "global action was rejected: $action"
         }
@@ -267,18 +306,33 @@ class AndroidSystemCommandApi(
   private fun desktopTask(args: AndroidCommandArgs): AndroidSystemCommandResult {
     val task = when (args.positional(1).lowercase().ifBlank { "status" }) {
       "status" -> DesktopAutomationStore.load(appContext)
-      "start" -> DesktopAutomationStore.start(appContext, args.required("goal"))
+      "start" -> DesktopAutomationStore.start(appContext, args.required("goal")).also {
+        desktopFeedback("正在操作手机", "任务开始：${it.goal.take(36)}", ongoing = true)
+      }
       "intervention", "pause" -> {
         val reason = args.required("reason")
         notifyDesktopIntervention(reason)
         DesktopAutomationStore.intervention(appContext, reason)
       }
-      "resume" -> DesktopAutomationStore.resume(appContext)
-      "complete" -> DesktopAutomationStore.finish(appContext, "completed", args.string("summary"))
-      "cancel" -> DesktopAutomationStore.finish(appContext, "cancelled", args.string("summary"))
+      "resume" -> DesktopAutomationStore.resume(appContext).also {
+        desktopFeedback("正在操作手机", "继续任务：先重新识别当前界面", ongoing = true)
+      }
+      "complete" -> DesktopAutomationStore.finish(appContext, "completed", args.string("summary")).also {
+        desktopFeedback("手机操作已完成", args.string("summary").ifBlank { "任务完成" }, ongoing = false)
+        AndroidOverlayController.hide(appContext, DESKTOP_FEEDBACK_OVERLAY_ID)
+      }
+      "cancel" -> DesktopAutomationStore.finish(appContext, "cancelled", args.string("summary")).also {
+        desktopFeedback("手机操作已取消", args.string("summary").ifBlank { "任务取消" }, ongoing = false)
+        AndroidOverlayController.hide(appContext, DESKTOP_FEEDBACK_OVERLAY_ID)
+      }
       else -> return fail("supported: android ui task status|start|intervention|resume|complete|cancel")
     }
-    return ok(JSONObject().put("task", task.toJson()).toString(2))
+    return ok(
+      JSONObject()
+        .put("task", task.toJson())
+        .put("feedback", lastDesktopFeedback)
+        .toString(2),
+    )
   }
 
   private fun desktopAction(
@@ -308,7 +362,9 @@ class AndroidSystemCommandApi(
       val timeoutMs = args.long("verify-timeout-ms", 8_000L).coerceIn(250L, 60_000L)
       val expectedText = args.string("expect-text")
       val expectedPackage = args.string("expect-package")
-      val verification = if (expectedText.isNotBlank() || expectedPackage.isNotBlank()) {
+      val verification = if (operationResult.optBoolean("matched")) {
+        operationResult
+      } else if (expectedText.isNotBlank() || expectedPackage.isNotBlank()) {
         desktopAutomation.waitFor(expectedText, expectedPackage, timeoutMs)
       } else {
         desktopAutomation.waitForChange(before.optString("screenDigest"), timeoutMs)
@@ -316,6 +372,7 @@ class AndroidSystemCommandApi(
       require(verification.optBoolean("matched")) {
         "UI action executed but its expected result was not observed"
       }
+      desktopFeedback("正在操作手机", "$action 已验证", ongoing = true)
       val resultSummary = verification.toString()
       val updatedTask = DesktopAutomationStore.actionConfirmed(
         context = appContext,
@@ -329,6 +386,7 @@ class AndroidSystemCommandApi(
           .put("action", action)
           .put("operation", operationResult)
           .put("verification", verification)
+          .put("feedback", lastDesktopFeedback)
           .put("task", updatedTask.toJson())
           .toString(2),
       )
@@ -337,6 +395,7 @@ class AndroidSystemCommandApi(
         appContext,
         "Desktop action $action ($actionId) needs review: ${error.message.orEmpty()}",
       )
+      AndroidOverlayController.hide(appContext, DESKTOP_FEEDBACK_OVERLAY_ID)
       notifyDesktopIntervention(
         "Action $action needs review before Flovera can continue: ${error.message.orEmpty()}",
       )
@@ -352,6 +411,72 @@ class AndroidSystemCommandApi(
       ongoing = false,
       priority = NotificationCompat.PRIORITY_DEFAULT,
     )
+  }
+
+  private fun desktopFeedback(title: String, detail: String, ongoing: Boolean): JSONObject {
+    val body = detail.ifBlank { "Flovera is operating the phone." }.take(240)
+    var overlayShown = false
+    var notificationPosted = false
+    if (Settings.canDrawOverlays(appContext)) {
+      runCatching {
+        AndroidOverlayController.show(
+          appContext,
+          DESKTOP_FEEDBACK_OVERLAY_ID,
+          "$title\n$body",
+          if (ongoing) 300_000L else 2_500L,
+        )
+      }.onSuccess { overlayShown = true }
+    }
+    if (permissionState("notifications") == "granted") {
+      runCatching {
+        ensureNotificationChannel()
+        val notification = NotificationCompat.Builder(appContext, SYSTEM_CHANNEL_ID)
+          .setSmallIcon(R.mipmap.ic_launcher)
+          .setContentTitle(title)
+          .setContentText(body)
+          .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+          .setOngoing(ongoing)
+          .setAutoCancel(!ongoing)
+          .setPriority(NotificationCompat.PRIORITY_LOW)
+          .build()
+        NotificationManagerCompat.from(appContext).notify(DESKTOP_FEEDBACK_NOTIFICATION_ID, notification)
+      }.onSuccess { notificationPosted = true }
+    }
+    return JSONObject()
+      .put("title", title)
+      .put("detail", body)
+      .put("ongoing", ongoing)
+      .put("overlayShown", overlayShown)
+      .put("notificationPosted", notificationPosted)
+      .also { lastDesktopFeedback = it }
+  }
+
+  private fun desktopSelectorLabel(args: AndroidCommandArgs): String {
+    return args.string("text")
+      .ifBlank { args.string("description") }
+      .ifBlank { args.string("resource-id") }
+      .ifBlank { args.string("node-id") }
+      .ifBlank { "目标控件" }
+      .take(40)
+  }
+
+  private fun desktopDiagnosis(service: JSONObject): JSONObject {
+    val permission = permissionState("accessibility")
+    return JSONObject()
+      .put("accessibilityPermission", permission)
+      .put("connected", service.optBoolean("connected"))
+      .put("keyguardLocked", service.optBoolean("keyguardLocked"))
+      .put("overlayPermission", permissionState("overlay"))
+      .put("notificationPermission", permissionState("notifications"))
+      .put(
+        "recommendation",
+        when {
+          permission != "granted" -> "Open Flovera Permissions and enable Desktop operation accessibility. Android does not allow Flovera to re-enable it silently."
+          !service.optBoolean("connected") -> "Flovera Accessibility is enabled but not connected yet. Reopen the Accessibility page or wait for Android to bind the service."
+          service.optBoolean("keyguardLocked") -> "Unlock the device before continuing the desktop task."
+          else -> "ready"
+        },
+      )
   }
 
   private fun camera(args: AndroidCommandArgs): AndroidSystemCommandResult {
@@ -1232,6 +1357,8 @@ class AndroidSystemCommandApi(
     )
     private const val SYSTEM_CHANNEL_ID = "flovera_system_actions"
     private const val DEFAULT_NOTIFICATION_ID = 7201
+    private const val DESKTOP_FEEDBACK_NOTIFICATION_ID = 7310
+    private const val DESKTOP_FEEDBACK_OVERLAY_ID = "desktop-operation"
     private const val DEFAULT_ALARM_ID = 7301
     private const val DAY_MS = 86_400_000L
     private const val MAX_IMPORTED_MEDIA_BYTES = 50 * 1024 * 1024
@@ -1347,6 +1474,8 @@ private class AndroidCommandArgs(private val values: List<String>) {
   fun requiredLong(name: String): Long = required(name).toLongOrNull() ?: error("--$name must be an integer")
 
   fun requiredInt(name: String): Int = required(name).toIntOrNull() ?: error("--$name must be an integer")
+
+  fun has(name: String): Boolean = optionIndex(name) >= 0
 
   private fun optionIndex(name: String): Int {
     return values.indexOfFirst { it == "--$name" }

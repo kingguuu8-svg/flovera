@@ -6,6 +6,7 @@ import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 
 class DesktopAutomationFixtureActivity : Activity() {
@@ -31,13 +32,38 @@ class DesktopAutomationFixtureActivity : Activity() {
         result.text = "Submitted: ${input.text}"
       }
     }
+    val content = LinearLayout(this).apply {
+      orientation = LinearLayout.VERTICAL
+      setPadding(padding, padding, padding, padding)
+      addView(input, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+      addView(submit, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+      addView(result, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+      repeat(18) { index ->
+        addView(
+          TextView(this@DesktopAutomationFixtureActivity).apply {
+            text = "Filler row $index"
+            textSize = 18f
+            minHeight = (64 * density).toInt()
+          },
+          ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
+        )
+      }
+      addView(
+        TextView(this@DesktopAutomationFixtureActivity).apply {
+          text = "Lower target"
+          contentDescription = "Lower target"
+          textSize = 20f
+          minHeight = (72 * density).toInt()
+        },
+        ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
+      )
+    }
     setContentView(
-      LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        setPadding(padding, padding, padding, padding)
-        addView(input, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        addView(submit, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        addView(result, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+      ScrollView(this).apply {
+        addView(
+          content,
+          ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
+        )
       },
     )
   }
