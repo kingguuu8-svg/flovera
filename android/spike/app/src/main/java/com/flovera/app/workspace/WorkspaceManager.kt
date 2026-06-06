@@ -2861,7 +2861,7 @@ data class FloveraCapabilities(
   val androidCommandRuntimeMode: String = "app_owned_permission_gated_system_apis",
   val androidCommandSupportedSubcommands: List<String> = listOf(
     "android help",
-    "android app info|list|resolve|launch",
+    "android app info|list|resolve",
     "android permission status",
     "android permission open <permission-id>",
     "android notification post|cancel",
@@ -2879,7 +2879,7 @@ data class FloveraCapabilities(
     "android network get",
     "android foreground start|stop|status",
     "android intent open|open-url|share|dial",
-    "android ui status|open-settings|inspect|ocr|screenshot|wait|task|launch|click|set-text|tap|swipe|global",
+    "android ui status|open-settings|inspect|ocr|screenshot|wait|task|click|set-text|tap|swipe|global",
   ),
   val androidSystemApiProfiles: List<String> = listOf(
     "notification",
@@ -2915,8 +2915,7 @@ data class FloveraCapabilities(
   val androidDesktopSwipeUntilText: Boolean = true,
   val androidDesktopSwipeCoordinateAliases: Boolean = true,
   val androidAppIndex: Boolean = true,
-  val androidAppNameLaunch: Boolean = true,
-  val androidDesktopLaunchActivityFallback: Boolean = true,
+  val androidDirectAppLaunch: Boolean = false,
   val androidDesktopClickVerificationFallback: Boolean = true,
   val androidDesktopSetTextFocusRetry: Boolean = true,
   val androidDesktopSetTextDismissKeyboardAfter: Boolean = true,

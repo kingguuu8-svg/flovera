@@ -241,7 +241,8 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(desktopSkill.contains("name: flovera-desktop-operation"))
     assertTrue(desktopSkill.contains("click --text"))
     assertTrue(desktopSkill.contains("click --ocr-text"))
-    assertTrue(desktopSkill.contains("launch --app <visible-name>"))
+    assertTrue(desktopSkill.contains("Flovera cannot directly launch arbitrary third-party apps"))
+    assertTrue(desktopSkill.contains("global --action back"))
     assertTrue(desktopSkill.contains("android app resolve --name <name>"))
     assertTrue(desktopSkill.contains("--dismiss-keyboard-after"))
     assertTrue(desktopSkill.contains(".flovera/logs/ui-diagnosis"))
@@ -249,7 +250,7 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(desktopSkill.contains("--expect-ocr-text"))
     assertTrue(desktopSkill.contains("swipe --until-text"))
     assertTrue(desktopSkill.contains("--from-x/--from-y/--to-x/--to-y"))
-    assertTrue(desktopSkill.contains("launch --package [--activity <activity-class>]"))
+    assertTrue(desktopSkill.contains("ask the user whether they want a reusable Flovera automation script/macro"))
     assertTrue(desktopSkill.contains("stronger notification/vibration"))
     assertTrue(desktopSkill.contains("inspect --filter-text"))
     assertTrue(desktopSkill.contains("--action-id"))
@@ -1259,7 +1260,7 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"workspaceAutomationScriptPath\": \".flovera/scripts\""))
     assertTrue(capabilities.contains("\"workspaceAutomationScriptRunner\": \"flovera script run\""))
     assertTrue(capabilities.contains("\"androidAppIndex\": true"))
-    assertTrue(capabilities.contains("\"androidAppNameLaunch\": true"))
+    assertTrue(capabilities.contains("\"androidDirectAppLaunch\": false"))
     assertTrue(capabilities.contains("\"androidDesktopClickVerificationFallback\": true"))
     assertTrue(capabilities.contains("\"androidDesktopSetTextFocusRetry\": true"))
     assertTrue(capabilities.contains("\"androidDesktopFailureDiagnosisPath\": \".flovera/logs/ui-diagnosis\""))
@@ -1439,7 +1440,7 @@ class WorkspaceFileTreeInstrumentedTest {
       assertTrue("missing profile=$profile\n$help", help.contains("\"$profile\""))
     }
     assertTrue(help, help.contains("contacts list|search|create|delete"))
-    assertTrue(help, help.contains("app info|list|resolve|launch"))
+    assertTrue(help, help.contains("app info|list|resolve"))
     assertTrue(help, help.contains("calendar calendars|events|create|delete"))
     assertTrue(help, help.contains("camera capture"))
     assertTrue(help, help.contains("microphone record"))
@@ -1681,112 +1682,6 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(status, status.contains("\"recommendation\""))
   }
 
-  @Test
-  fun workspaceCommandRunOperatesAnotherAppWithVerifiedIdempotentAction() = runBlocking {
-    val context = InstrumentationRegistry.getInstrumentation().targetContext
-    val workspace = WorkspaceManager(context, "workspace-command-desktop-live-${System.currentTimeMillis()}")
-    val tool = WorkspaceCommandRunTool(workspace, ToolEventRecorder())
-
-    val status = tool.execute(
-      WorkspaceCommandRunTool.Args(argv = listOf("android", "ui", "status"), snapshotBeforeRun = false),
-    )
-    assertTrue(status, status.contains("\"connected\": true"))
-
-    tool.execute(
-      WorkspaceCommandRunTool.Args(
-        argv = listOf("android", "ui", "task", "start", "--goal", "Inspect Android settings"),
-        snapshotBeforeRun = false,
-      ),
-    )
-    val launchArgs = WorkspaceCommandRunTool.Args(
-      argv = listOf(
-        "android", "ui", "launch",
-        "--package", "com.android.settings",
-        "--action-id", "open-settings-1",
-        "--expect-package", "com.android.settings",
-        "--verify-timeout-ms", "10000",
-      ),
-      snapshotBeforeRun = false,
-    )
-    val launched = tool.execute(launchArgs)
-    val duplicate = tool.execute(launchArgs)
-    val inspected = tool.execute(
-      WorkspaceCommandRunTool.Args(
-        argv = listOf("android", "ui", "inspect", "--max-nodes", "500"),
-        snapshotBeforeRun = false,
-      ),
-    )
-    val screenshot = tool.execute(
-      WorkspaceCommandRunTool.Args(
-        argv = listOf("android", "ui", "screenshot", "--output", "captures/settings.png"),
-        snapshotBeforeRun = false,
-      ),
-    )
-    tool.execute(
-      WorkspaceCommandRunTool.Args(
-        argv = listOf("android", "ui", "task", "complete", "--summary", "Settings inspected"),
-        snapshotBeforeRun = false,
-      ),
-    )
-
-    assertTrue(launched, launched.contains("\"actionId\": \"open-settings-1\""))
-    assertTrue(launched, launched.contains("\"matched\": true"))
-    assertTrue(duplicate, duplicate.contains("\"alreadyConfirmed\": true"))
-    assertTrue(inspected, inspected.contains("\"package\": \"com.android.settings\""))
-    assertTrue(inspected, inspected.contains("\"nodes\""))
-    assertTrue(screenshot, screenshot.contains("\"mimeType\"") && screenshot.contains("image") && screenshot.contains("png"))
-    assertTrue(File(workspace.root, "captures/settings.png").length() > 0L)
-  }
-
-  @Test
-  fun workspaceCommandRunSeedsRecoverableDesktopAction() = runBlocking {
-    val context = InstrumentationRegistry.getInstrumentation().targetContext
-    val workspace = WorkspaceManager(context, "workspace-command-desktop-recovery-seed-${System.currentTimeMillis()}")
-    val tool = WorkspaceCommandRunTool(workspace, ToolEventRecorder())
-    val status = tool.execute(
-      WorkspaceCommandRunTool.Args(argv = listOf("android", "ui", "status"), snapshotBeforeRun = false),
-    )
-    assertTrue(status, status.contains("\"connected\": true"))
-    tool.execute(
-      WorkspaceCommandRunTool.Args(
-        argv = listOf("android", "ui", "task", "start", "--goal", "Recover without replay"),
-        snapshotBeforeRun = false,
-      ),
-    )
-    val launched = tool.execute(recoverableSettingsLaunchArgs())
-    assertTrue(launched, launched.contains("\"actionId\": \"recoverable-open-settings\""))
-    assertTrue(launched, launched.contains("\"matched\": true"))
-    assertTrue(launched, launched.contains("recoverable-open-settings"))
-  }
-
-  @Test
-  fun workspaceCommandRunResumesDesktopActionWithoutReplay() = runBlocking {
-    val context = InstrumentationRegistry.getInstrumentation().targetContext
-    val workspace = WorkspaceManager(context, "workspace-command-desktop-recovery-resume-${System.currentTimeMillis()}")
-    val tool = WorkspaceCommandRunTool(workspace, ToolEventRecorder())
-    val status = tool.execute(
-      WorkspaceCommandRunTool.Args(argv = listOf("android", "ui", "status"), snapshotBeforeRun = false),
-    )
-    assertTrue(status, status.contains("\"connected\": true"))
-    assertTrue(status, status.contains("\"status\": \"intervention\""))
-    assertTrue(status, status.contains("restarted"))
-
-    val resumed = tool.execute(
-      WorkspaceCommandRunTool.Args(argv = listOf("android", "ui", "task", "resume"), snapshotBeforeRun = false),
-    )
-    val duplicate = tool.execute(recoverableSettingsLaunchArgs())
-    val completed = tool.execute(
-      WorkspaceCommandRunTool.Args(
-        argv = listOf("android", "ui", "task", "complete", "--summary", "Recovered without replay"),
-        snapshotBeforeRun = false,
-      ),
-    )
-
-    assertTrue(resumed, resumed.contains("\"status\": \"active\""))
-    assertTrue(duplicate, duplicate.contains("\"alreadyConfirmed\": true"))
-    assertTrue(completed, completed.contains("\"status\": \"completed\""))
-  }
-
   @Ignore("am instrument stops or suppresses the target app AccessibilityService; use DesktopAutomationDebugReceiver for real-device verification.")
   @Test
   fun workspaceCommandRunInputsAndClicksAcrossAppBoundary() = runBlocking {
@@ -1933,19 +1828,6 @@ class WorkspaceFileTreeInstrumentedTest {
 
     assertTrue(result.toString(), result.optString("engine").contains("mlkit"))
     assertTrue(result.toString(), result.optJSONArray("blocks").toString().contains("OCR"))
-  }
-
-  private fun recoverableSettingsLaunchArgs(): WorkspaceCommandRunTool.Args {
-    return WorkspaceCommandRunTool.Args(
-      argv = listOf(
-        "android", "ui", "launch",
-        "--package", "com.android.settings",
-        "--action-id", "recoverable-open-settings",
-        "--expect-package", "com.android.settings",
-        "--verify-timeout-ms", "10000",
-      ),
-      snapshotBeforeRun = false,
-    )
   }
 
   @Test
@@ -2791,7 +2673,7 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"gitCommandRemoteOperations\": false"))
     assertTrue(capabilities.contains("\"androidCommandRuntime\": true"))
     assertTrue(capabilities.contains("\"androidCommandRuntimeMode\": \"app_owned_permission_gated_system_apis\""))
-    assertTrue(capabilities.contains("\"android app info|list|resolve|launch\""))
+    assertTrue(capabilities.contains("\"android app info|list|resolve\""))
     assertTrue(capabilities.contains("\"androidSystemApiProfiles\""))
     assertTrue(capabilities.contains("\"notification\""))
     assertTrue(capabilities.contains("\"camera\""))
@@ -2826,8 +2708,7 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"androidDesktopSwipeUntilText\": true"))
     assertTrue(capabilities.contains("\"androidDesktopSwipeCoordinateAliases\": true"))
     assertTrue(capabilities.contains("\"androidAppIndex\": true"))
-    assertTrue(capabilities.contains("\"androidAppNameLaunch\": true"))
-    assertTrue(capabilities.contains("\"androidDesktopLaunchActivityFallback\": true"))
+    assertTrue(capabilities.contains("\"androidDirectAppLaunch\": false"))
     assertTrue(capabilities.contains("\"androidDesktopClickVerificationFallback\": true"))
     assertTrue(capabilities.contains("\"androidDesktopSetTextFocusRetry\": true"))
     assertTrue(capabilities.contains("\"androidDesktopSetTextDismissKeyboardAfter\": true"))

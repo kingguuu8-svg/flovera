@@ -924,11 +924,14 @@ permissions without user action or expose Android shell.
   user-facing Permissions panel whose Grant all flow batches missing runtime
   permissions and then opens each missing special Android authorization page
   in sequence.
-- Done: extend the Android command profile with app listing/name resolution,
-  app-name launch, generic `.flovera/scripts/*.json` automation scripts through
+- Done: extend the Android command profile with app listing/name resolution
+  for package identification, generic `.flovera/scripts/*.json` automation scripts through
   `flovera script list|run`, click verification bounds fallback, set-text
   focus/tap retry with optional keyboard dismissal, and UI failure diagnosis
   bundles under `.flovera/logs/ui-diagnosis/`.
+- Done: remove direct arbitrary third-party app launch from Flovera-owned
+  Android commands. Cross-app tasks now start from the current visible screen
+  or from a user-opened target app.
 - Next hardening target: promote the worker to a foreground service during very
   long JVM builds if Android background process pressure still kills the worker
   before checkpointed work can resume.
@@ -1191,7 +1194,7 @@ now exposes permission-gated Android system APIs:
   the active semantic tree, filter inspection by text/description/resource-id,
   filter OCR-enhanced inspection by visible OCR text, expand a subtree by node
   id, capture a workspace screenshot, run ML Kit OCR to return text blocks with
-  screen bounds, launch apps with optional explicit activity fallback,
+  screen bounds,
   click/set text by text/description/resource-id/node-id/OCR text, tap/swipe/use
   global actions, accept start/end or from/to swipe coordinate names, swipe
   until target text appears, and wait for expected text/OCR text or package

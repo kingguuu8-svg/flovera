@@ -3,8 +3,6 @@ package com.flovera.app.platform
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.app.KeyguardManager
-import android.content.ComponentName
-import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Path
 import android.graphics.Rect
@@ -341,19 +339,6 @@ class FloveraAccessibilityService : AccessibilityService() {
       else -> error("unsupported global action: $action")
     }
     return performGlobalAction(globalAction)
-  }
-
-  fun launchApp(packageName: String, activityName: String): Boolean {
-    val explicitIntent = if (activityName.isNotBlank()) {
-      Intent(Intent.ACTION_MAIN)
-        .addCategory(Intent.CATEGORY_LAUNCHER)
-        .setComponent(ComponentName(packageName, activityName))
-    } else {
-      null
-    }
-    val launchIntent = explicitIntent ?: packageManager.getLaunchIntentForPackage(packageName) ?: return false
-    startActivity(launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-    return true
   }
 
   fun waitFor(text: String, packageName: String, timeoutMs: Long): JSONObject {

@@ -120,31 +120,7 @@ class AndroidSystemCommandApi(
       )
       "list" -> ok(appList(args).toString(2))
       "resolve" -> ok(resolveInstalledApp(args.required("name")).toString(2))
-      "launch" -> {
-        val resolved = if (args.string("package").isNotBlank()) {
-          JSONObject()
-            .put("package", args.string("package"))
-            .put("activity", args.string("activity"))
-            .put("label", args.string("package"))
-            .put("matched", true)
-            .put("source", "package")
-        } else {
-          resolveInstalledApp(args.required("name"))
-        }
-        require(resolved.optBoolean("matched")) { "app was not found: ${args.string("name")}" }
-        val packageName = resolved.getString("package")
-        val activityName = resolved.optString("activity")
-        require(launchInstalledApp(packageName, activityName)) {
-          "app has no launchable activity or launch was rejected: $packageName"
-        }
-        ok(
-          resolved
-            .put("launched", true)
-            .put("activity", activityName)
-            .toString(2),
-        )
-      }
-      else -> fail("supported: android app info|list|resolve|launch")
+      else -> fail("supported: android app info|list|resolve")
     }
   }
 
@@ -230,20 +206,6 @@ class AndroidSystemCommandApi(
     if (packageName.isBlank() || activity.isBlank()) return null
     val label = loadLabel(appContext.packageManager)?.toString().orEmpty().ifBlank { packageName }
     return InstalledApp(label = label, packageName = packageName, activity = activity)
-  }
-
-  private fun launchInstalledApp(packageName: String, activityName: String): Boolean {
-    val intent = if (activityName.isNotBlank()) {
-      Intent(Intent.ACTION_MAIN)
-        .addCategory(Intent.CATEGORY_LAUNCHER)
-        .setClassName(packageName, activityName)
-    } else {
-      appContext.packageManager.getLaunchIntentForPackage(packageName)
-    } ?: return false
-    return runCatching {
-      appContext.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-      true
-    }.getOrDefault(false)
   }
 
   private fun notification(args: AndroidCommandArgs): AndroidSystemCommandResult {
@@ -338,29 +300,6 @@ class AndroidSystemCommandApi(
         ok(result.toString(2))
       }
       "task" -> desktopTask(args)
-      "launch" -> desktopAction(args, "launch") {
-        val resolved = if (args.string("app").isNotBlank()) {
-          resolveInstalledApp(args.string("app"))
-        } else {
-          JSONObject()
-            .put("matched", true)
-            .put("package", args.required("package"))
-            .put("activity", args.string("activity"))
-            .put("label", args.string("package"))
-        }
-        require(resolved.optBoolean("matched")) { "app was not found: ${args.string("app")}" }
-        val packageName = resolved.getString("package")
-        val activityName = resolved.optString("activity")
-        desktopFeedback("正在操作手机", "打开应用：${activityName.ifBlank { packageName }}", ongoing = true)
-        require(desktopAutomation.launch(packageName, activityName)) {
-          "app has no launchable activity or launch was rejected: $packageName"
-        }
-        JSONObject()
-          .put("launched", true)
-          .put("package", packageName)
-          .put("activity", activityName)
-          .put("label", resolved.optString("label"))
-      }
       "click" -> desktopAction(args, "click") {
         desktopFeedback("正在操作手机", "点击：${desktopSelectorLabel(args)}", ongoing = true)
         val clicked = desktopAutomation.click(
@@ -437,7 +376,7 @@ class AndroidSystemCommandApi(
         JSONObject().put("globalAction", action)
       }
       else -> fail(
-        "supported: android ui status|open-settings|inspect|ocr|screenshot|wait|task|launch|click|set-text|tap|swipe|global",
+        "supported: android ui status|open-settings|inspect|ocr|screenshot|wait|task|click|set-text|tap|swipe|global",
       )
     }
   }
@@ -990,7 +929,7 @@ class AndroidSystemCommandApi(
         "commands",
         JSONArray(
           listOf(
-            "app info|list|resolve|launch",
+            "app info|list|resolve",
             "permission status|open",
             "notification post|cancel",
             "camera capture",
@@ -1007,7 +946,7 @@ class AndroidSystemCommandApi(
             "network get",
             "foreground start|stop|status",
             "intent open|open-url|share|dial",
-            "ui status|open-settings|inspect|ocr|screenshot|wait|task|launch|click|set-text|tap|swipe|global",
+            "ui status|open-settings|inspect|ocr|screenshot|wait|task|click|set-text|tap|swipe|global",
           ),
         ),
       )

@@ -88,7 +88,7 @@ class WorkspaceCommandRunTool(
 ) : SimpleTool<WorkspaceCommandRunTool.Args>(
   argsType = typeToken<Args>(),
   name = "workspace_command_run",
-  description = "Primary bounded command-style execution surface for Flovera-owned workspace runtimes. Use this for normal Python execution, generated scripts, project commands, local Git/JGit work, Android system APIs, cross-app accessibility operations, workspace automation scripts, and groovy scripts when JVM access is useful. This is not Android shell access: supported command profiles are python/python3, groovy, git, android, and flovera script. The android profile provides permission-gated native APIs and an android ui surface for semantic inspection, screenshots, verified gestures, app launch, and persistent desktop-task recovery.",
+  description = "Primary bounded command-style execution surface for Flovera-owned workspace runtimes. Use this for normal Python execution, generated scripts, project commands, local Git/JGit work, Android system APIs, cross-app accessibility operations, workspace automation scripts, and groovy scripts when JVM access is useful. This is not Android shell access: supported command profiles are python/python3, groovy, git, android, and flovera script. The android profile provides permission-gated native APIs and an android ui surface for semantic inspection, screenshots, verified gestures, and persistent desktop-task recovery.",
 ) {
   @Serializable
   data class Args(
@@ -853,7 +853,7 @@ private class FloveraScriptCommandAdapter(
     val action = values.getOrNull(2)?.lowercase().orEmpty()
     val needsActionId = values.firstOrNull()?.lowercase() == "android" &&
       values.getOrNull(1)?.lowercase() == "ui" &&
-      action in setOf("launch", "click", "set-text", "input", "tap", "swipe", "global") &&
+      action in setOf("click", "set-text", "input", "tap", "swipe", "global") &&
       "--action-id" !in values
     return if (needsActionId) values + listOf("--action-id", "script-${scriptName.filter { it.isLetterOrDigit() }.take(24)}-$index-$action") else values
   }

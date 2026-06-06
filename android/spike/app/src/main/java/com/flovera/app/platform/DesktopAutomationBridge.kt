@@ -73,13 +73,6 @@ class DesktopAutomationProvider : ContentProvider() {
           maxSwipes = input.getInt("maxSwipes", 5),
         )
         METHOD_GLOBAL -> JSONObject().put("completed", service.global(input.getString("action").orEmpty()))
-        METHOD_LAUNCH -> JSONObject().put(
-          "completed",
-          service.launchApp(
-            packageName = input.getString("package").orEmpty(),
-            activityName = input.getString("activity").orEmpty(),
-          ),
-        )
         METHOD_WAIT -> service.waitFor(
           text = input.getString("text").orEmpty(),
           ocrText = input.getString("ocrText").orEmpty(),
@@ -125,7 +118,6 @@ class DesktopAutomationProvider : ContentProvider() {
     const val METHOD_SWIPE = "swipe"
     const val METHOD_SWIPE_UNTIL_TEXT = "swipe_until_text"
     const val METHOD_GLOBAL = "global"
-    const val METHOD_LAUNCH = "launch"
     const val METHOD_WAIT = "wait"
     const val METHOD_WAIT_CHANGE = "wait_change"
     const val KEY_JSON = "json"
@@ -252,14 +244,6 @@ class DesktopAutomationClient(context: Context) {
   fun global(action: String): Boolean = call(
     DesktopAutomationProvider.METHOD_GLOBAL,
     Bundle().apply { putString("action", action) },
-  ).optBoolean("completed")
-
-  fun launch(packageName: String, activityName: String = ""): Boolean = call(
-    DesktopAutomationProvider.METHOD_LAUNCH,
-    Bundle().apply {
-      putString("package", packageName)
-      putString("activity", activityName)
-    },
   ).optBoolean("completed")
 
   fun waitFor(text: String, packageName: String, timeoutMs: Long, ocrText: String = ""): JSONObject = call(

@@ -267,13 +267,13 @@ object FloveraSkillRegistry {
         - Use `workspace_command_run` with argv. Run `["android", "help"]` when exact available syntax is needed.
         - Core read APIs: app `info/list/resolve`, `["android","location","current"]`, contacts `list/search`, calendar `calendars/events`, media `list`, Bluetooth `paired/scan`, storage `list`, foreground `status`, permission `status`.
         - Location uses fresh system cache when available, otherwise requests enabled fused/network/GPS/passive providers concurrently. Read `source`, `ageMs`, `accuracyMeters`, and `enabledProviders` before describing precision or failure; do not infer that GPS or network positioning failed unless the command reports it.
-        - Core action APIs: app `launch --name <app-name>` or `launch --package <package>`, notification `post/cancel`, camera `capture --output`, microphone `record --output --duration-ms`, contacts `create/delete`, calendar `create/delete`, media/storage `import --output`, overlay `show/hide`, package `install --path`, alarm `schedule/cancel`, network `get`, foreground `start/stop`, and intent `open-url/share/dial`.
+        - Core action APIs: notification `post/cancel`, camera `capture --output`, microphone `record --output --duration-ms`, contacts `create/delete`, calendar `create/delete`, media/storage `import --output`, overlay `show/hide`, package `install --path`, alarm `schedule/cancel`, network `get`, foreground `start/stop`, and intent `open-url/share/dial`.
         - Camera captures and microphone recordings write directly into workspace-relative output paths. Media and shared-storage imports also require an explicit workspace output path.
         - If a permission is missing, ask the user to open Flovera's Permissions panel and tap Grant all. Flovera batches runtime requests, then opens each required special-permission system page in sequence.
         - Use `["android", "permission", "open", "<permission-id>"]` only when a specific permission needs to be reopened.
         - Do not claim a permission is granted until `android permission status` reports `granted`.
         - Do not claim a native action succeeded from intent launch alone. Use the command result and verify workspace outputs when an action produces a file.
-        - Android commands are app-owned adapters, not shell access. Do not use `adb`, `am`, `pm`, Android shell commands, hidden APIs, or invented native bridges.
+        - Android commands are app-owned adapters, not shell access. Do not use `adb`, `am`, `pm`, Android shell commands, hidden APIs, invented native bridges, or direct launch of arbitrary third-party apps.
         - Permission ids include notifications, camera, microphone, fine_location, coarse_location, contacts_read, contacts_write, calendar_read, calendar_write, media_images, media_video, media_audio, bluetooth_scan, bluetooth_connect, battery_optimization, overlay, all_files, install_unknown_apps, exact_alarm, internet, and foreground_service.
       """.trimIndent()
 
@@ -294,14 +294,15 @@ object FloveraSkillRegistry {
         - Fall back to raw node-id only after inspecting the current screen. Fall back to coordinates only for touch-heavy UI that exposes no usable semantic node.
         - Every mutating action requires a stable unique `--action-id`. Reusing an already confirmed action-id is a no-op, which prevents duplicate actions after retries or process recovery.
         - Provide `--expect-text` or `--expect-package` whenever the expected result is known. Without an explicit expectation Flovera still requires the semantic screen digest to change.
-        - Supported actions include `launch --app <visible-name>`, `launch --package [--activity <activity-class>]`, `click`, `click --ocr-text`, `set-text --value`, `set-text --ocr-text --value`, `tap`, `swipe`, `swipe --until-text`, and `global --action back|home|recents|notifications|quick-settings`. Prefer `android app resolve --name <name>` or `launch --app <name>` before guessing package names. If a package reports no launchable activity but the activity class is known from inspection or app metadata, retry with `--activity`.
+        - Supported actions include `click`, `click --ocr-text`, `set-text --value`, `set-text --ocr-text --value`, `tap`, `swipe`, `swipe --until-text`, and `global --action back|home|recents|notifications|quick-settings`. Flovera cannot directly launch arbitrary third-party apps; if the target app is not already visible, ask the user to open it, then inspect the current screen and continue.
         - If a click appears accepted but verification fails, Flovera retries once by tapping the matched pre-action bounds and verifies again. If text input cannot directly set text, Flovera taps/focuses the target and retries; add `--dismiss-keyboard-after` when the keyboard should be closed after input.
+        - If several attempts on the same page do not make progress, use `global --action back` to return to the upper page, re-inspect, and choose a different path instead of repeating the same failing selector.
         - Use `wait --text/--ocr-text/--package` and post-action `--expect-text`, `--expect-ocr-text`, or `--expect-package` checks. Do not infer success from a gesture being accepted.
         - Each desktop operation command updates app-owned feedback as "Flovera is operating the phone" plus the current action such as click, input, swipe, or wait. Terminal feedback dwells briefly and may use a stronger notification/vibration. Do not replace this with filler narration; add natural-language progress only when it helps the user understand a decision.
         - `screenshot --output <workspace.png>` captures the current screen for diagnostics. Failed UI actions write a diagnosis package under `.flovera/logs/ui-diagnosis/` with screenshot and semantic/OCR inspection when possible. Current provider requests are text-only, so do not claim the model interpreted screenshot pixels unless a future vision adapter explicitly reports that it did.
         - If login, CAPTCHA, biometric confirmation, a protected system dialog, lock screen, payment, or an unverified action blocks progress, run `ui task intervention --reason`. Tell the user exactly what must be done.
         - After the user resolves the blocker, run `ui task resume`, inspect the current screen, and rebuild the scene if needed before continuing from the last confirmed action-id. Never replay earlier actions blindly.
-        - Complete with `ui task complete --summary`, or cancel explicitly. Do not leave a finished workflow marked active.
+        - Complete with `ui task complete --summary`, or cancel explicitly. Do not leave a finished workflow marked active. After a successful repeatable workflow, ask the user whether they want a reusable Flovera automation script/macro for next time; do not create it silently.
       """.trimIndent()
 
       "flovera-automation-script" -> """
@@ -321,6 +322,8 @@ object FloveraSkillRegistry {
         - Use `--param key=value` for runtime values. Inside script argv or cwd, reference values as `{{key}}`.
         - Keep scripts small and inspectable. Put large reusable logic in ordinary workspace files such as `tools/*.py` or `tools/*.groovy`, then call those files from script steps.
         - For Android UI steps, include semantic selectors and expected results when possible. Flovera adds a stable action id when a script step omits one, but explicit action ids are better for hand-written workflows.
+        - For a script/macro whose starting point is an app's initial page, do not assume the app will already be in that state. Start from the user's currently visible screen, then use inspection and repeated `global --action back` steps as needed to return toward the app's upper-level page before continuing. If the target app is not visible, ask the user to open it first; Flovera does not directly launch arbitrary third-party apps.
+        - If a scripted Android UI step fails repeatedly on the same page, back out once, re-inspect, and try a different visible path rather than looping on the same selector.
         - Verify artifacts after script runs when the workflow creates Office/PDF/image/data files.
 
         Script shape:
