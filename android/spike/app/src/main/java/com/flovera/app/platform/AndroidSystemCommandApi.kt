@@ -200,8 +200,19 @@ class AndroidSystemCommandApi(
             textFilter = args.string("filter-text"),
             descriptionFilter = args.string("filter-description"),
             resourceIdFilter = args.string("filter-resource-id"),
+            ocrTextFilter = args.string("filter-ocr-text"),
             nodeId = args.string("node-id"),
             subtree = args.has("subtree"),
+            withOcr = args.has("with-ocr") || args.string("filter-ocr-text").isNotBlank(),
+          ).toString(2),
+        )
+      }
+      "ocr" -> {
+        desktopFeedback("正在操作手机", "识别当前屏幕文字", ongoing = true)
+        ok(
+          desktopAutomation.ocr(
+            textFilter = args.string("filter-text"),
+            maxBlocks = args.int("max-blocks", 200),
           ).toString(2),
         )
       }
@@ -218,6 +229,7 @@ class AndroidSystemCommandApi(
         val result = desktopAutomation.waitFor(
           text = args.string("text"),
           packageName = args.string("package"),
+          ocrText = args.string("ocr-text"),
           timeoutMs = args.long("timeout-ms", 10_000L).coerceIn(250L, 60_000L),
         )
         ok(result.toString(2))
@@ -242,9 +254,10 @@ class AndroidSystemCommandApi(
           text = args.string("text"),
           description = args.string("description"),
           resourceId = args.string("resource-id"),
+          ocrText = args.string("ocr-text"),
         )
-        require(clicked) { "matching node was not found or could not be clicked" }
-        JSONObject().put("clicked", true)
+        require(clicked.optBoolean("completed")) { "matching node was not found or could not be clicked" }
+        clicked.put("clicked", true)
       }
       "set-text", "input" -> desktopAction(args, "set-text") {
         desktopFeedback("正在操作手机", "输入：${args.required("value").take(24)}", ongoing = true)
@@ -306,7 +319,7 @@ class AndroidSystemCommandApi(
         JSONObject().put("globalAction", action)
       }
       else -> fail(
-        "supported: android ui status|open-settings|inspect|screenshot|wait|task|launch|click|set-text|tap|swipe|global",
+        "supported: android ui status|open-settings|inspect|ocr|screenshot|wait|task|launch|click|set-text|tap|swipe|global",
       )
     }
   }
@@ -367,11 +380,12 @@ class AndroidSystemCommandApi(
       val operationResult = operation()
       val timeoutMs = args.long("verify-timeout-ms", 8_000L).coerceIn(250L, 60_000L)
       val expectedText = args.string("expect-text")
+      val expectedOcrText = args.string("expect-ocr-text")
       val expectedPackage = args.string("expect-package")
       val verification = if (operationResult.optBoolean("matched")) {
         operationResult
-      } else if (expectedText.isNotBlank() || expectedPackage.isNotBlank()) {
-        desktopAutomation.waitFor(expectedText, expectedPackage, timeoutMs)
+      } else if (expectedText.isNotBlank() || expectedOcrText.isNotBlank() || expectedPackage.isNotBlank()) {
+        desktopAutomation.waitFor(expectedText, expectedPackage, timeoutMs, expectedOcrText)
       } else {
         desktopAutomation.waitForChange(before.optString("screenDigest"), timeoutMs)
       }
@@ -466,6 +480,7 @@ class AndroidSystemCommandApi(
     return args.string("text")
       .ifBlank { args.string("description") }
       .ifBlank { args.string("resource-id") }
+      .ifBlank { args.string("ocr-text") }
       .ifBlank { args.string("node-id") }
       .ifBlank { "目标控件" }
       .take(40)
@@ -798,7 +813,7 @@ class AndroidSystemCommandApi(
             "network get",
             "foreground start|stop|status",
             "intent open|open-url|share|dial",
-            "ui status|open-settings|inspect|screenshot|wait|task|launch|click|set-text|tap|swipe|global",
+            "ui status|open-settings|inspect|ocr|screenshot|wait|task|launch|click|set-text|tap|swipe|global",
           ),
         ),
       )

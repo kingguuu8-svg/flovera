@@ -83,20 +83,24 @@ class FloveraAccessibilityService : AccessibilityService() {
     textFilter: String = "",
     descriptionFilter: String = "",
     resourceIdFilter: String = "",
+    ocrTextFilter: String = "",
     nodeId: String = "",
     subtree: Boolean = false,
+    withOcr: Boolean = false,
   ): JSONObject {
     val baseRoot = awaitActiveRoot()
     val root = if (subtree && nodeId.isNotBlank()) nodeAtPath(baseRoot, nodeId)
       ?: error("subtree node was not found: $nodeId")
     else baseRoot
+    val ocrSnapshot = if (withOcr || ocrTextFilter.isNotBlank()) runCatching { ocrSnapshot() }.getOrNull() else null
     val nodes = JSONArray()
     val queue = ArrayDeque<NodePath>()
     queue.add(NodePath(root, if (subtree && nodeId.isNotBlank()) nodeId else "0"))
     while (queue.isNotEmpty() && nodes.length() < maxNodes) {
       val current = queue.removeFirst()
       val currentJson = nodeJson(current.node, current.path)
-      if (currentJson.matchesFilters(textFilter, descriptionFilter, resourceIdFilter)) {
+      if (ocrSnapshot != null) attachOcr(currentJson, ocrSnapshot.blocks)
+      if (currentJson.matchesFilters(textFilter, descriptionFilter, resourceIdFilter, ocrTextFilter)) {
         nodes.put(currentJson)
       }
       for (index in 0 until current.node.childCount) {
@@ -114,16 +118,68 @@ class FloveraAccessibilityService : AccessibilityService() {
       .put("filterText", textFilter)
       .put("filterDescription", descriptionFilter)
       .put("filterResourceId", resourceIdFilter)
+      .put("filterOcrText", ocrTextFilter)
       .put("subtreeRoot", if (subtree) nodeId else "")
+      .put("withOcr", ocrSnapshot != null)
+      .put("ocrEngine", ocrSnapshot?.engine.orEmpty())
+      .put("ocrBlockCount", ocrSnapshot?.blocks?.size ?: 0)
+      .put("ocrTextMatched", if (ocrTextFilter.isBlank()) false else ocrSnapshot?.containsText(ocrTextFilter) == true)
       .put("screenDigest", screenDigest(nodes))
       .put("nodes", nodes)
   }
 
+  fun ocr(textFilter: String = "", maxBlocks: Int = 200): JSONObject {
+    val snapshot = ocrSnapshot()
+    val blocks = JSONArray()
+    snapshot.blocks
+      .asSequence()
+      .filter { textFilter.isBlank() || it.text.contains(textFilter, ignoreCase = true) }
+      .take(maxBlocks.coerceIn(1, 500))
+      .forEach { blocks.put(it.toJson()) }
+    return JSONObject()
+      .put("engine", snapshot.engine)
+      .put("width", snapshot.width)
+      .put("height", snapshot.height)
+      .put("filterText", textFilter)
+      .put("blockCount", blocks.length())
+      .put("blocks", blocks)
+  }
+
   fun screenshot(output: File): JSONObject {
-    val latch = CountDownLatch(1)
-    val result = AtomicReference<Result<Unit>>()
-    val executor = Executors.newSingleThreadExecutor()
+    val bitmap = captureScreenshotBitmap()
     output.parentFile?.mkdirs()
+    try {
+      FileOutputStream(output).use { stream ->
+        require(bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)) { "failed to encode screenshot" }
+      }
+    } finally {
+      bitmap.recycle()
+    }
+    return JSONObject()
+      .put("output", output.path)
+      .put("bytes", output.length())
+      .put("mimeType", "image/png")
+  }
+
+  private fun captureScreenshotBitmap(): Bitmap {
+    var lastError: Throwable? = null
+    repeat(SCREENSHOT_MAX_ATTEMPTS) { attempt ->
+      try {
+        return captureScreenshotBitmapOnce()
+      } catch (error: Throwable) {
+        lastError = error
+        if (attempt < SCREENSHOT_MAX_ATTEMPTS - 1) {
+          Thread.sleep(SCREENSHOT_RETRY_DELAY_MS * (attempt + 1))
+        }
+      }
+    }
+    throw lastError ?: IllegalStateException("accessibility screenshot failed")
+  }
+
+  private fun captureScreenshotBitmapOnce(): Bitmap {
+    val latch = CountDownLatch(1)
+    val result = AtomicReference<Result<Bitmap>>()
+    val executor = Executors.newSingleThreadExecutor()
     try {
       takeScreenshot(
         android.view.Display.DEFAULT_DISPLAY,
@@ -136,11 +192,8 @@ class FloveraAccessibilityService : AccessibilityService() {
                   ?: error("Android returned an unreadable screenshot buffer")
                 val bitmap = hardware.copy(Bitmap.Config.ARGB_8888, false)
                 screenshot.hardwareBuffer.close()
-                FileOutputStream(output).use { stream ->
-                  require(bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)) { "failed to encode screenshot" }
-                }
-                bitmap.recycle()
                 hardware.recycle()
+                bitmap
               },
             )
             latch.countDown()
@@ -153,26 +206,24 @@ class FloveraAccessibilityService : AccessibilityService() {
         },
       )
       require(latch.await(SCREENSHOT_TIMEOUT_MS, TimeUnit.MILLISECONDS)) { "accessibility screenshot timed out" }
-      result.get()?.getOrThrow() ?: error("accessibility screenshot produced no result")
-      return JSONObject()
-        .put("output", output.path)
-        .put("bytes", output.length())
-        .put("mimeType", "image/png")
+      return result.get()?.getOrThrow() ?: error("accessibility screenshot produced no result")
     } finally {
       executor.shutdownNow()
     }
   }
 
-  fun click(nodeId: String, text: String, description: String, resourceId: String): Boolean {
-    val node = findNode(nodeId, text, description, resourceId) ?: return false
-    var target: AccessibilityNodeInfo? = node
-    while (target != null) {
-      if (target.isClickable && target.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
-      target = target.parent
+  fun click(nodeId: String, text: String, description: String, resourceId: String, ocrText: String): JSONObject {
+    val node = findNode(nodeId, text, description, resourceId)
+    if (node != null) {
+      val completed = clickNodeOrBounds(node)
+      return JSONObject()
+        .put("completed", completed)
+        .put("strategy", "accessibility")
     }
-    val bounds = Rect()
-    node.getBoundsInScreen(bounds)
-    return tap(bounds.centerX(), bounds.centerY(), DEFAULT_GESTURE_TIMEOUT_MS)
+    if (ocrText.isNotBlank()) {
+      return clickByOcrText(ocrText)
+    }
+    return JSONObject().put("completed", false).put("strategy", "none")
   }
 
   fun setText(nodeId: String, textMatch: String, description: String, resourceId: String, value: String): Boolean {
@@ -272,11 +323,22 @@ class FloveraAccessibilityService : AccessibilityService() {
   }
 
   fun waitFor(text: String, packageName: String, timeoutMs: Long): JSONObject {
+    return waitFor(text = text, ocrText = "", packageName = packageName, timeoutMs = timeoutMs)
+  }
+
+  fun waitFor(text: String, ocrText: String, packageName: String, timeoutMs: Long): JSONObject {
     val deadline = System.currentTimeMillis() + timeoutMs
     var observedPackage = ""
     var observedDigest = ""
+    var ocrMatched = false
     do {
-      val inspection = runCatching { inspect(MAX_WAIT_INSPECTION_NODES) }.getOrNull()
+      val inspection = runCatching {
+        inspect(
+          maxNodes = MAX_WAIT_INSPECTION_NODES,
+          ocrTextFilter = ocrText,
+          withOcr = ocrText.isNotBlank(),
+        )
+      }.getOrNull()
       if (inspection == null) {
         Thread.sleep(WAIT_POLL_MS)
         continue
@@ -285,9 +347,13 @@ class FloveraAccessibilityService : AccessibilityService() {
       observedDigest = inspection.optString("screenDigest")
       val packageMatched = packageName.isBlank() || inspection.optString("package") == packageName
       val textMatched = text.isBlank() || inspection.optJSONArray("nodes").containsText(text)
-      if (packageMatched && textMatched) {
+      ocrMatched = ocrText.isBlank() || inspection.optBoolean("ocrTextMatched")
+      if (packageMatched && textMatched && ocrMatched) {
         return JSONObject()
           .put("matched", true)
+          .put("text", text)
+          .put("ocrText", ocrText)
+          .put("ocrMatched", ocrMatched)
           .put("package", inspection.optString("package"))
           .put("screenDigest", inspection.optString("screenDigest"))
       }
@@ -296,6 +362,8 @@ class FloveraAccessibilityService : AccessibilityService() {
     return JSONObject()
       .put("matched", false)
       .put("text", text)
+      .put("ocrText", ocrText)
+      .put("ocrMatched", ocrMatched)
       .put("package", packageName)
       .put("observedPackage", observedPackage)
       .put("screenDigest", observedDigest)
@@ -365,6 +433,119 @@ class FloveraAccessibilityService : AccessibilityService() {
     return null
   }
 
+  private fun clickNodeOrBounds(node: AccessibilityNodeInfo): Boolean {
+    var target: AccessibilityNodeInfo? = node
+    while (target != null) {
+      if (target.isClickable && target.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
+      target = target.parent
+    }
+    val bounds = Rect()
+    node.getBoundsInScreen(bounds)
+    return tap(bounds.centerX(), bounds.centerY(), DEFAULT_GESTURE_TIMEOUT_MS)
+  }
+
+  private fun clickByOcrText(ocrText: String): JSONObject {
+    val normalized = ocrText.trim()
+    val snapshot = ocrSnapshot()
+    val block = snapshot.blocks.firstOrNull { it.text.contains(normalized, ignoreCase = true) }
+      ?: return JSONObject()
+        .put("completed", false)
+        .put("strategy", "ocr")
+        .put("ocrText", ocrText)
+        .put("reason", "ocr text was not observed")
+    val target = clickableNodeForOcrBlock(awaitActiveRoot(), block)
+    if (target != null) {
+      return JSONObject()
+        .put("completed", clickNodeOrBounds(target))
+        .put("strategy", "ocr_clickable_node")
+        .put("ocrText", block.text)
+        .put("ocrBounds", block.boundsJson())
+    }
+    return JSONObject()
+      .put("completed", tap(block.bounds.centerX(), block.bounds.centerY(), DEFAULT_GESTURE_TIMEOUT_MS))
+      .put("strategy", "ocr_bounds_tap")
+      .put("ocrText", block.text)
+      .put("ocrBounds", block.boundsJson())
+  }
+
+  private fun clickableNodeForOcrBlock(root: AccessibilityNodeInfo, block: OcrBlock): AccessibilityNodeInfo? {
+    var best: AccessibilityNodeInfo? = null
+    var bestArea = Int.MAX_VALUE
+    val queue = ArrayDeque<AccessibilityNodeInfo>()
+    queue.add(root)
+    while (queue.isNotEmpty()) {
+      val node = queue.removeFirst()
+      val bounds = Rect()
+      node.getBoundsInScreen(bounds)
+      if (node.isClickable && bounds.isUsable() && bounds.contains(block.bounds.centerX(), block.bounds.centerY())) {
+        val area = bounds.width() * bounds.height()
+        if (area < bestArea) {
+          best = node
+          bestArea = area
+        }
+      }
+      for (index in 0 until node.childCount) {
+        node.getChild(index)?.let(queue::add)
+      }
+    }
+    return best
+  }
+
+  private fun ocrSnapshot(): OcrSnapshot {
+    val bitmap = captureScreenshotBitmap()
+    try {
+      val json = MlKitOcrEngine.recognize(this, bitmap, OCR_TIMEOUT_MS)
+      return OcrSnapshot(
+        engine = json.optString("engine"),
+        width = json.optInt("width"),
+        height = json.optInt("height"),
+        blocks = parseOcrBlocks(json.optJSONArray("blocks")),
+      )
+    } finally {
+      bitmap.recycle()
+    }
+  }
+
+  private fun parseOcrBlocks(blocksJson: JSONArray?): List<OcrBlock> {
+    val blocks = mutableListOf<OcrBlock>()
+    if (blocksJson == null) return blocks
+    for (index in 0 until blocksJson.length()) {
+      val block = blocksJson.optJSONObject(index) ?: continue
+      val bounds = block.optJSONArray("bounds") ?: continue
+      blocks.add(
+        OcrBlock(
+          id = block.optString("id"),
+          kind = block.optString("kind"),
+          text = block.optString("text"),
+          bounds = Rect(
+            bounds.optInt(0),
+            bounds.optInt(1),
+            bounds.optInt(2),
+            bounds.optInt(3),
+          ),
+        ),
+      )
+    }
+    return blocks.filter { it.text.isNotBlank() }
+  }
+
+  private fun attachOcr(nodeJson: JSONObject, blocks: List<OcrBlock>) {
+    val bounds = nodeJson.boundsRect()
+    if (!bounds.isUsable()) return
+    val attached = blocks
+      .asSequence()
+      .filter { block ->
+        bounds.contains(block.bounds.centerX(), block.bounds.centerY()) ||
+          blockOverlapRatio(bounds, block.bounds) >= OCR_ATTACH_MIN_OVERLAP
+      }
+      .take(MAX_ATTACHED_OCR_BLOCKS)
+      .toList()
+    if (attached.isEmpty()) return
+    nodeJson
+      .put("ocrText", attached.joinToString(" ") { it.text })
+      .put("ocrBlocks", JSONArray(attached.map { it.toJson() }))
+  }
+
   private fun matchingNode(
     root: AccessibilityNodeInfo,
     predicate: (AccessibilityNodeInfo) -> Boolean,
@@ -421,7 +602,8 @@ class FloveraAccessibilityService : AccessibilityService() {
       val node = optJSONObject(index) ?: continue
       if (
         node.optString("text").contains(normalized, ignoreCase = true) ||
-        node.optString("description").contains(normalized, ignoreCase = true)
+        node.optString("description").contains(normalized, ignoreCase = true) ||
+        node.optString("ocrText").contains(normalized, ignoreCase = true)
       ) {
         return true
       }
@@ -429,10 +611,36 @@ class FloveraAccessibilityService : AccessibilityService() {
     return false
   }
 
-  private fun JSONObject.matchesFilters(text: String, description: String, resourceId: String): Boolean {
+  private fun JSONObject.matchesFilters(text: String, description: String, resourceId: String, ocrText: String): Boolean {
     return (text.isBlank() || optString("text").contains(text, ignoreCase = true)) &&
       (description.isBlank() || optString("description").contains(description, ignoreCase = true)) &&
-      (resourceId.isBlank() || optString("resourceId").contains(resourceId, ignoreCase = true))
+      (resourceId.isBlank() || optString("resourceId").contains(resourceId, ignoreCase = true)) &&
+      (ocrText.isBlank() || optString("ocrText").contains(ocrText, ignoreCase = true))
+  }
+
+  private fun OcrSnapshot.containsText(expected: String): Boolean {
+    val normalized = expected.trim()
+    return normalized.isBlank() || blocks.any { it.text.contains(normalized, ignoreCase = true) }
+  }
+
+  private fun JSONObject.boundsRect(): Rect {
+    val bounds = optJSONArray("bounds") ?: return Rect()
+    return Rect(
+      bounds.optInt(0),
+      bounds.optInt(1),
+      bounds.optInt(2),
+      bounds.optInt(3),
+    )
+  }
+
+  private fun Rect.isUsable(): Boolean = width() > 0 && height() > 0
+
+  private fun blockOverlapRatio(nodeBounds: Rect, blockBounds: Rect): Double {
+    val intersection = Rect(nodeBounds)
+    if (!intersection.intersect(blockBounds)) return 0.0
+    val blockArea = blockBounds.width().coerceAtLeast(1) * blockBounds.height().coerceAtLeast(1)
+    val intersectionArea = intersection.width().coerceAtLeast(0) * intersection.height().coerceAtLeast(0)
+    return intersectionArea.toDouble() / blockArea.toDouble()
   }
 
   private fun screenDigest(nodes: JSONArray): String {
@@ -465,15 +673,44 @@ class FloveraAccessibilityService : AccessibilityService() {
 
   private data class NodePath(val node: AccessibilityNodeInfo, val path: String)
 
+  private data class OcrSnapshot(
+    val engine: String,
+    val width: Int,
+    val height: Int,
+    val blocks: List<OcrBlock>,
+  )
+
+  private data class OcrBlock(
+    val id: String,
+    val kind: String,
+    val text: String,
+    val bounds: Rect,
+  ) {
+    fun boundsJson(): JSONArray = JSONArray(listOf(bounds.left, bounds.top, bounds.right, bounds.bottom))
+
+    fun toJson(): JSONObject = JSONObject()
+      .put("id", id)
+      .put("kind", kind)
+      .put("text", text)
+      .put("bounds", boundsJson())
+      .put("centerX", bounds.centerX())
+      .put("centerY", bounds.centerY())
+  }
+
   companion object {
     @Volatile private var instance: FloveraAccessibilityService? = null
     @Volatile private var latestPackage: String = ""
     @Volatile private var latestEventAtMillis: Long = 0L
     private const val SCREENSHOT_TIMEOUT_MS = 10_000L
+    private const val SCREENSHOT_MAX_ATTEMPTS = 5
+    private const val SCREENSHOT_RETRY_DELAY_MS = 250L
     private const val DEFAULT_GESTURE_TIMEOUT_MS = 3_000L
     private const val WAIT_POLL_MS = 250L
     private const val ACTIVE_WINDOW_TIMEOUT_MS = 3_000L
     private const val MAX_WAIT_INSPECTION_NODES = 500
+    private const val OCR_TIMEOUT_MS = 10_000L
+    private const val OCR_ATTACH_MIN_OVERLAP = 0.35
+    private const val MAX_ATTACHED_OCR_BLOCKS = 8
 
     fun requireConnected(): FloveraAccessibilityService {
       return instance ?: error("Flovera Accessibility is not enabled or connected")

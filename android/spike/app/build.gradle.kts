@@ -103,6 +103,8 @@ dependencies {
   implementation(libs.markwon.core)
   implementation(libs.markwon.ext.tables)
   implementation(libs.jgit)
+  implementation(libs.mlkit.text.recognition)
+  implementation(libs.mlkit.text.recognition.chinese)
   implementation("org.codehaus.groovy:groovy:2.4.21:grooid")
   implementation("com.android.tools:r8:9.1.31")
 

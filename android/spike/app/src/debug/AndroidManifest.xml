@@ -10,5 +10,12 @@
         <receiver
             android:name="com.flovera.app.debug.ContextOverflowRecoveryDebugReceiver"
             android:exported="true" />
+        <receiver
+            android:name="com.flovera.app.debug.DesktopAutomationOcrDebugReceiver"
+            android:exported="true" />
+        <activity
+            android:name="com.flovera.app.debug.DesktopAutomationOcrDebugActivity"
+            android:exported="true"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar" />
     </application>
 </manifest>

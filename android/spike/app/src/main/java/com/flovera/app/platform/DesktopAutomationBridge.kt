@@ -22,18 +22,22 @@ class DesktopAutomationProvider : ContentProvider() {
           textFilter = input.getString("textFilter").orEmpty(),
           descriptionFilter = input.getString("descriptionFilter").orEmpty(),
           resourceIdFilter = input.getString("resourceIdFilter").orEmpty(),
+          ocrTextFilter = input.getString("ocrTextFilter").orEmpty(),
           nodeId = input.getString("nodeId").orEmpty(),
           subtree = input.getBoolean("subtree", false),
+          withOcr = input.getBoolean("withOcr", false),
+        )
+        METHOD_OCR -> service.ocr(
+          textFilter = input.getString("textFilter").orEmpty(),
+          maxBlocks = input.getInt("maxBlocks", 200),
         )
         METHOD_SCREENSHOT -> service.screenshot(java.io.File(input.getString("output").orEmpty()))
-        METHOD_CLICK -> JSONObject().put(
-          "completed",
-          service.click(
-            nodeId = input.getString("nodeId").orEmpty(),
-            text = input.getString("text").orEmpty(),
-            description = input.getString("description").orEmpty(),
-            resourceId = input.getString("resourceId").orEmpty(),
-          ),
+        METHOD_CLICK -> service.click(
+          nodeId = input.getString("nodeId").orEmpty(),
+          text = input.getString("text").orEmpty(),
+          description = input.getString("description").orEmpty(),
+          resourceId = input.getString("resourceId").orEmpty(),
+          ocrText = input.getString("ocrText").orEmpty(),
         )
         METHOD_SET_TEXT -> JSONObject().put(
           "completed",
@@ -80,6 +84,7 @@ class DesktopAutomationProvider : ContentProvider() {
         )
         METHOD_WAIT -> service.waitFor(
           text = input.getString("text").orEmpty(),
+          ocrText = input.getString("ocrText").orEmpty(),
           packageName = input.getString("package").orEmpty(),
           timeoutMs = input.getLong("timeoutMs"),
         )
@@ -114,6 +119,7 @@ class DesktopAutomationProvider : ContentProvider() {
   companion object {
     const val METHOD_STATUS = "status"
     const val METHOD_INSPECT = "inspect"
+    const val METHOD_OCR = "ocr"
     const val METHOD_SCREENSHOT = "screenshot"
     const val METHOD_CLICK = "click"
     const val METHOD_SET_TEXT = "set_text"
@@ -140,8 +146,10 @@ class DesktopAutomationClient(context: Context) {
     textFilter: String = "",
     descriptionFilter: String = "",
     resourceIdFilter: String = "",
+    ocrTextFilter: String = "",
     nodeId: String = "",
     subtree: Boolean = false,
+    withOcr: Boolean = false,
   ): JSONObject = call(
     DesktopAutomationProvider.METHOD_INSPECT,
     Bundle().apply {
@@ -149,8 +157,18 @@ class DesktopAutomationClient(context: Context) {
       putString("textFilter", textFilter)
       putString("descriptionFilter", descriptionFilter)
       putString("resourceIdFilter", resourceIdFilter)
+      putString("ocrTextFilter", ocrTextFilter)
       putString("nodeId", nodeId)
       putBoolean("subtree", subtree)
+      putBoolean("withOcr", withOcr)
+    },
+  )
+
+  fun ocr(textFilter: String = "", maxBlocks: Int = 200): JSONObject = call(
+    DesktopAutomationProvider.METHOD_OCR,
+    Bundle().apply {
+      putString("textFilter", textFilter)
+      putInt("maxBlocks", maxBlocks)
     },
   )
 
@@ -159,15 +177,16 @@ class DesktopAutomationClient(context: Context) {
     Bundle().apply { putString("output", output.absolutePath) },
   )
 
-  fun click(nodeId: String, text: String, description: String, resourceId: String): Boolean = call(
+  fun click(nodeId: String, text: String, description: String, resourceId: String, ocrText: String = ""): JSONObject = call(
     DesktopAutomationProvider.METHOD_CLICK,
     Bundle().apply {
       putString("nodeId", nodeId)
       putString("text", text)
       putString("description", description)
       putString("resourceId", resourceId)
+      putString("ocrText", ocrText)
     },
-  ).optBoolean("completed")
+  )
 
   fun setText(nodeId: String, text: String, description: String, resourceId: String, value: String): Boolean = call(
     DesktopAutomationProvider.METHOD_SET_TEXT,
@@ -244,10 +263,11 @@ class DesktopAutomationClient(context: Context) {
     },
   ).optBoolean("completed")
 
-  fun waitFor(text: String, packageName: String, timeoutMs: Long): JSONObject = call(
+  fun waitFor(text: String, packageName: String, timeoutMs: Long, ocrText: String = ""): JSONObject = call(
     DesktopAutomationProvider.METHOD_WAIT,
     Bundle().apply {
       putString("text", text)
+      putString("ocrText", ocrText)
       putString("package", packageName)
       putLong("timeoutMs", timeoutMs)
     },
@@ -282,7 +302,7 @@ class DesktopAutomationClient(context: Context) {
   }
 
   private companion object {
-    const val BRIDGE_CONNECT_TIMEOUT_MS = 5_000L
+    const val BRIDGE_CONNECT_TIMEOUT_MS = 15_000L
     const val BRIDGE_CONNECT_POLL_MS = 200L
   }
 }

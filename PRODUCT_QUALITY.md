@@ -1184,18 +1184,21 @@ now exposes permission-gated Android system APIs:
 - intents: permission pages, URLs/maps, share sheets, and dialer.
 - desktop operation: an Accessibility-backed `android ui` profile can inspect
   the active semantic tree, filter inspection by text/description/resource-id,
-  expand a subtree by node id, capture a workspace screenshot, launch apps
-  with optional explicit activity fallback,
-  click/set text by text/description/resource-id/node-id, tap/swipe/use global
-  actions, accept start/end or from/to swipe coordinate names, swipe until
-  target text appears, and wait for expected text or package changes. Mutating
+  filter OCR-enhanced inspection by visible OCR text, expand a subtree by node
+  id, capture a workspace screenshot, run ML Kit OCR to return text blocks with
+  screen bounds, launch apps with optional explicit activity fallback,
+  click/set text by text/description/resource-id/node-id/OCR text, tap/swipe/use
+  global actions, accept start/end or from/to swipe coordinate names, swipe
+  until target text appears, and wait for expected text/OCR text or package
+  changes. Mutating
   actions require stable action IDs, persist the last confirmed action, update
   app-owned runtime feedback so the user can see that Flovera is operating the
   phone, keep terminal feedback visible briefly, use stronger completion
-  notification/vibration when available, and verify the resulting semantic
-  state before success. Login, CAPTCHA, biometric, payment, protected-dialog,
-  lock-screen, and unverified states become explicit user-intervention
-  checkpoints rather than guessed continuation.
+  notification/vibration when available, fuse OCR blocks back onto accessibility
+  nodes before falling back to OCR bounding-box taps, and verify the resulting
+  semantic or OCR-observed state before success. Login, CAPTCHA, biometric,
+  payment, protected-dialog, lock-screen, and unverified states become explicit
+  user-intervention checkpoints rather than guessed continuation.
 
 Desktop operation currently uses semantic accessibility data for agent
 reasoning. Screenshots are captured as workspace PNG diagnostics, but the

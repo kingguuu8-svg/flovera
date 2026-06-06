@@ -17,6 +17,7 @@ chaquopy = "17.0.0"
 jtokkit = "1.1.0"
 markwon = "4.6.2"
 jgit = "6.10.0.202406032230-r"
+mlkitTextRecognition = "16.0.1"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "androidxCore" }
@@ -43,6 +44,8 @@ jtokkit = { module = "com.knuddels:jtokkit", version.ref = "jtokkit" }
 markwon-core = { module = "io.noties.markwon:core", version.ref = "markwon" }
 markwon-ext-tables = { module = "io.noties.markwon:ext-tables", version.ref = "markwon" }
 jgit = { module = "org.eclipse.jgit:org.eclipse.jgit", version.ref = "jgit" }
+mlkit-text-recognition = { module = "com.google.mlkit:text-recognition", version.ref = "mlkitTextRecognition" }
+mlkit-text-recognition-chinese = { module = "com.google.mlkit:text-recognition-chinese", version.ref = "mlkitTextRecognition" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "androidGradlePlugin" }

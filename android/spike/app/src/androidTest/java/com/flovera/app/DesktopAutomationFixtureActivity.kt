@@ -1,7 +1,9 @@
 package com.flovera.app
 
 import android.app.Activity
+import android.graphics.Color
 import android.os.Bundle
+import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
@@ -32,11 +34,25 @@ class DesktopAutomationFixtureActivity : Activity() {
         result.text = "Submitted: ${input.text}"
       }
     }
+    val ocrOnly = TextView(this).apply {
+      text = "OCR TARGET"
+      textSize = 34f
+      setTextColor(Color.BLACK)
+      setBackgroundColor(Color.WHITE)
+      importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+      gravity = android.view.Gravity.CENTER_VERTICAL
+      setPadding(padding, 0, padding, 0)
+      minimumHeight = (96 * density).toInt()
+      setOnClickListener {
+        result.text = "OCR target clicked"
+      }
+    }
     val content = LinearLayout(this).apply {
       orientation = LinearLayout.VERTICAL
       setPadding(padding, padding, padding, padding)
       addView(input, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
       addView(submit, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+      addView(ocrOnly, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (96 * density).toInt()))
       addView(result, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
       repeat(18) { index ->
         addView(

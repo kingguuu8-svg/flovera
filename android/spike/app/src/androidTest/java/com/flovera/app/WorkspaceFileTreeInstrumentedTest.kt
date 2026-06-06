@@ -1,5 +1,11 @@
 package com.flovera.app
 
+import android.content.ComponentName
+import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
 import android.net.Uri
 import androidx.core.content.FileProvider
 import androidx.test.platform.app.InstrumentationRegistry
@@ -14,6 +20,7 @@ import com.flovera.app.koog.ToolEventRecorder
 import com.flovera.app.koog.WorkspaceCommandRunTool
 import com.flovera.app.koog.WorkspaceSearchTool
 import com.flovera.app.koog.workspaceToolRegistry
+import com.flovera.app.platform.MlKitOcrEngine
 import com.flovera.app.web.FloveraWebBridge
 import com.flovera.app.config.SettingsStore
 import com.flovera.app.workspace.WorkspaceController
@@ -46,6 +53,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Ignore
 import org.junit.Test
 
 private const val TEST_HELPER_JAR_BASE64 =
@@ -228,6 +236,9 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(androidSkill.contains("Permissions panel"))
     assertTrue(desktopSkill.contains("name: flovera-desktop-operation"))
     assertTrue(desktopSkill.contains("click --text"))
+    assertTrue(desktopSkill.contains("click --ocr-text"))
+    assertTrue(desktopSkill.contains("inspect --with-ocr"))
+    assertTrue(desktopSkill.contains("--expect-ocr-text"))
     assertTrue(desktopSkill.contains("swipe --until-text"))
     assertTrue(desktopSkill.contains("--from-x/--from-y/--to-x/--to-y"))
     assertTrue(desktopSkill.contains("launch --package [--activity <activity-class>]"))
@@ -1668,27 +1679,22 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(completed, completed.contains("\"status\": \"completed\""))
   }
 
+  @Ignore("am instrument stops or suppresses the target app AccessibilityService; use DesktopAutomationDebugReceiver for real-device verification.")
   @Test
   fun workspaceCommandRunInputsAndClicksAcrossAppBoundary() = runBlocking {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
+    context.startActivity(
+      Intent().apply {
+        component = ComponentName("com.flovera.app.test", "com.flovera.app.DesktopAutomationFixtureActivity")
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      },
+    )
+    Thread.sleep(1_000)
     val workspace = WorkspaceManager(context, "workspace-command-desktop-input-${System.currentTimeMillis()}")
     val tool = WorkspaceCommandRunTool(workspace, ToolEventRecorder())
     tool.execute(
       WorkspaceCommandRunTool.Args(
         argv = listOf("android", "ui", "task", "start", "--goal", "Fill and submit another app"),
-        snapshotBeforeRun = false,
-      ),
-    )
-    val launched = tool.execute(
-      WorkspaceCommandRunTool.Args(
-        argv = listOf(
-          "android", "ui", "launch",
-          "--package", "com.flovera.app.test",
-          "--activity", "com.flovera.app.DesktopAutomationFixtureActivity",
-          "--action-id", "fixture-explicit-launch",
-          "--expect-package", "com.flovera.app.test",
-          "--verify-timeout-ms", "10000",
-        ),
         snapshotBeforeRun = false,
       ),
     )
@@ -1702,8 +1708,6 @@ class WorkspaceFileTreeInstrumentedTest {
         snapshotBeforeRun = false,
       ),
     )
-    assertTrue(launched, launched.contains("\"launched\": true"))
-    assertTrue(launched, launched.contains("\"activity\": \"com.flovera.app.DesktopAutomationFixtureActivity\""))
     assertTrue(available, available.contains("\"matched\": true"))
 
     val filteredInspection = tool.execute(
@@ -1728,6 +1732,36 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(filteredInspection, filteredInspection.contains("\"editable\": true"))
     assertTrue(input, input.contains("\"matched\": true"))
     assertTrue(input, input.contains("\"feedback\""))
+
+    val ocrInspection = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf(
+          "android", "ui", "inspect",
+          "--with-ocr",
+          "--filter-ocr-text", "OCR TARGET",
+          "--max-nodes", "80",
+        ),
+        snapshotBeforeRun = false,
+        timeoutMs = 20_000,
+      ),
+    )
+    val ocrClicked = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf(
+          "android", "ui", "click",
+          "--ocr-text", "OCR TARGET",
+          "--action-id", "fixture-ocr-target",
+          "--expect-text", "OCR target clicked",
+          "--verify-timeout-ms", "15000",
+        ),
+        snapshotBeforeRun = false,
+        timeoutMs = 30_000,
+      ),
+    )
+    assertTrue(ocrInspection, ocrInspection.contains("\"withOcr\": true"))
+    assertTrue(ocrInspection, ocrInspection.contains("\"ocrTextMatched\": true"))
+    assertTrue(ocrClicked, ocrClicked.contains("\"matched\": true"))
+    assertTrue(ocrClicked, ocrClicked.contains("\"strategy\": \"ocr_"))
 
     val submitted = tool.execute(
       WorkspaceCommandRunTool.Args(
@@ -1769,6 +1803,28 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(lowerTarget, lowerTarget.contains("\"feedback\""))
     assertTrue(completed, completed.contains("\"status\": \"completed\""))
     assertTrue(completed, completed.contains("\"durationMs\": 8000"))
+  }
+
+  @Test
+  fun mlKitOcrEngineRecognizesGeneratedBitmap() {
+    val bitmap = Bitmap.createBitmap(900, 240, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    canvas.drawColor(Color.WHITE)
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+      color = Color.BLACK
+      textSize = 72f
+      isFakeBoldText = true
+    }
+    canvas.drawText("OCR TARGET", 36f, 140f, paint)
+
+    val result = try {
+      MlKitOcrEngine.recognize(InstrumentationRegistry.getInstrumentation().targetContext, bitmap, 15_000L)
+    } finally {
+      bitmap.recycle()
+    }
+
+    assertTrue(result.toString(), result.optString("engine").contains("mlkit"))
+    assertTrue(result.toString(), result.optJSONArray("blocks").toString().contains("OCR"))
   }
 
   private fun recoverableSettingsLaunchArgs(): WorkspaceCommandRunTool.Args {
@@ -2646,6 +2702,11 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"androidDesktopPostActionVerification\": true"))
     assertTrue(capabilities.contains("\"androidDesktopRuntimeFeedback\": true"))
     assertTrue(capabilities.contains("\"androidDesktopCompletionStrongFeedback\": true"))
+    assertTrue(capabilities.contains("\"androidDesktopOcrObservation\": true"))
+    assertTrue(capabilities.contains("\"androidDesktopOcrEngine\": \"mlkit_text_recognition_chinese\""))
+    assertTrue(capabilities.contains("\"androidDesktopOcrSemanticFusion\": true"))
+    assertTrue(capabilities.contains("\"androidDesktopOcrTextSelector\": true"))
+    assertTrue(capabilities.contains("\"androidDesktopOcrPostActionVerification\": true"))
     assertTrue(capabilities.contains("\"androidDesktopSemanticClick\": true"))
     assertTrue(capabilities.contains("\"androidDesktopSwipeUntilText\": true"))
     assertTrue(capabilities.contains("\"androidDesktopSwipeCoordinateAliases\": true"))

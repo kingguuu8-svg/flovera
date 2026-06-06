@@ -76,6 +76,8 @@ class AgentPromptBuilderInstrumentedTest {
     assertTrue(systemPrompt.contains("accessibility-backed cross-app UI operations"))
     assertTrue(systemPrompt.contains("filtered/subtree inspection"))
     assertTrue(systemPrompt.contains("semantic click/input"))
+    assertTrue(systemPrompt.contains("OCR-enhanced inspection"))
+    assertTrue(systemPrompt.contains("click --ocr-text"))
     assertTrue(systemPrompt.contains("swipe-until-text"))
     assertTrue(systemPrompt.contains("coordinate aliases"))
     assertTrue(systemPrompt.contains("optional activity fallback"))
