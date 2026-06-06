@@ -14,6 +14,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.ResolveInfo
 import android.database.Cursor
 import android.graphics.ImageFormat
 import android.hardware.camera2.CameraCaptureSession
@@ -117,7 +118,33 @@ class AndroidSystemCommandApi(
           .put("profiles", JSONArray(PROFILES))
           .toString(2),
       )
-      else -> fail("unsupported android app command")
+      "list" -> ok(appList(args).toString(2))
+      "resolve" -> ok(resolveInstalledApp(args.required("name")).toString(2))
+      "launch" -> {
+        val resolved = if (args.string("package").isNotBlank()) {
+          JSONObject()
+            .put("package", args.string("package"))
+            .put("activity", args.string("activity"))
+            .put("label", args.string("package"))
+            .put("matched", true)
+            .put("source", "package")
+        } else {
+          resolveInstalledApp(args.required("name"))
+        }
+        require(resolved.optBoolean("matched")) { "app was not found: ${args.string("name")}" }
+        val packageName = resolved.getString("package")
+        val activityName = resolved.optString("activity")
+        require(launchInstalledApp(packageName, activityName)) {
+          "app has no launchable activity or launch was rejected: $packageName"
+        }
+        ok(
+          resolved
+            .put("launched", true)
+            .put("activity", activityName)
+            .toString(2),
+        )
+      }
+      else -> fail("supported: android app info|list|resolve|launch")
     }
   }
 
@@ -141,6 +168,82 @@ class AndroidSystemCommandApi(
       }
       else -> fail("supported: android permission status | android permission open <id>")
     }
+  }
+
+  private fun appList(args: AndroidCommandArgs): JSONObject {
+    val query = args.string("query").ifBlank { args.string("name") }.trim()
+    val limit = args.int("limit", 80).coerceIn(1, 500)
+    val apps = installedLaunchableApps()
+      .asSequence()
+      .filter { app ->
+        query.isBlank() ||
+          app.label.contains(query, ignoreCase = true) ||
+          app.packageName.contains(query, ignoreCase = true)
+      }
+      .take(limit)
+      .map { it.toJson() }
+      .toList()
+    return JSONObject()
+      .put("query", query)
+      .put("count", apps.size)
+      .put("apps", JSONArray(apps))
+  }
+
+  private fun resolveInstalledApp(name: String): JSONObject {
+    val normalized = name.trim()
+    val apps = installedLaunchableApps()
+    val scored = apps
+      .map { app -> app to app.matchScore(normalized) }
+      .filter { (_, score) -> score > 0 }
+      .sortedWith(compareByDescending<Pair<InstalledApp, Int>> { it.second }.thenBy { it.first.label.length })
+    val best = scored.firstOrNull()
+    val candidates = JSONArray(scored.take(8).map { (app, score) -> app.toJson().put("score", score) })
+    return if (best == null) {
+      JSONObject()
+        .put("matched", false)
+        .put("query", normalized)
+        .put("candidates", candidates)
+    } else {
+      best.first.toJson()
+        .put("matched", true)
+        .put("query", normalized)
+        .put("score", best.second)
+        .put("candidates", candidates)
+    }
+  }
+
+  private fun installedLaunchableApps(): List<InstalledApp> {
+    val manager = appContext.packageManager
+    val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+    return manager.queryIntentActivities(intent, 0)
+      .asSequence()
+      .mapNotNull { info -> info.toInstalledApp() }
+      .distinctBy { "${it.packageName}/${it.activity}" }
+      .sortedWith(compareBy<InstalledApp> { it.label.lowercase() }.thenBy { it.packageName })
+      .toList()
+  }
+
+  private fun ResolveInfo.toInstalledApp(): InstalledApp? {
+    val activityInfo = activityInfo ?: return null
+    val packageName = activityInfo.packageName.orEmpty()
+    val activity = activityInfo.name.orEmpty()
+    if (packageName.isBlank() || activity.isBlank()) return null
+    val label = loadLabel(appContext.packageManager)?.toString().orEmpty().ifBlank { packageName }
+    return InstalledApp(label = label, packageName = packageName, activity = activity)
+  }
+
+  private fun launchInstalledApp(packageName: String, activityName: String): Boolean {
+    val intent = if (activityName.isNotBlank()) {
+      Intent(Intent.ACTION_MAIN)
+        .addCategory(Intent.CATEGORY_LAUNCHER)
+        .setClassName(packageName, activityName)
+    } else {
+      appContext.packageManager.getLaunchIntentForPackage(packageName)
+    } ?: return false
+    return runCatching {
+      appContext.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+      true
+    }.getOrDefault(false)
   }
 
   private fun notification(args: AndroidCommandArgs): AndroidSystemCommandResult {
@@ -236,8 +339,18 @@ class AndroidSystemCommandApi(
       }
       "task" -> desktopTask(args)
       "launch" -> desktopAction(args, "launch") {
-        val packageName = args.required("package")
-        val activityName = args.string("activity")
+        val resolved = if (args.string("app").isNotBlank()) {
+          resolveInstalledApp(args.string("app"))
+        } else {
+          JSONObject()
+            .put("matched", true)
+            .put("package", args.required("package"))
+            .put("activity", args.string("activity"))
+            .put("label", args.string("package"))
+        }
+        require(resolved.optBoolean("matched")) { "app was not found: ${args.string("app")}" }
+        val packageName = resolved.getString("package")
+        val activityName = resolved.optString("activity")
         desktopFeedback("正在操作手机", "打开应用：${activityName.ifBlank { packageName }}", ongoing = true)
         require(desktopAutomation.launch(packageName, activityName)) {
           "app has no launchable activity or launch was rejected: $packageName"
@@ -246,6 +359,7 @@ class AndroidSystemCommandApi(
           .put("launched", true)
           .put("package", packageName)
           .put("activity", activityName)
+          .put("label", resolved.optString("label"))
       }
       "click" -> desktopAction(args, "click") {
         desktopFeedback("正在操作手机", "点击：${desktopSelectorLabel(args)}", ongoing = true)
@@ -266,10 +380,14 @@ class AndroidSystemCommandApi(
           text = args.string("text"),
           description = args.string("description"),
           resourceId = args.string("resource-id"),
+          ocrText = args.string("ocr-text"),
           value = args.required("value"),
         )
-        require(changed) { "matching editable node was not found or rejected text input" }
-        JSONObject().put("textSet", true)
+        require(changed.optBoolean("completed")) { "matching editable node was not found or rejected text input" }
+        if (args.has("dismiss-keyboard-after")) {
+          changed.put("dismissKeyboard", desktopAutomation.global("back"))
+        }
+        changed.put("textSet", true)
       }
       "tap" -> desktopAction(args, "tap") {
         desktopFeedback("正在操作手机", "点击坐标：${args.requiredInt("x")},${args.requiredInt("y")}", ongoing = true)
@@ -373,7 +491,11 @@ class AndroidSystemCommandApi(
     }
 
     return try {
-      val before = desktopAutomation.inspect(300)
+      val before = desktopAutomation.inspect(
+        maxNodes = 300,
+        ocrTextFilter = args.string("ocr-text"),
+        withOcr = args.string("ocr-text").isNotBlank(),
+      )
       require(!before.optBoolean("keyguardLocked")) {
         "device is locked; unlock it before resuming the desktop task"
       }
@@ -382,12 +504,23 @@ class AndroidSystemCommandApi(
       val expectedText = args.string("expect-text")
       val expectedOcrText = args.string("expect-ocr-text")
       val expectedPackage = args.string("expect-package")
-      val verification = if (operationResult.optBoolean("matched")) {
+      var verification = if (operationResult.optBoolean("matched")) {
         operationResult
       } else if (expectedText.isNotBlank() || expectedOcrText.isNotBlank() || expectedPackage.isNotBlank()) {
         desktopAutomation.waitFor(expectedText, expectedPackage, timeoutMs, expectedOcrText)
       } else {
         desktopAutomation.waitForChange(before.optString("screenDigest"), timeoutMs)
+      }
+      if (!verification.optBoolean("matched") && action == "click") {
+        val fallback = fallbackClickByBounds(args, before)
+        if (fallback.optBoolean("completed")) {
+          operationResult.put("verificationFallback", fallback)
+          verification = if (expectedText.isNotBlank() || expectedOcrText.isNotBlank() || expectedPackage.isNotBlank()) {
+            desktopAutomation.waitFor(expectedText, expectedPackage, timeoutMs, expectedOcrText)
+          } else {
+            desktopAutomation.waitForChange(before.optString("screenDigest"), timeoutMs)
+          }
+        }
       }
       require(verification.optBoolean("matched")) {
         "UI action executed but its expected result was not observed"
@@ -411,16 +544,76 @@ class AndroidSystemCommandApi(
           .toString(2),
       )
     } catch (error: Throwable) {
+      val diagnosisPath = writeDesktopFailureDiagnosis(action, actionId, error)
       DesktopAutomationStore.intervention(
         appContext,
-        "Desktop action $action ($actionId) needs review: ${error.message.orEmpty()}",
+        "Desktop action $action ($actionId) needs review: ${error.message.orEmpty()}${diagnosisPath?.let { "; diagnosis=$it" }.orEmpty()}",
       )
       AndroidOverlayController.hide(appContext, DESKTOP_FEEDBACK_OVERLAY_ID)
       notifyDesktopIntervention(
         "Action $action needs review before Flovera can continue: ${error.message.orEmpty()}",
       )
-      throw error
+      throw IllegalStateException("${error.message.orEmpty()}${diagnosisPath?.let { "; diagnosis=$it" }.orEmpty()}", error)
     }
+  }
+
+  private fun fallbackClickByBounds(args: AndroidCommandArgs, inspection: JSONObject): JSONObject {
+    val node = firstMatchingInspectionNode(args, inspection) ?: return JSONObject()
+      .put("completed", false)
+      .put("strategy", "bounds_fallback")
+      .put("reason", "matching pre-action node was not found")
+    val bounds = node.optJSONArray("bounds") ?: return JSONObject().put("completed", false).put("strategy", "bounds_fallback")
+    val left = bounds.optInt(0)
+    val top = bounds.optInt(1)
+    val right = bounds.optInt(2)
+    val bottom = bounds.optInt(3)
+    if (right <= left || bottom <= top) return JSONObject().put("completed", false).put("strategy", "bounds_fallback")
+    val x = (left + right) / 2
+    val y = (top + bottom) / 2
+    return JSONObject()
+      .put("completed", desktopAutomation.tap(x, y, args.long("gesture-timeout-ms", 3_000L)))
+      .put("strategy", "bounds_tap_after_verification_failure")
+      .put("x", x)
+      .put("y", y)
+      .put("node", node)
+  }
+
+  private fun firstMatchingInspectionNode(args: AndroidCommandArgs, inspection: JSONObject): JSONObject? {
+    val text = args.string("text")
+    val description = args.string("description")
+    val resourceId = args.string("resource-id")
+    val ocrText = args.string("ocr-text")
+    val nodes = inspection.optJSONArray("nodes") ?: return null
+    for (index in 0 until nodes.length()) {
+      val node = nodes.optJSONObject(index) ?: continue
+      val matched = (text.isBlank() || node.optString("text").contains(text, ignoreCase = true)) &&
+        (description.isBlank() || node.optString("description").contains(description, ignoreCase = true)) &&
+        (resourceId.isBlank() || node.optString("resourceId").contains(resourceId, ignoreCase = true)) &&
+        (ocrText.isBlank() || node.optString("ocrText").contains(ocrText, ignoreCase = true))
+      if (matched) return node
+    }
+    return null
+  }
+
+  private fun writeDesktopFailureDiagnosis(action: String, actionId: String, error: Throwable): String? {
+    return runCatching {
+      val safeActionId = actionId.filter { it.isLetterOrDigit() || it == '-' || it == '_' }.ifBlank { "action" }
+      val base = ".flovera/logs/ui-diagnosis/${System.currentTimeMillis()}-$safeActionId"
+      val screenshot = workspaceOutputFile("$base.png")
+      val screenshotResult = runCatching { desktopAutomation.screenshot(screenshot).put("output", workspace.workspaceRelativePath(screenshot)) }.getOrNull()
+      val inspectResult = runCatching {
+        desktopAutomation.inspect(maxNodes = 250, withOcr = true)
+      }.getOrNull()
+      val diagnosis = JSONObject()
+        .put("action", action)
+        .put("actionId", actionId)
+        .put("error", error.message.orEmpty())
+        .put("screenshot", screenshotResult)
+        .put("inspection", inspectResult)
+      val jsonFile = workspaceOutputFile("$base.json")
+      jsonFile.writeText(diagnosis.toString(2), Charsets.UTF_8)
+      workspace.workspaceRelativePath(jsonFile)
+    }.getOrNull()
   }
 
   private fun notifyDesktopIntervention(reason: String) {
@@ -797,6 +990,7 @@ class AndroidSystemCommandApi(
         "commands",
         JSONArray(
           listOf(
+            "app info|list|resolve|launch",
             "permission status|open",
             "notification post|cancel",
             "camera capture",
@@ -1424,6 +1618,34 @@ private data class AndroidLocationSnapshot(
   val ageMs: Long,
   val enabledProviders: List<String>,
 )
+
+private data class InstalledApp(
+  val label: String,
+  val packageName: String,
+  val activity: String,
+) {
+  fun toJson(): JSONObject = JSONObject()
+    .put("label", label)
+    .put("package", packageName)
+    .put("activity", activity)
+
+  fun matchScore(query: String): Int {
+    val normalized = query.trim()
+    if (normalized.isBlank()) return 0
+    val labelLower = label.lowercase()
+    val packageLower = packageName.lowercase()
+    val queryLower = normalized.lowercase()
+    return when {
+      label == normalized -> 100
+      labelLower == queryLower -> 95
+      packageName == normalized -> 90
+      label.contains(normalized, ignoreCase = true) -> 80 - (label.length - normalized.length).coerceAtLeast(0).coerceAtMost(40)
+      packageName.contains(normalized, ignoreCase = true) -> 65
+      packageLower.split('.').any { it == queryLower } -> 60
+      else -> 0
+    }
+  }
+}
 
 class AndroidSystemAlarmReceiver : BroadcastReceiver() {
   override fun onReceive(context: Context, intent: Intent) {

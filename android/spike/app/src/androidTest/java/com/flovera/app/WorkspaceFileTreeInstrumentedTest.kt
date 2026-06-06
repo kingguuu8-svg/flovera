@@ -203,6 +203,7 @@ class WorkspaceFileTreeInstrumentedTest {
     val gitSkill = workspace.readFile(".flovera/skills/flovera-git-workspace-command/SKILL.md")
     val androidSkill = workspace.readFile(".flovera/skills/flovera-android-command/SKILL.md")
     val desktopSkill = workspace.readFile(".flovera/skills/flovera-desktop-operation/SKILL.md")
+    val automationScriptSkill = workspace.readFile(".flovera/skills/flovera-automation-script/SKILL.md")
     val skillCreator = workspace.readFile(".flovera/skills/flovera-skill-creator/SKILL.md")
 
     assertTrue(manifest.contains("\"id\": \"flovera-android-webview-app\""))
@@ -210,6 +211,7 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(manifest.contains("\"id\": \"flovera-git-workspace-command\""))
     assertTrue(manifest.contains("\"id\": \"flovera-android-command\""))
     assertTrue(manifest.contains("\"id\": \"flovera-desktop-operation\""))
+    assertTrue(manifest.contains("\"id\": \"flovera-automation-script\""))
     assertTrue(manifest.contains("\"id\": \"flovera-skill-creator\""))
     assertFalse(manifest.contains("\"id\": \"flovera-context-handoff\""))
     assertTrue(manifest.contains("\"enabled\": true"))
@@ -217,6 +219,7 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(manifest.contains("\"descriptionZh\""))
     assertTrue(manifest.contains(".flovera/skills/flovera-android-webview-app/SKILL.md"))
     assertTrue(manifest.contains(".flovera/skills/flovera-python-workspace-command/SKILL.md"))
+    assertTrue(manifest.contains(".flovera/skills/flovera-automation-script/SKILL.md"))
     assertTrue(manifest.contains(".flovera/skills/flovera-skill-creator/SKILL.md"))
     assertTrue(skill.contains("# Flovera Android WebView App"))
     assertTrue(skill.startsWith("---"))
@@ -229,6 +232,7 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(gitSkill.contains("embedded JGit"))
     assertTrue(gitSkill.contains("[\"git\", \"status\"]"))
     assertTrue(androidSkill.contains("[\"android\", \"help\"]"))
+    assertTrue(androidSkill.contains("app `info/list/resolve`"))
     assertTrue(androidSkill.contains("camera"))
     assertTrue(androidSkill.contains("microphone"))
     assertTrue(androidSkill.contains("enabledProviders"))
@@ -237,6 +241,10 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(desktopSkill.contains("name: flovera-desktop-operation"))
     assertTrue(desktopSkill.contains("click --text"))
     assertTrue(desktopSkill.contains("click --ocr-text"))
+    assertTrue(desktopSkill.contains("launch --app <visible-name>"))
+    assertTrue(desktopSkill.contains("android app resolve --name <name>"))
+    assertTrue(desktopSkill.contains("--dismiss-keyboard-after"))
+    assertTrue(desktopSkill.contains(".flovera/logs/ui-diagnosis"))
     assertTrue(desktopSkill.contains("inspect --with-ocr"))
     assertTrue(desktopSkill.contains("--expect-ocr-text"))
     assertTrue(desktopSkill.contains("swipe --until-text"))
@@ -247,6 +255,11 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(desktopSkill.contains("--action-id"))
     assertTrue(desktopSkill.contains("Never replay earlier actions blindly"))
     assertTrue(desktopSkill.contains("provider requests are text-only"))
+    assertTrue(automationScriptSkill.contains("name: flovera-automation-script"))
+    assertTrue(automationScriptSkill.contains(".flovera/scripts/<name>.json"))
+    assertTrue(automationScriptSkill.contains("[\"flovera\", \"script\", \"run\", \"<name>\"]"))
+    assertTrue(automationScriptSkill.contains("not only Android UI operation"))
+    assertTrue(automationScriptSkill.contains("Python, Groovy/JVM, local Git/JGit, Android system APIs"))
     assertTrue(skillCreator.contains("name: flovera-skill-creator"))
     assertTrue(skillCreator.contains("description: Use when the user asks Flovera to create"))
     assertTrue(skillCreator.contains("description_zh:"))
@@ -263,6 +276,7 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(enabledDescriptors.contains("flovera-python-workspace-command"))
     assertTrue(enabledDescriptors.contains("flovera-git-workspace-command"))
     assertTrue(enabledDescriptors.contains("flovera-android-command"))
+    assertTrue(enabledDescriptors.contains("flovera-automation-script"))
     assertTrue(enabledDescriptors.contains("Use when a task needs Python execution"))
     assertFalse(enabledDescriptors.contains("ZH:"))
     assertFalse(enabledDescriptors.contains("用于需要在 Flovera 内运行 Python"))
@@ -1175,6 +1189,83 @@ class WorkspaceFileTreeInstrumentedTest {
   }
 
   @Test
+  fun workspaceCommandRunExecutesGenericFloveraAutomationScript() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "workspace-command-flovera-script-${System.currentTimeMillis()}")
+    workspace.writeFile(
+      "tools/write_note.py",
+      """
+      import os
+      import sys
+
+      os.makedirs("out", exist_ok=True)
+      with open("out/script-note.txt", "w", encoding="utf-8") as handle:
+          handle.write(sys.argv[1])
+      print("note=" + sys.argv[1])
+      """.trimIndent(),
+      createAutoSnapshot = false,
+    )
+    workspace.writeFile(
+      ".flovera/scripts/write-note.json",
+      """
+      {
+        "name": "write-note",
+        "description": "Write a note through a generic Flovera automation script.",
+        "steps": [
+          {
+            "name": "write",
+            "argv": ["python", "tools/write_note.py", "{{message}}"],
+            "timeoutMs": 30000
+          }
+        ]
+      }
+      """.trimIndent(),
+      createAutoSnapshot = false,
+    )
+    val tool = WorkspaceCommandRunTool(workspace, ToolEventRecorder())
+
+    val list = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("flovera", "script", "list"),
+        snapshotBeforeRun = false,
+      ),
+    )
+    val run = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("flovera", "script", "run", "write-note", "--param", "message=hello-script"),
+        snapshotBeforeRun = false,
+      ),
+    )
+
+    assertTrue(list, list.contains("\"name\": \"write-note\""))
+    assertTrue(run, run.contains("Workspace command status=ok exitCode=0"))
+    assertTrue(run, run.contains("\"status\": \"completed\""))
+    assertTrue(run, run.contains("note=hello-script"))
+    assertTrue(workspace.readFile("out/script-note.txt").contains("hello-script"))
+    val audit = workspace.readFile(".flovera/logs/workspace-command.jsonl")
+    assertTrue(audit, audit.contains("\"riskCategory\":\"flovera.script\""))
+  }
+
+  @Test
+  fun workspaceCapabilitiesExposeAutomationScriptAndDesktopHardening() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "workspace-capabilities-script-${System.currentTimeMillis()}").also { it.ensureSeedFiles() }
+
+    val capabilities = workspace.readFile(".flovera/capabilities.json")
+
+    assertTrue(capabilities.contains("\"flovera\""))
+    assertTrue(capabilities.contains("\"flovera-script\""))
+    assertTrue(capabilities.contains("\"workspaceAutomationScripts\": true"))
+    assertTrue(capabilities.contains("\"workspaceAutomationScriptPath\": \".flovera/scripts\""))
+    assertTrue(capabilities.contains("\"workspaceAutomationScriptRunner\": \"flovera script run\""))
+    assertTrue(capabilities.contains("\"androidAppIndex\": true"))
+    assertTrue(capabilities.contains("\"androidAppNameLaunch\": true"))
+    assertTrue(capabilities.contains("\"androidDesktopClickVerificationFallback\": true"))
+    assertTrue(capabilities.contains("\"androidDesktopSetTextFocusRetry\": true"))
+    assertTrue(capabilities.contains("\"androidDesktopFailureDiagnosisPath\": \".flovera/logs/ui-diagnosis\""))
+  }
+
+  @Test
   fun workspaceCommandRunExecutesMultilinePythonCommandCode() = runBlocking {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val workspace = WorkspaceManager(context, "workspace-command-python-c-${System.currentTimeMillis()}")
@@ -1285,6 +1376,7 @@ class WorkspaceFileTreeInstrumentedTest {
   @Test
   fun workspaceCommandRunReportsAndroidPermissionStatus() = runBlocking {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val packageName = context.packageName
     val workspace = WorkspaceManager(context, "workspace-command-android-${System.currentTimeMillis()}")
     val tool = WorkspaceCommandRunTool(workspace, ToolEventRecorder(), networkEnabled = true)
 
@@ -1300,6 +1392,18 @@ class WorkspaceFileTreeInstrumentedTest {
         snapshotBeforeRun = false,
       ),
     )
+    val appList = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("android", "app", "list", "--query", packageName, "--limit", "5"),
+        snapshotBeforeRun = false,
+      ),
+    )
+    val appResolve = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf("android", "app", "resolve", "--name", packageName),
+        snapshotBeforeRun = false,
+      ),
+    )
     val help = tool.execute(
       WorkspaceCommandRunTool.Args(
         argv = listOf("android", "help"),
@@ -1309,6 +1413,9 @@ class WorkspaceFileTreeInstrumentedTest {
 
     assertTrue(app, app.contains("\"permissionsPanel\": true"))
     assertTrue(app, app.contains("\"profiles\""))
+    assertTrue(appList, appList.contains("\"apps\""))
+    assertTrue(appResolve, appResolve.contains("\"matched\""))
+    assertTrue(appResolve, appResolve.contains(packageName))
     assertTrue(permissions, permissions.contains("\"permissions\""))
     assertTrue(permissions, permissions.contains("\"id\": \"notifications\""))
     assertTrue(permissions, permissions.contains("\"id\": \"battery_optimization\""))
@@ -1332,6 +1439,7 @@ class WorkspaceFileTreeInstrumentedTest {
       assertTrue("missing profile=$profile\n$help", help.contains("\"$profile\""))
     }
     assertTrue(help, help.contains("contacts list|search|create|delete"))
+    assertTrue(help, help.contains("app info|list|resolve|launch"))
     assertTrue(help, help.contains("calendar calendars|events|create|delete"))
     assertTrue(help, help.contains("camera capture"))
     assertTrue(help, help.contains("microphone record"))
@@ -2669,7 +2777,13 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"groovy\""))
     assertTrue(capabilities.contains("\"git\""))
     assertTrue(capabilities.contains("\"android\""))
+    assertTrue(capabilities.contains("\"flovera\""))
     assertTrue(capabilities.contains("\"workspaceCommandProfiles\""))
+    assertTrue(capabilities.contains("\"flovera-script\""))
+    assertTrue(capabilities.contains("\"workspaceAutomationScripts\": true"))
+    assertTrue(capabilities.contains("\"workspaceAutomationScriptPath\": \".flovera/scripts\""))
+    assertTrue(capabilities.contains("\"workspaceAutomationScriptRunner\": \"flovera script run\""))
+    assertTrue(capabilities.contains("\"flovera script list\""))
     assertTrue(capabilities.contains("\"gitCommandRuntime\": true"))
     assertTrue(capabilities.contains("\"gitCommandRuntimeMode\": \"embedded_jgit_local_workspace\""))
     assertTrue(capabilities.contains("\"gitCommandSupportedSubcommands\""))
@@ -2677,6 +2791,7 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"gitCommandRemoteOperations\": false"))
     assertTrue(capabilities.contains("\"androidCommandRuntime\": true"))
     assertTrue(capabilities.contains("\"androidCommandRuntimeMode\": \"app_owned_permission_gated_system_apis\""))
+    assertTrue(capabilities.contains("\"android app info|list|resolve|launch\""))
     assertTrue(capabilities.contains("\"androidSystemApiProfiles\""))
     assertTrue(capabilities.contains("\"notification\""))
     assertTrue(capabilities.contains("\"camera\""))
@@ -2710,7 +2825,13 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"androidDesktopSemanticClick\": true"))
     assertTrue(capabilities.contains("\"androidDesktopSwipeUntilText\": true"))
     assertTrue(capabilities.contains("\"androidDesktopSwipeCoordinateAliases\": true"))
+    assertTrue(capabilities.contains("\"androidAppIndex\": true"))
+    assertTrue(capabilities.contains("\"androidAppNameLaunch\": true"))
     assertTrue(capabilities.contains("\"androidDesktopLaunchActivityFallback\": true"))
+    assertTrue(capabilities.contains("\"androidDesktopClickVerificationFallback\": true"))
+    assertTrue(capabilities.contains("\"androidDesktopSetTextFocusRetry\": true"))
+    assertTrue(capabilities.contains("\"androidDesktopSetTextDismissKeyboardAfter\": true"))
+    assertTrue(capabilities.contains("\"androidDesktopFailureDiagnosisPath\": \".flovera/logs/ui-diagnosis\""))
     assertTrue(capabilities.contains("\"androidDesktopInspectFilters\": true"))
     assertTrue(capabilities.contains("\"androidDesktopAccessibilityDiagnosis\": true"))
     assertTrue(capabilities.contains("\"androidDesktopScreenshotVisionInput\": false"))

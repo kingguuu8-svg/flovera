@@ -93,6 +93,13 @@ object FloveraSkillRegistry {
       descriptionZh = "用于规划或原型实现轻量的 Flovera 侧 MCP 适配器或 server 重写流程。",
     ),
     defaultRegistration(
+      id = "flovera-automation-script",
+      titleEn = "Flovera Automation Script",
+      titleZh = "Flovera 通用自动化脚本",
+      descriptionEn = "Use when a repeatable workflow should be saved as a generic Flovera workspace automation script under .flovera/scripts, including Python, Groovy, Git, Android, or mixed command steps.",
+      descriptionZh = "用于把可重复流程保存为 .flovera/scripts 下的通用 Flovera 工作区自动化脚本，可编排 Python、Groovy、Git、Android 或混合命令步骤。",
+    ),
+    defaultRegistration(
       id = "flovera-skill-creator",
       titleEn = "Flovera Skill Creator",
       titleZh = "Flovera 技能创建器",
@@ -258,9 +265,9 @@ object FloveraSkillRegistry {
 
         Required workflow:
         - Use `workspace_command_run` with argv. Run `["android", "help"]` when exact available syntax is needed.
-        - Core read APIs: `["android","location","current"]`, contacts `list/search`, calendar `calendars/events`, media `list`, Bluetooth `paired/scan`, storage `list`, foreground `status`, permission `status`.
+        - Core read APIs: app `info/list/resolve`, `["android","location","current"]`, contacts `list/search`, calendar `calendars/events`, media `list`, Bluetooth `paired/scan`, storage `list`, foreground `status`, permission `status`.
         - Location uses fresh system cache when available, otherwise requests enabled fused/network/GPS/passive providers concurrently. Read `source`, `ageMs`, `accuracyMeters`, and `enabledProviders` before describing precision or failure; do not infer that GPS or network positioning failed unless the command reports it.
-        - Core action APIs: notification `post/cancel`, camera `capture --output`, microphone `record --output --duration-ms`, contacts `create/delete`, calendar `create/delete`, media/storage `import --output`, overlay `show/hide`, package `install --path`, alarm `schedule/cancel`, network `get`, foreground `start/stop`, and intent `open-url/share/dial`.
+        - Core action APIs: app `launch --name <app-name>` or `launch --package <package>`, notification `post/cancel`, camera `capture --output`, microphone `record --output --duration-ms`, contacts `create/delete`, calendar `create/delete`, media/storage `import --output`, overlay `show/hide`, package `install --path`, alarm `schedule/cancel`, network `get`, foreground `start/stop`, and intent `open-url/share/dial`.
         - Camera captures and microphone recordings write directly into workspace-relative output paths. Media and shared-storage imports also require an explicit workspace output path.
         - If a permission is missing, ask the user to open Flovera's Permissions panel and tap Grant all. Flovera batches runtime requests, then opens each required special-permission system page in sequence.
         - Use `["android", "permission", "open", "<permission-id>"]` only when a specific permission needs to be reopened.
@@ -287,13 +294,54 @@ object FloveraSkillRegistry {
         - Fall back to raw node-id only after inspecting the current screen. Fall back to coordinates only for touch-heavy UI that exposes no usable semantic node.
         - Every mutating action requires a stable unique `--action-id`. Reusing an already confirmed action-id is a no-op, which prevents duplicate actions after retries or process recovery.
         - Provide `--expect-text` or `--expect-package` whenever the expected result is known. Without an explicit expectation Flovera still requires the semantic screen digest to change.
-        - Supported actions include `launch --package [--activity <activity-class>]`, `click`, `click --ocr-text`, `set-text --value`, `tap`, `swipe`, `swipe --until-text`, and `global --action back|home|recents|notifications|quick-settings`. If a package reports no launchable activity but the activity class is known from inspection or app metadata, retry with `--activity`.
+        - Supported actions include `launch --app <visible-name>`, `launch --package [--activity <activity-class>]`, `click`, `click --ocr-text`, `set-text --value`, `set-text --ocr-text --value`, `tap`, `swipe`, `swipe --until-text`, and `global --action back|home|recents|notifications|quick-settings`. Prefer `android app resolve --name <name>` or `launch --app <name>` before guessing package names. If a package reports no launchable activity but the activity class is known from inspection or app metadata, retry with `--activity`.
+        - If a click appears accepted but verification fails, Flovera retries once by tapping the matched pre-action bounds and verifies again. If text input cannot directly set text, Flovera taps/focuses the target and retries; add `--dismiss-keyboard-after` when the keyboard should be closed after input.
         - Use `wait --text/--ocr-text/--package` and post-action `--expect-text`, `--expect-ocr-text`, or `--expect-package` checks. Do not infer success from a gesture being accepted.
         - Each desktop operation command updates app-owned feedback as "Flovera is operating the phone" plus the current action such as click, input, swipe, or wait. Terminal feedback dwells briefly and may use a stronger notification/vibration. Do not replace this with filler narration; add natural-language progress only when it helps the user understand a decision.
-        - `screenshot --output <workspace.png>` captures the current screen for diagnostics. Current provider requests are text-only, so do not claim the model interpreted screenshot pixels unless a future vision adapter explicitly reports that it did.
+        - `screenshot --output <workspace.png>` captures the current screen for diagnostics. Failed UI actions write a diagnosis package under `.flovera/logs/ui-diagnosis/` with screenshot and semantic/OCR inspection when possible. Current provider requests are text-only, so do not claim the model interpreted screenshot pixels unless a future vision adapter explicitly reports that it did.
         - If login, CAPTCHA, biometric confirmation, a protected system dialog, lock screen, payment, or an unverified action blocks progress, run `ui task intervention --reason`. Tell the user exactly what must be done.
         - After the user resolves the blocker, run `ui task resume`, inspect the current screen, and rebuild the scene if needed before continuing from the last confirmed action-id. Never replay earlier actions blindly.
         - Complete with `ui task complete --summary`, or cancel explicitly. Do not leave a finished workflow marked active.
+      """.trimIndent()
+
+      "flovera-automation-script" -> """
+        ---
+        name: flovera-automation-script
+        description: Use when a repeatable workflow should be saved as a generic Flovera workspace automation script under .flovera/scripts, including Python, Groovy, Git, Android, or mixed command steps.
+        description_zh: 用于把可重复流程保存为 .flovera/scripts 下的通用 Flovera 工作区自动化脚本，可编排 Python、Groovy、Git、Android 或混合命令步骤。
+        ---
+
+        # Flovera Automation Script
+
+        Required workflow:
+        - Use this for reusable automation, not only Android UI operation. A script can compose Python, Groovy/JVM, local Git/JGit, Android system APIs, and Android desktop operation commands.
+        - Store scripts as JSON files under `.flovera/scripts/<name>.json`.
+        - Run scripts through `workspace_command_run` with argv `["flovera", "script", "run", "<name>"]`. List scripts with `["flovera", "script", "list"]`.
+        - Keep each step as argv, not shell text. Do not use shell operators, bash, npm, daemons, or OS commands.
+        - Use `--param key=value` for runtime values. Inside script argv or cwd, reference values as `{{key}}`.
+        - Keep scripts small and inspectable. Put large reusable logic in ordinary workspace files such as `tools/*.py` or `tools/*.groovy`, then call those files from script steps.
+        - For Android UI steps, include semantic selectors and expected results when possible. Flovera adds a stable action id when a script step omits one, but explicit action ids are better for hand-written workflows.
+        - Verify artifacts after script runs when the workflow creates Office/PDF/image/data files.
+
+        Script shape:
+
+        ```json
+        {
+          "name": "daily-report",
+          "description": "Generate and inspect a daily report.",
+          "steps": [
+            {
+              "name": "generate",
+              "argv": ["python", "tools/report.py", "--date", "{{date}}"],
+              "timeoutMs": 30000
+            },
+            {
+              "name": "status",
+              "argv": ["git", "status"]
+            }
+          ]
+        }
+        ```
       """.trimIndent()
 
       "flovera-mcp-adapter" -> """
@@ -491,6 +539,10 @@ object FloveraSkillRegistry {
       "flovera-mcp-adapter" -> copy(
         titleZh = "Flovera MCP 适配规划",
         descriptionZh = "用于规划或原型实现轻量的 Flovera 侧 MCP 适配器或 server 重写流程。",
+      )
+      "flovera-automation-script" -> copy(
+        titleZh = "Flovera 通用自动化脚本",
+        descriptionZh = "用于把可重复流程保存为 .flovera/scripts 下的通用 Flovera 工作区自动化脚本，可编排 Python、Groovy、Git、Android 或混合命令步骤。",
       )
       "flovera-skill-creator" -> copy(
         titleZh = "Flovera 技能创建器",

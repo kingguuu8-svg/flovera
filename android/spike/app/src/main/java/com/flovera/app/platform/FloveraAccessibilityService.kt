@@ -226,15 +226,49 @@ class FloveraAccessibilityService : AccessibilityService() {
     return JSONObject().put("completed", false).put("strategy", "none")
   }
 
-  fun setText(nodeId: String, textMatch: String, description: String, resourceId: String, value: String): Boolean {
-    val node = findNode(nodeId, textMatch, description, resourceId)
-      ?: activeApplicationRoot()?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-      ?: return false
-    if (node.isPassword) return false
-    val arguments = Bundle().apply {
-      putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value)
+  fun setText(nodeId: String, textMatch: String, description: String, resourceId: String, ocrText: String, value: String): JSONObject {
+    val attempts = JSONArray()
+    val node = findNode(nodeId, textMatch, description, resourceId)?.editableCandidate()
+      ?: focusedEditableNode()
+    if (node != null) {
+      if (trySetText(node, value)) {
+        return JSONObject()
+          .put("completed", true)
+          .put("strategy", "accessibility")
+          .put("attempts", attempts.put("accessibility"))
+      }
+      attempts.put("accessibility_failed")
+      if (clickNodeOrBounds(node)) {
+        Thread.sleep(WAIT_POLL_MS)
+        val focused = focusedEditableNode() ?: node
+        if (trySetText(focused, value)) {
+          return JSONObject()
+            .put("completed", true)
+            .put("strategy", "focus_tap_retry")
+            .put("attempts", attempts.put("focus_tap_retry"))
+        }
+      }
+      attempts.put("focus_tap_retry_failed")
     }
-    return node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
+    if (ocrText.isNotBlank()) {
+      val clicked = clickByOcrText(ocrText)
+      attempts.put("ocr_focus:${clicked.optString("strategy")}")
+      if (clicked.optBoolean("completed")) {
+        Thread.sleep(WAIT_POLL_MS)
+        val focused = focusedEditableNode()
+        if (focused != null && trySetText(focused, value)) {
+          return JSONObject()
+            .put("completed", true)
+            .put("strategy", "ocr_focus_set_text")
+            .put("attempts", attempts)
+            .put("ocrFocus", clicked)
+        }
+      }
+    }
+    return JSONObject()
+      .put("completed", false)
+      .put("strategy", "none")
+      .put("attempts", attempts)
   }
 
   fun tap(x: Int, y: Int, timeoutMs: Long): Boolean {
@@ -442,6 +476,30 @@ class FloveraAccessibilityService : AccessibilityService() {
     val bounds = Rect()
     node.getBoundsInScreen(bounds)
     return tap(bounds.centerX(), bounds.centerY(), DEFAULT_GESTURE_TIMEOUT_MS)
+  }
+
+  private fun trySetText(node: AccessibilityNodeInfo, value: String): Boolean {
+    if (node.isPassword || !node.isEnabled) return false
+    val target = node.editableCandidate() ?: return false
+    val arguments = Bundle().apply {
+      putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value)
+    }
+    return target.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
+  }
+
+  private fun focusedEditableNode(): AccessibilityNodeInfo? {
+    return activeApplicationRoot()
+      ?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+      ?.editableCandidate()
+  }
+
+  private fun AccessibilityNodeInfo.editableCandidate(): AccessibilityNodeInfo? {
+    var target: AccessibilityNodeInfo? = this
+    while (target != null) {
+      if (target.isEditable && !target.isPassword && target.isEnabled) return target
+      target = target.parent
+    }
+    return null
   }
 
   private fun clickByOcrText(ocrText: String): JSONObject {

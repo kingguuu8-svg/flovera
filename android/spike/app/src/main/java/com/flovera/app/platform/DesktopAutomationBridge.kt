@@ -39,15 +39,13 @@ class DesktopAutomationProvider : ContentProvider() {
           resourceId = input.getString("resourceId").orEmpty(),
           ocrText = input.getString("ocrText").orEmpty(),
         )
-        METHOD_SET_TEXT -> JSONObject().put(
-          "completed",
-          service.setText(
-            nodeId = input.getString("nodeId").orEmpty(),
-            textMatch = input.getString("text").orEmpty(),
-            description = input.getString("description").orEmpty(),
-            resourceId = input.getString("resourceId").orEmpty(),
-            value = input.getString("value").orEmpty(),
-          ),
+        METHOD_SET_TEXT -> service.setText(
+          nodeId = input.getString("nodeId").orEmpty(),
+          textMatch = input.getString("text").orEmpty(),
+          description = input.getString("description").orEmpty(),
+          resourceId = input.getString("resourceId").orEmpty(),
+          ocrText = input.getString("ocrText").orEmpty(),
+          value = input.getString("value").orEmpty(),
         )
         METHOD_TAP -> JSONObject().put(
           "completed",
@@ -188,16 +186,17 @@ class DesktopAutomationClient(context: Context) {
     },
   )
 
-  fun setText(nodeId: String, text: String, description: String, resourceId: String, value: String): Boolean = call(
+  fun setText(nodeId: String, text: String, description: String, resourceId: String, value: String, ocrText: String = ""): JSONObject = call(
     DesktopAutomationProvider.METHOD_SET_TEXT,
     Bundle().apply {
       putString("nodeId", nodeId)
       putString("text", text)
       putString("description", description)
       putString("resourceId", resourceId)
+      putString("ocrText", ocrText)
       putString("value", value)
     },
-  ).optBoolean("completed")
+  )
 
   fun tap(x: Int, y: Int, timeoutMs: Long): Boolean = call(
     DesktopAutomationProvider.METHOD_TAP,

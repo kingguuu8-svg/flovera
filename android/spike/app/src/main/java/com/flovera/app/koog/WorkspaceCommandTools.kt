@@ -60,6 +60,8 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
 import org.codehaus.groovy.control.CompilationUnit
 import org.codehaus.groovy.control.CompilerConfiguration
 import org.codehaus.groovy.tools.FileSystemCompiler
@@ -86,7 +88,7 @@ class WorkspaceCommandRunTool(
 ) : SimpleTool<WorkspaceCommandRunTool.Args>(
   argsType = typeToken<Args>(),
   name = "workspace_command_run",
-  description = "Primary bounded command-style execution surface for Flovera-owned workspace runtimes. Use this for normal Python execution, generated scripts, project commands, local Git/JGit work, Android system APIs, cross-app accessibility operations, and groovy scripts when JVM access is useful. This is not Android shell access: supported command profiles are python/python3, groovy, git, and android. The android profile provides permission-gated native APIs and an android ui surface for semantic inspection, screenshots, verified gestures, app launch, and persistent desktop-task recovery.",
+  description = "Primary bounded command-style execution surface for Flovera-owned workspace runtimes. Use this for normal Python execution, generated scripts, project commands, local Git/JGit work, Android system APIs, cross-app accessibility operations, workspace automation scripts, and groovy scripts when JVM access is useful. This is not Android shell access: supported command profiles are python/python3, groovy, git, android, and flovera script. The android profile provides permission-gated native APIs and an android ui surface for semantic inspection, screenshots, verified gestures, app launch, and persistent desktop-task recovery.",
 ) {
   @Serializable
   data class Args(
@@ -137,6 +139,7 @@ class WorkspaceCommandGateway(
     GroovyCommandAdapter(workspace, networkEnabled, secretEnvironment),
     GitCommandAdapter(workspace),
     AndroidCommandAdapter(workspace, networkEnabled),
+    FloveraScriptCommandAdapter(workspace, networkEnabled, authorityMode, secretEnvironment),
   )
 
   fun run(args: WorkspaceCommandRunTool.Args): String {
@@ -144,7 +147,7 @@ class WorkspaceCommandGateway(
     if (argv.isEmpty()) {
       val risk = WorkspaceCommandRisk.unsupported("missing")
       return denied(
-        message = "Missing command argv. Supported now: python/python3, groovy, git, and android command profiles.",
+        message = "Missing command argv. Supported now: python/python3, groovy, git, android, and flovera script command profiles.",
         args = args,
         argv = emptyList(),
         risk = risk,
@@ -156,7 +159,7 @@ class WorkspaceCommandGateway(
     if (adapter == null) {
       val risk = WorkspaceCommandRisk.unsupported(command)
       return denied(
-        message = "Unsupported workspace command: ${argv.first()}. Supported now: python, python3, experimental groovy, git, and android command profiles. Android shell, npm, daemons, and shell operators are not enabled through this tool.",
+        message = "Unsupported workspace command: ${argv.first()}. Supported now: python, python3, experimental groovy, git, android, and flovera script command profiles. Android shell, npm, daemons, and shell operators are not enabled through this tool.",
         args = args,
         argv = argv,
         risk = risk,
@@ -700,6 +703,184 @@ private class GitCommandAdapter(
       ".flovera/runtime/",
       ".flovera/jobs/",
     )
+  }
+}
+
+private class FloveraScriptCommandAdapter(
+  private val workspace: WorkspaceManager,
+  private val networkEnabled: Boolean,
+  private val authorityMode: String,
+  private val secretEnvironment: Map<String, String>,
+) : WorkspaceCommandAdapter {
+  override val commandNames: Set<String> = setOf("flovera")
+
+  override fun classify(argv: List<String>): WorkspaceCommandRisk {
+    return when (argv.getOrNull(1)?.lowercase()) {
+      "script" -> WorkspaceCommandRisk("flovera.script", listOf("workspace.read", "workspace.write", "automation.script"))
+      else -> WorkspaceCommandRisk.unsupported("flovera")
+    }
+  }
+
+  override fun execute(argv: List<String>, args: WorkspaceCommandRunTool.Args): PythonRunResult {
+    val startedAt = System.currentTimeMillis()
+    val subcommand = argv.getOrNull(2)?.lowercase().orEmpty().ifBlank { "list" }
+    return runCatching {
+      when (subcommand) {
+        "list" -> scriptList(startedAt)
+        "run" -> scriptRun(argv, args, startedAt)
+        else -> PythonRunResult(
+          status = "error",
+          exitCode = 1,
+          stderr = "Supported: flovera script list | flovera script run <name> [--param key=value]\n",
+          elapsedMs = elapsed(startedAt),
+        )
+      }
+    }.getOrElse { error ->
+      PythonRunResult(
+        status = "error",
+        exitCode = 1,
+        stderr = "${error::class.java.simpleName}: ${error.message.orEmpty()}\n",
+        elapsedMs = elapsed(startedAt),
+      )
+    }
+  }
+
+  private fun scriptList(startedAt: Long): PythonRunResult {
+    val directory = File(workspace.root, SCRIPT_DIRECTORY)
+    val scripts = JSONArray()
+    if (directory.isDirectory) {
+      directory.walkTopDown()
+        .filter { it.isFile && it.extension.equals("json", ignoreCase = true) }
+        .sortedBy { it.relativeTo(directory).invariantSeparatorsPath }
+        .forEach { file ->
+          val json = runCatching { JSONObject(file.readText(Charsets.UTF_8)) }.getOrNull()
+          scripts.put(
+            JSONObject()
+              .put("name", json?.optString("name").orEmpty().ifBlank { file.nameWithoutExtension })
+              .put("description", json?.optString("description").orEmpty())
+              .put("path", workspace.workspaceRelativePath(file))
+              .put("stepCount", json?.optJSONArray("steps")?.length() ?: 0),
+          )
+        }
+    }
+    return PythonRunResult(
+      status = "ok",
+      exitCode = 0,
+      stdout = JSONObject()
+        .put("directory", SCRIPT_DIRECTORY)
+        .put("count", scripts.length())
+        .put("scripts", scripts)
+        .toString(2) + "\n",
+      elapsedMs = elapsed(startedAt),
+    )
+  }
+
+  private fun scriptRun(argv: List<String>, args: WorkspaceCommandRunTool.Args, startedAt: Long): PythonRunResult {
+    val name = argv.getOrNull(3).orEmpty().ifBlank { optionValue(argv, "name") }
+    val scriptFile = resolveScriptFile(name)
+    val script = JSONObject(scriptFile.readText(Charsets.UTF_8))
+    val scriptName = script.optString("name").ifBlank { scriptFile.nameWithoutExtension }
+    val params = optionValues(argv, "param").associate { value ->
+      val key = value.substringBefore('=', "").trim()
+      require(key.isNotBlank() && value.contains('=')) { "--param must be key=value: $value" }
+      key to value.substringAfter('=')
+    }
+    val steps = script.optJSONArray("steps") ?: error("script steps must be an array")
+    val outputs = JSONArray()
+    for (index in 0 until steps.length()) {
+      val step = steps.optJSONObject(index) ?: error("script step $index must be an object")
+      val stepArgv = stepArgv(step, params, scriptName, index)
+      require(stepArgv.firstOrNull()?.lowercase() != "flovera") { "nested flovera script steps are not supported yet" }
+      val stepArgs = args.copy(
+        argv = stepArgv,
+        cwd = substituteParams(step.optString("cwd", args.cwd), params),
+        timeoutMs = step.optInt("timeoutMs", args.timeoutMs).coerceIn(FloveraPythonRuntime.MIN_TIMEOUT_MS, FloveraPythonRuntime.MAX_TIMEOUT_MS),
+        snapshotBeforeRun = step.optBoolean("snapshotBeforeRun", false),
+      )
+      val output = WorkspaceCommandGateway(
+        workspace = workspace,
+        networkEnabled = networkEnabled,
+        authorityMode = authorityMode,
+        secretEnvironment = secretEnvironment,
+      ).run(stepArgs)
+      val ok = output.contains("Workspace command status=ok")
+      outputs.put(
+        JSONObject()
+          .put("index", index)
+          .put("name", step.optString("name").ifBlank { "step-$index" })
+          .put("argv", JSONArray(stepArgv))
+          .put("ok", ok)
+          .put("output", output.take(20_000)),
+      )
+      require(ok) { "script step $index failed" }
+    }
+    return PythonRunResult(
+      status = "ok",
+      exitCode = 0,
+      stdout = JSONObject()
+        .put("script", scriptName)
+        .put("path", workspace.workspaceRelativePath(scriptFile))
+        .put("status", "completed")
+        .put("stepCount", steps.length())
+        .put("outputs", outputs)
+        .toString(2) + "\n",
+      elapsedMs = elapsed(startedAt),
+    )
+  }
+
+  private fun resolveScriptFile(name: String): File {
+    val normalized = name.trim().trim('/')
+    require(normalized.isNotBlank()) { "script name is required" }
+    val relative = when {
+      normalized.endsWith(".json") && normalized.contains("/") -> normalized
+      normalized.endsWith(".json") -> "$SCRIPT_DIRECTORY/$normalized"
+      normalized.contains("/") -> "$normalized.json"
+      else -> "$SCRIPT_DIRECTORY/$normalized.json"
+    }
+    val file = File(workspace.root, relative).canonicalFile
+    val root = workspace.root.canonicalFile
+    require(file.path == root.path || file.path.startsWith(root.path + File.separator)) { "script path escapes workspace: $name" }
+    require(file.isFile) { "script was not found: $relative" }
+    return file
+  }
+
+  private fun stepArgv(step: JSONObject, params: Map<String, String>, scriptName: String, index: Int): List<String> {
+    val raw = step.optJSONArray("argv") ?: step.optJSONArray("cmd") ?: error("script step $index requires argv or cmd")
+    val values = mutableListOf<String>()
+    for (argIndex in 0 until raw.length()) {
+      values += substituteParams(raw.optString(argIndex), params)
+    }
+    val action = values.getOrNull(2)?.lowercase().orEmpty()
+    val needsActionId = values.firstOrNull()?.lowercase() == "android" &&
+      values.getOrNull(1)?.lowercase() == "ui" &&
+      action in setOf("launch", "click", "set-text", "input", "tap", "swipe", "global") &&
+      "--action-id" !in values
+    return if (needsActionId) values + listOf("--action-id", "script-${scriptName.filter { it.isLetterOrDigit() }.take(24)}-$index-$action") else values
+  }
+
+  private fun substituteParams(value: String, params: Map<String, String>): String {
+    var result = value
+    params.forEach { (key, replacement) ->
+      result = result.replace("{{$key}}", replacement).replace("{{ $key }}", replacement)
+    }
+    require(!Regex("\\{\\{\\s*[^}]+\\s*\\}\\}").containsMatchIn(result)) { "unresolved script parameter in: $value" }
+    return result
+  }
+
+  private fun optionValue(argv: List<String>, name: String): String = optionValues(argv, name).firstOrNull().orEmpty()
+
+  private fun optionValues(argv: List<String>, name: String): List<String> {
+    val result = mutableListOf<String>()
+    argv.forEachIndexed { index, value ->
+      if (value == "--$name") argv.getOrNull(index + 1)?.let(result::add)
+    }
+    return result
+  }
+
+  private fun elapsed(startedAt: Long): Int = (System.currentTimeMillis() - startedAt).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+
+  companion object {
+    private const val SCRIPT_DIRECTORY = ".flovera/scripts"
   }
 }
 

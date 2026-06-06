@@ -924,6 +924,11 @@ permissions without user action or expose Android shell.
   user-facing Permissions panel whose Grant all flow batches missing runtime
   permissions and then opens each missing special Android authorization page
   in sequence.
+- Done: extend the Android command profile with app listing/name resolution,
+  app-name launch, generic `.flovera/scripts/*.json` automation scripts through
+  `flovera script list|run`, click verification bounds fallback, set-text
+  focus/tap retry with optional keyboard dismissal, and UI failure diagnosis
+  bundles under `.flovera/logs/ui-diagnosis/`.
 - Next hardening target: promote the worker to a foreground service during very
   long JVM builds if Android background process pressure still kills the worker
   before checkpointed work can resume.
