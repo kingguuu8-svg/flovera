@@ -383,12 +383,12 @@ object FloveraSkillRegistry {
         - Use `workspace_command_run` with `["flovera", "office", ...]` before hand-editing Office XML or falling back to Python/JVM.
         - Start with `["flovera", "office", "inspect", "<path>"]` to identify docx/xlsx/pptx type, package validity, text entries, and preview text.
         - Use `["flovera", "office", "validate", "<path>"]` before and after edits. Treat invalid packages as blockers until repaired.
-        - Use `["flovera", "office", "text", "<path>", "--max", "200"]` when the task needs document text for search, summary, or replacement planning.
-        - Use `["flovera", "office", "replace", "<path>", "--find", "<old>", "--replace", "<new>"]` for safe package-level text replacement. Prefer `--output <new-file>` unless the user explicitly wants in-place editing.
+        - Use `["flovera", "office", "text", "<path>", "--max", "200"]` when the task needs document text for search, summary, or replacement planning. Optional `--backend auto|light|poi|docx4j` is available.
+        - Use `["flovera", "office", "replace", "<path>", "--find", "<old>", "--replace", "<new>"]` for safe structural text replacement. Prefer `--output <new-file>` unless the user explicitly wants in-place editing. Optional `--backend auto|light|poi|docx4j` is available.
         - After editing any Office file, run `flovera office validate` and then `artifact_inspect` on the output path.
-        - Current implementation is a lightweight OOXML zip/xml adapter. It can inspect, validate, extract XML text nodes, and replace text that is not split across OOXML runs. It is not a full Office layout engine.
-        - Do not promise tracked changes, comments, charts, formula recalculation, embedded media editing, slide layout fidelity, or full Microsoft Office compatibility unless a future adapter verifies that exact feature.
-        - For complex editing that the lightweight adapter cannot safely perform, use the JVM/Groovy route and plan a docx4j or Apache POI compatibility spike. Keep docx4j/Apache POI as code-level targets, not prompt-only advice.
+        - Current implementation has a lightweight OOXML zip/xml adapter plus runtime-only Apache POI and docx4j heavy backends. `auto` prefers docx4j for docx and POI for xlsx/pptx, then falls back to the lightweight adapter when possible.
+        - The heavy backends are structural document libraries, not a full Office renderer. Do not promise tracked changes, comments, charts, formula recalculation, embedded media editing, slide layout fidelity, or full Microsoft Office compatibility unless that exact operation is verified.
+        - For complex editing that the command wrapper cannot safely express, use Groovy with the built-in POI/docx4j libraries instead of asking the user to install anything manually.
       """.trimIndent()
 
       "flovera-skill-creator" -> """

@@ -934,9 +934,11 @@ permissions without user action or expose Android shell.
   or from a user-opened target app.
 - Done: add the first Office OOXML command substrate through
   `flovera office inspect|validate|text|replace` for docx/xlsx/pptx packages.
-  This is a lightweight zip/xml adapter for package validation, text extraction,
-  and safe XML text replacement; complex Office editing remains planned through
-  JVM-worker docx4j/Apache POI adaptation.
+  This now combines a lightweight zip/xml fallback with runtime-only Apache POI
+  and docx4j heavy backends for structural text extraction/replacement. It is
+  still not a full Office renderer and does not claim tracked changes, chart
+  editing, formula recalculation, or exact layout fidelity without targeted
+  verification.
 - Next hardening target: promote the worker to a foreground service during very
   long JVM builds if Android background process pressure still kills the worker
   before checkpointed work can resume.

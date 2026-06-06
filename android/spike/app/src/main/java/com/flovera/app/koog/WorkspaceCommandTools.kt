@@ -748,10 +748,22 @@ private class FloveraCommandAdapter(
       PythonRunResult(
         status = "error",
         exitCode = 1,
-        stderr = "${error::class.java.simpleName}: ${error.message.orEmpty()}\n",
+        stderr = workspaceCommandThrowableSummary(error),
         elapsedMs = elapsed(startedAt),
       )
     }
+  }
+
+  private fun workspaceCommandThrowableSummary(error: Throwable): String {
+    val lines = mutableListOf<String>()
+    var current: Throwable? = error
+    var depth = 0
+    while (current != null && depth < 6) {
+      lines += "${current::class.java.name}: ${current.message.orEmpty()}"
+      current = current.cause
+      depth += 1
+    }
+    return lines.joinToString("\n") + "\n"
   }
 
   private fun scriptCommand(argv: List<String>, args: WorkspaceCommandRunTool.Args, startedAt: Long): PythonRunResult {
@@ -904,12 +916,17 @@ private class FloveraCommandAdapter(
     val output = when (action) {
       "inspect" -> officeInspect(resolveOfficePath(argv))
       "validate" -> officeValidate(resolveOfficePath(argv))
-      "text" -> officeText(resolveOfficePath(argv), optionValue(argv, "max").toIntOrNull() ?: 120)
+      "text" -> officeText(
+        resolveOfficePath(argv),
+        optionValue(argv, "max").toIntOrNull() ?: 120,
+        optionValue(argv, "backend"),
+      )
       "replace" -> officeReplace(
         inputFile = resolveOfficePath(argv),
         outputPath = optionValue(argv, "output"),
         find = optionValue(argv, "find"),
         replacement = optionValue(argv, "replace"),
+        backend = optionValue(argv, "backend"),
       )
       else -> error("Supported: flovera office inspect|validate|text|replace <path>")
     }
@@ -936,10 +953,18 @@ private class FloveraCommandAdapter(
     val type = officeType(file, entries)
     val validation = officeValidation(type, entries)
     val text = extractOfficeText(file, type, maxItems = 80)
+    val heavy = runCatching { officeJvmBackends().inspect(file, type) }
+      .getOrElse { throwable ->
+        JSONObject()
+          .put("available", officeJvmBackends().availability(type))
+          .put("error", "${throwable::class.java.name}: ${throwable.message.orEmpty()}")
+      }
     return JSONObject()
       .put("path", workspace.workspaceRelativePath(file))
       .put("type", type)
       .put("valid", validation.optBoolean("valid"))
+      .put("backend", "light")
+      .put("heavyBackends", heavy)
       .put("missingEntries", validation.optJSONArray("missingEntries") ?: JSONArray())
       .put("entryCount", entries.size)
       .put("textItemCount", text.optInt("count"))
@@ -954,22 +979,83 @@ private class FloveraCommandAdapter(
       .put("path", workspace.workspaceRelativePath(file))
       .put("type", type)
       .put("entryCount", entries.size)
+      .put("heavyBackends", officeJvmBackends().availability(type))
   }
 
-  private fun officeText(file: File, maxItems: Int): JSONObject {
+  private fun officeText(file: File, maxItems: Int, backend: String = ""): JSONObject {
     val entries = zipEntryNames(file)
     val type = officeType(file, entries)
+    val normalizedBackend = backend.lowercase().ifBlank { "auto" }
+    if (normalizedBackend != "light") {
+      val heavy = runCatching {
+        officeJvmBackends().text(file, type, maxItems.coerceIn(1, 1_000), normalizedBackend)
+      }
+      if (heavy.isSuccess) {
+        return heavy.getOrThrow()
+          .put("path", workspace.workspaceRelativePath(file))
+          .put("type", type)
+      }
+      if (normalizedBackend != "auto" && normalizedBackend != "heavy") {
+        throw heavy.exceptionOrNull() ?: IllegalStateException("Office JVM backend failed")
+      }
+      return extractOfficeText(file, type, maxItems = maxItems.coerceIn(1, 1_000))
+        .put("path", workspace.workspaceRelativePath(file))
+        .put("type", type)
+        .put("backend", "light")
+        .put("fallbackFrom", officeJvmBackends().availability(type).optString("defaultBackend"))
+        .put("fallbackError", "${heavy.exceptionOrNull()!!::class.java.name}: ${heavy.exceptionOrNull()!!.message.orEmpty()}")
+    }
     return extractOfficeText(file, type, maxItems = maxItems.coerceIn(1, 1_000))
       .put("path", workspace.workspaceRelativePath(file))
       .put("type", type)
+      .put("backend", "light")
   }
 
-  private fun officeReplace(inputFile: File, outputPath: String, find: String, replacement: String): JSONObject {
+  private fun officeReplace(inputFile: File, outputPath: String, find: String, replacement: String, backend: String = ""): JSONObject {
     require(find.isNotBlank()) { "--find is required" }
     val entries = zipEntryNames(inputFile)
     val type = officeType(inputFile, entries)
     require(officeValidation(type, entries).optBoolean("valid")) { "unsupported or invalid Office OOXML package: $type" }
     val outputFile = if (outputPath.isBlank()) inputFile else workspaceOutputFile(outputPath)
+    val normalizedBackend = backend.lowercase().ifBlank { "auto" }
+    if (normalizedBackend != "light") {
+      val heavy = runCatching {
+        officeJvmBackends().replace(
+          inputFile,
+          type,
+          outputFile,
+          find,
+          replacement,
+          normalizedBackend,
+        )
+      }
+      if (heavy.isSuccess) {
+        return heavy.getOrThrow()
+          .put("path", workspace.workspaceRelativePath(inputFile))
+          .put("type", type)
+          .put("inPlace", outputFile.canonicalFile == inputFile.canonicalFile)
+      }
+      if (normalizedBackend != "auto" && normalizedBackend != "heavy") {
+        throw heavy.exceptionOrNull() ?: IllegalStateException("Office JVM backend failed")
+      }
+      val light = officeLightReplace(inputFile, outputFile, type, entries, find, replacement)
+      return light
+        .put("backend", "light")
+        .put("fallbackFrom", officeJvmBackends().availability(type).optString("defaultBackend"))
+        .put("fallbackError", "${heavy.exceptionOrNull()!!::class.java.name}: ${heavy.exceptionOrNull()!!.message.orEmpty()}")
+    }
+    return officeLightReplace(inputFile, outputFile, type, entries, find, replacement)
+      .put("backend", "light")
+  }
+
+  private fun officeLightReplace(
+    inputFile: File,
+    outputFile: File,
+    type: String,
+    entries: List<String>,
+    find: String,
+    replacement: String,
+  ): JSONObject {
     val sameFile = outputFile.canonicalFile == inputFile.canonicalFile
     val target = if (sameFile) File(inputFile.parentFile, ".${inputFile.name}.${System.currentTimeMillis()}.tmp") else outputFile
     target.parentFile?.mkdirs()
@@ -1018,6 +1104,10 @@ private class FloveraCommandAdapter(
       .put("type", type)
       .put("replacements", replacementCount)
       .put("inPlace", sameFile)
+  }
+
+  private fun officeJvmBackends(): FloveraOfficeJvmBackends {
+    return FloveraOfficeJvmBackends { file -> workspace.workspaceRelativePath(file) }
   }
 
   private fun workspaceOutputFile(path: String): File {

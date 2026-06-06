@@ -267,7 +267,7 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(automationScriptSkill.contains("Python, Groovy/JVM, local Git/JGit, Android system APIs"))
     assertTrue(officeSkill.contains("name: flovera-office-ooxml"))
     assertTrue(officeSkill.contains("[\"flovera\", \"office\", \"inspect\", \"<path>\"]"))
-    assertTrue(officeSkill.contains("docx4j or Apache POI"))
+    assertTrue(officeSkill.contains("runtime-only Apache POI and docx4j heavy backends"))
     assertTrue(officeSkill.contains("lightweight OOXML zip/xml adapter"))
     assertTrue(skillCreator.contains("name: flovera-skill-creator"))
     assertTrue(skillCreator.contains("description: Use when the user asks Flovera to create"))
@@ -1271,6 +1271,12 @@ class WorkspaceFileTreeInstrumentedTest {
     val xlsxText = tool.execute(
       WorkspaceCommandRunTool.Args(argv = listOf("flovera", "office", "text", "docs/sample.xlsx"), snapshotBeforeRun = false),
     )
+    val docxPoiText = tool.execute(
+      WorkspaceCommandRunTool.Args(argv = listOf("flovera", "office", "text", "docs/sample.docx", "--backend", "poi"), snapshotBeforeRun = false),
+    )
+    val docxDocx4jText = tool.execute(
+      WorkspaceCommandRunTool.Args(argv = listOf("flovera", "office", "text", "docs/sample.docx", "--backend", "docx4j"), snapshotBeforeRun = false),
+    )
     val pptxValidate = tool.execute(
       WorkspaceCommandRunTool.Args(argv = listOf("flovera", "office", "validate", "docs/sample.pptx"), snapshotBeforeRun = false),
     )
@@ -1281,6 +1287,7 @@ class WorkspaceFileTreeInstrumentedTest {
           "--find", "Hello DOCX",
           "--replace", "Updated DOCX",
           "--output", "out/updated.docx",
+          "--backend", "docx4j",
         ),
         snapshotBeforeRun = false,
       ),
@@ -1291,12 +1298,20 @@ class WorkspaceFileTreeInstrumentedTest {
 
     assertTrue(docxInspect, docxInspect.contains("Workspace command status=ok exitCode=0"))
     assertTrue(docxInspect, docxInspect.contains("\"type\": \"docx\""))
+    assertTrue(docxInspect, docxInspect.contains("\"docx4j\": true"))
+    assertTrue(docxInspect, docxInspect.contains("\"poi\": true"))
     assertTrue(docxInspect, docxInspect.contains("Hello DOCX"))
     assertTrue(xlsxText, xlsxText.contains("\"type\": \"xlsx\""))
     assertTrue(xlsxText, xlsxText.contains("Hello XLSX"))
+    assertTrue(docxPoiText, docxPoiText.contains("\"backend\": \"poi\""))
+    assertTrue(docxPoiText, docxPoiText.contains("Hello DOCX"))
+    assertTrue(docxDocx4jText, docxDocx4jText.contains("\"backend\": \"docx4j\""))
+    assertTrue(docxDocx4jText, docxDocx4jText.contains("Hello DOCX"))
     assertTrue(pptxValidate, pptxValidate.contains("\"type\": \"pptx\""))
     assertTrue(pptxValidate, pptxValidate.contains("\"valid\": true"))
+    assertTrue(pptxValidate, pptxValidate.contains("\"poi\": true"))
     assertTrue(replaced, replaced.contains("\"replacements\": 1"))
+    assertTrue(replaced, replaced.contains("\"backend\": \"docx4j\""))
     assertTrue(replaced, replaced.contains("updated.docx"))
     assertTrue(updatedText, updatedText.contains("Updated DOCX"))
     val audit = workspace.readFile(".flovera/logs/workspace-command.jsonl")
@@ -1314,21 +1329,43 @@ class WorkspaceFileTreeInstrumentedTest {
       }
       entry(
         "[Content_Types].xml",
-        """<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>""",
+        when (type) {
+          "docx" -> """<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>"""
+          "xlsx" -> """<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/></Types>"""
+          else -> """<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/><Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/></Types>"""
+        },
+      )
+      entry(
+        "_rels/.rels",
+        when (type) {
+          "docx" -> """<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>"""
+          "xlsx" -> """<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>"""
+          else -> """<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/></Relationships>"""
+        },
       )
       when (type) {
-        "docx" -> entry(
-          "word/document.xml",
-          """<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>$text</w:t></w:r></w:p></w:body></w:document>""",
-        )
+        "docx" -> {
+          entry(
+            "word/_rels/document.xml.rels",
+            """<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>""",
+          )
+          entry(
+            "word/document.xml",
+            """<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>$text</w:t></w:r></w:p><w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr></w:body></w:document>""",
+          )
+        }
         "xlsx" -> {
           entry(
             "xl/workbook.xml",
-            """<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>""",
+            """<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets></workbook>""",
+          )
+          entry(
+            "xl/_rels/workbook.xml.rels",
+            """<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/></Relationships>""",
           )
           entry(
             "xl/sharedStrings.xml",
-            """<?xml version="1.0" encoding="UTF-8"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><si><t>$text</t></si></sst>""",
+            """<?xml version="1.0" encoding="UTF-8"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="1" uniqueCount="1"><si><t>$text</t></si></sst>""",
           )
           entry(
             "xl/worksheets/sheet1.xml",
@@ -1338,11 +1375,15 @@ class WorkspaceFileTreeInstrumentedTest {
         "pptx" -> {
           entry(
             "ppt/presentation.xml",
-            """<?xml version="1.0" encoding="UTF-8"?><p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"/>""",
+            """<?xml version="1.0" encoding="UTF-8"?><p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:sldIdLst><p:sldId id="256" r:id="rId1"/></p:sldIdLst></p:presentation>""",
+          )
+          entry(
+            "ppt/_rels/presentation.xml.rels",
+            """<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/></Relationships>""",
           )
           entry(
             "ppt/slides/slide1.xml",
-            """<?xml version="1.0" encoding="UTF-8"?><p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><p:cSld><p:spTree><p:sp><p:txBody><a:p><a:r><a:t>$text</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>""",
+            """<?xml version="1.0" encoding="UTF-8"?><p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/><p:sp><p:nvSpPr><p:cNvPr id="2" name="Text"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>$text</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>""",
           )
         }
       }
@@ -1362,13 +1403,16 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"workspaceAutomationScriptPath\": \".flovera/scripts\""))
     assertTrue(capabilities.contains("\"workspaceAutomationScriptRunner\": \"flovera script run\""))
     assertTrue(capabilities.contains("\"officeOoxmlRuntime\": true"))
-    assertTrue(capabilities.contains("\"officeOoxmlRuntimeMode\": \"lightweight_zip_xml_workspace_command\""))
+    assertTrue(capabilities.contains("\"officeOoxmlRuntimeMode\": \"lightweight_zip_xml_with_runtime_only_poi_docx4j_backends\""))
     assertTrue(capabilities.contains("\"officeOoxmlSupportedFormats\""))
     assertTrue(capabilities.contains("\"docx\""))
     assertTrue(capabilities.contains("\"xlsx\""))
     assertTrue(capabilities.contains("\"pptx\""))
     assertTrue(capabilities.contains("\"flovera office inspect <path>\""))
-    assertTrue(capabilities.contains("\"officeOoxmlComplexLibraryTargets\""))
+    assertTrue(capabilities.contains("\"officeOoxmlHeavyBackends\""))
+    assertTrue(capabilities.contains("\"apache-poi\""))
+    assertTrue(capabilities.contains("\"docx4j\""))
+    assertTrue(capabilities.contains("\"officeOoxmlHeavyBackendLoadMode\": \"runtime_only_reflection\""))
     assertTrue(capabilities.contains("\"docx4j\""))
     assertTrue(capabilities.contains("\"apache-poi\""))
     assertTrue(capabilities.contains("\"androidAppIndex\": true"))
@@ -2781,7 +2825,7 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"officeOoxmlRuntime\": true"))
     assertTrue(capabilities.contains("\"officeOoxmlSupportedCommands\""))
     assertTrue(capabilities.contains("\"flovera office replace <path> --find <text> --replace <text> [--output <path>]\""))
-    assertTrue(capabilities.contains("\"officeOoxmlComplexEditingStatus\": \"planned_jvm_worker_adaptation\""))
+    assertTrue(capabilities.contains("\"officeOoxmlComplexEditingStatus\": \"available_as_structural_backend_not_full_office_renderer\""))
     assertTrue(capabilities.contains("\"gitCommandRuntime\": true"))
     assertTrue(capabilities.contains("\"gitCommandRuntimeMode\": \"embedded_jgit_local_workspace\""))
     assertTrue(capabilities.contains("\"gitCommandSupportedSubcommands\""))

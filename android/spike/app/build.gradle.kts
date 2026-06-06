@@ -64,6 +64,8 @@ android {
         excludes += "/META-INF/{AL2.0,LGPL2.1}"
         excludes += "META-INF/DEPENDENCIES"
         excludes += "META-INF/INDEX.LIST"
+        excludes += "META-INF/LICENSE.md"
+        excludes += "META-INF/NOTICE.md"
         excludes += "META-INF/io.netty.versions.properties"
       }
     }
@@ -105,6 +107,13 @@ dependencies {
   implementation(libs.jgit)
   implementation(libs.mlkit.text.recognition)
   implementation(libs.mlkit.text.recognition.chinese)
+  runtimeOnly(libs.poi.ooxml)
+  runtimeOnly(libs.docx4j.core) {
+    exclude(group = "commons-logging", module = "commons-logging")
+  }
+  runtimeOnly(libs.jaxb.runtime)
+  runtimeOnly(libs.stax.api)
+  runtimeOnly(libs.woodstox.core)
   implementation("org.codehaus.groovy:groovy:2.4.21:grooid")
   implementation("com.android.tools:r8:9.1.31")
 
