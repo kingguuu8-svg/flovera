@@ -38,6 +38,8 @@ import java.util.jar.JarEntry
 import java.util.jar.JarInputStream
 import java.util.jar.JarFile
 import java.util.jar.JarOutputStream
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
@@ -204,6 +206,7 @@ class WorkspaceFileTreeInstrumentedTest {
     val androidSkill = workspace.readFile(".flovera/skills/flovera-android-command/SKILL.md")
     val desktopSkill = workspace.readFile(".flovera/skills/flovera-desktop-operation/SKILL.md")
     val automationScriptSkill = workspace.readFile(".flovera/skills/flovera-automation-script/SKILL.md")
+    val officeSkill = workspace.readFile(".flovera/skills/flovera-office-ooxml/SKILL.md")
     val skillCreator = workspace.readFile(".flovera/skills/flovera-skill-creator/SKILL.md")
 
     assertTrue(manifest.contains("\"id\": \"flovera-android-webview-app\""))
@@ -212,6 +215,7 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(manifest.contains("\"id\": \"flovera-android-command\""))
     assertTrue(manifest.contains("\"id\": \"flovera-desktop-operation\""))
     assertTrue(manifest.contains("\"id\": \"flovera-automation-script\""))
+    assertTrue(manifest.contains("\"id\": \"flovera-office-ooxml\""))
     assertTrue(manifest.contains("\"id\": \"flovera-skill-creator\""))
     assertFalse(manifest.contains("\"id\": \"flovera-context-handoff\""))
     assertTrue(manifest.contains("\"enabled\": true"))
@@ -220,6 +224,7 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(manifest.contains(".flovera/skills/flovera-android-webview-app/SKILL.md"))
     assertTrue(manifest.contains(".flovera/skills/flovera-python-workspace-command/SKILL.md"))
     assertTrue(manifest.contains(".flovera/skills/flovera-automation-script/SKILL.md"))
+    assertTrue(manifest.contains(".flovera/skills/flovera-office-ooxml/SKILL.md"))
     assertTrue(manifest.contains(".flovera/skills/flovera-skill-creator/SKILL.md"))
     assertTrue(skill.contains("# Flovera Android WebView App"))
     assertTrue(skill.startsWith("---"))
@@ -243,7 +248,6 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(desktopSkill.contains("click --ocr-text"))
     assertTrue(desktopSkill.contains("Flovera cannot directly launch arbitrary third-party apps"))
     assertTrue(desktopSkill.contains("global --action back"))
-    assertTrue(desktopSkill.contains("android app resolve --name <name>"))
     assertTrue(desktopSkill.contains("--dismiss-keyboard-after"))
     assertTrue(desktopSkill.contains(".flovera/logs/ui-diagnosis"))
     assertTrue(desktopSkill.contains("inspect --with-ocr"))
@@ -261,6 +265,10 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(automationScriptSkill.contains("[\"flovera\", \"script\", \"run\", \"<name>\"]"))
     assertTrue(automationScriptSkill.contains("not only Android UI operation"))
     assertTrue(automationScriptSkill.contains("Python, Groovy/JVM, local Git/JGit, Android system APIs"))
+    assertTrue(officeSkill.contains("name: flovera-office-ooxml"))
+    assertTrue(officeSkill.contains("[\"flovera\", \"office\", \"inspect\", \"<path>\"]"))
+    assertTrue(officeSkill.contains("docx4j or Apache POI"))
+    assertTrue(officeSkill.contains("lightweight OOXML zip/xml adapter"))
     assertTrue(skillCreator.contains("name: flovera-skill-creator"))
     assertTrue(skillCreator.contains("description: Use when the user asks Flovera to create"))
     assertTrue(skillCreator.contains("description_zh:"))
@@ -278,6 +286,7 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(enabledDescriptors.contains("flovera-git-workspace-command"))
     assertTrue(enabledDescriptors.contains("flovera-android-command"))
     assertTrue(enabledDescriptors.contains("flovera-automation-script"))
+    assertTrue(enabledDescriptors.contains("flovera-office-ooxml"))
     assertTrue(enabledDescriptors.contains("Use when a task needs Python execution"))
     assertFalse(enabledDescriptors.contains("ZH:"))
     assertFalse(enabledDescriptors.contains("用于需要在 Flovera 内运行 Python"))
@@ -1248,6 +1257,99 @@ class WorkspaceFileTreeInstrumentedTest {
   }
 
   @Test
+  fun workspaceCommandRunInspectsAndEditsOfficeOoxmlPackages() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "workspace-command-office-${System.currentTimeMillis()}")
+    writeMinimalOfficePackage(workspace, "docs/sample.docx", "docx", "Hello DOCX")
+    writeMinimalOfficePackage(workspace, "docs/sample.xlsx", "xlsx", "Hello XLSX")
+    writeMinimalOfficePackage(workspace, "docs/sample.pptx", "pptx", "Hello PPTX")
+    val tool = WorkspaceCommandRunTool(workspace, ToolEventRecorder())
+
+    val docxInspect = tool.execute(
+      WorkspaceCommandRunTool.Args(argv = listOf("flovera", "office", "inspect", "docs/sample.docx"), snapshotBeforeRun = false),
+    )
+    val xlsxText = tool.execute(
+      WorkspaceCommandRunTool.Args(argv = listOf("flovera", "office", "text", "docs/sample.xlsx"), snapshotBeforeRun = false),
+    )
+    val pptxValidate = tool.execute(
+      WorkspaceCommandRunTool.Args(argv = listOf("flovera", "office", "validate", "docs/sample.pptx"), snapshotBeforeRun = false),
+    )
+    val replaced = tool.execute(
+      WorkspaceCommandRunTool.Args(
+        argv = listOf(
+          "flovera", "office", "replace", "docs/sample.docx",
+          "--find", "Hello DOCX",
+          "--replace", "Updated DOCX",
+          "--output", "out/updated.docx",
+        ),
+        snapshotBeforeRun = false,
+      ),
+    )
+    val updatedText = tool.execute(
+      WorkspaceCommandRunTool.Args(argv = listOf("flovera", "office", "text", "out/updated.docx"), snapshotBeforeRun = false),
+    )
+
+    assertTrue(docxInspect, docxInspect.contains("Workspace command status=ok exitCode=0"))
+    assertTrue(docxInspect, docxInspect.contains("\"type\": \"docx\""))
+    assertTrue(docxInspect, docxInspect.contains("Hello DOCX"))
+    assertTrue(xlsxText, xlsxText.contains("\"type\": \"xlsx\""))
+    assertTrue(xlsxText, xlsxText.contains("Hello XLSX"))
+    assertTrue(pptxValidate, pptxValidate.contains("\"type\": \"pptx\""))
+    assertTrue(pptxValidate, pptxValidate.contains("\"valid\": true"))
+    assertTrue(replaced, replaced.contains("\"replacements\": 1"))
+    assertTrue(replaced, replaced.contains("updated.docx"))
+    assertTrue(updatedText, updatedText.contains("Updated DOCX"))
+    val audit = workspace.readFile(".flovera/logs/workspace-command.jsonl")
+    assertTrue(audit, audit.contains("\"riskCategory\":\"flovera.office\""))
+  }
+
+  private fun writeMinimalOfficePackage(workspace: WorkspaceManager, path: String, type: String, text: String) {
+    val file = File(workspace.root, path)
+    file.parentFile?.mkdirs()
+    ZipOutputStream(file.outputStream()).use { output ->
+      fun entry(name: String, content: String) {
+        output.putNextEntry(ZipEntry(name))
+        output.write(content.toByteArray(StandardCharsets.UTF_8))
+        output.closeEntry()
+      }
+      entry(
+        "[Content_Types].xml",
+        """<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>""",
+      )
+      when (type) {
+        "docx" -> entry(
+          "word/document.xml",
+          """<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>$text</w:t></w:r></w:p></w:body></w:document>""",
+        )
+        "xlsx" -> {
+          entry(
+            "xl/workbook.xml",
+            """<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>""",
+          )
+          entry(
+            "xl/sharedStrings.xml",
+            """<?xml version="1.0" encoding="UTF-8"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><si><t>$text</t></si></sst>""",
+          )
+          entry(
+            "xl/worksheets/sheet1.xml",
+            """<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c></row></sheetData></worksheet>""",
+          )
+        }
+        "pptx" -> {
+          entry(
+            "ppt/presentation.xml",
+            """<?xml version="1.0" encoding="UTF-8"?><p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"/>""",
+          )
+          entry(
+            "ppt/slides/slide1.xml",
+            """<?xml version="1.0" encoding="UTF-8"?><p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><p:cSld><p:spTree><p:sp><p:txBody><a:p><a:r><a:t>$text</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>""",
+          )
+        }
+      }
+    }
+  }
+
+  @Test
   fun workspaceCapabilitiesExposeAutomationScriptAndDesktopHardening() {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val workspace = WorkspaceManager(context, "workspace-capabilities-script-${System.currentTimeMillis()}").also { it.ensureSeedFiles() }
@@ -1259,6 +1361,16 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"workspaceAutomationScripts\": true"))
     assertTrue(capabilities.contains("\"workspaceAutomationScriptPath\": \".flovera/scripts\""))
     assertTrue(capabilities.contains("\"workspaceAutomationScriptRunner\": \"flovera script run\""))
+    assertTrue(capabilities.contains("\"officeOoxmlRuntime\": true"))
+    assertTrue(capabilities.contains("\"officeOoxmlRuntimeMode\": \"lightweight_zip_xml_workspace_command\""))
+    assertTrue(capabilities.contains("\"officeOoxmlSupportedFormats\""))
+    assertTrue(capabilities.contains("\"docx\""))
+    assertTrue(capabilities.contains("\"xlsx\""))
+    assertTrue(capabilities.contains("\"pptx\""))
+    assertTrue(capabilities.contains("\"flovera office inspect <path>\""))
+    assertTrue(capabilities.contains("\"officeOoxmlComplexLibraryTargets\""))
+    assertTrue(capabilities.contains("\"docx4j\""))
+    assertTrue(capabilities.contains("\"apache-poi\""))
     assertTrue(capabilities.contains("\"androidAppIndex\": true"))
     assertTrue(capabilities.contains("\"androidDirectAppLaunch\": false"))
     assertTrue(capabilities.contains("\"androidDesktopClickVerificationFallback\": true"))
@@ -2666,6 +2778,10 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"workspaceAutomationScriptPath\": \".flovera/scripts\""))
     assertTrue(capabilities.contains("\"workspaceAutomationScriptRunner\": \"flovera script run\""))
     assertTrue(capabilities.contains("\"flovera script list\""))
+    assertTrue(capabilities.contains("\"officeOoxmlRuntime\": true"))
+    assertTrue(capabilities.contains("\"officeOoxmlSupportedCommands\""))
+    assertTrue(capabilities.contains("\"flovera office replace <path> --find <text> --replace <text> [--output <path>]\""))
+    assertTrue(capabilities.contains("\"officeOoxmlComplexEditingStatus\": \"planned_jvm_worker_adaptation\""))
     assertTrue(capabilities.contains("\"gitCommandRuntime\": true"))
     assertTrue(capabilities.contains("\"gitCommandRuntimeMode\": \"embedded_jgit_local_workspace\""))
     assertTrue(capabilities.contains("\"gitCommandSupportedSubcommands\""))

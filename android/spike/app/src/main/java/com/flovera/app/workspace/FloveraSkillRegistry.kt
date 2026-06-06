@@ -100,6 +100,13 @@ object FloveraSkillRegistry {
       descriptionZh = "用于把可重复流程保存为 .flovera/scripts 下的通用 Flovera 工作区自动化脚本，可编排 Python、Groovy、Git、Android 或混合命令步骤。",
     ),
     defaultRegistration(
+      id = "flovera-office-ooxml",
+      titleEn = "Flovera Office OOXML",
+      titleZh = "Flovera Office OOXML 文档",
+      descriptionEn = "Use when working with Microsoft Office OOXML documents in Flovera, including docx, xlsx, and pptx inspection, validation, text extraction, safe text replacement, or planning deeper docx4j/Apache POI editing.",
+      descriptionZh = "用于在 Flovera 中处理 Microsoft Office OOXML 文档，包括 docx、xlsx、pptx 的检查、校验、文本抽取、安全文本替换，或规划更深入的 docx4j/Apache POI 编辑。",
+    ),
+    defaultRegistration(
       id = "flovera-skill-creator",
       titleEn = "Flovera Skill Creator",
       titleZh = "Flovera 技能创建器",
@@ -363,6 +370,27 @@ object FloveraSkillRegistry {
         - If the original MCP server depends on npm, daemons, OS shell behavior, native binaries, or hidden secrets, call out the platform gap and design a bounded replacement.
       """.trimIndent()
 
+      "flovera-office-ooxml" -> """
+        ---
+        name: flovera-office-ooxml
+        description: Use when working with Microsoft Office OOXML documents in Flovera, including docx, xlsx, and pptx inspection, validation, text extraction, safe text replacement, or planning deeper docx4j/Apache POI editing.
+        description_zh: 用于在 Flovera 中处理 Microsoft Office OOXML 文档，包括 docx、xlsx、pptx 的检查、校验、文本抽取、安全文本替换，或规划更深入的 docx4j/Apache POI 编辑。
+        ---
+
+        # Flovera Office OOXML
+
+        Required workflow:
+        - Use `workspace_command_run` with `["flovera", "office", ...]` before hand-editing Office XML or falling back to Python/JVM.
+        - Start with `["flovera", "office", "inspect", "<path>"]` to identify docx/xlsx/pptx type, package validity, text entries, and preview text.
+        - Use `["flovera", "office", "validate", "<path>"]` before and after edits. Treat invalid packages as blockers until repaired.
+        - Use `["flovera", "office", "text", "<path>", "--max", "200"]` when the task needs document text for search, summary, or replacement planning.
+        - Use `["flovera", "office", "replace", "<path>", "--find", "<old>", "--replace", "<new>"]` for safe package-level text replacement. Prefer `--output <new-file>` unless the user explicitly wants in-place editing.
+        - After editing any Office file, run `flovera office validate` and then `artifact_inspect` on the output path.
+        - Current implementation is a lightweight OOXML zip/xml adapter. It can inspect, validate, extract XML text nodes, and replace text that is not split across OOXML runs. It is not a full Office layout engine.
+        - Do not promise tracked changes, comments, charts, formula recalculation, embedded media editing, slide layout fidelity, or full Microsoft Office compatibility unless a future adapter verifies that exact feature.
+        - For complex editing that the lightweight adapter cannot safely perform, use the JVM/Groovy route and plan a docx4j or Apache POI compatibility spike. Keep docx4j/Apache POI as code-level targets, not prompt-only advice.
+      """.trimIndent()
+
       "flovera-skill-creator" -> """
         ---
         name: flovera-skill-creator
@@ -546,6 +574,10 @@ object FloveraSkillRegistry {
       "flovera-automation-script" -> copy(
         titleZh = "Flovera 通用自动化脚本",
         descriptionZh = "用于把可重复流程保存为 .flovera/scripts 下的通用 Flovera 工作区自动化脚本，可编排 Python、Groovy、Git、Android 或混合命令步骤。",
+      )
+      "flovera-office-ooxml" -> copy(
+        titleZh = "Flovera Office OOXML 文档",
+        descriptionZh = "用于在 Flovera 中处理 Microsoft Office OOXML 文档，包括 docx、xlsx、pptx 的检查、校验、文本抽取、安全文本替换，或规划更深入的 docx4j/Apache POI 编辑。",
       )
       "flovera-skill-creator" -> copy(
         titleZh = "Flovera 技能创建器",

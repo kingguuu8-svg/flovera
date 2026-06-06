@@ -38,6 +38,10 @@ import java.security.MessageDigest
 import java.util.jar.JarEntry
 import java.util.jar.JarFile
 import java.util.jar.JarOutputStream
+import java.util.zip.ZipEntry
+import java.util.zip.ZipFile
+import java.util.zip.ZipInputStream
+import java.util.zip.ZipOutputStream
 import javax.xml.parsers.DocumentBuilderFactory
 import java.util.concurrent.Callable
 import java.util.concurrent.CountDownLatch
@@ -88,7 +92,7 @@ class WorkspaceCommandRunTool(
 ) : SimpleTool<WorkspaceCommandRunTool.Args>(
   argsType = typeToken<Args>(),
   name = "workspace_command_run",
-  description = "Primary bounded command-style execution surface for Flovera-owned workspace runtimes. Use this for normal Python execution, generated scripts, project commands, local Git/JGit work, Android system APIs, cross-app accessibility operations, workspace automation scripts, and groovy scripts when JVM access is useful. This is not Android shell access: supported command profiles are python/python3, groovy, git, android, and flovera script. The android profile provides permission-gated native APIs and an android ui surface for semantic inspection, screenshots, verified gestures, and persistent desktop-task recovery.",
+  description = "Primary bounded command-style execution surface for Flovera-owned workspace runtimes. Use this for normal Python execution, generated scripts, project commands, local Git/JGit work, Android system APIs, cross-app accessibility operations, workspace automation scripts, Office OOXML inspection/editing, and groovy scripts when JVM access is useful. This is not Android shell access: supported command profiles are python/python3, groovy, git, android, flovera script, and flovera office. The android profile provides permission-gated native APIs and an android ui surface for semantic inspection, screenshots, verified gestures, and persistent desktop-task recovery.",
 ) {
   @Serializable
   data class Args(
@@ -139,7 +143,7 @@ class WorkspaceCommandGateway(
     GroovyCommandAdapter(workspace, networkEnabled, secretEnvironment),
     GitCommandAdapter(workspace),
     AndroidCommandAdapter(workspace, networkEnabled),
-    FloveraScriptCommandAdapter(workspace, networkEnabled, authorityMode, secretEnvironment),
+    FloveraCommandAdapter(workspace, networkEnabled, authorityMode, secretEnvironment),
   )
 
   fun run(args: WorkspaceCommandRunTool.Args): String {
@@ -706,7 +710,7 @@ private class GitCommandAdapter(
   }
 }
 
-private class FloveraScriptCommandAdapter(
+private class FloveraCommandAdapter(
   private val workspace: WorkspaceManager,
   private val networkEnabled: Boolean,
   private val authorityMode: String,
@@ -717,21 +721,26 @@ private class FloveraScriptCommandAdapter(
   override fun classify(argv: List<String>): WorkspaceCommandRisk {
     return when (argv.getOrNull(1)?.lowercase()) {
       "script" -> WorkspaceCommandRisk("flovera.script", listOf("workspace.read", "workspace.write", "automation.script"))
+      "office" -> {
+        val action = argv.getOrNull(2)?.lowercase().orEmpty()
+        val permissions = if (action == "replace") listOf("workspace.read", "workspace.write", "office.ooxml") else listOf("workspace.read", "office.ooxml")
+        WorkspaceCommandRisk("flovera.office", permissions)
+      }
       else -> WorkspaceCommandRisk.unsupported("flovera")
     }
   }
 
   override fun execute(argv: List<String>, args: WorkspaceCommandRunTool.Args): PythonRunResult {
     val startedAt = System.currentTimeMillis()
-    val subcommand = argv.getOrNull(2)?.lowercase().orEmpty().ifBlank { "list" }
+    val profile = argv.getOrNull(1)?.lowercase().orEmpty()
     return runCatching {
-      when (subcommand) {
-        "list" -> scriptList(startedAt)
-        "run" -> scriptRun(argv, args, startedAt)
+      when (profile) {
+        "script" -> scriptCommand(argv, args, startedAt)
+        "office" -> officeCommand(argv, startedAt)
         else -> PythonRunResult(
           status = "error",
           exitCode = 1,
-          stderr = "Supported: flovera script list | flovera script run <name> [--param key=value]\n",
+          stderr = "Supported: flovera script list|run, flovera office inspect|validate|text|replace\n",
           elapsedMs = elapsed(startedAt),
         )
       }
@@ -740,6 +749,19 @@ private class FloveraScriptCommandAdapter(
         status = "error",
         exitCode = 1,
         stderr = "${error::class.java.simpleName}: ${error.message.orEmpty()}\n",
+        elapsedMs = elapsed(startedAt),
+      )
+    }
+  }
+
+  private fun scriptCommand(argv: List<String>, args: WorkspaceCommandRunTool.Args, startedAt: Long): PythonRunResult {
+    return when (argv.getOrNull(2)?.lowercase().orEmpty().ifBlank { "list" }) {
+      "list" -> scriptList(startedAt)
+      "run" -> scriptRun(argv, args, startedAt)
+      else -> PythonRunResult(
+        status = "error",
+        exitCode = 1,
+        stderr = "Supported: flovera script list | flovera script run <name> [--param key=value]\n",
         elapsedMs = elapsed(startedAt),
       )
     }
@@ -877,10 +899,259 @@ private class FloveraScriptCommandAdapter(
     return result
   }
 
+  private fun officeCommand(argv: List<String>, startedAt: Long): PythonRunResult {
+    val action = argv.getOrNull(2)?.lowercase().orEmpty().ifBlank { "inspect" }
+    val output = when (action) {
+      "inspect" -> officeInspect(resolveOfficePath(argv))
+      "validate" -> officeValidate(resolveOfficePath(argv))
+      "text" -> officeText(resolveOfficePath(argv), optionValue(argv, "max").toIntOrNull() ?: 120)
+      "replace" -> officeReplace(
+        inputFile = resolveOfficePath(argv),
+        outputPath = optionValue(argv, "output"),
+        find = optionValue(argv, "find"),
+        replacement = optionValue(argv, "replace"),
+      )
+      else -> error("Supported: flovera office inspect|validate|text|replace <path>")
+    }
+    return PythonRunResult(
+      status = "ok",
+      exitCode = 0,
+      stdout = output.toString(2) + "\n",
+      elapsedMs = elapsed(startedAt),
+    )
+  }
+
+  private fun resolveOfficePath(argv: List<String>): File {
+    val raw = argv.getOrNull(3).orEmpty().ifBlank { optionValue(argv, "path") }
+    require(raw.isNotBlank()) { "office file path is required" }
+    val file = File(workspace.root, raw.trim().trim('/')).canonicalFile
+    val root = workspace.root.canonicalFile
+    require(file.path == root.path || file.path.startsWith(root.path + File.separator)) { "office path escapes workspace: $raw" }
+    require(file.isFile) { "office file was not found: $raw" }
+    return file
+  }
+
+  private fun officeInspect(file: File): JSONObject {
+    val entries = zipEntryNames(file)
+    val type = officeType(file, entries)
+    val validation = officeValidation(type, entries)
+    val text = extractOfficeText(file, type, maxItems = 80)
+    return JSONObject()
+      .put("path", workspace.workspaceRelativePath(file))
+      .put("type", type)
+      .put("valid", validation.optBoolean("valid"))
+      .put("missingEntries", validation.optJSONArray("missingEntries") ?: JSONArray())
+      .put("entryCount", entries.size)
+      .put("textItemCount", text.optInt("count"))
+      .put("textPreview", text.optJSONArray("items") ?: JSONArray())
+      .put("features", officeFeatures(type, entries))
+  }
+
+  private fun officeValidate(file: File): JSONObject {
+    val entries = zipEntryNames(file)
+    val type = officeType(file, entries)
+    return officeValidation(type, entries)
+      .put("path", workspace.workspaceRelativePath(file))
+      .put("type", type)
+      .put("entryCount", entries.size)
+  }
+
+  private fun officeText(file: File, maxItems: Int): JSONObject {
+    val entries = zipEntryNames(file)
+    val type = officeType(file, entries)
+    return extractOfficeText(file, type, maxItems = maxItems.coerceIn(1, 1_000))
+      .put("path", workspace.workspaceRelativePath(file))
+      .put("type", type)
+  }
+
+  private fun officeReplace(inputFile: File, outputPath: String, find: String, replacement: String): JSONObject {
+    require(find.isNotBlank()) { "--find is required" }
+    val entries = zipEntryNames(inputFile)
+    val type = officeType(inputFile, entries)
+    require(officeValidation(type, entries).optBoolean("valid")) { "unsupported or invalid Office OOXML package: $type" }
+    val outputFile = if (outputPath.isBlank()) inputFile else workspaceOutputFile(outputPath)
+    val sameFile = outputFile.canonicalFile == inputFile.canonicalFile
+    val target = if (sameFile) File(inputFile.parentFile, ".${inputFile.name}.${System.currentTimeMillis()}.tmp") else outputFile
+    target.parentFile?.mkdirs()
+    val replaceEntries = officeTextEntries(type, entries).toSet()
+    val escapedFind = escapeXml(find)
+    val escapedReplacement = escapeXml(replacement)
+    var replacementCount = 0
+    try {
+      ZipInputStream(inputFile.inputStream()).use { input ->
+        ZipOutputStream(target.outputStream()).use { output ->
+          var entry = input.nextEntry
+          while (entry != null) {
+            val bytes = input.readBytes()
+            val next = ZipEntry(entry.name)
+            output.putNextEntry(next)
+            val updated = if (!entry.isDirectory && entry.name in replaceEntries) {
+              val text = bytes.toString(Charsets.UTF_8)
+              val count = countOccurrences(text, escapedFind)
+              if (count > 0) {
+                replacementCount += count
+                text.replace(escapedFind, escapedReplacement).toByteArray(Charsets.UTF_8)
+              } else {
+                bytes
+              }
+            } else {
+              bytes
+            }
+            output.write(updated)
+            output.closeEntry()
+            input.closeEntry()
+            entry = input.nextEntry
+          }
+        }
+      }
+      if (sameFile) {
+        target.copyTo(inputFile, overwrite = true)
+        target.delete()
+      }
+    } catch (error: Throwable) {
+      if (sameFile) target.delete()
+      throw error
+    }
+    return JSONObject()
+      .put("path", workspace.workspaceRelativePath(inputFile))
+      .put("output", workspace.workspaceRelativePath(outputFile))
+      .put("type", type)
+      .put("replacements", replacementCount)
+      .put("inPlace", sameFile)
+  }
+
+  private fun workspaceOutputFile(path: String): File {
+    val file = File(workspace.root, path.trim().trim('/')).canonicalFile
+    val root = workspace.root.canonicalFile
+    require(file.path == root.path || file.path.startsWith(root.path + File.separator)) { "office output path escapes workspace: $path" }
+    return file
+  }
+
+  private fun zipEntryNames(file: File): List<String> {
+    return ZipFile(file).use { zip ->
+      zip.entries().asSequence().map { it.name }.toList()
+    }
+  }
+
+  private fun officeType(file: File, entries: List<String>): String {
+    val extension = file.extension.lowercase()
+    return when {
+      extension == "docx" || "word/document.xml" in entries -> "docx"
+      extension == "xlsx" || "xl/workbook.xml" in entries -> "xlsx"
+      extension == "pptx" || "ppt/presentation.xml" in entries -> "pptx"
+      else -> "unknown"
+    }
+  }
+
+  private fun officeValidation(type: String, entries: List<String>): JSONObject {
+    val required = when (type) {
+      "docx" -> listOf("[Content_Types].xml", "word/document.xml")
+      "xlsx" -> listOf("[Content_Types].xml", "xl/workbook.xml")
+      "pptx" -> listOf("[Content_Types].xml", "ppt/presentation.xml")
+      else -> listOf("[Content_Types].xml")
+    }
+    val missing = required.filterNot { it in entries }
+    return JSONObject()
+      .put("valid", type != "unknown" && missing.isEmpty())
+      .put("missingEntries", JSONArray(missing))
+      .put("requiredEntries", JSONArray(required))
+  }
+
+  private fun officeFeatures(type: String, entries: List<String>): JSONObject {
+    return JSONObject()
+      .put("textEntryCount", officeTextEntries(type, entries).size)
+      .put("hasCoreProperties", "docProps/core.xml" in entries)
+      .put("hasAppProperties", "docProps/app.xml" in entries)
+      .put("sheetCount", entries.count { it.startsWith("xl/worksheets/sheet") && it.endsWith(".xml") })
+      .put("slideCount", entries.count { it.startsWith("ppt/slides/slide") && it.endsWith(".xml") })
+  }
+
+  private fun officeTextEntries(type: String, entries: List<String>): List<String> {
+    return when (type) {
+      "docx" -> entries.filter {
+        it == "word/document.xml" ||
+          Regex("""word/(header|footer|footnotes|endnotes)\d*\.xml""").matches(it)
+      }
+      "xlsx" -> entries.filter {
+        it == "xl/sharedStrings.xml" || it.startsWith("xl/worksheets/") && it.endsWith(".xml")
+      }
+      "pptx" -> entries.filter {
+        it.startsWith("ppt/slides/") && it.endsWith(".xml") ||
+          it.startsWith("ppt/notesSlides/") && it.endsWith(".xml")
+      }
+      else -> emptyList()
+    }
+  }
+
+  private fun extractOfficeText(file: File, type: String, maxItems: Int): JSONObject {
+    val items = JSONArray()
+    var count = 0
+    val errors = JSONArray()
+    ZipFile(file).use { zip ->
+      val entries = officeTextEntries(type, zip.entries().asSequence().map { it.name }.toList())
+      entries.forEach { name ->
+        val entry = zip.getEntry(name) ?: return@forEach
+        val xml = zip.getInputStream(entry).use { it.readBytes().toString(Charsets.UTF_8) }
+        val values = runCatching { xmlTextValues(xml) }
+          .onFailure { errors.put(JSONObject().put("entry", name).put("error", it.message.orEmpty())) }
+          .getOrDefault(emptyList())
+        values.forEach { value ->
+          count += 1
+          if (items.length() < maxItems && value.isNotBlank()) {
+            items.put(JSONObject().put("entry", name).put("text", value))
+          }
+        }
+      }
+    }
+    return JSONObject()
+      .put("count", count)
+      .put("items", items)
+      .put("errors", errors)
+  }
+
+  private fun xmlTextValues(xml: String): List<String> {
+    return OOXML_TEXT_NODE_PATTERN.findAll(xml)
+      .map { match -> unescapeXml(match.groupValues[2]) }
+      .toList()
+  }
+
+  private fun escapeXml(value: String): String {
+    return value
+      .replace("&", "&amp;")
+      .replace("<", "&lt;")
+      .replace(">", "&gt;")
+      .replace("\"", "&quot;")
+      .replace("'", "&apos;")
+  }
+
+  private fun unescapeXml(value: String): String {
+    return value
+      .replace("&apos;", "'")
+      .replace("&quot;", "\"")
+      .replace("&gt;", ">")
+      .replace("&lt;", "<")
+      .replace("&amp;", "&")
+  }
+
+  private fun countOccurrences(text: String, needle: String): Int {
+    if (needle.isEmpty()) return 0
+    var count = 0
+    var index = text.indexOf(needle)
+    while (index >= 0) {
+      count += 1
+      index = text.indexOf(needle, index + needle.length)
+    }
+    return count
+  }
+
   private fun elapsed(startedAt: Long): Int = (System.currentTimeMillis() - startedAt).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
 
   companion object {
     private const val SCRIPT_DIRECTORY = ".flovera/scripts"
+    private val OOXML_TEXT_NODE_PATTERN = Regex(
+      """<([A-Za-z0-9_]+:)?t(?:\s[^>]*)?>(.*?)</([A-Za-z0-9_]+:)?t>""",
+      setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
+    )
   }
 }
 

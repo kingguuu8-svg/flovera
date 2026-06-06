@@ -932,6 +932,11 @@ permissions without user action or expose Android shell.
 - Done: remove direct arbitrary third-party app launch from Flovera-owned
   Android commands. Cross-app tasks now start from the current visible screen
   or from a user-opened target app.
+- Done: add the first Office OOXML command substrate through
+  `flovera office inspect|validate|text|replace` for docx/xlsx/pptx packages.
+  This is a lightweight zip/xml adapter for package validation, text extraction,
+  and safe XML text replacement; complex Office editing remains planned through
+  JVM-worker docx4j/Apache POI adaptation.
 - Next hardening target: promote the worker to a foreground service during very
   long JVM builds if Android background process pressure still kills the worker
   before checkpointed work can resume.
