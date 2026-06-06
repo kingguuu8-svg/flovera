@@ -24,9 +24,11 @@ public final class FloveraOfficeJvmBackends {
   }
 
   public JSONObject availability(String type) throws Exception {
+    boolean docx4j = docx4jAvailable(type);
     return new JSONObject()
       .put("poi", poiAvailable(type))
-      .put("docx4j", docx4jAvailable(type))
+      .put("docx4j", docx4j)
+      .put("docx4jUnavailableReason", docx4j ? JSONObject.NULL : docx4jUnavailableReason(type))
       .put("defaultBackend", defaultBackend(type))
       .put("supportedBackends", new JSONArray(supportedBackends(type)));
   }
@@ -35,7 +37,7 @@ public final class FloveraOfficeJvmBackends {
     JSONObject result = new JSONObject().put("available", availability(type));
     JSONArray probes = new JSONArray();
     probes.put(probe("poi", () -> text(file, type, 20, "poi")));
-    if ("docx".equals(type)) {
+    if (docx4jAvailable(type)) {
       probes.put(probe("docx4j", () -> text(file, type, 20, "docx4j")));
     }
     return result.put("probes", probes);
@@ -71,15 +73,17 @@ public final class FloveraOfficeJvmBackends {
   }
 
   private String defaultBackend(String type) {
-    if ("docx".equals(type)) return "docx4j";
-    if ("xlsx".equals(type) || "pptx".equals(type)) return "poi";
+    if (docx4jAvailable(type)) return "docx4j";
+    if (poiAvailable(type)) return "poi";
     return "light";
   }
 
   private List<String> supportedBackends(String type) {
-    if ("docx".equals(type)) return Arrays.asList("light", "poi", "docx4j");
-    if ("xlsx".equals(type) || "pptx".equals(type)) return Arrays.asList("light", "poi");
-    return Collections.singletonList("light");
+    ArrayList<String> supported = new ArrayList<>();
+    supported.add("light");
+    if (poiAvailable(type)) supported.add("poi");
+    if (docx4jAvailable(type)) supported.add("docx4j");
+    return supported;
   }
 
   private String selectBackend(String type, String requested, boolean supportsReplace) {
@@ -95,8 +99,14 @@ public final class FloveraOfficeJvmBackends {
     if ("docx4j".equals(selected) && !"docx".equals(type)) {
       throw new IllegalArgumentException("docx4j backend is supported for docx only");
     }
+    if ("docx4j".equals(selected) && !docx4jAvailable(type)) {
+      throw new IllegalStateException("docx4j backend is unavailable on this Android runtime: " + docx4jUnavailableReason(type) + ". Use --backend poi or --backend light.");
+    }
     if ("poi".equals(selected) && !("docx".equals(type) || "xlsx".equals(type) || "pptx".equals(type))) {
       throw new IllegalArgumentException("POI backend requires docx, xlsx, or pptx");
+    }
+    if ("poi".equals(selected) && !poiAvailable(type)) {
+      throw new IllegalStateException("POI backend is unavailable on this Android runtime. Use --backend light.");
     }
     if (supportsReplace && "docx4j".equals(selected) && !"docx".equals(type)) {
       throw new IllegalArgumentException("docx4j replace is supported for docx only");
@@ -112,7 +122,18 @@ public final class FloveraOfficeJvmBackends {
   }
 
   private boolean docx4jAvailable(String type) {
-    return "docx".equals(type) && hasClass("org.docx4j.openpackaging.packages.WordprocessingMLPackage");
+    return "docx".equals(type) &&
+      hasClass("java.awt.Image") &&
+      hasClass("org.docx4j.jaxb.Context") &&
+      hasClass("org.docx4j.openpackaging.packages.WordprocessingMLPackage");
+  }
+
+  private String docx4jUnavailableReason(String type) {
+    if (!"docx".equals(type)) return "docx4j_supports_docx_only";
+    if (!hasClass("java.awt.Image")) return "missing_android_java_awt_image";
+    if (!hasClass("org.docx4j.jaxb.Context")) return "missing_docx4j_jaxb_context";
+    if (!hasClass("org.docx4j.openpackaging.packages.WordprocessingMLPackage")) return "missing_docx4j_wordprocessing_package";
+    return "unavailable";
   }
 
   private boolean hasClass(String name) {

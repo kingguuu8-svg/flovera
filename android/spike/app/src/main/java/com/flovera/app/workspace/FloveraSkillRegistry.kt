@@ -103,8 +103,8 @@ object FloveraSkillRegistry {
       id = "flovera-office-ooxml",
       titleEn = "Flovera Office OOXML",
       titleZh = "Flovera Office OOXML 文档",
-      descriptionEn = "Use when working with Microsoft Office OOXML documents in Flovera, including docx, xlsx, and pptx inspection, validation, text extraction, safe text replacement, or planning deeper docx4j/Apache POI editing.",
-      descriptionZh = "用于在 Flovera 中处理 Microsoft Office OOXML 文档，包括 docx、xlsx、pptx 的检查、校验、文本抽取、安全文本替换，或规划更深入的 docx4j/Apache POI 编辑。",
+      descriptionEn = "Use when working with Microsoft Office OOXML documents in Flovera, including docx, xlsx, and pptx inspection, validation, text extraction, safe text replacement, or planning deeper Apache POI editing.",
+      descriptionZh = "用于在 Flovera 中处理 Microsoft Office OOXML 文档，包括 docx、xlsx、pptx 的检查、校验、文本抽取、安全文本替换，或规划更深入的 Apache POI 编辑。",
     ),
     defaultRegistration(
       id = "flovera-skill-creator",
@@ -373,8 +373,8 @@ object FloveraSkillRegistry {
       "flovera-office-ooxml" -> """
         ---
         name: flovera-office-ooxml
-        description: Use when working with Microsoft Office OOXML documents in Flovera, including docx, xlsx, and pptx inspection, validation, text extraction, safe text replacement, or planning deeper docx4j/Apache POI editing.
-        description_zh: 用于在 Flovera 中处理 Microsoft Office OOXML 文档，包括 docx、xlsx、pptx 的检查、校验、文本抽取、安全文本替换，或规划更深入的 docx4j/Apache POI 编辑。
+        description: Use when working with Microsoft Office OOXML documents in Flovera, including docx, xlsx, and pptx inspection, validation, text extraction, safe text replacement, or planning deeper Apache POI editing.
+        description_zh: 用于在 Flovera 中处理 Microsoft Office OOXML 文档，包括 docx、xlsx、pptx 的检查、校验、文本抽取、安全文本替换，或规划更深入的 Apache POI 编辑。
         ---
 
         # Flovera Office OOXML
@@ -383,12 +383,13 @@ object FloveraSkillRegistry {
         - Use `workspace_command_run` with `["flovera", "office", ...]` before hand-editing Office XML or falling back to Python/JVM.
         - Start with `["flovera", "office", "inspect", "<path>"]` to identify docx/xlsx/pptx type, package validity, text entries, and preview text.
         - Use `["flovera", "office", "validate", "<path>"]` before and after edits. Treat invalid packages as blockers until repaired.
-        - Use `["flovera", "office", "text", "<path>", "--max", "200"]` when the task needs document text for search, summary, or replacement planning. Optional `--backend auto|light|poi|docx4j` is available.
-        - Use `["flovera", "office", "replace", "<path>", "--find", "<old>", "--replace", "<new>"]` for safe structural text replacement. Prefer `--output <new-file>` unless the user explicitly wants in-place editing. Optional `--backend auto|light|poi|docx4j` is available.
+        - Use `["flovera", "office", "text", "<path>", "--max", "200"]` when the task needs document text for search, summary, or replacement planning. Optional `--backend auto|light|poi` is available.
+        - Use `["flovera", "office", "replace", "<path>", "--find", "<old>", "--replace", "<new>"]` for safe structural text replacement. Prefer `--output <new-file>` unless the user explicitly wants in-place editing. Optional `--backend auto|light|poi` is available.
         - After editing any Office file, run `flovera office validate` and then `artifact_inspect` on the output path.
-        - Current implementation has a lightweight OOXML zip/xml adapter plus runtime-only Apache POI and docx4j heavy backends. `auto` prefers docx4j for docx and POI for xlsx/pptx, then falls back to the lightweight adapter when possible.
+        - Current implementation has a lightweight OOXML zip/xml adapter plus a runtime-only Apache POI backend. `auto` prefers POI for docx/xlsx/pptx, then falls back to the lightweight adapter when possible.
+        - Ordinary Maven docx4j is not currently exposed as a supported backend on Android because it depends on Java SE/AWT/JAXB APIs such as `java.awt.Image`. Only use docx4j if `flovera office inspect` reports it in `supportedBackends`; otherwise treat it as future custom-bundle work.
         - The heavy backends are structural document libraries, not a full Office renderer. Do not promise tracked changes, comments, charts, formula recalculation, embedded media editing, slide layout fidelity, or full Microsoft Office compatibility unless that exact operation is verified.
-        - For complex editing that the command wrapper cannot safely express, use Groovy with the built-in POI/docx4j libraries instead of asking the user to install anything manually.
+        - For complex editing that the command wrapper cannot safely express, use Groovy with built-in POI or workspace-provided JVM libraries instead of asking the user to install anything manually.
       """.trimIndent()
 
       "flovera-skill-creator" -> """
@@ -577,7 +578,7 @@ object FloveraSkillRegistry {
       )
       "flovera-office-ooxml" -> copy(
         titleZh = "Flovera Office OOXML 文档",
-        descriptionZh = "用于在 Flovera 中处理 Microsoft Office OOXML 文档，包括 docx、xlsx、pptx 的检查、校验、文本抽取、安全文本替换，或规划更深入的 docx4j/Apache POI 编辑。",
+        descriptionZh = "用于在 Flovera 中处理 Microsoft Office OOXML 文档，包括 docx、xlsx、pptx 的检查、校验、文本抽取、安全文本替换，或规划更深入的 Apache POI 编辑。",
       )
       "flovera-skill-creator" -> copy(
         titleZh = "Flovera 技能创建器",

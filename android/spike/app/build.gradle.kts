@@ -108,10 +108,6 @@ dependencies {
   implementation(libs.mlkit.text.recognition)
   implementation(libs.mlkit.text.recognition.chinese)
   runtimeOnly(libs.poi.ooxml)
-  runtimeOnly(libs.docx4j.core) {
-    exclude(group = "commons-logging", module = "commons-logging")
-  }
-  runtimeOnly(libs.jaxb.runtime)
   runtimeOnly(libs.stax.api)
   runtimeOnly(libs.woodstox.core)
   implementation("org.codehaus.groovy:groovy:2.4.21:grooid")

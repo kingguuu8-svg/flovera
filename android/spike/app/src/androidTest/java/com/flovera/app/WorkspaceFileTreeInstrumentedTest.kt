@@ -267,7 +267,7 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(automationScriptSkill.contains("Python, Groovy/JVM, local Git/JGit, Android system APIs"))
     assertTrue(officeSkill.contains("name: flovera-office-ooxml"))
     assertTrue(officeSkill.contains("[\"flovera\", \"office\", \"inspect\", \"<path>\"]"))
-    assertTrue(officeSkill.contains("runtime-only Apache POI and docx4j heavy backends"))
+    assertTrue(officeSkill.contains("runtime-only Apache POI backend"))
     assertTrue(officeSkill.contains("lightweight OOXML zip/xml adapter"))
     assertTrue(skillCreator.contains("name: flovera-skill-creator"))
     assertTrue(skillCreator.contains("description: Use when the user asks Flovera to create"))
@@ -1274,9 +1274,6 @@ class WorkspaceFileTreeInstrumentedTest {
     val docxPoiText = tool.execute(
       WorkspaceCommandRunTool.Args(argv = listOf("flovera", "office", "text", "docs/sample.docx", "--backend", "poi"), snapshotBeforeRun = false),
     )
-    val docxDocx4jText = tool.execute(
-      WorkspaceCommandRunTool.Args(argv = listOf("flovera", "office", "text", "docs/sample.docx", "--backend", "docx4j"), snapshotBeforeRun = false),
-    )
     val pptxValidate = tool.execute(
       WorkspaceCommandRunTool.Args(argv = listOf("flovera", "office", "validate", "docs/sample.pptx"), snapshotBeforeRun = false),
     )
@@ -1287,7 +1284,7 @@ class WorkspaceFileTreeInstrumentedTest {
           "--find", "Hello DOCX",
           "--replace", "Updated DOCX",
           "--output", "out/updated.docx",
-          "--backend", "docx4j",
+          "--backend", "poi",
         ),
         snapshotBeforeRun = false,
       ),
@@ -1298,20 +1295,19 @@ class WorkspaceFileTreeInstrumentedTest {
 
     assertTrue(docxInspect, docxInspect.contains("Workspace command status=ok exitCode=0"))
     assertTrue(docxInspect, docxInspect.contains("\"type\": \"docx\""))
-    assertTrue(docxInspect, docxInspect.contains("\"docx4j\": true"))
+    assertTrue(docxInspect, docxInspect.contains("\"docx4j\": false"))
+    assertTrue(docxInspect, docxInspect.contains("\"docx4jUnavailableReason\": \"missing_android_java_awt_image\""))
     assertTrue(docxInspect, docxInspect.contains("\"poi\": true"))
     assertTrue(docxInspect, docxInspect.contains("Hello DOCX"))
     assertTrue(xlsxText, xlsxText.contains("\"type\": \"xlsx\""))
     assertTrue(xlsxText, xlsxText.contains("Hello XLSX"))
     assertTrue(docxPoiText, docxPoiText.contains("\"backend\": \"poi\""))
     assertTrue(docxPoiText, docxPoiText.contains("Hello DOCX"))
-    assertTrue(docxDocx4jText, docxDocx4jText.contains("\"backend\": \"docx4j\""))
-    assertTrue(docxDocx4jText, docxDocx4jText.contains("Hello DOCX"))
     assertTrue(pptxValidate, pptxValidate.contains("\"type\": \"pptx\""))
     assertTrue(pptxValidate, pptxValidate.contains("\"valid\": true"))
     assertTrue(pptxValidate, pptxValidate.contains("\"poi\": true"))
     assertTrue(replaced, replaced.contains("\"replacements\": 1"))
-    assertTrue(replaced, replaced.contains("\"backend\": \"docx4j\""))
+    assertTrue(replaced, replaced.contains("\"backend\": \"poi\""))
     assertTrue(replaced, replaced.contains("updated.docx"))
     assertTrue(updatedText, updatedText.contains("Updated DOCX"))
     val audit = workspace.readFile(".flovera/logs/workspace-command.jsonl")
@@ -1403,7 +1399,7 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"workspaceAutomationScriptPath\": \".flovera/scripts\""))
     assertTrue(capabilities.contains("\"workspaceAutomationScriptRunner\": \"flovera script run\""))
     assertTrue(capabilities.contains("\"officeOoxmlRuntime\": true"))
-    assertTrue(capabilities.contains("\"officeOoxmlRuntimeMode\": \"lightweight_zip_xml_with_runtime_only_poi_docx4j_backends\""))
+    assertTrue(capabilities.contains("\"officeOoxmlRuntimeMode\": \"lightweight_zip_xml_with_runtime_only_poi_backend\""))
     assertTrue(capabilities.contains("\"officeOoxmlSupportedFormats\""))
     assertTrue(capabilities.contains("\"docx\""))
     assertTrue(capabilities.contains("\"xlsx\""))
@@ -1411,9 +1407,9 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"flovera office inspect <path>\""))
     assertTrue(capabilities.contains("\"officeOoxmlHeavyBackends\""))
     assertTrue(capabilities.contains("\"apache-poi\""))
-    assertTrue(capabilities.contains("\"docx4j\""))
+    assertTrue(capabilities.contains("\"officeOoxmlUnavailableBackends\""))
     assertTrue(capabilities.contains("\"officeOoxmlHeavyBackendLoadMode\": \"runtime_only_reflection\""))
-    assertTrue(capabilities.contains("\"docx4j\""))
+    assertTrue(capabilities.contains("ordinary Maven docx4j depends on Java SE/AWT/JAXB APIs"))
     assertTrue(capabilities.contains("\"apache-poi\""))
     assertTrue(capabilities.contains("\"androidAppIndex\": true"))
     assertTrue(capabilities.contains("\"androidDirectAppLaunch\": false"))
@@ -2824,7 +2820,7 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"flovera script list\""))
     assertTrue(capabilities.contains("\"officeOoxmlRuntime\": true"))
     assertTrue(capabilities.contains("\"officeOoxmlSupportedCommands\""))
-    assertTrue(capabilities.contains("\"flovera office replace <path> --find <text> --replace <text> [--output <path>]\""))
+    assertTrue(capabilities.contains("\"flovera office replace <path> --find <text> --replace <text> [--output <path>] [--backend auto|light|poi]\""))
     assertTrue(capabilities.contains("\"officeOoxmlComplexEditingStatus\": \"available_as_structural_backend_not_full_office_renderer\""))
     assertTrue(capabilities.contains("\"gitCommandRuntime\": true"))
     assertTrue(capabilities.contains("\"gitCommandRuntimeMode\": \"embedded_jgit_local_workspace\""))

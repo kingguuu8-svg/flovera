@@ -19,8 +19,6 @@ markwon = "4.6.2"
 jgit = "6.10.0.202406032230-r"
 mlkitTextRecognition = "16.0.1"
 poi = "5.5.1"
-docx4j = "11.5.14"
-jaxbRuntime = "4.0.6"
 staxApi = "1.0.1"
 woodstox = "7.2.0"
 
@@ -52,8 +50,6 @@ jgit = { module = "org.eclipse.jgit:org.eclipse.jgit", version.ref = "jgit" }
 mlkit-text-recognition = { module = "com.google.mlkit:text-recognition", version.ref = "mlkitTextRecognition" }
 mlkit-text-recognition-chinese = { module = "com.google.mlkit:text-recognition-chinese", version.ref = "mlkitTextRecognition" }
 poi-ooxml = { module = "org.apache.poi:poi-ooxml", version.ref = "poi" }
-docx4j-core = { module = "org.docx4j:docx4j-core", version.ref = "docx4j" }
-jaxb-runtime = { module = "org.glassfish.jaxb:jaxb-runtime", version.ref = "jaxbRuntime" }
 stax-api = { module = "stax:stax-api", version.ref = "staxApi" }
 woodstox-core = { module = "com.fasterxml.woodstox:woodstox-core", version.ref = "woodstox" }
 
