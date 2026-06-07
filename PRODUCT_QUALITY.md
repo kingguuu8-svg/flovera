@@ -934,14 +934,17 @@ permissions without user action or expose Android shell.
   or from a user-opened target app.
 - Done: add the first Office OOXML command substrate through
   `flovera office inspect|validate|text|replace` for docx/xlsx/pptx packages.
-  This now combines a lightweight zip/xml fallback with a runtime-only Apache
-  POI backend for structural text extraction/replacement. Ordinary Maven docx4j
-  was verified as not Android-compatible because it depends on Java SE/AWT/JAXB
-  pieces such as `java.awt.Image`; supporting docx4j requires a future custom
-  Android-shaded bundle rather than exposing a broken built-in backend. The
-  current Office layer is still not a full Office renderer and does not claim
-  tracked changes, chart editing, formula recalculation, or exact layout
-  fidelity without targeted verification.
+  This now combines a lightweight zip/xml fallback for docx/xlsx/pptx with a
+  runtime-only Apache POI backend for docx/xlsx structural text
+  extraction/replacement. POI's PPTX/XSLF API was verified as not
+  Android-compatible because it depends on Java SE/AWT geometry pieces such as
+  `java.awt.geom.Rectangle2D`; PPTX therefore uses the lightweight OOXML path.
+  Ordinary Maven docx4j was verified as not Android-compatible because it
+  depends on Java SE/AWT/JAXB pieces such as `java.awt.Image`; supporting docx4j
+  requires a future custom Android-shaded bundle rather than exposing a broken
+  built-in backend. The current Office layer is still not a full Office renderer
+  and does not claim tracked changes, chart editing, formula recalculation, or
+  exact layout fidelity without targeted verification.
 - Next hardening target: promote the worker to a foreground service during very
   long JVM builds if Android background process pressure still kills the worker
   before checkpointed work can resume.

@@ -122,7 +122,7 @@ class AgentPromptBuilderInstrumentedTest {
     assertTrue(systemPrompt.contains("workspaceCommandRuntime=available_python_groovy_jvm_artifacts_flovera_scripts_office_ooxml_poi_backend_experimental"))
     assertTrue(systemPrompt.contains("workspaceCommandProfiles=python,groovy,git,android,flovera-script,flovera-office"))
     assertTrue(systemPrompt.contains("workspaceAutomationScripts=available_at_.flovera/scripts"))
-    assertTrue(systemPrompt.contains("officeOoxmlRuntime=available_docx_xlsx_pptx_inspect_validate_text_replace_with_poi_runtime_backend_docx4j_unavailable_on_android"))
+    assertTrue(systemPrompt.contains("officeOoxmlRuntime=available_docx_xlsx_pptx_light_backend_with_poi_docx_xlsx_backend_poi_pptx_unavailable_on_android"))
     assertTrue(systemPrompt.contains("gitRuntime=available_embedded_jgit_local_only"))
     assertTrue(systemPrompt.contains("androidCommandProfile=available_permission_gated_system_apis"))
     assertTrue(systemPrompt.contains("jvmBuildScheduler=serialized_throttled_checkpointed_cache"))

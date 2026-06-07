@@ -2854,8 +2854,10 @@ data class FloveraCapabilities(
   val workspaceAutomationScriptRunner: String = "flovera script run",
   val workspaceAutomationScriptCommands: List<String> = listOf("flovera script list", "flovera script run <name> [--param key=value]"),
   val officeOoxmlRuntime: Boolean = true,
-  val officeOoxmlRuntimeMode: String = "lightweight_zip_xml_with_runtime_only_poi_backend",
+  val officeOoxmlRuntimeMode: String = "lightweight_zip_xml_with_runtime_only_poi_docx_xlsx_backend",
   val officeOoxmlSupportedFormats: List<String> = listOf("docx", "xlsx", "pptx"),
+  val officeOoxmlPoiBackendFormats: List<String> = listOf("docx", "xlsx"),
+  val officeOoxmlLightBackendFormats: List<String> = listOf("docx", "xlsx", "pptx"),
   val officeOoxmlSupportedCommands: List<String> = listOf(
     "flovera office inspect <path>",
     "flovera office validate <path>",
@@ -2864,6 +2866,7 @@ data class FloveraCapabilities(
   ),
   val officeOoxmlHeavyBackends: List<String> = listOf("apache-poi"),
   val officeOoxmlUnavailableBackends: Map<String, String> = mapOf(
+    "apache-poi-pptx" to "POI XSLF depends on Java SE/AWT geometry APIs such as java.awt.geom.Rectangle2D; PPTX uses the lightweight OOXML backend on Android",
     "docx4j" to "ordinary Maven docx4j depends on Java SE/AWT/JAXB APIs such as java.awt.Image; Android support requires a future custom shaded bundle",
   ),
   val officeOoxmlHeavyBackendLoadMode: String = "runtime_only_reflection",

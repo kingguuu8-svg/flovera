@@ -386,10 +386,11 @@ object FloveraSkillRegistry {
         - Use `["flovera", "office", "text", "<path>", "--max", "200"]` when the task needs document text for search, summary, or replacement planning. Optional `--backend auto|light|poi` is available.
         - Use `["flovera", "office", "replace", "<path>", "--find", "<old>", "--replace", "<new>"]` for safe structural text replacement. Prefer `--output <new-file>` unless the user explicitly wants in-place editing. Optional `--backend auto|light|poi` is available.
         - After editing any Office file, run `flovera office validate` and then `artifact_inspect` on the output path.
-        - Current implementation has a lightweight OOXML zip/xml adapter plus a runtime-only Apache POI backend. `auto` prefers POI for docx/xlsx/pptx, then falls back to the lightweight adapter when possible.
+        - Current implementation has a lightweight OOXML zip/xml adapter for docx/xlsx/pptx plus a runtime-only Apache POI backend for docx/xlsx. `auto` prefers POI only when `inspect` reports it in `supportedBackends`, then falls back to the lightweight adapter when possible.
+        - Do not use Groovy/Maven POI XSLF as the default path for PPTX generation or editing on Android. POI's PPTX APIs depend on Java SE/AWT geometry classes such as `java.awt.geom.Rectangle2D`, so PPTX work should use the lightweight OOXML path or direct ZIP/XML construction unless a future compatibility bundle is verified.
         - Ordinary Maven docx4j is not currently exposed as a supported backend on Android because it depends on Java SE/AWT/JAXB APIs such as `java.awt.Image`. Only use docx4j if `flovera office inspect` reports it in `supportedBackends`; otherwise treat it as future custom-bundle work.
         - The heavy backends are structural document libraries, not a full Office renderer. Do not promise tracked changes, comments, charts, formula recalculation, embedded media editing, slide layout fidelity, or full Microsoft Office compatibility unless that exact operation is verified.
-        - For complex editing that the command wrapper cannot safely express, use Groovy with built-in POI or workspace-provided JVM libraries instead of asking the user to install anything manually.
+        - For complex docx/xlsx editing that the command wrapper cannot safely express, use Groovy with built-in POI or workspace-provided JVM libraries instead of asking the user to install anything manually. For pptx, prefer direct OOXML ZIP/XML generation over POI XSLF.
       """.trimIndent()
 
       "flovera-skill-creator" -> """

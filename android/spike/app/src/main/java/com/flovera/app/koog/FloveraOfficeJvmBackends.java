@@ -6,7 +6,6 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.Iterator;
@@ -24,9 +23,11 @@ public final class FloveraOfficeJvmBackends {
   }
 
   public JSONObject availability(String type) throws Exception {
+    boolean poi = poiAvailable(type);
     boolean docx4j = docx4jAvailable(type);
     return new JSONObject()
-      .put("poi", poiAvailable(type))
+      .put("poi", poi)
+      .put("poiUnavailableReason", poi ? JSONObject.NULL : poiUnavailableReason(type))
       .put("docx4j", docx4j)
       .put("docx4jUnavailableReason", docx4j ? JSONObject.NULL : docx4jUnavailableReason(type))
       .put("defaultBackend", defaultBackend(type))
@@ -34,10 +35,13 @@ public final class FloveraOfficeJvmBackends {
   }
 
   public JSONObject inspect(File file, String type) throws Exception {
-    JSONObject result = new JSONObject().put("available", availability(type));
+    JSONObject available = availability(type);
+    JSONObject result = new JSONObject().put("available", available);
     JSONArray probes = new JSONArray();
-    probes.put(probe("poi", () -> text(file, type, 20, "poi")));
-    if (docx4jAvailable(type)) {
+    if (available.optBoolean("poi")) {
+      probes.put(probe("poi", () -> text(file, type, 20, "poi")));
+    }
+    if (available.optBoolean("docx4j")) {
       probes.put(probe("docx4j", () -> text(file, type, 20, "docx4j")));
     }
     return result.put("probes", probes);
@@ -115,10 +119,23 @@ public final class FloveraOfficeJvmBackends {
   }
 
   private boolean poiAvailable(String type) {
-    return ("docx".equals(type) || "xlsx".equals(type) || "pptx".equals(type)) &&
-      hasClass("org.apache.poi.xwpf.usermodel.XWPFDocument") &&
-      hasClass("org.apache.poi.xssf.usermodel.XSSFWorkbook") &&
-      hasClass("org.apache.poi.xslf.usermodel.XMLSlideShow");
+    if ("docx".equals(type)) return hasClass("org.apache.poi.xwpf.usermodel.XWPFDocument");
+    if ("xlsx".equals(type)) return hasClass("org.apache.poi.xssf.usermodel.XSSFWorkbook");
+    if ("pptx".equals(type)) {
+      return hasClass("org.apache.poi.xslf.usermodel.XMLSlideShow") &&
+        hasClass("java.awt.geom.Rectangle2D");
+    }
+    return false;
+  }
+
+  private String poiUnavailableReason(String type) {
+    if ("docx".equals(type) && !hasClass("org.apache.poi.xwpf.usermodel.XWPFDocument")) return "missing_poi_xwpf_document";
+    if ("xlsx".equals(type) && !hasClass("org.apache.poi.xssf.usermodel.XSSFWorkbook")) return "missing_poi_xssf_workbook";
+    if ("pptx".equals(type)) {
+      if (!hasClass("org.apache.poi.xslf.usermodel.XMLSlideShow")) return "missing_poi_xslf_slideshow";
+      if (!hasClass("java.awt.geom.Rectangle2D")) return "missing_android_java_awt_geom_rectangle2d";
+    }
+    return "unsupported_office_type";
   }
 
   private boolean docx4jAvailable(String type) {
