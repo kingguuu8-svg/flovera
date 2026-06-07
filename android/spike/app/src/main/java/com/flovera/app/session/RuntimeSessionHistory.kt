@@ -18,6 +18,19 @@ object RuntimeSessionHistory {
     currentVisibleInput: String = currentInput,
     maxMessages: Int = DEFAULT_MAX_MESSAGES,
   ): List<RuntimeHistoryEntry> {
+    val ledgerEntries = PromptContextLedger.promptBlocks(
+      session = session,
+      currentInput = currentInput,
+      currentVisibleInput = currentVisibleInput,
+      maxMessages = maxMessages,
+    ).map { block ->
+      RuntimeHistoryEntry(
+        role = block.role,
+        content = block.content,
+      )
+    }
+    if (ledgerEntries.isNotEmpty()) return ledgerEntries
+
     val messages = withoutCurrentInput(session.messages, currentInput, currentVisibleInput)
       .filter { it.role == SESSION_ROLE_COMPRESSION || it.hasRuntimeHistoryPayload() }
     val dividerIndex = messages.indexOfLast { it.role == SESSION_ROLE_COMPRESSION }

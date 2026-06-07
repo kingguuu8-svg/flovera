@@ -386,24 +386,29 @@ This is observability for the run loop, not hidden reasoning.
 
 ### Runtime Context Retention
 
-Status: Baseline implemented for persisted tool history. Tool events now carry
-bounded retention metadata (`success`, `resultKind`, `outputChars`,
+Status: Baseline implemented for append-only prompt context history. Tool events
+now carry bounded retention metadata (`success`, `resultKind`, `outputChars`,
 `outputTruncated`, `retentionPriority`, and `retentionReason`) at record time.
-`RuntimeSessionHistory` no longer treats every persisted tool result as the
-same kind of prompt history: it uses `ToolContextRetentionPolicy` to emit
-`tool_context` slices where failed tools remain active-critical, recent command,
-read, search, and network outputs stay full only while fresh, successful
-artifact/file-write validation becomes structured memory, generic successes
-become summaries, and status-only outputs are UI-only. Current Koog run-loop
-tool results are still delivered directly inside the active run; this policy is
-for cross-run prompt reconstruction and future compression/skills retention.
+When session messages are appended, Flovera also appends stable
+`promptContextBlocks` for user/assistant text, chronological transcript context,
+relevant run status, compression handoff summaries, and retained tool context.
+`RuntimeSessionHistory` reads those blocks first, so later requests see the same
+history the conversation UI exposed instead of re-deriving and rewriting tool
+history on every run. Failed tools remain active-critical, recent command/read/
+search/network outputs stay full in the ledger block that was written at the
+time, successful artifact/file-write validation becomes structured memory,
+generic successes become bounded summaries, and status-only outputs are UI-only.
+Current Koog run-loop tool results are still delivered directly inside the
+active run; the ledger is for cross-run prompt reconstruction and future
+compression/skills retention.
 
 - Keep full session logs and conversation transcript available for UI/debug
   without forcing every tool result back into the next provider request.
 - Preserve failed tool output with higher priority so retries and recovery do
   not lose the actionable error tail.
-- Downgrade older successful tool results into summaries or structured facts
-  instead of replaying large stdout/stderr blocks.
+- Decide each tool result's retained prompt form when the message is appended,
+  then keep that prompt block stable across later runs instead of downgrading or
+  rewriting old history based on distance from the current request.
 - Treat skill reads as future tool events that can reuse the same retention
   policy: active task gets high-priority context, compacted history keeps
   activation metadata and a path back to the skill body.
@@ -628,23 +633,25 @@ advanced request templates and auditable route changes.
 
 ### Agent Rules And Runtime Control
 
-Status: Partially implemented. Workspace `AGENT.md` rules are injected into the
-agent prompt, users can interrupt runs, queue follow-up inputs, mark queued
-inputs as guidance, and active runs use an Android foreground service with
-status notifications. Guidance sent while a run is active is visible in the
-conversation as a user bubble in the active run transcript after the next
-completed tool result, with a lightweight waiting status while it is pending.
-Interrupts persist the active draft transcript plus a lightweight
-`run_interrupted` status instead of a full assistant bubble, and notification
-copy now says partial transcript/tool history was saved. Settings include an
-explicit opt-in background keep-alive mode that keeps Flovera foreground-service
-visible for long workspace work, requests notification permission, opens the
-Android battery-optimization exception flow, and restores from the persisted
-setting after a service restart. Remaining work is clearer UI separation
-between system rules and workspace rules, stronger cancellation coverage for
-active provider/tool work, notification actions, OEM-specific autostart
-diagnostics, overlay/floating-window research, and more explicit background
-lifecycle diagnostics.
+Status: Partially implemented. Workspace `AGENT.md` rules are read from the same
+file shown in Flovera's AGENT.md editor and appended directly to the end of the
+app-owned system prompt as user-owned workspace guidance. The rules no longer
+need a separate user-message reminder for the agent to inspect AGENT.md. Users
+can interrupt runs, queue follow-up inputs, mark queued inputs as guidance, and
+active runs use an Android foreground service with status notifications.
+Guidance sent while a run is active is visible in the conversation as a user
+bubble in the active run transcript after the next completed tool result, with a
+lightweight waiting status while it is pending. Interrupts persist the active
+draft transcript plus a lightweight `run_interrupted` status instead of a full
+assistant bubble, and notification copy now says partial transcript/tool history
+was saved. Settings include an explicit opt-in background keep-alive mode that
+keeps Flovera foreground-service visible for long workspace work, requests
+notification permission, opens the Android battery-optimization exception flow,
+and restores from the persisted setting after a service restart. Remaining work
+is clearer UI separation between system rules and workspace rules, stronger
+cancellation coverage for active provider/tool work, notification actions,
+OEM-specific autostart diagnostics, overlay/floating-window research, and more
+explicit background lifecycle diagnostics.
 
 - Separate system rules from user/workspace rules:
   - System rules are app-owned product and safety constraints.
@@ -702,11 +709,12 @@ that improve repeat workflows without turning the composer into a hidden shell.
 ### System Prompt Optimization
 
 Status: Partially implemented. The app-owned prompt is split into stable
-sections, embeds stable Flovera runtime boundaries, discourages repeated
-`.flovera` rediscovery, and warns against treating mocked files or JSON handoff
-protocols as proof of interactive artifact completion. Remaining work is golden
-prompt snapshots, token-cost diagnostics, and regression checks for high-risk
-capability claims.
+sections, embeds stable Flovera runtime boundaries, appends the current
+workspace `AGENT.md` content at the system prompt tail as user-owned guidance,
+discourages repeated `.flovera` rediscovery, and warns against treating mocked
+files or JSON handoff protocols as proof of interactive artifact completion.
+Remaining work is golden prompt snapshots, token-cost diagnostics, and
+regression checks for high-risk capability claims.
 
 - Audit the app-owned system prompt for duplicated rules, stale project history,
   and instructions that can be represented as structured capability metadata.

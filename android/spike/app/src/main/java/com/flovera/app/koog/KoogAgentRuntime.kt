@@ -168,6 +168,7 @@ class KoogAgentRuntime(
         webSearchAvailable = webSearchAvailable,
         authorityMode = settings.agentAuthorityMode,
         pythonRunToolFallbackEnabled = settings.pythonRunToolFallbackEnabled,
+        workspaceUserRules = workspaceUserRules,
       ),
       maxIterations = AGENT_ITERATIONS_INTERNAL_GUARD,
     )

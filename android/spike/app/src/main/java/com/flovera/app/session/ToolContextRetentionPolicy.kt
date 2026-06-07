@@ -20,6 +20,10 @@ object ToolContextRetentionPolicy {
   private const val SUMMARY_LIMIT = 360
   private const val ARG_LIMIT = 420
   private const val RECENT_FULL_MESSAGE_DISTANCE = 0
+  private const val LEDGER_ACTIVE_CRITICAL_LIMIT = 50_000
+  private const val LEDGER_RECENT_FULL_LIMIT = 50_000
+  private const val LEDGER_STRUCTURED_MEMORY_LIMIT = 12_000
+  private const val LEDGER_SUMMARY_LIMIT = 4_000
 
   fun classify(name: String, args: String, result: String): ToolRetentionDecision {
     val normalizedName = name.lowercase()
@@ -66,6 +70,18 @@ object ToolContextRetentionPolicy {
     }
   }
 
+  fun ledgerSlicesForMessage(message: SessionMessage): List<RuntimeHistoryEntry> {
+    if (message.toolEvents.isEmpty()) return emptyList()
+    return message.toolEvents.mapNotNull { event ->
+      val priority = normalizeLedgerPriority(event.retentionPriority.ifBlank { RETENTION_SUMMARY_ONLY })
+      if (priority == RETENTION_UI_ONLY) return@mapNotNull null
+      RuntimeHistoryEntry(
+        role = "tool_context",
+        content = formatToolContext(event, priority, ledgerLimitFor(priority)),
+      )
+    }
+  }
+
   private fun normalizePriority(priority: String, distanceFromNewestMessage: Int): String {
     return when (priority) {
       RETENTION_ACTIVE_CRITICAL -> RETENTION_ACTIVE_CRITICAL
@@ -82,6 +98,25 @@ object ToolContextRetentionPolicy {
     }
   }
 
+  private fun normalizeLedgerPriority(priority: String): String {
+    return when (priority) {
+      RETENTION_ACTIVE_CRITICAL,
+      RETENTION_RECENT_FULL,
+      RETENTION_STRUCTURED_MEMORY,
+      RETENTION_UI_ONLY -> priority
+      else -> RETENTION_SUMMARY_ONLY
+    }
+  }
+
+  private fun ledgerLimitFor(priority: String): Int {
+    return when (priority) {
+      RETENTION_ACTIVE_CRITICAL -> LEDGER_ACTIVE_CRITICAL_LIMIT
+      RETENTION_RECENT_FULL -> LEDGER_RECENT_FULL_LIMIT
+      RETENTION_STRUCTURED_MEMORY -> LEDGER_STRUCTURED_MEMORY_LIMIT
+      else -> LEDGER_SUMMARY_LIMIT
+    }
+  }
+
   private fun formatToolContext(event: ToolEvent, priority: String): String {
     val limit = when (priority) {
       RETENTION_ACTIVE_CRITICAL -> ACTIVE_CRITICAL_LIMIT
@@ -89,6 +124,10 @@ object ToolContextRetentionPolicy {
       RETENTION_STRUCTURED_MEMORY -> STRUCTURED_MEMORY_LIMIT
       else -> SUMMARY_LIMIT
     }
+    return formatToolContext(event, priority, limit)
+  }
+
+  private fun formatToolContext(event: ToolEvent, priority: String, resultLimit: Int): String {
     return buildString {
       append("tool=")
       append(event.name)
@@ -108,7 +147,7 @@ object ToolContextRetentionPolicy {
       append(", args=")
       append(event.args.compact(ARG_LIMIT))
       append(", result=")
-      append(event.result.compact(limit))
+      append(event.result.compact(resultLimit))
     }
   }
 

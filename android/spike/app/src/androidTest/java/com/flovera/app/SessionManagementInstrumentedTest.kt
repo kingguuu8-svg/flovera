@@ -229,6 +229,7 @@ class SessionManagementInstrumentedTest {
     assertEquals(2, truncated?.messages?.size)
     assertEquals("two", truncated?.messages?.last()?.content)
     assertEquals(2, store.load(three.id)?.messages?.size)
+    assertEquals(2, store.load(three.id)?.promptContextBlocks?.size)
   }
 
   @Test
@@ -377,6 +378,66 @@ class SessionManagementInstrumentedTest {
   }
 
   @Test
+  fun appendMessageAddsPromptContextBlocksWithoutRewritingPreviousBlocks() {
+    val store = isolatedSessionStore("prompt-ledger-append").store
+    val session = store.create("Prompt ledger ${System.currentTimeMillis()}")
+    val first = store.appendMessage(session, SessionMessage(role = "user", content = "inspect README"))
+    val assistant = store.appendMessage(
+      first,
+      SessionMessage(
+        role = "assistant",
+        content = "I read the file.",
+        toolEvents = listOf(
+          ToolEvent(
+            name = "read_file",
+            args = "path=README.md",
+            result = "README full output for the next request",
+            resultKind = "file_read",
+            retentionPriority = ToolContextRetentionPolicy.RETENTION_RECENT_FULL,
+            retentionReason = "recent file_read output may be needed by the next model request",
+          ),
+        ),
+      ),
+    )
+    val beforeBlocks = assistant.promptContextBlocks.map { it.id to it.content }
+
+    val current = store.appendMessage(assistant, SessionMessage(role = "user", content = "what did you read"))
+
+    assertEquals(beforeBlocks, current.promptContextBlocks.take(beforeBlocks.size).map { it.id to it.content })
+    assertEquals(listOf("user", "assistant", "tool_context", "user"), current.promptContextBlocks.map { it.role })
+    val history = RuntimeSessionHistory.promptText(current, currentInput = "what did you read")
+    assertTrue(history.contains("user: inspect README"))
+    assertTrue(history.contains("assistant: I read the file."))
+    assertTrue(history.contains("tool_context: tool=read_file"))
+    assertTrue(history.contains("README full output for the next request"))
+    assertFalse(history.contains("user: what did you read"))
+  }
+
+  @Test
+  fun appendMessageBackfillsPromptContextBlocksForLegacySessions() {
+    val store = isolatedSessionStore("prompt-ledger-backfill").store
+    val session = store.create("Legacy prompt ledger ${System.currentTimeMillis()}")
+    store.save(
+      session.copy(
+        messages = listOf(
+          SessionMessage(role = "user", content = "legacy request"),
+          SessionMessage(role = "assistant", content = "legacy answer"),
+        ),
+        promptContextBlocks = emptyList(),
+      ),
+    )
+
+    val updated = store.appendMessage(session, SessionMessage(role = "user", content = "continue"))
+    val loaded = store.load(updated.id)
+
+    assertEquals(listOf(0, 1, 2), loaded?.promptContextBlocks?.map { it.sourceMessageIndex })
+    val history = RuntimeSessionHistory.promptText(updated, currentInput = "continue")
+    assertTrue(history.contains("user: legacy request"))
+    assertTrue(history.contains("assistant: legacy answer"))
+    assertFalse(history.contains("user: continue"))
+  }
+
+  @Test
   fun runtimeHistoryUsesLatestCompressionDividerAsHandoffBoundary() {
     val store = isolatedSessionStore("runtime-history-compressed").store
     val session = store.create("Runtime history ${System.currentTimeMillis()}")
@@ -491,6 +552,65 @@ class SessionManagementInstrumentedTest {
   }
 
   @Test
+  fun runtimeHistoryKeepsChronologicalTranscriptContextBetweenToolCalls() {
+    val store = isolatedSessionStore("runtime-history-transcript-ledger").store
+    val session = store.create("Runtime transcript ledger ${System.currentTimeMillis()}")
+    val first = store.appendMessage(session, SessionMessage(role = "user", content = "inspect and explain"))
+    val assistant = store.appendMessage(
+      first,
+      SessionMessage(
+        role = "assistant",
+        content = "",
+        transcriptEvents = listOf(
+          ConversationTranscriptEvent(
+            type = "tool_call",
+            title = "Tool: read_file",
+            detail = "Read one.txt",
+            status = "completed",
+            timestampMillis = 1L,
+          ),
+          ConversationTranscriptEvent(
+            type = "assistant_text",
+            role = "assistant",
+            content = "First explanation after read.",
+            timestampMillis = 2L,
+          ),
+          ConversationTranscriptEvent(
+            type = "tool_call",
+            title = "Tool: workspace_search",
+            detail = "Searched project",
+            status = "completed",
+            timestampMillis = 3L,
+          ),
+          ConversationTranscriptEvent(
+            type = "assistant_text",
+            role = "assistant",
+            content = "Second explanation after search.",
+            timestampMillis = 4L,
+          ),
+        ),
+      ),
+    )
+    val current = store.appendMessage(assistant, SessionMessage(role = "user", content = "what happened"))
+
+    val transcriptContext = RuntimeSessionHistory.entries(current, currentInput = "what happened")
+      .single { it.role == "transcript_context" }
+
+    assertTrue(transcriptContext.content.contains("tool_call:Tool: read_file:Read one.txt"))
+    assertTrue(transcriptContext.content.contains("assistant_text:assistant:First explanation after read."))
+    assertTrue(transcriptContext.content.contains("tool_call:Tool: workspace_search:Searched project"))
+    assertTrue(transcriptContext.content.contains("assistant_text:assistant:Second explanation after search."))
+    assertTrue(
+      transcriptContext.content.indexOf("Read one.txt") <
+        transcriptContext.content.indexOf("First explanation after read."),
+    )
+    assertTrue(
+      transcriptContext.content.indexOf("First explanation after read.") <
+        transcriptContext.content.indexOf("Searched project"),
+    )
+  }
+
+  @Test
   fun runtimeHistoryAddsPolicyBasedToolContextSlices() {
     val store = isolatedSessionStore("runtime-history-tools").store
     val session = store.create("Runtime history tools ${System.currentTimeMillis()}")
@@ -544,9 +664,9 @@ class SessionManagementInstrumentedTest {
   }
 
   @Test
-  fun runtimeHistoryDemotesOldRecentFullToolOutputToSummary() {
-    val store = isolatedSessionStore("runtime-history-tool-summary").store
-    val session = store.create("Runtime history tool summary ${System.currentTimeMillis()}")
+  fun runtimeHistoryKeepsLedgerToolContextStableAfterLaterMessages() {
+    val store = isolatedSessionStore("runtime-history-tool-ledger").store
+    val session = store.create("Runtime history tool ledger ${System.currentTimeMillis()}")
     val one = store.appendMessage(session, SessionMessage(role = "user", content = "inspect"))
     val oldTool = store.appendMessage(
       one,
@@ -571,8 +691,8 @@ class SessionManagementInstrumentedTest {
     val toolContext = RuntimeSessionHistory.entries(current, currentInput = "continue")
       .single { it.role == "tool_context" }
 
-    assertTrue(toolContext.content.contains("priority=summary_only"))
-    assertTrue(toolContext.content.length < 700)
+    assertTrue(toolContext.content.contains("priority=recent_full"))
+    assertTrue(toolContext.content.contains("x".repeat(1_000)))
   }
 
   private fun isolatedSessionStore(name: String): SessionStoreHarness {

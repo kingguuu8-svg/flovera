@@ -21,6 +21,7 @@ data class AgentSession(
   val pinnedAtMillis: Long? = null,
   val messages: List<SessionMessage> = emptyList(),
   val contextRecords: List<ContextUsageRecord> = emptyList(),
+  val promptContextBlocks: List<PromptContextBlock> = emptyList(),
 )
 
 @Serializable
@@ -96,6 +97,18 @@ data class ContextUsageRecord(
   val summary: String = "",
   val summarySource: String = "",
   val compressionError: String = "",
+)
+
+@Serializable
+data class PromptContextBlock(
+  val id: String,
+  val sourceMessageIndex: Int,
+  val sourceTimestampMillis: Long,
+  val role: String,
+  val content: String,
+  val createdAtMillis: Long = System.currentTimeMillis(),
+  val retentionPriority: String = "",
+  val origin: String = "message",
 )
 
 class AgentSessionStore(
@@ -208,9 +221,13 @@ class AgentSessionStore(
 
   fun appendMessage(session: AgentSession, message: SessionMessage): AgentSession {
     val latest = load(session.id) ?: session
+    val backfilledBlocks = PromptContextLedger.withBackfilledBlocks(latest)
+    val messageIndex = latest.messages.size
     val updated = latest.copy(
       updatedAtMillis = System.currentTimeMillis(),
       messages = latest.messages + message,
+      promptContextBlocks = backfilledBlocks +
+        PromptContextLedger.blocksForMessage(message, messageIndex),
     )
     save(updated)
     return updated
@@ -264,6 +281,8 @@ class AgentSessionStore(
     val updated = session.copy(
       updatedAtMillis = System.currentTimeMillis(),
       messages = session.messages.take(normalizedCount),
+      promptContextBlocks = session.promptContextBlocks
+        .filter { it.sourceMessageIndex < normalizedCount },
     )
     save(updated)
     return updated

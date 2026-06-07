@@ -35,9 +35,13 @@ class AgentPromptBuilderInstrumentedTest {
   }
 
   @Test
-  fun systemPromptKeepsWorkspaceRulesOutOfSystemLayer() {
+  fun systemPromptAppendsWorkspaceRulesDirectlyFromAgentMd() {
     val workspaceRule = "Prefer compact UI labels."
-    val systemPrompt = AgentPromptBuilder.systemPrompt(networkEnabled = true, webSearchAvailable = true)
+    val systemPrompt = AgentPromptBuilder.systemPrompt(
+      networkEnabled = true,
+      webSearchAvailable = true,
+      workspaceUserRules = workspaceRule,
+    )
     val fullAuthorityPrompt = AgentPromptBuilder.systemPrompt(
       networkEnabled = true,
       webSearchAvailable = true,
@@ -59,6 +63,9 @@ class AgentPromptBuilderInstrumentedTest {
     assertTrue(systemPrompt.contains("System rules in this prompt have the highest priority"))
     assertTrue(systemPrompt.contains("Workspace user rules from AGENT.md"))
     assertTrue(systemPrompt.contains("AGENT.md is user-owned workspace guidance"))
+    assertTrue(systemPrompt.contains("Workspace AGENT.md:"))
+    assertTrue(systemPrompt.contains("same AGENT.md content shown in Flovera's AGENT.md editor"))
+    assertTrue(systemPrompt.contains(workspaceRule))
     assertTrue(systemPrompt.contains("If the user asks in Chinese, answer in Chinese"))
     assertTrue(systemPrompt.contains("Core boundaries:"))
     assertTrue(systemPrompt.contains("Stable Flovera runtime boundary:"))
@@ -195,15 +202,14 @@ class AgentPromptBuilderInstrumentedTest {
     assertTrue(systemPrompt.contains("authorityMode=safe"))
     assertTrue(systemPrompt.contains("networkTools=enabled"))
     assertTrue(systemPrompt.contains("webSearch=enabled"))
-    assertFalse(systemPrompt.contains(workspaceRule))
     assertFalse(systemPrompt.contains("\"provider\":\"custom-openai\""))
     assertFalse(systemPrompt.contains("\"openRouterProviderPreferences\""))
     assertTrue(fullAuthorityPrompt.contains("authorityMode=full"))
     assertTrue(fullAuthorityPrompt.contains("Full Authority mode: still write settings proposals"))
     assertTrue(fullAuthorityPrompt.contains(".flovera/logs/full-authority.jsonl"))
     assertTrue(fullAuthorityPrompt.contains("does not expose plaintext secrets"))
-    assertTrue(userInput.contains("Workspace user rules from AGENT.md:"))
-    assertTrue(userInput.contains(workspaceRule))
+    assertFalse(userInput.contains("Workspace user rules from AGENT.md:"))
+    assertFalse(userInput.contains(workspaceRule))
     assertTrue(userInput.contains("Recent session history:"))
     assertTrue(userInput.contains("Available Flovera skills:"))
     assertTrue(userInput.contains("Available user-managed secrets:"))

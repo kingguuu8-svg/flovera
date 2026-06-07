@@ -21,7 +21,7 @@ data class AgentRequestFootprint(
   val payloadJson: String,
   val transportOverheadChars: Int,
 ) {
-  val rulesChars: Int = systemPrompt.length + workspaceUserRules.length
+  val rulesChars: Int = systemPrompt.length
   val toolSchemaChars: Int = toolSchemaJson.length
   val requestChars: Int = payloadJson.length + transportOverheadChars
 }
@@ -37,13 +37,14 @@ object AgentRequestFootprintBuilder {
     val webSearchAvailable = settings.networkEnabled && settings.webSearchEnabled && settings.braveSearchApiKey.isNotBlank()
     val provider = ModelProviderCatalog.findProvider(settings.provider)
     val modelContext = ModelProviderCatalog.contextFor(settings)
+    val workspaceUserRules = workspace.readAgentRules()
     val systemPrompt = AgentPromptBuilder.systemPrompt(
       networkEnabled = settings.networkEnabled,
       webSearchAvailable = webSearchAvailable,
       authorityMode = settings.agentAuthorityMode,
       pythonRunToolFallbackEnabled = settings.pythonRunToolFallbackEnabled,
+      workspaceUserRules = workspaceUserRules,
     )
-    val workspaceUserRules = workspace.readAgentRules()
     val userPrompt = AgentPromptBuilder.userInput(
       input = input,
       session = session,
