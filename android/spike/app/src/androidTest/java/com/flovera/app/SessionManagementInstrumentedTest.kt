@@ -3,7 +3,9 @@ package com.flovera.app
 import androidx.test.platform.app.InstrumentationRegistry
 import com.flovera.app.config.AppSettings
 import com.flovera.app.config.SettingsStore
+import com.flovera.app.session.AgentRunTimelineEvent
 import com.flovera.app.session.AgentSessionStore
+import com.flovera.app.session.ConversationTranscriptEvent
 import com.flovera.app.session.ContextUsageRecord
 import com.flovera.app.session.RuntimeSessionHistory
 import com.flovera.app.session.SESSION_ROLE_COMPRESSION
@@ -422,6 +424,70 @@ class SessionManagementInstrumentedTest {
     val entries = RuntimeSessionHistory.entries(two)
 
     assertEquals(listOf("task", "answer"), entries.map { it.content })
+  }
+
+  @Test
+  fun runtimeHistoryKeepsToolOnlyAssistantMessageAfterInterruptedRun() {
+    val store = isolatedSessionStore("runtime-history-interrupted-tools").store
+    val session = store.create("Runtime history interrupted ${System.currentTimeMillis()}")
+    val first = store.appendMessage(session, SessionMessage(role = "user", content = "connect with ssh"))
+    val interrupted = store.appendMessage(
+      first,
+      SessionMessage(
+        role = "assistant",
+        content = "",
+        toolEvents = listOf(
+          ToolEvent(
+            name = "read_file",
+            args = "path=ssh_connect.groovy",
+            result = "import com.jcraft.jsch.*\nprintln 'loaded ssh script'",
+            resultKind = "file_read",
+            retentionPriority = ToolContextRetentionPolicy.RETENTION_RECENT_FULL,
+            retentionReason = "recent file_read output may be needed by the next model request",
+          ),
+        ),
+        runEvents = listOf(
+          AgentRunTimelineEvent(
+            type = "run_interrupted",
+            title = "Run interrupted",
+            detail = "The active agent run was cancelled by the user; partial transcript and tool history were saved.",
+            status = "interrupted",
+          ),
+        ),
+        transcriptEvents = listOf(
+          ConversationTranscriptEvent(
+            type = "assistant_text",
+            role = "assistant",
+            content = "JSch loaded; authentication failed for root. Trying other usernames.",
+          ),
+          ConversationTranscriptEvent(
+            type = "tool_call",
+            title = "Tool: read_file",
+            detail = "Read ssh_connect.groovy",
+            status = "completed",
+          ),
+          ConversationTranscriptEvent(
+            type = "run_interrupted",
+            title = "Run interrupted",
+            detail = "The active agent run was cancelled by the user; partial transcript and tool history were saved.",
+            status = "interrupted",
+          ),
+        ),
+      ),
+    )
+    val current = store.appendMessage(interrupted, SessionMessage(role = "user", content = "what did you read"))
+
+    val history = RuntimeSessionHistory.promptText(current, currentInput = "what did you read")
+
+    assertTrue(history.contains("user: connect with ssh"))
+    assertTrue(history.contains("interrupted_run_context:"))
+    assertTrue(history.contains("Interrupted assistant run visible in conversation UI"))
+    assertTrue(history.contains("JSch loaded; authentication failed for root"))
+    assertTrue(history.contains("run_interrupted:Run interrupted"))
+    assertTrue(history.contains("tool_context: tool=read_file"))
+    assertTrue(history.contains("path=ssh_connect.groovy"))
+    assertTrue(history.contains("loaded ssh script"))
+    assertFalse(history.contains("user: what did you read"))
   }
 
   @Test

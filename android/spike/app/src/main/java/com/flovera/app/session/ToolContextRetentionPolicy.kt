@@ -19,7 +19,7 @@ object ToolContextRetentionPolicy {
   private const val STRUCTURED_MEMORY_LIMIT = 700
   private const val SUMMARY_LIMIT = 360
   private const val ARG_LIMIT = 420
-  private const val RECENT_FULL_MESSAGE_DISTANCE = 1
+  private const val RECENT_FULL_MESSAGE_DISTANCE = 0
 
   fun classify(name: String, args: String, result: String): ToolRetentionDecision {
     val normalizedName = name.lowercase()

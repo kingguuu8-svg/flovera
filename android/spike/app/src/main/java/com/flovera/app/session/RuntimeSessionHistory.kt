@@ -9,6 +9,8 @@ object RuntimeSessionHistory {
   private const val DEFAULT_MAX_MESSAGES = 12
   private const val MESSAGE_CONTENT_LIMIT = 1_500
   private const val HANDOFF_CONTENT_LIMIT = 6_000
+  private const val INTERRUPTED_CONTEXT_LIMIT = 3_000
+  private const val INTERRUPTED_EVENT_LIMIT = 24
 
   fun entries(
     session: AgentSession,
@@ -17,7 +19,7 @@ object RuntimeSessionHistory {
     maxMessages: Int = DEFAULT_MAX_MESSAGES,
   ): List<RuntimeHistoryEntry> {
     val messages = withoutCurrentInput(session.messages, currentInput, currentVisibleInput)
-      .filter { it.role == SESSION_ROLE_COMPRESSION || it.content.isNotBlank() }
+      .filter { it.role == SESSION_ROLE_COMPRESSION || it.hasRuntimeHistoryPayload() }
     val dividerIndex = messages.indexOfLast { it.role == SESSION_ROLE_COMPRESSION }
     if (dividerIndex < 0) {
       val retained = messages
@@ -85,11 +87,62 @@ object RuntimeSessionHistory {
     )
   }
 
+  private fun SessionMessage.hasRuntimeHistoryPayload(): Boolean {
+    return content.isNotBlank() || toolEvents.isNotEmpty() || hasInterruptedRun()
+  }
+
   private fun List<SessionMessage>.toRuntimeEntries(): List<RuntimeHistoryEntry> {
     return flatMapIndexed { index, message ->
       val distanceFromNewestMessage = lastIndex - index
-      listOf(message.toRuntimeEntry()) +
+      listOfNotNull(message.toRuntimeEntry().takeIf { it.content.isNotBlank() }) +
+        message.interruptedRunContextEntry() +
         ToolContextRetentionPolicy.slicesForMessage(message, distanceFromNewestMessage)
+    }
+  }
+
+  private fun SessionMessage.hasInterruptedRun(): Boolean {
+    return runEvents.any { it.type == "run_interrupted" } ||
+      transcriptEvents.any { it.type == "run_interrupted" }
+  }
+
+  private fun SessionMessage.interruptedRunContextEntry(): List<RuntimeHistoryEntry> {
+    if (!hasInterruptedRun()) return emptyList()
+    return listOf(
+      RuntimeHistoryEntry(
+        role = "interrupted_run_context",
+        content = buildInterruptedRunContext().normalized(INTERRUPTED_CONTEXT_LIMIT),
+      ),
+    )
+  }
+
+  private fun SessionMessage.buildInterruptedRunContext(): String {
+    val transcript = transcriptEvents
+      .filterNot { it.type == "thinking" }
+      .takeLast(INTERRUPTED_EVENT_LIMIT)
+    val source = if (transcript.isNotEmpty()) {
+      transcript.map { event ->
+        when {
+          event.content.isNotBlank() -> "${event.type}:${event.role.ifBlank { "status" }}:${event.content}"
+          event.detail.isNotBlank() -> "${event.type}:${event.title}:${event.detail}"
+          event.title.isNotBlank() -> "${event.type}:${event.title}"
+          else -> event.type
+        }
+      }
+    } else {
+      runEvents.takeLast(INTERRUPTED_EVENT_LIMIT).map { event ->
+        when {
+          event.detail.isNotBlank() -> "${event.type}:${event.title}:${event.detail}"
+          event.title.isNotBlank() -> "${event.type}:${event.title}"
+          else -> event.type
+        }
+      }
+    }
+    return buildString {
+      append("Interrupted assistant run visible in conversation UI. ")
+      append("toolCallCount=")
+      append(toolEvents.size)
+      append(". Timeline: ")
+      append(source.joinToString(" | "))
     }
   }
 
