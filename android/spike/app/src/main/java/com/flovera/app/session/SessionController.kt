@@ -48,6 +48,10 @@ class SessionController(private val store: AgentSessionStore) {
     return store.appendMessage(session, message)
   }
 
+  fun appendPromptContextBlocks(session: AgentSession, blocks: List<PromptContextBlock>): AgentSession {
+    return store.appendPromptContextBlocks(session, blocks)
+  }
+
   fun appendContextRecord(session: AgentSession, record: ContextUsageRecord): AgentSession {
     return store.appendContextRecord(session, record)
   }

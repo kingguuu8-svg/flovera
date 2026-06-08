@@ -36,6 +36,13 @@ interface SessionHandoffCompressor {
     workspace: WorkspaceManager,
     interruptedRun: InterruptedRunHandoff? = null,
   ): SessionHandoffCompression
+
+  suspend fun summarizeAssistantFinal(
+    settings: AppSettings,
+    userContent: String,
+    assistantContent: String,
+    runContext: String = "",
+  ): String
 }
 
 data class ContextOverflowDetection(

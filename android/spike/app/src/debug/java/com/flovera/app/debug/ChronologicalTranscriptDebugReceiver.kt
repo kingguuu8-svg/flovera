@@ -79,6 +79,7 @@ class ChronologicalTranscriptDebugReceiver : BroadcastReceiver() {
       appendUserPrompt = sessions::appendUserPrompt,
       appendContextRecord = sessions::appendContextRecord,
       appendCompressionDivider = sessions::appendCompressionDivider,
+      appendPromptContextBlocks = sessions::appendPromptContextBlocks,
       appendMessage = sessions::appendMessage,
       onStarted = { _, _ -> },
       onDraft = { },

@@ -74,6 +74,7 @@ class ContextOverflowRecoveryDebugReceiver : BroadcastReceiver() {
       appendUserPrompt = sessions::appendUserPrompt,
       appendContextRecord = sessions::appendContextRecord,
       appendCompressionDivider = sessions::appendCompressionDivider,
+      appendPromptContextBlocks = sessions::appendPromptContextBlocks,
       appendMessage = sessions::appendMessage,
       onStarted = { _, _ -> },
       onDraft = { },
@@ -145,6 +146,15 @@ class ContextOverflowRecoveryDebugReceiver : BroadcastReceiver() {
         summary = "Recovered handoff summary\n\n${interruptedRun?.assistantDraft.orEmpty()}",
         source = HANDOFF_SOURCE_LLM,
       )
+    }
+
+    override suspend fun summarizeAssistantFinal(
+      settings: AppSettings,
+      userContent: String,
+      assistantContent: String,
+      runContext: String,
+    ): String {
+      return "summary: ${assistantContent.take(240)}"
     }
   }
 

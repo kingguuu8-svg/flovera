@@ -62,6 +62,7 @@ class AgentRunControllerInstrumentedTest {
       appendUserPrompt = sessions::appendUserPrompt,
       appendContextRecord = sessions::appendContextRecord,
       appendCompressionDivider = sessions::appendCompressionDivider,
+      appendPromptContextBlocks = sessions::appendPromptContextBlocks,
       appendMessage = sessions::appendMessage,
       onStarted = { withUser, draft ->
         startedSession = withUser
@@ -160,6 +161,7 @@ class AgentRunControllerInstrumentedTest {
       appendUserPrompt = sessions::appendUserPrompt,
       appendContextRecord = sessions::appendContextRecord,
       appendCompressionDivider = sessions::appendCompressionDivider,
+      appendPromptContextBlocks = sessions::appendPromptContextBlocks,
       appendMessage = sessions::appendMessage,
       onStarted = { withUser, draft ->
         startedSession = withUser
@@ -212,6 +214,7 @@ class AgentRunControllerInstrumentedTest {
       appendUserPrompt = sessions::appendUserPrompt,
       appendContextRecord = sessions::appendContextRecord,
       appendCompressionDivider = sessions::appendCompressionDivider,
+      appendPromptContextBlocks = sessions::appendPromptContextBlocks,
       appendMessage = sessions::appendMessage,
       onStarted = { withContext, draft ->
         startedSession = withContext
@@ -271,6 +274,7 @@ class AgentRunControllerInstrumentedTest {
       appendUserPrompt = sessions::appendUserPrompt,
       appendContextRecord = sessions::appendContextRecord,
       appendCompressionDivider = sessions::appendCompressionDivider,
+      appendPromptContextBlocks = sessions::appendPromptContextBlocks,
       appendMessage = sessions::appendMessage,
       onStarted = { _, _ -> },
       onDraft = { },
@@ -352,6 +356,7 @@ class AgentRunControllerInstrumentedTest {
       appendUserPrompt = sessions::appendUserPrompt,
       appendContextRecord = sessions::appendContextRecord,
       appendCompressionDivider = sessions::appendCompressionDivider,
+      appendPromptContextBlocks = sessions::appendPromptContextBlocks,
       appendMessage = sessions::appendMessage,
       onStarted = { _, _ -> },
       onDraft = { drafts += it },
@@ -395,6 +400,7 @@ class AgentRunControllerInstrumentedTest {
       appendUserPrompt = sessions::appendUserPrompt,
       appendContextRecord = sessions::appendContextRecord,
       appendCompressionDivider = sessions::appendCompressionDivider,
+      appendPromptContextBlocks = sessions::appendPromptContextBlocks,
       appendMessage = sessions::appendMessage,
       onStarted = { _, _ -> },
       onDraft = { drafts += it },
@@ -439,6 +445,10 @@ class AgentRunControllerInstrumentedTest {
         callbackCalled = true
         current
       },
+      appendPromptContextBlocks = { current, _ ->
+        callbackCalled = true
+        current
+      },
       appendMessage = { current, _ ->
         callbackCalled = true
         current
@@ -473,6 +483,7 @@ class AgentRunControllerInstrumentedTest {
       appendUserPrompt = sessions::appendUserPrompt,
       appendContextRecord = sessions::appendContextRecord,
       appendCompressionDivider = sessions::appendCompressionDivider,
+      appendPromptContextBlocks = sessions::appendPromptContextBlocks,
       appendMessage = sessions::appendMessage,
       onStarted = { _, _ -> },
       onDraft = { },
@@ -537,6 +548,7 @@ class AgentRunControllerInstrumentedTest {
       appendUserPrompt = sessions::appendUserPrompt,
       appendContextRecord = sessions::appendContextRecord,
       appendCompressionDivider = sessions::appendCompressionDivider,
+      appendPromptContextBlocks = sessions::appendPromptContextBlocks,
       appendMessage = sessions::appendMessage,
       onStarted = { _, _ -> },
       onDraft = { },
@@ -574,6 +586,7 @@ class AgentRunControllerInstrumentedTest {
       appendUserPrompt = sessions::appendUserPrompt,
       appendContextRecord = sessions::appendContextRecord,
       appendCompressionDivider = sessions::appendCompressionDivider,
+      appendPromptContextBlocks = sessions::appendPromptContextBlocks,
       appendMessage = sessions::appendMessage,
       onStarted = { _, _ -> },
       onDraft = { },
@@ -626,6 +639,15 @@ class AgentRunControllerInstrumentedTest {
         summary = summary,
         source = HANDOFF_SOURCE_LLM,
       )
+    }
+
+    override suspend fun summarizeAssistantFinal(
+      settings: AppSettings,
+      userContent: String,
+      assistantContent: String,
+      runContext: String,
+    ): String {
+      return "summary: ${assistantContent.take(240)}"
     }
   }
 
@@ -803,6 +825,7 @@ class AgentRunControllerInstrumentedTest {
       appendUserPrompt = sessions::appendUserPrompt,
       appendContextRecord = sessions::appendContextRecord,
       appendCompressionDivider = sessions::appendCompressionDivider,
+      appendPromptContextBlocks = sessions::appendPromptContextBlocks,
       appendMessage = sessions::appendMessage,
       onStarted = { _, _ -> },
       onDraft = { drafts += it },
@@ -853,6 +876,7 @@ class AgentRunControllerInstrumentedTest {
       appendUserPrompt = sessions::appendUserPrompt,
       appendContextRecord = sessions::appendContextRecord,
       appendCompressionDivider = sessions::appendCompressionDivider,
+      appendPromptContextBlocks = sessions::appendPromptContextBlocks,
       appendMessage = sessions::appendMessage,
       onStarted = { _, _ -> },
       onDraft = { },
@@ -907,6 +931,7 @@ class AgentRunControllerInstrumentedTest {
       appendUserPrompt = sessions::appendUserPrompt,
       appendContextRecord = sessions::appendContextRecord,
       appendCompressionDivider = sessions::appendCompressionDivider,
+      appendPromptContextBlocks = sessions::appendPromptContextBlocks,
       appendMessage = sessions::appendMessage,
       onStarted = { _, _ -> },
       onDraft = { },
@@ -969,7 +994,7 @@ class AgentRunControllerInstrumentedTest {
     )
     val controller = AgentRunController(runtime = KoogAgentRuntime(), scope = this)
     var finishedSession: AgentSession? = null
-    val prompt = "尝试多次调用工具，并在调用工具之间输出文本"
+    val prompt = "测试多次调用工具，并在工具调用之间输出文本"
 
     val job = controller.submit(
       input = prompt,
@@ -979,6 +1004,7 @@ class AgentRunControllerInstrumentedTest {
       appendUserPrompt = sessions::appendUserPrompt,
       appendContextRecord = sessions::appendContextRecord,
       appendCompressionDivider = sessions::appendCompressionDivider,
+      appendPromptContextBlocks = sessions::appendPromptContextBlocks,
       appendMessage = sessions::appendMessage,
       onStarted = { _, _ -> },
       onDraft = { },
@@ -1027,6 +1053,7 @@ class AgentRunControllerInstrumentedTest {
       appendUserPrompt = sessions::appendUserPrompt,
       appendContextRecord = sessions::appendContextRecord,
       appendCompressionDivider = sessions::appendCompressionDivider,
+      appendPromptContextBlocks = sessions::appendPromptContextBlocks,
       appendMessage = sessions::appendMessage,
       onStarted = { _, _ -> },
       onDraft = { },
@@ -1065,6 +1092,7 @@ class AgentRunControllerInstrumentedTest {
       appendUserPrompt = sessions::appendUserPrompt,
       appendContextRecord = sessions::appendContextRecord,
       appendCompressionDivider = sessions::appendCompressionDivider,
+      appendPromptContextBlocks = sessions::appendPromptContextBlocks,
       appendMessage = sessions::appendMessage,
       onStarted = { _, _ -> },
       onDraft = { drafts += it },
@@ -1106,6 +1134,7 @@ class AgentRunControllerInstrumentedTest {
       appendUserPrompt = sessions::appendUserPrompt,
       appendContextRecord = sessions::appendContextRecord,
       appendCompressionDivider = sessions::appendCompressionDivider,
+      appendPromptContextBlocks = sessions::appendPromptContextBlocks,
       appendMessage = sessions::appendMessage,
       onStarted = { _, _ -> },
       onDraft = { },

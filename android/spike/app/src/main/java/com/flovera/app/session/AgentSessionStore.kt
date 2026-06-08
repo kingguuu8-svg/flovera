@@ -104,11 +104,14 @@ data class PromptContextBlock(
   val id: String,
   val sourceMessageIndex: Int,
   val sourceTimestampMillis: Long,
+  val runIndex: Int = -1,
   val role: String,
   val content: String,
   val createdAtMillis: Long = System.currentTimeMillis(),
   val retentionPriority: String = "",
   val origin: String = "message",
+  val kind: String = "",
+  val summaryOfBlockId: String = "",
 )
 
 class AgentSessionStore(
@@ -223,11 +226,23 @@ class AgentSessionStore(
     val latest = load(session.id) ?: session
     val backfilledBlocks = PromptContextLedger.withBackfilledBlocks(latest)
     val messageIndex = latest.messages.size
+    val runIndex = PromptContextLedger.runIndexForMessage(latest.messages, message)
     val updated = latest.copy(
       updatedAtMillis = System.currentTimeMillis(),
       messages = latest.messages + message,
       promptContextBlocks = backfilledBlocks +
-        PromptContextLedger.blocksForMessage(message, messageIndex),
+        PromptContextLedger.blocksForMessage(message, messageIndex, runIndex),
+    )
+    save(updated)
+    return updated
+  }
+
+  fun appendPromptContextBlocks(session: AgentSession, blocks: List<PromptContextBlock>): AgentSession {
+    if (blocks.isEmpty()) return load(session.id) ?: session
+    val latest = load(session.id) ?: session
+    val updated = latest.copy(
+      updatedAtMillis = System.currentTimeMillis(),
+      promptContextBlocks = latest.promptContextBlocks + blocks,
     )
     save(updated)
     return updated

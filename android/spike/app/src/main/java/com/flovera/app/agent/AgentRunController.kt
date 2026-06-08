@@ -13,6 +13,8 @@ import com.flovera.app.session.AgentSession
 import com.flovera.app.session.AgentRunTimelineEvent
 import com.flovera.app.session.ContextUsageRecord
 import com.flovera.app.session.ConversationTranscriptEvent
+import com.flovera.app.session.PromptContextBlock
+import com.flovera.app.session.PromptContextLedger
 import com.flovera.app.session.RuntimeSessionHistory
 import com.flovera.app.session.SessionMessage
 import com.flovera.app.session.ToolEvent
@@ -58,6 +60,7 @@ class AgentRunController(
     appendUserPrompt: (AgentSession, String) -> AgentSession,
     appendContextRecord: (AgentSession, ContextUsageRecord) -> AgentSession,
     appendCompressionDivider: (AgentSession, ContextUsageRecord, String) -> AgentSession,
+    appendPromptContextBlocks: (AgentSession, List<PromptContextBlock>) -> AgentSession,
     appendMessage: (AgentSession, SessionMessage) -> AgentSession,
     onStarted: (AgentSession, SessionMessage) -> Unit,
     onDraft: (SessionMessage) -> Unit,
@@ -130,22 +133,74 @@ class AgentRunController(
     onRunEvent(runStartedEvent)
     onStarted(startedSession, startDraft)
 
+    suspend fun maybeAppendAssistantSummariesForCompression(source: AgentSession): AgentSession {
+      var updated = source
+      var usage = estimateContextUsage(trimmed, visibleTrimmed, settings, updated, workspace)
+      if ((usage.contextUsagePermille ?: 0) < PromptContextLedger.ASSISTANT_SUMMARY_TRIGGER_USAGE_PERMILLE) {
+        return updated
+      }
+      for (candidate in PromptContextLedger.assistantSummaryCandidates(updated, trimmed, visibleTrimmed)) {
+        if ((usage.contextUsagePermille ?: 0) < PromptContextLedger.ASSISTANT_SUMMARY_TRIGGER_USAGE_PERMILLE) {
+          break
+        }
+        val runContext = PromptContextLedger.withBackfilledBlocks(updated)
+          .filter { it.runIndex == candidate.run.index && it.kind == PromptContextLedger.KIND_RUN_CONTEXT }
+          .joinToString("\n") { it.content }
+        val summary = handoffCompressor.summarizeAssistantFinal(
+          settings = settings,
+          userContent = candidate.userContent,
+          assistantContent = candidate.assistantContent,
+          runContext = runContext,
+        ).trim()
+        if (summary.isBlank()) continue
+        val sourceMessage = updated.messages.getOrNull(candidate.sourceMessageIndex) ?: continue
+        updated = appendPromptContextBlocks(
+          updated,
+          listOf(
+            PromptContextLedger.buildAssistantSummaryBlock(
+              sourceMessageIndex = candidate.sourceMessageIndex,
+              runIndex = candidate.run.index,
+              role = candidate.assistantRole,
+              summary = summary,
+              sourceTimestampMillis = sourceMessage.timestampMillis,
+            ),
+          ),
+        )
+        usage = estimateContextUsage(trimmed, visibleTrimmed, settings, updated, workspace)
+      }
+      return updated
+    }
+
+    suspend fun prepareCompressionRestartSession(
+      source: AgentSession,
+      baseRecord: ContextUsageRecord,
+      interruptedRun: InterruptedRunHandoff? = null,
+    ): Pair<AgentSession, ContextUsageRecord> {
+      val compression = handoffCompressor.compress(
+        settings = settings,
+        session = source,
+        record = baseRecord,
+        workspace = workspace,
+        interruptedRun = interruptedRun,
+      )
+      val compressedRecord = baseRecord.copy(
+        compressed = true,
+        summary = compression.summary,
+        summarySource = compression.source,
+        compressionError = compression.error,
+      )
+      val withContext = appendContextRecord(source, compressedRecord)
+      val withDivider = appendCompressionDivider(withContext, compressedRecord, compression.summary)
+      return maybeAppendAssistantSummariesForCompression(withDivider) to compressedRecord
+    }
+
     return scope.launch {
       var currentSession = if (contextCompressed) {
-        val compression = handoffCompressor.compress(
-          settings = settings,
-          session = withUser,
-          record = contextRecord,
-          workspace = workspace,
+        val (compressedSession, compressedRecord) = prepareCompressionRestartSession(
+          source = withUser,
+          baseRecord = contextRecord,
         )
-        val compressedRecord = contextRecord.copy(
-          compressed = true,
-          summary = compression.summary,
-          summarySource = compression.source,
-          compressionError = compression.error,
-        )
-        val withContext = appendContextRecord(withUser, compressedRecord)
-        appendCompressionDivider(withContext, compressedRecord, compression.summary).also { compressedSession ->
+        compressedSession.also {
           activeRunEvents = buildCompressedRunTimeline(activeRunEvents, compressedRecord)
           runState.replaceBaseTimeline(activeRunEvents, statusContent = "Working...")
           onSessionUpdated(
@@ -255,21 +310,12 @@ class AgentRunController(
             contextBudgetStatus = AgentContextBudget.STATUS_COMPRESSION_RECOMMENDED,
             contextBudgetReason = "Provider reported a likely context or token overflow during this run.",
           )
-          val compression = handoffCompressor.compress(
-            settings = settings,
-            session = currentSession,
-            record = recoveryRecord,
-            workspace = workspace,
+          val (preparedSession, compressedRecord) = prepareCompressionRestartSession(
+            source = currentSession,
+            baseRecord = recoveryRecord,
             interruptedRun = interruptedRun,
           )
-          val compressedRecord = recoveryRecord.copy(
-            compressed = true,
-            summary = compression.summary,
-            summarySource = compression.source,
-            compressionError = compression.error,
-          )
-          val withContext = appendContextRecord(currentSession, compressedRecord)
-          currentSession = appendCompressionDivider(withContext, compressedRecord, compression.summary)
+          currentSession = preparedSession
           val compressionCompletedEvent = lifecycleRunEvent(
             type = AgentRunEventType.COMPRESSION_COMPLETED,
             title = "Context overflow compressed",

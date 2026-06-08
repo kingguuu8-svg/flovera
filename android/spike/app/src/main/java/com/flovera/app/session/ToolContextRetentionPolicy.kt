@@ -14,17 +14,6 @@ object ToolContextRetentionPolicy {
   const val RETENTION_SUMMARY_ONLY = "summary_only"
   const val RETENTION_UI_ONLY = "ui_only"
 
-  private const val ACTIVE_CRITICAL_LIMIT = 2_200
-  private const val RECENT_FULL_LIMIT = 1_400
-  private const val STRUCTURED_MEMORY_LIMIT = 700
-  private const val SUMMARY_LIMIT = 360
-  private const val ARG_LIMIT = 420
-  private const val RECENT_FULL_MESSAGE_DISTANCE = 0
-  private const val LEDGER_ACTIVE_CRITICAL_LIMIT = 50_000
-  private const val LEDGER_RECENT_FULL_LIMIT = 50_000
-  private const val LEDGER_STRUCTURED_MEMORY_LIMIT = 12_000
-  private const val LEDGER_SUMMARY_LIMIT = 4_000
-
   fun classify(name: String, args: String, result: String): ToolRetentionDecision {
     val normalizedName = name.lowercase()
     val success = !looksLikeFailure(result)
@@ -55,100 +44,6 @@ object ToolContextRetentionPolicy {
       retentionPriority = priority,
       retentionReason = reasonFor(priority, kind, args),
     )
-  }
-
-  fun slicesForMessage(message: SessionMessage, distanceFromNewestMessage: Int): List<RuntimeHistoryEntry> {
-    if (message.toolEvents.isEmpty()) return emptyList()
-    return message.toolEvents.mapNotNull { event ->
-      val priority = event.retentionPriority.ifBlank { RETENTION_SUMMARY_ONLY }
-      val normalized = normalizePriority(priority, distanceFromNewestMessage)
-      if (normalized == RETENTION_UI_ONLY) return@mapNotNull null
-      RuntimeHistoryEntry(
-        role = "tool_context",
-        content = formatToolContext(event, normalized),
-      )
-    }
-  }
-
-  fun ledgerSlicesForMessage(message: SessionMessage): List<RuntimeHistoryEntry> {
-    if (message.toolEvents.isEmpty()) return emptyList()
-    return message.toolEvents.mapNotNull { event ->
-      val priority = normalizeLedgerPriority(event.retentionPriority.ifBlank { RETENTION_SUMMARY_ONLY })
-      if (priority == RETENTION_UI_ONLY) return@mapNotNull null
-      RuntimeHistoryEntry(
-        role = "tool_context",
-        content = formatToolContext(event, priority, ledgerLimitFor(priority)),
-      )
-    }
-  }
-
-  private fun normalizePriority(priority: String, distanceFromNewestMessage: Int): String {
-    return when (priority) {
-      RETENTION_ACTIVE_CRITICAL -> RETENTION_ACTIVE_CRITICAL
-      RETENTION_RECENT_FULL -> {
-        if (distanceFromNewestMessage <= RECENT_FULL_MESSAGE_DISTANCE) {
-          RETENTION_RECENT_FULL
-        } else {
-          RETENTION_SUMMARY_ONLY
-        }
-      }
-      RETENTION_STRUCTURED_MEMORY -> RETENTION_STRUCTURED_MEMORY
-      RETENTION_UI_ONLY -> RETENTION_UI_ONLY
-      else -> RETENTION_SUMMARY_ONLY
-    }
-  }
-
-  private fun normalizeLedgerPriority(priority: String): String {
-    return when (priority) {
-      RETENTION_ACTIVE_CRITICAL,
-      RETENTION_RECENT_FULL,
-      RETENTION_STRUCTURED_MEMORY,
-      RETENTION_UI_ONLY -> priority
-      else -> RETENTION_SUMMARY_ONLY
-    }
-  }
-
-  private fun ledgerLimitFor(priority: String): Int {
-    return when (priority) {
-      RETENTION_ACTIVE_CRITICAL -> LEDGER_ACTIVE_CRITICAL_LIMIT
-      RETENTION_RECENT_FULL -> LEDGER_RECENT_FULL_LIMIT
-      RETENTION_STRUCTURED_MEMORY -> LEDGER_STRUCTURED_MEMORY_LIMIT
-      else -> LEDGER_SUMMARY_LIMIT
-    }
-  }
-
-  private fun formatToolContext(event: ToolEvent, priority: String): String {
-    val limit = when (priority) {
-      RETENTION_ACTIVE_CRITICAL -> ACTIVE_CRITICAL_LIMIT
-      RETENTION_RECENT_FULL -> RECENT_FULL_LIMIT
-      RETENTION_STRUCTURED_MEMORY -> STRUCTURED_MEMORY_LIMIT
-      else -> SUMMARY_LIMIT
-    }
-    return formatToolContext(event, priority, limit)
-  }
-
-  private fun formatToolContext(event: ToolEvent, priority: String, resultLimit: Int): String {
-    return buildString {
-      append("tool=")
-      append(event.name)
-      append(", priority=")
-      append(priority)
-      append(", success=")
-      append(event.success)
-      append(", kind=")
-      append(event.resultKind)
-      if (event.outputTruncated) {
-        append(", storedOutput=truncated/${event.outputChars} chars")
-      }
-      if (event.retentionReason.isNotBlank()) {
-        append(", reason=")
-        append(event.retentionReason)
-      }
-      append(", args=")
-      append(event.args.compact(ARG_LIMIT))
-      append(", result=")
-      append(event.result.compact(resultLimit))
-    }
   }
 
   private fun kindFor(name: String, args: String = ""): String {
@@ -198,12 +93,4 @@ object ToolContextRetentionPolicy {
       lower.contains("not found")
   }
 
-  private fun String.compact(limit: Int): String {
-    val normalized = lineSequence()
-      .joinToString(" ") { it.trim() }
-      .replace(Regex("\\s+"), " ")
-      .trim()
-    if (normalized.length <= limit) return normalized
-    return normalized.take(limit).trimEnd() + "..."
-  }
 }

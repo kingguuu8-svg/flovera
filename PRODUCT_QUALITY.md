@@ -386,29 +386,35 @@ This is observability for the run loop, not hidden reasoning.
 
 ### Runtime Context Retention
 
-Status: Baseline implemented for append-only prompt context history. Tool events
+Status: Implemented for layered append-only prompt context history. Tool events
 now carry bounded retention metadata (`success`, `resultKind`, `outputChars`,
 `outputTruncated`, `retentionPriority`, and `retentionReason`) at record time.
-When session messages are appended, Flovera also appends stable
-`promptContextBlocks` for user/assistant text, chronological transcript context,
-relevant run status, compression handoff summaries, and retained tool context.
+When session messages are appended, Flovera appends stable `promptContextBlocks`
+with a run index and kind: full user messages, full assistant/error final
+responses, run context, raw detail context, one-time detail summaries, and
+optional assistant-final summaries for older compressed history.
 `RuntimeSessionHistory` reads those blocks first, so later requests see the same
-history the conversation UI exposed instead of re-deriving and rewriting tool
-history on every run. Failed tools remain active-critical, recent command/read/
-search/network outputs stay full in the ledger block that was written at the
-time, successful artifact/file-write validation becomes structured memory,
-generic successes become bounded summaries, and status-only outputs are UI-only.
-Current Koog run-loop tool results are still delivered directly inside the
-active run; the ledger is for cross-run prompt reconstruction and future
-compression/skills retention.
+user/assistant conversation the UI exposed while only tool/detail history is
+eligible for omission or summarization. Failed tools and skill reads are
+promoted to run context. Ordinary successful tool/transcript details stay raw
+for nearby runs, switch to their first deterministic summary after the distance
+threshold, and are dropped from old pre-compression runs except for the recent
+compression window. Compression dividers remain visible history markers but no
+longer replace prompt history with a handoff message. Current Koog run-loop
+tool results are still delivered directly inside the active run; the ledger is
+for cross-run prompt reconstruction, overflow retry, and skills retention.
 
 - Keep full session logs and conversation transcript available for UI/debug
   without forcing every tool result back into the next provider request.
 - Preserve failed tool output with higher priority so retries and recovery do
   not lose the actionable error tail.
-- Decide each tool result's retained prompt form when the message is appended,
-  then keep that prompt block stable across later runs instead of downgrading or
-  rewriting old history based on distance from the current request.
+- Decide each tool result's raw prompt form and deterministic summary when the
+  message is appended. Later prompt selection may choose raw, summary, or omit
+  the block, but it must not rewrite the original block.
+- Preserve full user messages and assistant final responses by default. Only an
+  overflow compression restart may add a separate assistant-final summary block,
+  and only for the farthest old runs after run/detail context has already been
+  omitted.
 - Treat skill reads as future tool events that can reuse the same retention
   policy: active task gets high-priority context, compacted history keeps
   activation metadata and a path back to the skill body.

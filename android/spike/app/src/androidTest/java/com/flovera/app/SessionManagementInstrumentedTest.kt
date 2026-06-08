@@ -7,6 +7,7 @@ import com.flovera.app.session.AgentRunTimelineEvent
 import com.flovera.app.session.AgentSessionStore
 import com.flovera.app.session.ConversationTranscriptEvent
 import com.flovera.app.session.ContextUsageRecord
+import com.flovera.app.session.PromptContextLedger
 import com.flovera.app.session.RuntimeSessionHistory
 import com.flovera.app.session.SESSION_ROLE_COMPRESSION
 import com.flovera.app.session.SessionController
@@ -404,11 +405,21 @@ class SessionManagementInstrumentedTest {
     val current = store.appendMessage(assistant, SessionMessage(role = "user", content = "what did you read"))
 
     assertEquals(beforeBlocks, current.promptContextBlocks.take(beforeBlocks.size).map { it.id to it.content })
-    assertEquals(listOf("user", "assistant", "tool_context", "user"), current.promptContextBlocks.map { it.role })
+    assertEquals(
+      listOf(
+        PromptContextLedger.KIND_USER_MESSAGE,
+        PromptContextLedger.KIND_PRIMARY_RESPONSE,
+        PromptContextLedger.KIND_DETAIL_CONTEXT_RAW,
+        PromptContextLedger.KIND_DETAIL_CONTEXT_SUMMARY,
+        PromptContextLedger.KIND_USER_MESSAGE,
+      ),
+      current.promptContextBlocks.map { it.kind },
+    )
     val history = RuntimeSessionHistory.promptText(current, currentInput = "what did you read")
     assertTrue(history.contains("user: inspect README"))
     assertTrue(history.contains("assistant: I read the file."))
-    assertTrue(history.contains("tool_context: tool=read_file"))
+    assertTrue(history.contains("detail_context: tools:"))
+    assertTrue(history.contains("tool=read_file"))
     assertTrue(history.contains("README full output for the next request"))
     assertFalse(history.contains("user: what did you read"))
   }
@@ -438,26 +449,28 @@ class SessionManagementInstrumentedTest {
   }
 
   @Test
-  fun runtimeHistoryUsesLatestCompressionDividerAsHandoffBoundary() {
+  fun runtimeHistoryPreservesUserAndAssistantAcrossCompressionDivider() {
     val store = isolatedSessionStore("runtime-history-compressed").store
     val session = store.create("Runtime history ${System.currentTimeMillis()}")
-    val one = store.appendMessage(session, SessionMessage(role = "user", content = "old user request"))
-    val two = store.appendMessage(one, SessionMessage(role = "assistant", content = "old assistant result"))
+    val oldUser = store.appendMessage(session, SessionMessage(role = "user", content = "old user request"))
+    val oldAssistant = store.appendMessage(oldUser, SessionMessage(role = "assistant", content = "old assistant result"))
+    val activeUser = store.appendMessage(oldAssistant, SessionMessage(role = "user", content = "active user request"))
+    val activeAssistant = store.appendMessage(activeUser, SessionMessage(role = "assistant", content = "active assistant result"))
     val compressed = store.appendCompressionDivider(
-      two,
+      activeAssistant,
       contextRecord("compression-record"),
       "Keep only the project target and pending task.",
     )
-    val after = store.appendMessage(compressed, SessionMessage(role = "assistant", content = "new assistant result"))
-    val current = store.appendMessage(after, SessionMessage(role = "user", content = "continue the task"))
+    val current = store.appendMessage(compressed, SessionMessage(role = "user", content = "continue the task"))
 
     val history = RuntimeSessionHistory.promptText(current, currentInput = "continue the task")
 
-    assertTrue(history.contains("handoff_summary:"))
-    assertTrue(history.contains("Keep only the project target and pending task."))
-    assertTrue(history.contains("assistant: new assistant result"))
-    assertFalse(history.contains("old user request"))
-    assertFalse(history.contains("old assistant result"))
+    assertTrue(history.contains("user: old user request"))
+    assertTrue(history.contains("assistant: old assistant result"))
+    assertTrue(history.contains("user: active user request"))
+    assertTrue(history.contains("assistant: active assistant result"))
+    assertFalse(history.contains("handoff_summary:"))
+    assertFalse(history.contains("Keep only the project target and pending task."))
     assertFalse(history.contains("user: continue the task"))
   }
 
@@ -541,11 +554,11 @@ class SessionManagementInstrumentedTest {
     val history = RuntimeSessionHistory.promptText(current, currentInput = "what did you read")
 
     assertTrue(history.contains("user: connect with ssh"))
-    assertTrue(history.contains("interrupted_run_context:"))
-    assertTrue(history.contains("Interrupted assistant run visible in conversation UI"))
+    assertTrue(history.contains("run_context: events: run_interrupted:Run interrupted"))
     assertTrue(history.contains("JSch loaded; authentication failed for root"))
     assertTrue(history.contains("run_interrupted:Run interrupted"))
-    assertTrue(history.contains("tool_context: tool=read_file"))
+    assertTrue(history.contains("detail_context: transcript:"))
+    assertTrue(history.contains("tool=read_file"))
     assertTrue(history.contains("path=ssh_connect.groovy"))
     assertTrue(history.contains("loaded ssh script"))
     assertFalse(history.contains("user: what did you read"))
@@ -594,7 +607,7 @@ class SessionManagementInstrumentedTest {
     val current = store.appendMessage(assistant, SessionMessage(role = "user", content = "what happened"))
 
     val transcriptContext = RuntimeSessionHistory.entries(current, currentInput = "what happened")
-      .single { it.role == "transcript_context" }
+      .single { it.role == "detail_context" }
 
     assertTrue(transcriptContext.content.contains("tool_call:Tool: read_file:Read one.txt"))
     assertTrue(transcriptContext.content.contains("assistant_text:assistant:First explanation after read."))
@@ -630,6 +643,15 @@ class SessionManagementInstrumentedTest {
             retentionPriority = ToolContextRetentionPolicy.RETENTION_ACTIVE_CRITICAL,
             retentionReason = "failed tool output must remain available for retry and diagnosis",
           ),
+          ToolEvent(
+            name = "read_skill",
+            args = "skill=android-operation",
+            result = "Skill says: keep semantic tree and OCR evidence.",
+            success = true,
+            resultKind = "skill_read",
+            retentionPriority = ToolContextRetentionPolicy.RETENTION_STRUCTURED_MEMORY,
+            retentionReason = "skill reads should remain available across the next prompt turn",
+          ),
         ),
       ),
     )
@@ -654,17 +676,19 @@ class SessionManagementInstrumentedTest {
 
     val history = RuntimeSessionHistory.promptText(current, currentInput = "continue")
 
-    assertTrue(history.contains("tool_context: tool=workspace_command_run"))
-    assertTrue(history.contains("priority=active_critical"))
+    assertTrue(history.contains("run_context: promoted_tools:"))
+    assertTrue(history.contains("tool=workspace_command_run"))
     assertTrue(history.contains("Traceback: missing dependency"))
-    assertTrue(history.contains("tool_context: tool=write_file"))
-    assertTrue(history.contains("priority=structured_memory"))
+    assertTrue(history.contains("tool=read_skill"))
+    assertTrue(history.contains("keep semantic tree and OCR evidence"))
+    assertTrue(history.contains("detail_context: tools:"))
+    assertTrue(history.contains("tool=write_file"))
     assertTrue(history.contains("wrote index.html"))
     assertFalse(history.contains("user: continue"))
   }
 
   @Test
-  fun runtimeHistoryKeepsLedgerToolContextStableAfterLaterMessages() {
+  fun runtimeHistorySummarizesOldDetailContextWithoutTruncatingMessages() {
     val store = isolatedSessionStore("runtime-history-tool-ledger").store
     val session = store.create("Runtime history tool ledger ${System.currentTimeMillis()}")
     val one = store.appendMessage(session, SessionMessage(role = "user", content = "inspect"))
@@ -677,7 +701,7 @@ class SessionManagementInstrumentedTest {
           ToolEvent(
             name = "read_file",
             args = "path=large.txt",
-            result = "x".repeat(1_000),
+            result = "Important fact from ancient file. ${"x".repeat(1_000)}",
             resultKind = "file_read",
             retentionPriority = ToolContextRetentionPolicy.RETENTION_RECENT_FULL,
             retentionReason = "recent file_read output may be needed by the next model request",
@@ -685,14 +709,134 @@ class SessionManagementInstrumentedTest {
         ),
       ),
     )
-    val two = store.appendMessage(oldTool, SessionMessage(role = "assistant", content = "Later answer."))
-    val current = store.appendMessage(two, SessionMessage(role = "user", content = "continue"))
+    val two = store.appendMessage(oldTool, SessionMessage(role = "user", content = "follow up one"))
+    val three = store.appendMessage(two, SessionMessage(role = "assistant", content = "Later answer one."))
+    val four = store.appendMessage(three, SessionMessage(role = "user", content = "follow up two"))
+    val five = store.appendMessage(four, SessionMessage(role = "assistant", content = "Later answer two."))
+    val six = store.appendMessage(five, SessionMessage(role = "user", content = "follow up three"))
+    val seven = store.appendMessage(six, SessionMessage(role = "assistant", content = "Later answer three."))
+    val current = store.appendMessage(seven, SessionMessage(role = "user", content = "continue"))
 
-    val toolContext = RuntimeSessionHistory.entries(current, currentInput = "continue")
-      .single { it.role == "tool_context" }
+    val entries = RuntimeSessionHistory.entries(current, currentInput = "continue", maxMessages = 1)
+    val history = entries.joinToString("\n") { "${it.role}: ${it.content}" }
 
-    assertTrue(toolContext.content.contains("priority=recent_full"))
-    assertTrue(toolContext.content.contains("x".repeat(1_000)))
+    val detailSummary = entries.single { it.role == "detail_context_summary" }
+    assertTrue(history.contains("user: inspect"))
+    assertTrue(history.contains("assistant: Read a long file."))
+    assertTrue(detailSummary.content.contains("artifacts: large.txt"))
+    assertTrue(detailSummary.content.contains("facts: Important fact from ancient file."))
+    assertTrue(detailSummary.content.contains("resume_handles: read_file: path=large.txt"))
+    assertFalse(history.contains("x".repeat(500)))
+    assertFalse(history.contains("user: continue"))
+  }
+
+  @Test
+  fun runtimeHistoryDoesNotTruncateUserOrAssistantFinalMessages() {
+    val store = isolatedSessionStore("runtime-history-no-message-truncate").store
+    val session = store.create("Runtime history no truncate ${System.currentTimeMillis()}")
+    val longUser = "user-start " + "u".repeat(4_000) + " user-end"
+    val longAssistant = "assistant-start " + "a".repeat(4_000) + " assistant-end"
+    val one = store.appendMessage(session, SessionMessage(role = "user", content = longUser))
+    val two = store.appendMessage(one, SessionMessage(role = "assistant", content = longAssistant))
+    val three = store.appendMessage(two, SessionMessage(role = "user", content = "next"))
+    val four = store.appendMessage(three, SessionMessage(role = "assistant", content = "short answer"))
+    val current = store.appendMessage(four, SessionMessage(role = "user", content = "continue"))
+
+    val history = RuntimeSessionHistory.promptText(current, currentInput = "continue", maxMessages = 1)
+
+    assertTrue(history.contains(longUser))
+    assertTrue(history.contains(longAssistant))
+    assertTrue(history.contains("assistant: short answer"))
+    assertFalse(history.contains("user: continue"))
+  }
+
+  @Test
+  fun runtimeHistoryDropsOldRunContextAndUsesAssistantSummaryAfterCompressionRestart() {
+    val store = isolatedSessionStore("runtime-history-compression-restart").store
+    val session = store.create("Runtime compression restart ${System.currentTimeMillis()}")
+    val ancientUser = store.appendMessage(session, SessionMessage(role = "user", content = "ancient request"))
+    val ancientAssistant = store.appendMessage(
+      ancientUser,
+      SessionMessage(
+        role = "assistant",
+        content = "ancient assistant answer",
+        toolEvents = listOf(
+          ToolEvent(
+            name = "read_file",
+            args = "path=ancient.txt",
+            result = "ancient raw tool output",
+            resultKind = "file_read",
+            retentionPriority = ToolContextRetentionPolicy.RETENTION_RECENT_FULL,
+            retentionReason = "old detail should be droppable after compression restart",
+          ),
+        ),
+        runEvents = listOf(
+          AgentRunTimelineEvent(
+            type = "context_checkpoint",
+            title = "Ancient checkpoint",
+            detail = "ancient checkpoint detail",
+            status = "completed",
+          ),
+        ),
+      ),
+    )
+    val recentUser = store.appendMessage(ancientAssistant, SessionMessage(role = "user", content = "recent request"))
+    val recentAssistant = store.appendMessage(
+      recentUser,
+      SessionMessage(
+        role = "assistant",
+        content = "recent answer",
+        toolEvents = listOf(
+          ToolEvent(
+            name = "read_file",
+            args = "path=recent.txt",
+            result = "recent raw tool output",
+            resultKind = "file_read",
+            retentionPriority = ToolContextRetentionPolicy.RETENTION_RECENT_FULL,
+            retentionReason = "near compression restart should keep full detail",
+          ),
+        ),
+      ),
+    )
+    val fillerOne = store.appendMessage(recentAssistant, SessionMessage(role = "user", content = "filler one"))
+    val fillerAnswerOne = store.appendMessage(fillerOne, SessionMessage(role = "assistant", content = "filler answer one"))
+    val fillerTwo = store.appendMessage(fillerAnswerOne, SessionMessage(role = "user", content = "filler two"))
+    val fillerAnswerTwo = store.appendMessage(fillerTwo, SessionMessage(role = "assistant", content = "filler answer two"))
+    val activeUser = store.appendMessage(fillerAnswerTwo, SessionMessage(role = "user", content = "overflow request"))
+    val activeAssistant = store.appendMessage(activeUser, SessionMessage(role = "assistant", content = "overflow failed"))
+    val compressed = store.appendCompressionDivider(
+      activeAssistant,
+      contextRecord("compression-record"),
+      "compression handoff should stay out of runtime history",
+    )
+    val current = store.appendMessage(compressed, SessionMessage(role = "user", content = "retry"))
+    val withSummary = store.appendPromptContextBlocks(
+      current,
+      listOf(
+        PromptContextLedger.buildAssistantSummaryBlock(
+          sourceMessageIndex = 1,
+          runIndex = 0,
+          role = "assistant",
+          summary = "summary of the oldest assistant final",
+          sourceTimestampMillis = current.messages[1].timestampMillis,
+        ),
+      ),
+    )
+
+    val history = RuntimeSessionHistory.promptText(withSummary, currentInput = "retry")
+
+    assertTrue(history.contains("user: ancient request"))
+    assertTrue(history.contains("assistant: summary of the oldest assistant final"))
+    assertFalse(history.contains("assistant: ancient assistant answer"))
+    assertFalse(history.contains("ancient raw tool output"))
+    assertFalse(history.contains("ancient checkpoint detail"))
+    assertTrue(history.contains("user: recent request"))
+    assertTrue(history.contains("assistant: recent answer"))
+    assertTrue(history.contains("recent raw tool output"))
+    assertTrue(history.contains("user: overflow request"))
+    assertTrue(history.contains("assistant: overflow failed"))
+    assertFalse(history.contains("compression handoff should stay out of runtime history"))
+    assertFalse(history.contains("user: retry"))
   }
 
   private fun isolatedSessionStore(name: String): SessionStoreHarness {

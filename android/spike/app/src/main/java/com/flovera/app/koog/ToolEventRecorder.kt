@@ -10,8 +10,8 @@ class ToolEventRecorder(
 
   @Synchronized
   fun record(name: String, args: String, result: String) {
-    val storedResult = result.take(4_000)
     val decision = ToolContextRetentionPolicy.classify(name, args, result)
+    val storedResult = result.take(storageLimit(decision.retentionPriority))
     events += ToolEvent(
       name = name,
       args = args,
@@ -28,4 +28,13 @@ class ToolEventRecorder(
 
   @Synchronized
   fun snapshot(): List<ToolEvent> = events.toList()
+
+  private fun storageLimit(priority: String): Int {
+    return when (priority) {
+      ToolContextRetentionPolicy.RETENTION_ACTIVE_CRITICAL -> 16_000
+      ToolContextRetentionPolicy.RETENTION_RECENT_FULL,
+      ToolContextRetentionPolicy.RETENTION_STRUCTURED_MEMORY -> 8_000
+      else -> 4_000
+    }
+  }
 }

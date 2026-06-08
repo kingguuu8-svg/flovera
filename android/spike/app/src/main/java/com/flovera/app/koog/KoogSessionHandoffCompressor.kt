@@ -56,6 +56,35 @@ class KoogSessionHandoffCompressor : SessionHandoffCompressor {
     }
   }
 
+  override suspend fun summarizeAssistantFinal(
+    settings: AppSettings,
+    userContent: String,
+    assistantContent: String,
+    runContext: String,
+  ): String {
+    val localSummary = localAssistantSummary(userContent, assistantContent, runContext)
+    return runCatching {
+      val provider = ModelProviderCatalog.requireProvider(settings.provider)
+      val apiKey = settings.apiKeyFor(provider.id)
+      require(apiKey.isNotBlank()) { "${provider.label} API key is not configured." }
+      val context = ModelProviderCatalog.contextFor(settings)
+      val agent = AIAgent(
+        promptExecutor = MultiLLMPromptExecutor(ModelProviderCatalog.createClient(provider, apiKey, settings)),
+        llmModel = provider.createModel(settings.model, context),
+        toolRegistry = ToolRegistry {},
+        systemPrompt = assistantSummarySystemPrompt(),
+        maxIterations = 1,
+      )
+      val output = agent.use {
+        it.run(
+          agentInput = buildAssistantSummaryInput(userContent, assistantContent, runContext),
+          sessionId = "assistant-summary-${stableHash(userContent + assistantContent)}",
+        )
+      }
+      normalizeSummary(output).ifBlank { localSummary }
+    }.getOrElse { localSummary }
+  }
+
   private fun handoffSystemPrompt(): String {
     return """
       You are Flovera's session handoff compressor.
@@ -120,6 +149,17 @@ class KoogSessionHandoffCompressor : SessionHandoffCompressor {
     """.trimIndent()
   }
 
+  private fun assistantSummarySystemPrompt(): String {
+    return """
+      You are Flovera's assistant final-response compressor.
+      Summarize one older assistant final response for long-term session carry-forward.
+      Preserve decisions made, files or artifacts changed, important verification, unresolved constraints, and the next useful continuation fact.
+      Do not restate generic filler, process narration, or repeated explanation.
+      Do not invent facts.
+      Output plain text under 1200 characters.
+    """.trimIndent()
+  }
+
   private fun InterruptedRunHandoff.toHandoffText(): String {
     val tools = toolEvents
       .takeLast(12)
@@ -159,8 +199,46 @@ class KoogSessionHandoffCompressor : SessionHandoffCompressor {
     """.trimIndent()
   }
 
+  private fun buildAssistantSummaryInput(
+    userContent: String,
+    assistantContent: String,
+    runContext: String,
+  ): String {
+    return """
+      User request:
+      ${userContent.take(MESSAGE_LIMIT)}
+
+      Assistant final response:
+      ${assistantContent.take(MESSAGE_LIMIT)}
+
+      Run context:
+      ${runContext.take(MESSAGE_LIMIT).ifBlank { "(none)" }}
+    """.trimIndent()
+  }
+
   private fun normalizeSummary(value: String): String {
     return value.trim().take(MAX_SUMMARY_CHARS)
+  }
+
+  private fun localAssistantSummary(
+    userContent: String,
+    assistantContent: String,
+    runContext: String,
+  ): String {
+    return buildString {
+      append("Summary for older assistant response. ")
+      if (userContent.isNotBlank()) {
+        append("user=")
+        append(oneLine(userContent, 220))
+        append(". ")
+      }
+      append("assistant=")
+      append(oneLine(assistantContent, 900))
+      if (runContext.isNotBlank()) {
+        append(" runContext=")
+        append(oneLine(runContext, 220))
+      }
+    }.trim()
   }
 
   private fun oneLine(value: String, maxChars: Int): String {
@@ -178,5 +256,9 @@ class KoogSessionHandoffCompressor : SessionHandoffCompressor {
     const val HISTORY_LIMIT = 96_000
     const val WORKSPACE_LIMIT = 8_000
     const val MAX_SUMMARY_CHARS = 16_000
+  }
+
+  private fun stableHash(value: String): String {
+    return value.hashCode().toUInt().toString(16)
   }
 }

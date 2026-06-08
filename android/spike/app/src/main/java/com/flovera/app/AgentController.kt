@@ -815,6 +815,7 @@ class AgentController(
       appendUserPrompt = sessionController::appendUserPrompt,
       appendContextRecord = sessionController::appendContextRecord,
       appendCompressionDivider = sessionController::appendCompressionDivider,
+      appendPromptContextBlocks = sessionController::appendPromptContextBlocks,
       appendMessage = sessionController::appendMessage,
       additionalTranscriptEvents = { runTranscriptEvents.toList() },
       guidanceProvider = { consumeGuidanceForActiveRun() },
