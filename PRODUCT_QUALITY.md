@@ -959,6 +959,14 @@ permissions without user action or expose Android shell.
   built-in backend. The current Office layer is still not a full Office renderer
   and does not claim tracked changes, chart editing, formula recalculation, or
   exact layout fidelity without targeted verification.
+- Done: consolidate the visible Office instructions into one
+  `flovera-office-suite` skill while keeping format-specific creation engines:
+  openpyxl for XLSX, python-docx for DOCX, the verified Android PIL compatibility
+  path for python-pptx, and fpdf2 with an Android CJK font for PDF. Existing
+  `flovera office` commands remain the structural inspection, validation,
+  extraction, and simple-replacement layer. Legacy per-format skill
+  registrations migrate to the one suite entry without deleting their
+  workspace assets.
 - Next hardening target: promote the worker to a foreground service during very
   long JVM builds if Android background process pressure still kills the worker
   before checkpointed work can resume.

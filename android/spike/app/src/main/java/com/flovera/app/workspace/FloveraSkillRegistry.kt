@@ -100,10 +100,10 @@ object FloveraSkillRegistry {
       descriptionZh = "用于把可重复流程保存为 .flovera/scripts 下的通用 Flovera 工作区自动化脚本，可编排 Python、Groovy、Git、Android 或混合命令步骤。",
     ),
     defaultRegistration(
-      id = "flovera-office-ooxml",
-      titleEn = "Flovera Office OOXML",
+      id = "flovera-office-suite",
+      titleEn = "Flovera Office Suite",
       titleZh = "Flovera Office OOXML 文档",
-      descriptionEn = "Use when working with Microsoft Office OOXML documents in Flovera, including docx, xlsx, and pptx inspection, validation, text extraction, safe text replacement, or planning deeper Apache POI editing.",
+      descriptionEn = "Use when creating, reading, editing, or validating DOCX, XLSX, PPTX, or PDF files in Flovera with the format-specific Android-compatible document engines.",
       descriptionZh = "用于在 Flovera 中处理 Microsoft Office OOXML 文档，包括 docx、xlsx、pptx 的检查、校验、文本抽取、安全文本替换，或规划更深入的 Apache POI 编辑。",
     ),
     defaultRegistration(
@@ -117,9 +117,22 @@ object FloveraSkillRegistry {
 
   fun mergedDefaultManifest(existing: FloveraSkillManifest? = null): FloveraSkillManifest {
     if (existing == null) return FloveraSkillManifest(skills = defaultRegistrations)
-    val existingById = existing.skills.associateBy { it.id }
+    val legacyOfficeRegistrations = existing.skills.filter { it.id in LEGACY_OFFICE_SKILL_IDS }
+    val retainedRegistrations = existing.skills.filterNot { it.id in LEGACY_OFFICE_SKILL_IDS }
+    val officeSuiteDefault = defaultRegistrations.first { it.id == OFFICE_SUITE_SKILL_ID }
+    val migratedRegistrations = if (
+      retainedRegistrations.none { it.id == OFFICE_SUITE_SKILL_ID } &&
+      legacyOfficeRegistrations.isNotEmpty()
+    ) {
+      retainedRegistrations + officeSuiteDefault.copy(
+        enabled = legacyOfficeRegistrations.any { it.enabled },
+      )
+    } else {
+      retainedRegistrations
+    }
+    val existingById = migratedRegistrations.associateBy { it.id }
     val mergedDefaults = defaultRegistrations.filterNot { it.id in existingById }
-    val refreshedExisting = existing.skills.map { registration ->
+    val refreshedExisting = migratedRegistrations.map { registration ->
       val defaults = defaultRegistrations.firstOrNull { it.id == registration.id } ?: return@map registration
       registration.copy(
         path = registration.path.ifBlank { defaults.path },
@@ -370,6 +383,29 @@ object FloveraSkillRegistry {
         - If the original MCP server depends on npm, daemons, OS shell behavior, native binaries, or hidden secrets, call out the platform gap and design a bounded replacement.
       """.trimIndent()
 
+      "flovera-office-suite" -> """
+        ---
+        name: flovera-office-suite
+        description: Use when creating, reading, editing, or validating DOCX, XLSX, PPTX, or PDF files in Flovera with the format-specific Android-compatible document engines.
+        description_zh: 用于在 Flovera 中使用针对各格式适配的 Android 文档引擎创建、读取、编辑或验证 DOCX、XLSX、PPTX 与 PDF 文件。
+        ---
+
+        # Flovera Office Suite
+
+        Required workflow:
+        - Route by output format. One skill does not mean one common backend.
+        - XLSX: use built-in `openpyxl` for workbook creation and editing.
+        - DOCX: add `docx_shim` to `sys.path`, then use `python-docx 1.2.0`. It is pure Python; Flovera already provides compatible `lxml` and the shim includes `typing_extensions`.
+        - PPTX: add `pil_shim` before `_pptx_analyze` on `sys.path`, then use `python-pptx 1.0.2`. The PIL compatibility layer maps the Image/ImageFont surface used by python-pptx to Android graphics APIs.
+        - PDF: add `pil_shim` and `pdf_shim` to `sys.path`, then use `fpdf2 2.8.7`. For Chinese text, copy `/system/fonts/NotoSansCJK-Regular.ttc` into the workspace once with Groovy, register it with `add_font`, and let fpdf2 subset the used glyphs.
+        - Use `workspace_command_run` for all Python or Groovy steps. Do not ask the Android user to open a terminal.
+        - For an existing DOCX/XLSX/PPTX, begin with `["flovera", "office", "inspect", "<path>"]`; validate before and after structural edits.
+        - `["flovera", "office", "text", ...]` and `replace` remain useful for lightweight extraction and simple replacement. Apache POI is an optional structural backend for DOCX/XLSX only, not the preferred creation pipeline.
+        - Do not use POI XSLF for PPTX or ordinary docx4j on Android unless `inspect` explicitly reports that backend as supported.
+        - After producing DOCX/XLSX/PPTX, run `["flovera", "office", "validate", "<path>"]` and `artifact_inspect`. After producing PDF, run `artifact_inspect`.
+        - Keep outputs under `outputs/`. Do not claim layout fidelity, formulas, animation, charts, embedded media, or advanced Office behavior unless the generated file was validated for that exact feature.
+      """.trimIndent()
+
       "flovera-office-ooxml" -> """
         ---
         name: flovera-office-ooxml
@@ -581,6 +617,10 @@ object FloveraSkillRegistry {
         titleZh = "Flovera Office OOXML 文档",
         descriptionZh = "用于在 Flovera 中处理 Microsoft Office OOXML 文档，包括 docx、xlsx、pptx 的检查、校验、文本抽取、安全文本替换，或规划更深入的 Apache POI 编辑。",
       )
+      "flovera-office-suite" -> copy(
+        titleZh = "Flovera Office 四件套",
+        descriptionZh = "用于在 Flovera 中使用针对各格式适配的 Android 文档引擎创建、读取、编辑或验证 DOCX、XLSX、PPTX 与 PDF 文件。",
+      )
       "flovera-skill-creator" -> copy(
         titleZh = "Flovera 技能创建器",
         descriptionZh = "用于用户要求 Flovera 在 .flovera/skills 下创建、编辑、注册、拆分、开关或组织技能。",
@@ -601,4 +641,13 @@ object FloveraSkillRegistry {
   private fun String.looksLikeMojibake(): Boolean {
     return contains("鐢") || contains("搴") || contains("鍒") || contains("杩") || contains("閫") || contains("涓")
   }
+
+  private const val OFFICE_SUITE_SKILL_ID = "flovera-office-suite"
+  private val LEGACY_OFFICE_SKILL_IDS = setOf(
+    "flovera-office-ooxml",
+    "flovera-docx-engine",
+    "flovera-pptx-engine",
+    "flovera-pdf-engine",
+    "flovera-xlsx-engine",
+  )
 }
