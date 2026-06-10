@@ -244,10 +244,12 @@ class AgentController(
   }
 
   fun updateApiKey(value: String) {
+    if (rejectMutationWhileRunning("API settings")) return
     _state.update { it.copy(apiKeyDraft = value) }
   }
 
   fun updateProvider(value: String) {
+    if (rejectMutationWhileRunning("Provider settings")) return
     val draft = settingsController.draftForProvider(_state.value.settings, value) ?: return
     _state.update {
       it.copy(
@@ -262,14 +264,17 @@ class AgentController(
   }
 
   fun updateModel(value: String) {
+    if (rejectMutationWhileRunning("Model settings")) return
     _state.update { it.copy(modelDraft = value) }
   }
 
   fun updateAgentRules(value: String) {
+    if (rejectMutationWhileRunning("AGENT.md editing")) return
     _state.update { it.copy(agentRulesDraft = value) }
   }
 
   fun setNetworkEnabled(enabled: Boolean) {
+    if (rejectMutationWhileRunning("Network settings")) return
     val settings = settingsController.setNetworkEnabled(_state.value.settings, enabled)
     _state.update {
       it.copy(
@@ -280,6 +285,7 @@ class AgentController(
   }
 
   fun setBackgroundKeepAliveEnabled(enabled: Boolean) {
+    if (rejectMutationWhileRunning("Background settings")) return
     val current = _state.value
     val settings = settingsController.setBackgroundKeepAlive(current.settings, enabled)
     workspaceController.syncFloveraSettings(settings)
@@ -313,6 +319,7 @@ class AgentController(
     braveSearchApiKey: String = _state.value.settings.braveSearchApiKey,
     backgroundKeepAliveEnabled: Boolean = _state.value.settings.backgroundKeepAliveEnabled,
   ) {
+    if (rejectMutationWhileRunning("Settings")) return
     val current = _state.value
     val modelSettings = settingsController.saveModelSettings(
       current.settings,
@@ -383,6 +390,7 @@ class AgentController(
   }
 
   fun saveAgentRules(content: String = _state.value.agentRulesDraft) {
+    if (rejectMutationWhileRunning("AGENT.md editing")) return
     workspaceController.writeAgentRules(content)
     refreshWorkspaceState(status = "AGENT.md saved")
     _state.update { it.copy(agentRulesDraft = content) }
@@ -407,10 +415,12 @@ class AgentController(
     val mimeType = workspaceController.mimeType(path)
     val isImage = mimeType.startsWith("image/")
     val isPdf = mimeType == "application/pdf" || path.endsWith(".pdf", ignoreCase = true)
+    val isOfficeDocument = isOfficeDocumentPreview(path)
     val canPreviewAsText = canPreviewAsText(path, mimeType)
     val content = when {
       isImage -> ""
       isPdf -> ""
+      isOfficeDocument -> ""
       canPreviewAsText -> workspaceController.previewTextFile(path)
       else -> "No built-in preview for $mimeType. Use Open with or Share from the file menu."
     }
@@ -419,13 +429,18 @@ class AgentController(
         selectedPreviewPath = path,
         selectedPreviewContent = content,
         selectedPreviewMimeType = mimeType,
-        selectedPreviewUri = if (isImage || isPdf) workspaceFileUri(path)?.toString().orEmpty() else "",
+        selectedPreviewUri = if (isImage || isPdf || isOfficeDocument) {
+          workspaceFileUri(path)?.toString().orEmpty()
+        } else {
+          ""
+        },
         status = "Previewing $path",
       )
     }
   }
 
   fun setHtmlPinned(path: String, pinned: Boolean) {
+    if (rejectMutationWhileRunning("Preview pinning")) return
     val settings = settingsController.setPinnedHtmlPath(_state.value.settings, path, pinned)
     refreshWorkspaceState(settings = settings, status = if (pinned) "HTML pinned" else "HTML unpinned")
   }
@@ -438,7 +453,18 @@ class AgentController(
     _state.update { it.copy(status = status) }
   }
 
+  private fun rejectMutationWhileRunning(surface: String): Boolean {
+    if (!_state.value.isRunning) return false
+    _state.update {
+      it.copy(status = "$surface is locked while the agent is running")
+    }
+    return true
+  }
+
   fun runWorkspaceArtifactAction(actionId: String, inputJson: String): String {
+    if (rejectMutationWhileRunning("Artifact actions")) {
+      return artifactBridgeError("artifact actions are unavailable while the agent is running")
+    }
     val trimmedActionId = actionId.trim()
     if (trimmedActionId.isBlank()) return artifactBridgeError("missing action id")
     val previewPath = _state.value.selectedPreviewPath.ifBlank { _state.value.selectedHtmlPath }
@@ -478,6 +504,7 @@ class AgentController(
   }
 
   fun rerunWorkspaceArtifactJob(jobId: String) {
+    if (rejectMutationWhileRunning("Artifact actions")) return
     val job = workspaceController.readWorkspaceArtifactJob(jobId) ?: return reportStatus("Artifact job not found")
     val target = workspaceController.resolveWorkspaceArtifactActionByManifest(job.artifactManifestPath, job.actionId)
       ?: return reportStatus("Artifact action not found: ${job.actionId}")
@@ -489,6 +516,7 @@ class AgentController(
   }
 
   fun stopWorkspaceArtifactServer(manifestPath: String) {
+    if (rejectMutationWhileRunning("Artifact server changes")) return
     val stopped = workspacePythonHttpRuntime.stopManifest(manifestPath)
     _state.update {
       it.copy(
@@ -499,11 +527,13 @@ class AgentController(
   }
 
   fun renameWorkspacePath(path: String, newName: String) {
+    if (rejectMutationWhileRunning("Workspace changes")) return
     val status = workspaceController.rename(path, newName)
     refreshWorkspaceState(status = status)
   }
 
   fun deleteWorkspacePath(path: String) {
+    if (rejectMutationWhileRunning("Workspace changes")) return
     val status = workspaceController.deletePath(path)
     refreshWorkspaceState(
       status = status,
@@ -512,12 +542,14 @@ class AgentController(
   }
 
   fun createWorkspaceSnapshot(name: String) {
+    if (rejectMutationWhileRunning("Snapshot changes")) return
     val current = _state.value
     val snapshot = workspaceController.createSnapshot(name, current.selectedHtmlPath)
     refreshWorkspaceState(status = "Snapshot created: ${snapshot.name}")
   }
 
   fun restoreWorkspaceSnapshot(snapshotId: String) {
+    if (rejectMutationWhileRunning("Snapshot restore")) return
     val restored = workspaceController.restoreSnapshot(snapshotId) ?: return
     val settings = if (restored.selectedHtmlPath.isBlank()) {
       _state.value.settings
@@ -528,11 +560,13 @@ class AgentController(
   }
 
   fun deleteWorkspaceSnapshot(snapshotId: String) {
+    if (rejectMutationWhileRunning("Snapshot changes")) return
     val deleted = workspaceController.deleteSnapshot(snapshotId)
     refreshWorkspaceState(status = if (deleted) "Snapshot deleted" else "Snapshot could not be deleted")
   }
 
   fun approveSettingsProposal(path: String) {
+    if (rejectMutationWhileRunning("Settings proposals")) return
     val proposal = workspaceController.listSettingsProposals().firstOrNull { it.path == path } ?: return
     val settings = settingsController.applySettingsProposal(_state.value.settings, proposal.changes)
     workspaceController.deleteSettingsProposal(path)
@@ -540,16 +574,19 @@ class AgentController(
   }
 
   fun rejectSettingsProposal(path: String) {
+    if (rejectMutationWhileRunning("Settings proposals")) return
     val deleted = workspaceController.deleteSettingsProposal(path)
     refreshWorkspaceState(status = if (deleted) "Settings proposal rejected" else "Settings proposal not found")
   }
 
   fun dismissControlledToolProposal(path: String) {
+    if (rejectMutationWhileRunning("Tool proposals")) return
     val deleted = workspaceController.deleteControlledToolProposal(path)
     refreshWorkspaceState(status = if (deleted) "Tool proposal dismissed" else "Tool proposal not found")
   }
 
   fun setFloveraSkillEnabled(id: String, enabled: Boolean) {
+    if (rejectMutationWhileRunning("Skill settings")) return
     val updated = workspaceController.setFloveraSkillEnabled(id, enabled)
     refreshWorkspaceState(status = if (updated) "Skill ${if (enabled) "enabled" else "disabled"}: $id" else "Skill not found: $id")
   }
@@ -562,6 +599,7 @@ class AgentController(
     value: String,
     agentAllowed: Boolean,
   ) {
+    if (rejectMutationWhileRunning("Secret settings")) return
     val settings = settingsController.saveWorkspaceSecret(
       settings = _state.value.settings,
       originalName = originalName,
@@ -575,11 +613,13 @@ class AgentController(
   }
 
   fun deleteWorkspaceSecret(name: String) {
+    if (rejectMutationWhileRunning("Secret settings")) return
     val settings = settingsController.deleteWorkspaceSecret(_state.value.settings, name)
     refreshWorkspaceState(settings = settings, status = "Secret deleted: ${name.trim()}")
   }
 
   fun setWorkspaceSecretAgentAllowed(name: String, allowed: Boolean) {
+    if (rejectMutationWhileRunning("Secret settings")) return
     val settings = settingsController.setWorkspaceSecretAgentAllowed(_state.value.settings, name, allowed)
     refreshWorkspaceState(
       settings = settings,
@@ -595,6 +635,7 @@ class AgentController(
   fun workspaceMimeType(path: String): String = workspaceController.mimeType(path)
 
   fun importSharedIntent(intent: Intent?): Boolean {
+    if (rejectMutationWhileRunning("File import")) return false
     val uris = sharedUris(intent)
     if (uris.isEmpty()) return false
     val results = uris.map { uri -> workspaceController.importSharedFile(uri) }
@@ -603,6 +644,7 @@ class AgentController(
   }
 
   fun newSession() {
+    if (rejectMutationWhileRunning("Session changes")) return
     val session = sessionController.createSession()
     _state.update {
       it.copy(
@@ -617,6 +659,7 @@ class AgentController(
   }
 
   fun discardEmptyDraftSession() {
+    if (rejectMutationWhileRunning("Session changes")) return
     val current = _state.value
     val session = current.session ?: return
     if (session.messages.isNotEmpty()) return
@@ -631,6 +674,7 @@ class AgentController(
   }
 
   fun openSession(sessionId: String) {
+    if (rejectMutationWhileRunning("Session switching")) return
     val session = sessionController.openSession(sessionId) ?: return
     val settings = settingsController.setActiveSession(_state.value.settings, session.id)
     _state.update {
@@ -646,6 +690,7 @@ class AgentController(
   }
 
   fun renameSession(sessionId: String, title: String) {
+    if (rejectMutationWhileRunning("Session changes")) return
     val renamed = sessionController.renameSession(sessionId, title) ?: return
     val active = if (_state.value.session?.id == renamed.id) renamed else _state.value.session
     _state.update {
@@ -659,11 +704,13 @@ class AgentController(
   }
 
   fun duplicateSession(sessionId: String) {
+    if (rejectMutationWhileRunning("Session changes")) return
     val copy = sessionController.duplicateSession(sessionId) ?: return
     activateSession(copy, "Session copied")
   }
 
   fun archiveSession(sessionId: String) {
+    if (rejectMutationWhileRunning("Session changes")) return
     sessionController.archiveSession(sessionId) ?: return
     val current = _state.value
     if (current.session?.id == sessionId) {
@@ -686,11 +733,13 @@ class AgentController(
   }
 
   fun restoreSession(sessionId: String) {
+    if (rejectMutationWhileRunning("Session changes")) return
     val restored = sessionController.restoreSession(sessionId) ?: return
     activateSession(restored, "Session restored")
   }
 
   fun setSessionPinned(sessionId: String, pinned: Boolean) {
+    if (rejectMutationWhileRunning("Session changes")) return
     val updated = sessionController.setSessionPinned(sessionId, pinned) ?: return
     val active = if (_state.value.session?.id == updated.id) updated else _state.value.session
     _state.update {
@@ -1432,6 +1481,10 @@ class AgentController(
         "md", "markdown", "json", "js", "mjs", "cjs", "ts", "tsx", "jsx", "css", "csv",
         "xml", "kt", "kts", "java", "py", "sql", "sh", "ps1", "rb", "go", "rs", "c", "cpp", "h", "hpp",
       )
+  }
+
+  private fun isOfficeDocumentPreview(path: String): Boolean {
+    return path.substringAfterLast('.', missingDelimiterValue = "").lowercase() in setOf("docx", "pptx", "xlsx")
   }
 
   private fun activateSession(session: AgentSession, status: String) {

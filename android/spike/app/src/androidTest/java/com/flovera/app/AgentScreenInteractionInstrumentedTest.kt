@@ -5,8 +5,11 @@ import android.graphics.Bitmap
 import android.graphics.pdf.PdfDocument
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -14,6 +17,9 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.geometry.Offset
 import com.flovera.app.config.AppSettings
 import com.flovera.app.config.SettingsStore
 import com.flovera.app.agent.AgentRunEvent
@@ -32,6 +38,8 @@ import com.flovera.app.workspace.WorkspaceManager
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.Collections
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 import kotlinx.coroutines.CompletableDeferred
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -403,6 +411,48 @@ class AgentScreenInteractionInstrumentedTest {
   }
 
   @Test
+  fun runningAgentFreezesSessionSettingsAndAgentRulesMutations() {
+    val context = composeRule.activity.applicationContext
+    SettingsStore(context).save(usableSettings(AppSettings(language = "en")))
+    val controller = AgentController(
+      context,
+      agentRunController = AgentRunController(runtime = BlockingAgentRuntime()),
+      agentRunStatusNotifier = FakeAgentRunStatusNotifier(),
+    )
+    val originalSessionId = controller.state.value.session?.id.orEmpty()
+    controller.newSession()
+    val runningSessionId = controller.state.value.session?.id.orEmpty()
+    val originalRules = controller.state.value.agentRulesDraft
+    val originalNetwork = controller.state.value.settings.networkEnabled
+
+    composeRule.setContent {
+      AgentScreen(controller)
+    }
+
+    openConversation()
+    composeRule.onAllNodes(hasSetTextAction())[0].performTextInput("start locked task")
+    composeRule.onNodeWithContentDescription("Send message").performClick()
+    composeRule.waitUntil(timeoutMillis = 5_000) { controller.state.value.isRunning }
+
+    composeRule.onNodeWithContentDescription("More").performClick()
+    composeRule.onNodeWithText("Sessions").assertIsNotEnabled()
+    composeRule.onNodeWithText("Settings").assertIsNotEnabled()
+    composeRule.onNodeWithText("AGENT.md").assertIsNotEnabled()
+
+    composeRule.runOnIdle {
+      controller.openSession(originalSessionId)
+      controller.saveAgentRules("must not be saved during a run")
+      controller.setNetworkEnabled(!originalNetwork)
+      assertEquals(runningSessionId, controller.state.value.session?.id)
+      assertEquals(originalRules, controller.state.value.agentRulesDraft)
+      assertEquals(originalNetwork, controller.state.value.settings.networkEnabled)
+    }
+
+    composeRule.runOnIdle { controller.interruptAgentRun() }
+    composeRule.waitUntil(timeoutMillis = 5_000) { !controller.state.value.isRunning }
+  }
+
+  @Test
   fun runningAgentQueuesNextMessageAndStartsItAfterCurrentRun() {
     val context = composeRule.activity.applicationContext
     SettingsStore(context).save(usableSettings(AppSettings(language = "en")))
@@ -574,7 +624,20 @@ class AgentScreenInteractionInstrumentedTest {
   @Test
   fun htmlQuickPickerOpensWorkspaceHtmlFromMainSurface() {
     val context = composeRule.activity.applicationContext
-    SettingsStore(context).save(usableSettings(AppSettings(language = "en")))
+    val workspaceId = "quick-picker-${System.currentTimeMillis()}"
+    SettingsStore(context).save(
+      usableSettings(
+        AppSettings(
+          language = "en",
+          activeWorkspaceId = workspaceId,
+          recentHtmlPaths = listOf("quick.html"),
+        ),
+      ),
+    )
+    WorkspaceManager(context, workspaceId).also {
+      it.ensureSeedFiles()
+      it.writeFile("quick.html", "<html><body>quick</body></html>", createAutoSnapshot = false)
+    }
     val controller = AgentController(context)
 
     composeRule.setContent {
@@ -584,11 +647,32 @@ class AgentScreenInteractionInstrumentedTest {
     composeRule.onNodeWithContentDescription("Current display target").performClick()
     composeRule.onNodeWithText("Preview Display").assertIsDisplayed()
     composeRule.onNodeWithText("HTML Display Files").assertIsDisplayed()
-    composeRule.onNodeWithText("index.html").performClick()
+    val firstHtmlRowIndex = 1 + if (controller.state.value.workspaceArtifacts.isEmpty()) {
+      0
+    } else {
+      1 + controller.state.value.workspaceArtifacts.size
+    }
+    composeRule.onNodeWithTag("preview-display-list").performScrollToIndex(firstHtmlRowIndex)
+    composeRule.onNodeWithText("quick.html").performClick()
 
     composeRule.runOnIdle {
-      assertEquals("index.html", controller.state.value.selectedHtmlPath)
+      assertEquals("quick.html", controller.state.value.selectedHtmlPath)
     }
+  }
+
+  @Test
+  fun currentDisplayPickerExposesShareAction() {
+    val context = composeRule.activity.applicationContext
+    SettingsStore(context).save(usableSettings(AppSettings(language = "en", selectedHtmlPath = "index.html")))
+    val controller = AgentController(context)
+
+    composeRule.setContent {
+      AgentScreen(controller)
+    }
+
+    composeRule.onNodeWithContentDescription("Current display target").performClick()
+    composeRule.onNodeWithText("Current Display").assertIsDisplayed()
+    composeRule.onNodeWithContentDescription("Share current display").assertIsDisplayed()
   }
 
   @Test
@@ -749,6 +833,81 @@ class AgentScreenInteractionInstrumentedTest {
   }
 
   @Test
+  fun streamingDoesNotPullConversationBackAfterUserScrollsAway() {
+    val context = composeRule.activity.applicationContext
+    SettingsStore(context).save(usableSettings(AppSettings(language = "en")))
+    val store = AgentSessionStore(context)
+    var session = store.create("Scroll retention ${System.currentTimeMillis()}")
+    repeat(18) { index ->
+      session = store.appendMessage(
+        session,
+        SessionMessage(role = if (index % 2 == 0) "user" else "assistant", content = "history message $index"),
+      )
+    }
+    val runtime = ControlledStreamingAgentRuntime()
+    val controller = AgentController(
+      context,
+      agentRunController = AgentRunController(runtime = runtime),
+      agentRunStatusNotifier = FakeAgentRunStatusNotifier(),
+    )
+    controller.openSession(session.id)
+
+    composeRule.setContent {
+      AgentScreen(controller)
+    }
+
+    openConversation()
+    composeRule.onAllNodes(hasSetTextAction())[0].performTextInput("stream while I read history")
+    composeRule.onNodeWithContentDescription("Send message").performClick()
+    composeRule.waitUntil(timeoutMillis = 5_000) {
+      controller.state.value.assistantDraft?.content?.contains("initial streaming block") == true
+    }
+    composeRule.waitUntil(timeoutMillis = 5_000) {
+      composeRule.onAllNodesWithText("initial streaming block", substring = true).fetchSemanticsNodes().isNotEmpty() &&
+        composeRule.onAllNodesWithTag("conversation-bottom-anchor").fetchSemanticsNodes().isNotEmpty()
+    }
+    composeRule.onNodeWithTag("conversation-bottom-anchor").assertIsDisplayed()
+
+    composeRule.onNodeWithTag("conversation-list").performTouchInput {
+      down(center)
+      moveBy(Offset(0f, 80f))
+      up()
+    }
+    composeRule.onNodeWithContentDescription("Jump to latest and lock conversation").assertIsDisplayed()
+    repeat(6) {
+      composeRule.onNodeWithTag("conversation-list").performTouchInput {
+        down(center)
+        moveBy(Offset(0f, 240f))
+        up()
+      }
+    }
+    composeRule.waitUntil(timeoutMillis = 5_000) {
+      composeRule.onAllNodesWithText("history message 17").fetchSemanticsNodes().isNotEmpty()
+    }
+    composeRule.onNodeWithText("history message 17").assertIsDisplayed()
+    runtime.emitNextDelta()
+    composeRule.waitUntil(timeoutMillis = 5_000) {
+      controller.state.value.assistantDraft?.content?.contains("later streaming delta") == true
+    }
+    composeRule.waitForIdle()
+    composeRule.onNodeWithText("history message 17").assertIsDisplayed()
+
+    composeRule.onNodeWithContentDescription("Jump to latest and lock conversation").performClick()
+    composeRule.waitUntil(timeoutMillis = 5_000) {
+      composeRule.onAllNodesWithTag("conversation-bottom-anchor").fetchSemanticsNodes().isNotEmpty()
+    }
+    composeRule.onNodeWithTag("conversation-bottom-anchor").assertIsDisplayed()
+    assertTrue(
+      composeRule.onAllNodesWithContentDescription("Jump to latest and lock conversation")
+        .fetchSemanticsNodes()
+        .isEmpty(),
+    )
+
+    runtime.finish()
+    composeRule.waitUntil(timeoutMillis = 5_000) { !controller.state.value.isRunning }
+  }
+
+  @Test
   fun tappingImageFileOpensNativeImagePreviewOverPreviousHtml() {
     val context = composeRule.activity.applicationContext
     val workspaceId = "image-preview-${System.currentTimeMillis()}"
@@ -796,7 +955,14 @@ class AgentScreenInteractionInstrumentedTest {
     composeRule.onNodeWithText("sample.pdf", substring = true).performClick()
 
     composeRule.onNodeWithText("sample.pdf").assertIsDisplayed()
-    composeRule.onNodeWithContentDescription("PDF preview for sample.pdf").assertIsDisplayed()
+    composeRule.waitUntil(timeoutMillis = 5_000) {
+      composeRule.onAllNodesWithText("Page 1 of 2").fetchSemanticsNodes().isNotEmpty()
+    }
+    composeRule.onNodeWithText("Page 1 of 2").assertIsDisplayed()
+    composeRule.onNodeWithContentDescription("PDF preview for sample.pdf, page 1").assertIsDisplayed()
+    composeRule.onNodeWithContentDescription("Next page").performClick()
+    composeRule.onNodeWithText("Page 2 of 2").assertIsDisplayed()
+    composeRule.onNodeWithContentDescription("PDF preview for sample.pdf, page 2").assertIsDisplayed()
     composeRule.runOnIdle {
       assertEquals("index.html", controller.state.value.selectedHtmlPath)
       assertEquals("sample.pdf", controller.state.value.selectedPreviewPath)
@@ -804,6 +970,43 @@ class AgentScreenInteractionInstrumentedTest {
       assertTrue(controller.state.value.selectedPreviewUri.startsWith("content://"))
       assertEquals("", controller.state.value.selectedPreviewContent)
     }
+  }
+
+  @Test
+  fun tappingDocxFileOpensPagedNativeTextPreview() {
+    val context = composeRule.activity.applicationContext
+    val workspaceId = "docx-preview-${System.currentTimeMillis()}"
+    SettingsStore(context).save(usableSettings(AppSettings(language = "en", activeWorkspaceId = workspaceId)))
+    val workspace = WorkspaceManager(context, workspaceId).also { it.ensureSeedFiles() }
+    workspace.writeBytes(
+      "sample.docx",
+      officeZip(
+        "word/document.xml" to """
+          <w:document xmlns:w="word"><w:body>
+            <w:p><w:r><w:t>First page</w:t></w:r></w:p>
+            <w:p><w:r><w:br w:type="page"/></w:r></w:p>
+            <w:p><w:r><w:t>Second page</w:t></w:r></w:p>
+          </w:body></w:document>
+        """.trimIndent(),
+      ),
+      createAutoSnapshot = false,
+    )
+    val controller = AgentController(context)
+
+    composeRule.setContent {
+      AgentScreen(controller)
+    }
+
+    openConversation()
+    composeRule.onNodeWithContentDescription("More").performClick()
+    composeRule.onNodeWithText("Files").performClick()
+    composeRule.onNodeWithText("sample.docx", substring = true).performClick()
+
+    composeRule.onNodeWithText("Reading page 1 of 2").assertIsDisplayed()
+    composeRule.onNodeWithText("First page").assertIsDisplayed()
+    composeRule.onNodeWithContentDescription("Next page").performClick()
+    composeRule.onNodeWithText("Reading page 2 of 2").assertIsDisplayed()
+    composeRule.onNodeWithText("Second page").assertIsDisplayed()
   }
 
   @Test
@@ -839,13 +1042,28 @@ class AgentScreenInteractionInstrumentedTest {
 
   private fun testPdfBytes(): ByteArray {
     val document = PdfDocument()
-    val pageInfo = PdfDocument.PageInfo.Builder(240, 240, 1).create()
-    val page = document.startPage(pageInfo)
-    page.canvas.drawColor(android.graphics.Color.WHITE)
-    document.finishPage(page)
+    repeat(2) { index ->
+      val pageInfo = PdfDocument.PageInfo.Builder(240, 240, index + 1).create()
+      val page = document.startPage(pageInfo)
+      page.canvas.drawColor(android.graphics.Color.WHITE)
+      document.finishPage(page)
+    }
     return ByteArrayOutputStream().use { output ->
       document.writeTo(output)
       document.close()
+      output.toByteArray()
+    }
+  }
+
+  private fun officeZip(vararg entries: Pair<String, String>): ByteArray {
+    return ByteArrayOutputStream().use { output ->
+      ZipOutputStream(output).use { zip ->
+        entries.forEach { (path, content) ->
+          zip.putNextEntry(ZipEntry(path))
+          zip.write(content.toByteArray(Charsets.UTF_8))
+          zip.closeEntry()
+        }
+      }
       output.toByteArray()
     }
   }
@@ -976,6 +1194,60 @@ class AgentScreenInteractionInstrumentedTest {
       completion.await()
       eventSink.emit(AgentRunEvent(type = AgentRunEventType.MODEL_TEXT_DELTA, modelTextDelta = " answer"))
       return "partial final answer"
+    }
+  }
+
+  private class ControlledStreamingAgentRuntime : AgentRuntime {
+    private val nextDelta = CompletableDeferred<Unit>()
+    private val completion = CompletableDeferred<Unit>()
+
+    fun emitNextDelta() {
+      nextDelta.complete(Unit)
+    }
+
+    fun finish() {
+      completion.complete(Unit)
+    }
+
+    override suspend fun run(
+      input: String,
+      agentRunId: String,
+      settings: AppSettings,
+      session: AgentSession,
+      workspace: WorkspaceManager,
+      recorder: ToolEventRecorder,
+    ): String = "initial streaming block\nlater streaming delta"
+
+    override suspend fun runStreaming(
+      input: String,
+      agentRunId: String,
+      settings: AppSettings,
+      session: AgentSession,
+      workspace: WorkspaceManager,
+      recorder: ToolEventRecorder,
+      eventSink: AgentRunEventSink,
+      guidanceProvider: AgentRunGuidanceProvider,
+    ): String {
+      eventSink.emit(
+        AgentRunEvent(
+          type = AgentRunEventType.MODEL_TEXT_DELTA,
+          modelTextDelta = buildString {
+            repeat(24) { index -> appendLine("initial streaming block $index") }
+            append("initial streaming block end")
+          },
+        ),
+      )
+      nextDelta.await()
+      eventSink.emit(
+        AgentRunEvent(
+          type = AgentRunEventType.MODEL_TEXT_DELTA,
+          modelTextDelta = buildString {
+            repeat(80) { index -> appendLine("\nlater streaming delta $index") }
+          },
+        ),
+      )
+      completion.await()
+      return "initial streaming block\nlater streaming delta"
     }
   }
 

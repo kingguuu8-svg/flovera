@@ -127,9 +127,12 @@ Counter-paths:
 Acceptance criteria:
 
 - Default open position is the latest message.
-- While the user stays at the bottom, streaming drafts keep the list pinned to
-  the newest output by scrolling to a dedicated bottom anchor rather than the
-  top of the last message; manual scroll-away disables that auto-follow.
+- Conversation scrolling has two explicit states. Bottom-locked mode keeps new
+  messages and streaming drafts at the dedicated bottom anchor. Any user drag
+  enters free-scroll mode immediately; new content must not move the viewport.
+- Free-scroll mode always shows a downward arrow above the composer. Pressing it
+  smoothly reaches the latest content and returns to bottom-locked mode. Merely
+  reaching the bottom while freely scrolling does not silently change modes.
 - A completed, idle session never jumps back to the top when the user reaches
   the bottom.
 - Streaming output remains scrollable while it grows; if the user is already at
@@ -140,6 +143,11 @@ Acceptance criteria:
 - Tool events are collapsed by default when they are not the main answer.
 - Every message has a timestamp.
 - Running state disables only actions that would corrupt the active loop.
+- Running state freezes session switching/creation, AGENT.md edits, provider and
+  model settings, skills, secrets, snapshots, settings proposals, workspace
+  mutations, preview pinning, and artifact start/retry/stop. Read-only preview,
+  file inspection/share, queued messages, guidance, and explicit interruption
+  remain available.
 
 Human retest archive, 2026-05-24:
 
@@ -1306,11 +1314,16 @@ Status: Baseline implemented. The conversation-bound, blocking Python runtime is
 ### Rendering Coverage
 
 Status: Baseline implemented for common workspace outputs. Flovera can preview
-HTML, Markdown, plain text, code with line numbers, JSON, CSV, images, and the
-first page of PDFs, while `artifact_inspect` can inspect JSON, HTML, Office
-documents, PDFs, images, and text. Unsupported formats show a clear built-in
-preview fallback instead of pretending to render. Remaining work is richer
-Office, multi-page PDF, archives, SQLite, and media rendering.
+HTML, Markdown, plain text, code with line numbers, JSON, CSV, images, and every
+page of a PDF through Android `PdfRenderer`. DOCX uses explicit page breaks plus
+stable reading-page pagination, PPTX browses one slide per page, and XLSX
+browses one worksheet per page. These Office previews extract readable content
+and do not claim pixel-identical Office layout. `artifact_inspect` can inspect
+JSON, HTML, Office documents, PDFs, images, and text. Unsupported formats show
+a clear built-in preview fallback instead of pretending to render. The main
+Preview Display picker also exposes Android sharing for the current displayed
+workspace file. Remaining work is richer layout rendering, archives, SQLite,
+and media rendering.
 
 - Extend workspace rendering beyond HTML and Markdown.
 - Candidate formats: plain text, images, PDF, JSON, CSV, office documents, and

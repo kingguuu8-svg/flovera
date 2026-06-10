@@ -63,13 +63,17 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.ChatBubble
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Preview
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
@@ -96,20 +100,27 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
@@ -146,13 +157,18 @@ import com.flovera.app.session.ToolEvent
 import com.flovera.app.web.FloveraWebBridge
 import com.flovera.app.workspace.WorkspaceArtifactJob
 import com.flovera.app.workspace.WorkspaceControlledToolProposal
+import com.flovera.app.workspace.WorkspaceDocumentPreview
+import com.flovera.app.workspace.WorkspaceDocumentPreviewParser
 import com.flovera.app.workspace.WorkspaceFileNode
 import com.flovera.app.workspace.WorkspaceSettingsProposal
 import com.flovera.app.workspace.WorkspaceSnapshotRecord
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -167,6 +183,11 @@ private val FloveraFabText = Color(0xFFDEF3F8)
 private val FloveraEmptyPanel = Color(0xFFF7F6F1)
 private val FloveraEmptyPanelBorder = Color(0xFFE4DED2)
 private val FloveraAnchorIconSize = 56.dp
+
+private enum class ConversationScrollMode {
+  BottomLocked,
+  Free,
+}
 private val FloveraDesignBackground = Color(0xFFF7FAF9)
 private val FloveraDesignSurface = Color(0xFFFFFFFF)
 private val FloveraDesignElevated = Color(0xFFE9F0EF)
@@ -1456,14 +1477,16 @@ private fun WorkspacePreview(
   val htmlError = state.selectedHtmlError
   val isImagePreview = previewPath.isNotBlank() && mimeType.startsWith("image/")
   val isPdfPreview = previewPath.isNotBlank() && isPdfPreview(previewPath, mimeType)
+  val isOfficePreview = previewPath.isNotBlank() && isOfficeDocumentPreview(previewPath)
   val isTextPreview = previewPath.isNotBlank() &&
     !previewPath.endsWith(".html", ignoreCase = true) &&
     !previewPath.endsWith(".htm", ignoreCase = true) &&
     !isImagePreview &&
-    !isPdfPreview
+    !isPdfPreview &&
+    !isOfficePreview
 
-  LaunchedEffect(chromeColorSamplingEnabled, isTextPreview, isImagePreview, isPdfPreview, htmlUrl) {
-    if (!chromeColorSamplingEnabled || isTextPreview || isImagePreview || isPdfPreview || htmlUrl.isNullOrBlank()) {
+  LaunchedEffect(chromeColorSamplingEnabled, isTextPreview, isImagePreview, isPdfPreview, isOfficePreview, htmlUrl) {
+    if (!chromeColorSamplingEnabled || isTextPreview || isImagePreview || isPdfPreview || isOfficePreview || htmlUrl.isNullOrBlank()) {
       onChromeColorSampled(null)
     }
   }
@@ -1488,6 +1511,15 @@ private fun WorkspacePreview(
 
   if (isPdfPreview) {
     WorkspacePdfPreview(
+      path = previewPath,
+      mimeType = mimeType,
+      uri = previewUri,
+    )
+    return
+  }
+
+  if (isOfficePreview) {
+    WorkspaceOfficePreview(
       path = previewPath,
       mimeType = mimeType,
       uri = previewUri,
@@ -1550,7 +1582,35 @@ private fun WorkspaceImagePreview(path: String, mimeType: String, uri: String) {
 @Composable
 private fun WorkspacePdfPreview(path: String, mimeType: String, uri: String) {
   val context = LocalContext.current
+  var pageIndex by remember(uri) { mutableStateOf(0) }
+  var renderedPage by remember(uri) { mutableStateOf<PdfRenderedPage?>(null) }
   var pdfError by remember(uri) { mutableStateOf<String?>(null) }
+  var loading by remember(uri) { mutableStateOf(uri.isNotBlank()) }
+
+  DisposableEffect(renderedPage?.bitmap) {
+    val bitmap = renderedPage?.bitmap
+    onDispose {
+      if (bitmap?.isRecycled == false) bitmap.recycle()
+    }
+  }
+
+  LaunchedEffect(uri, pageIndex) {
+    if (uri.isBlank()) {
+      renderedPage = null
+      loading = false
+      pdfError = "PDF preview unavailable"
+      return@LaunchedEffect
+    }
+    loading = true
+    val result = withContext(Dispatchers.IO) { renderPdfPage(context, uri, pageIndex) }
+    renderedPage = result
+    pdfError = if (result == null) "PDF preview unavailable" else null
+    if (result != null && pageIndex >= result.pageCount) {
+      pageIndex = (result.pageCount - 1).coerceAtLeast(0)
+    }
+    loading = false
+  }
+
   Surface(
     modifier = Modifier.fillMaxSize(),
     color = MaterialTheme.colorScheme.background,
@@ -1560,7 +1620,17 @@ private fun WorkspacePdfPreview(path: String, mimeType: String, uri: String) {
       verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
       Text(path, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleMedium)
-      Text(mimeType.ifBlank { "application/pdf" }, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+      DocumentPageNavigator(
+        label = renderedPage?.let { "Page ${pageIndex + 1} of ${it.pageCount}" }
+          ?: mimeType.ifBlank { "application/pdf" },
+        pageIndex = pageIndex,
+        pageCount = renderedPage?.pageCount ?: 0,
+        onPrevious = { pageIndex = (pageIndex - 1).coerceAtLeast(0) },
+        onNext = {
+          val pageCount = renderedPage?.pageCount ?: 0
+          if (pageCount > 0) pageIndex = (pageIndex + 1).coerceAtMost(pageCount - 1)
+        },
+      )
       Surface(
         modifier = Modifier.fillMaxWidth().weight(1f),
         shape = FloveraSmallShape,
@@ -1573,26 +1643,17 @@ private fun WorkspacePdfPreview(path: String, mimeType: String, uri: String) {
           }
         } else {
           Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            AndroidView(
-              modifier = Modifier.fillMaxSize().semantics { contentDescription = "PDF preview for $path" },
-              factory = { viewContext ->
-                ImageView(viewContext).apply {
-                  scaleType = ImageView.ScaleType.FIT_CENTER
-                  adjustViewBounds = true
-                  setBackgroundColor(android.graphics.Color.TRANSPARENT)
-                }
-              },
-              update = { imageView ->
-                val bitmap = renderPdfFirstPage(context, uri)
-                if (bitmap == null) {
-                  pdfError = "PDF preview unavailable"
-                  imageView.setImageDrawable(null)
-                } else {
-                  pdfError = null
-                  imageView.setImageBitmap(bitmap)
-                }
-              },
-            )
+            renderedPage?.bitmap?.let { bitmap ->
+              Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = "PDF preview for $path, page ${pageIndex + 1}",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Fit,
+              )
+            }
+            if (loading) {
+              CircularProgressIndicator(modifier = Modifier.size(28.dp), strokeWidth = 2.dp)
+            }
             pdfError?.let {
               Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -1889,14 +1950,24 @@ private fun isPdfPreview(path: String, mimeType: String): Boolean {
   return mimeType == "application/pdf" || path.endsWith(".pdf", ignoreCase = true)
 }
 
-private fun renderPdfFirstPage(context: Context, uri: String): Bitmap? {
+private fun isOfficeDocumentPreview(path: String): Boolean {
+  return path.substringAfterLast('.', missingDelimiterValue = "").lowercase() in setOf("docx", "pptx", "xlsx")
+}
+
+private data class PdfRenderedPage(
+  val bitmap: Bitmap,
+  val pageCount: Int,
+)
+
+private fun renderPdfPage(context: Context, uri: String, pageIndex: Int): PdfRenderedPage? {
   return runCatching {
     val descriptor = context.contentResolver.openFileDescriptor(Uri.parse(uri), "r") ?: return null
     descriptor.use { parcel ->
       val renderer = PdfRenderer(parcel)
       try {
         if (renderer.pageCount <= 0) return null
-        val page = renderer.openPage(0)
+        val safePageIndex = pageIndex.coerceIn(0, renderer.pageCount - 1)
+        val page = renderer.openPage(safePageIndex)
         try {
           val width = page.width.coerceAtLeast(1)
           val height = page.height.coerceAtLeast(1)
@@ -1908,7 +1979,7 @@ private fun renderPdfFirstPage(context: Context, uri: String): Bitmap? {
           )
           bitmap.eraseColor(android.graphics.Color.WHITE)
           page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-          bitmap
+          PdfRenderedPage(bitmap = bitmap, pageCount = renderer.pageCount)
         } finally {
           page.close()
         }
@@ -1982,6 +2053,120 @@ private fun currentDisplayMimeType(state: AgentScreenState): String {
     state.selectedPreviewPath.isNotBlank() -> state.selectedPreviewMimeType
     state.selectedHtmlPath.isNotBlank() -> "text/html"
     else -> ""
+  }
+}
+
+@Composable
+private fun WorkspaceOfficePreview(path: String, mimeType: String, uri: String) {
+  val context = LocalContext.current
+  var preview by remember(uri) { mutableStateOf<WorkspaceDocumentPreview?>(null) }
+  var error by remember(uri) { mutableStateOf<String?>(null) }
+  var loading by remember(uri) { mutableStateOf(uri.isNotBlank()) }
+  var pageIndex by remember(uri) { mutableStateOf(0) }
+
+  LaunchedEffect(uri, path) {
+    if (uri.isBlank()) {
+      preview = null
+      error = "Document preview unavailable"
+      loading = false
+      return@LaunchedEffect
+    }
+    loading = true
+    val loaded = withContext(Dispatchers.IO) {
+      runCatching {
+        context.contentResolver.openInputStream(Uri.parse(uri))?.use { input ->
+          WorkspaceDocumentPreviewParser.parse(path, input)
+        }
+      }.getOrNull()
+    }
+    preview = loaded
+    error = if (loaded == null) "Document preview unavailable" else null
+    pageIndex = 0
+    loading = false
+  }
+
+  val pages = preview?.pages.orEmpty()
+  val page = pages.getOrNull(pageIndex)
+  Surface(
+    modifier = Modifier.fillMaxSize(),
+    color = MaterialTheme.colorScheme.background,
+  ) {
+    Column(
+      modifier = Modifier.fillMaxSize().systemBarsPadding().padding(18.dp),
+      verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+      Text(path, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleMedium)
+      DocumentPageNavigator(
+        label = page?.let { "${it.title} of ${pages.size}" } ?: mimeType,
+        pageIndex = pageIndex,
+        pageCount = pages.size,
+        onPrevious = { pageIndex = (pageIndex - 1).coerceAtLeast(0) },
+        onNext = {
+          if (pages.isNotEmpty()) pageIndex = (pageIndex + 1).coerceAtMost(pages.lastIndex)
+        },
+      )
+      Surface(
+        modifier = Modifier.fillMaxWidth().weight(1f),
+        shape = FloveraSmallShape,
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+      ) {
+        when {
+          loading -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(modifier = Modifier.size(28.dp), strokeWidth = 2.dp)
+          }
+          error != null -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(error.orEmpty(), color = MaterialTheme.colorScheme.onSurfaceVariant)
+          }
+          page != null -> SelectionContainer {
+            Text(
+              text = page.content,
+              modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+              color = MaterialTheme.colorScheme.onSurface,
+              style = MaterialTheme.typography.bodyMedium,
+            )
+          }
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun DocumentPageNavigator(
+  label: String,
+  pageIndex: Int,
+  pageCount: Int,
+  onPrevious: () -> Unit,
+  onNext: () -> Unit,
+) {
+  Row(
+    modifier = Modifier.fillMaxWidth().height(40.dp),
+    horizontalArrangement = Arrangement.spacedBy(8.dp),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    IconButton(
+      onClick = onPrevious,
+      enabled = pageIndex > 0,
+      modifier = Modifier.semantics { contentDescription = "Previous page" },
+    ) {
+      Icon(Icons.Filled.ChevronLeft, contentDescription = null)
+    }
+    Text(
+      text = label,
+      modifier = Modifier.weight(1f),
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+      maxLines = 1,
+      overflow = TextOverflow.Ellipsis,
+      style = MaterialTheme.typography.bodySmall,
+    )
+    IconButton(
+      onClick = onNext,
+      enabled = pageCount > 0 && pageIndex < pageCount - 1,
+      modifier = Modifier.semantics { contentDescription = "Next page" },
+    ) {
+      Icon(Icons.Filled.ChevronRight, contentDescription = null)
+    }
   }
 }
 
@@ -2122,40 +2307,36 @@ private fun ConversationDialog(
     "$contentBucket:${draft.runEvents.size}:${draft.toolEvents.size}:${draft.transcriptEvents.size}:$lastEventTime"
   }.orEmpty()
   val workspaceMessagePaths = remember(state.workspaceTree) { state.workspaceTree.workspaceMessageLinkPaths() }
+  val coroutineScope = rememberCoroutineScope()
   var pendingRevertIndex by remember { mutableStateOf<Int?>(null) }
   var sessionPickerOpen by remember { mutableStateOf(false) }
   var moreMenuOpen by remember { mutableStateOf(false) }
-  var stickToConversationBottom by remember(state.session?.id) { mutableStateOf(true) }
-  var autoScrollingToConversationBottom by remember(state.session?.id) { mutableStateOf(false) }
+  var conversationScrollMode by remember(state.session?.id) {
+    mutableStateOf(ConversationScrollMode.BottomLocked)
+  }
+  val userScrollConnection = remember(state.session?.id) {
+    object : NestedScrollConnection {
+      override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+        if (source == NestedScrollSource.UserInput && available.y != 0f) {
+          conversationScrollMode = ConversationScrollMode.Free
+        }
+        return Offset.Zero
+      }
+    }
+  }
   val bottomInsetPadding = navigationBarsBottomPaddingWhenImeHidden()
   val designStyle = floveraDesignStyleEnabled()
 
-  suspend fun scrollToConversationBottom() {
-    autoScrollingToConversationBottom = true
-    try {
-      listState.scrollToItem(bottomAnchorIndex)
-    } finally {
-      autoScrollingToConversationBottom = false
-    }
-  }
-
-  LaunchedEffect(listState, state.session?.id) {
-    snapshotFlow { listState.isScrollInProgress to listState.isNearBottom() }
-      .collect { (isScrolling, isNearBottom) ->
-        if (isScrolling && !autoScrollingToConversationBottom) {
-          stickToConversationBottom = isNearBottom
-        }
-      }
-  }
-
   LaunchedEffect(state.session?.id) {
-    stickToConversationBottom = true
-    scrollToConversationBottom()
+    conversationScrollMode = ConversationScrollMode.BottomLocked
+    withFrameNanos { }
+    listState.scrollToItem(bottomAnchorIndex)
   }
 
-  LaunchedEffect(bottomAnchorIndex, assistantDraftScrollKey, stickToConversationBottom) {
-    if (stickToConversationBottom && !listState.isScrollInProgress) {
-      scrollToConversationBottom()
+  LaunchedEffect(bottomAnchorIndex, assistantDraftScrollKey, conversationScrollMode) {
+    if (conversationScrollMode == ConversationScrollMode.BottomLocked) {
+      withFrameNanos { }
+      listState.scrollToItem(bottomAnchorIndex)
     }
   }
 
@@ -2225,6 +2406,7 @@ private fun ConversationDialog(
                     moreMenuOpen = false
                     sessionPickerOpen = true
                   },
+                  enabled = !state.isRunning,
                 )
                 DropdownMenuItem(
                   text = { Text(t(language, "Open Preview", "\u6253\u5f00\u9884\u89c8")) },
@@ -2246,6 +2428,7 @@ private fun ConversationDialog(
                     moreMenuOpen = false
                     onOpenPanel(AgentPanel.Snapshots)
                   },
+                  enabled = !state.isRunning,
                 )
                 DropdownMenuItem(
                   text = { Text(t(language, "Skills", "\u6280\u80fd")) },
@@ -2253,6 +2436,7 @@ private fun ConversationDialog(
                     moreMenuOpen = false
                     onOpenPanel(AgentPanel.Skills)
                   },
+                  enabled = !state.isRunning,
                 )
                 DropdownMenuItem(
                   text = { Text(t(language, "Secrets", "\u5bc6\u94a5")) },
@@ -2260,6 +2444,7 @@ private fun ConversationDialog(
                     moreMenuOpen = false
                     onOpenPanel(AgentPanel.Secrets)
                   },
+                  enabled = !state.isRunning,
                 )
                 DropdownMenuItem(
                   text = { Text(t(language, "Permissions", "\u6743\u9650")) },
@@ -2267,6 +2452,7 @@ private fun ConversationDialog(
                     moreMenuOpen = false
                     onOpenPanel(AgentPanel.Permissions)
                   },
+                  enabled = !state.isRunning,
                 )
                 DropdownMenuItem(
                   text = { Text("AGENT.md") },
@@ -2274,6 +2460,7 @@ private fun ConversationDialog(
                     moreMenuOpen = false
                     onOpenPanel(AgentPanel.AgentFile)
                   },
+                  enabled = !state.isRunning,
                 )
                 DropdownMenuItem(
                   text = { Text(t(language, "Settings", "\u8bbe\u7f6e")) },
@@ -2281,6 +2468,7 @@ private fun ConversationDialog(
                     moreMenuOpen = false
                     onOpenPanel(AgentPanel.Settings)
                   },
+                  enabled = !state.isRunning,
                 )
               }
             }
@@ -2293,44 +2481,29 @@ private fun ConversationDialog(
           }
         }
 
-        LazyColumn(
+        Box(
           modifier = Modifier.fillMaxWidth().weight(1f),
-          state = listState,
-          verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-          if (messages.isNotEmpty()) {
-            itemsIndexed(
-              items = messages,
-              key = { index, message -> "${message.timestampMillis}-${message.role}-$index" },
-            ) { index, message ->
-              ConversationDisplayBlocks(
-                blocks = conversationDisplayBlocksForMessage(
-                  message = message,
-                  messageIndex = index,
-                  streaming = false,
-                  includeCompression = true,
-                  allowRevert = !state.isRunning,
-                  includeStreamingAssistantText = true,
-                  animateStreamingText = true,
-                ),
-                workspaceMessagePaths = workspaceMessagePaths,
-                language = language,
-                onOpenPath = {
-                  controller.selectWorkspacePreview(it)
-                  onDismiss()
-                },
-                onRevert = { pendingRevertIndex = it },
-              )
-            }
-            state.assistantDraft?.let { draft ->
-              item(key = "assistant-draft") {
+          LazyColumn(
+            modifier = Modifier
+              .fillMaxSize()
+              .nestedScroll(userScrollConnection)
+              .testTag("conversation-list"),
+            state = listState,
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+          ) {
+            if (messages.isNotEmpty()) {
+              itemsIndexed(
+                items = messages,
+                key = { index, message -> "${message.timestampMillis}-${message.role}-$index" },
+              ) { index, message ->
                 ConversationDisplayBlocks(
                   blocks = conversationDisplayBlocksForMessage(
-                    message = draft,
-                    messageIndex = null,
-                    streaming = true,
+                    message = message,
+                    messageIndex = index,
+                    streaming = false,
                     includeCompression = true,
-                    allowRevert = false,
+                    allowRevert = !state.isRunning,
                     includeStreamingAssistantText = true,
                     animateStreamingText = true,
                   ),
@@ -2340,13 +2513,61 @@ private fun ConversationDialog(
                     controller.selectWorkspacePreview(it)
                     onDismiss()
                   },
-                  onRevert = {},
+                  onRevert = { pendingRevertIndex = it },
                 )
               }
+              state.assistantDraft?.let { draft ->
+                item(key = "assistant-draft") {
+                  ConversationDisplayBlocks(
+                    blocks = conversationDisplayBlocksForMessage(
+                      message = draft,
+                      messageIndex = null,
+                      streaming = true,
+                      includeCompression = true,
+                      allowRevert = false,
+                      includeStreamingAssistantText = true,
+                      animateStreamingText = true,
+                    ),
+                    workspaceMessagePaths = workspaceMessagePaths,
+                    language = language,
+                    onOpenPath = {
+                      controller.selectWorkspacePreview(it)
+                      onDismiss()
+                    },
+                    onRevert = {},
+                  )
+                }
+              }
+            }
+            item(key = "conversation-bottom-anchor") {
+              Spacer(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .height(1.dp)
+                  .testTag("conversation-bottom-anchor"),
+              )
             }
           }
-          item(key = "conversation-bottom-anchor") {
-            Spacer(modifier = Modifier.fillMaxWidth().height(1.dp))
+
+          if (conversationScrollMode == ConversationScrollMode.Free) {
+            FloatingActionButton(
+              onClick = {
+                coroutineScope.launch {
+                  listState.animateScrollToItem(bottomAnchorIndex)
+                  conversationScrollMode = ConversationScrollMode.BottomLocked
+                }
+              },
+              modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 10.dp)
+                .size(48.dp)
+                .semantics { contentDescription = "Jump to latest and lock conversation" },
+              shape = FloveraFabShape,
+              containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+              contentColor = MaterialTheme.colorScheme.onSurface,
+            ) {
+              Icon(Icons.Filled.ArrowDownward, contentDescription = null, modifier = Modifier.size(20.dp))
+            }
           }
         }
 
@@ -2785,15 +3006,6 @@ private fun shouldShowConversationMessageBubble(message: SessionMessage): Boolea
   return content != "Working..." &&
     content != "Compressing context..." &&
     !content.startsWith("Working...\n\nProgress:")
-}
-
-private fun LazyListState.isNearBottom(thresholdPx: Int = 48): Boolean {
-  val layout = layoutInfo
-  val totalItems = layout.totalItemsCount
-  if (totalItems == 0) return true
-  val lastVisible = layout.visibleItemsInfo.lastOrNull() ?: return true
-  if (lastVisible.index < totalItems - 1) return false
-  return lastVisible.offset + lastVisible.size <= layout.viewportEndOffset + thresholdPx
 }
 
 private fun compactConversationTranscriptEvents(
@@ -3438,6 +3650,7 @@ private fun DisplayTargetPickerRow(
   mimeType: String,
   selected: Boolean,
   onOpen: () -> Unit,
+  onShare: (() -> Unit)? = null,
 ) {
   Surface(
     modifier = Modifier
@@ -3464,6 +3677,14 @@ private fun DisplayTargetPickerRow(
           style = MaterialTheme.typography.bodySmall,
         )
       }
+      if (onShare != null) {
+        IconButton(
+          onClick = onShare,
+          modifier = Modifier.semantics { contentDescription = "Share current display" },
+        ) {
+          Icon(Icons.Filled.Share, contentDescription = null)
+        }
+      }
     }
   }
 }
@@ -3476,6 +3697,7 @@ private fun HtmlFilesDialog(
   onDismiss: () -> Unit,
   onShowDisplay: () -> Unit,
 ) {
+  val context = LocalContext.current
   val sortedHtmlFiles = remember(state.htmlFiles, state.settings.pinnedHtmlPaths, state.settings.recentHtmlPaths) {
     val recentRank = state.settings.recentHtmlPaths.withIndex().associate { it.value to it.index }
     state.htmlFiles.sortedWith(
@@ -3495,7 +3717,10 @@ private fun HtmlFilesDialog(
     title = { Text(t(language, "Preview Display", "\u9884\u89c8\u5c55\u793a")) },
     text = {
       LazyColumn(
-        modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 420.dp),
+        modifier = Modifier
+          .fillMaxWidth()
+          .heightIn(min = 120.dp, max = 420.dp)
+          .testTag("preview-display-list"),
         verticalArrangement = Arrangement.spacedBy(8.dp),
       ) {
         if (currentDisplayPath.isNotBlank()) {
@@ -3508,6 +3733,7 @@ private fun HtmlFilesDialog(
               mimeType = currentDisplayMimeType,
               selected = true,
               onOpen = onDismiss,
+              onShare = { shareWorkspaceFile(context, controller, currentDisplayPath) },
             )
           }
         }
@@ -4167,6 +4393,7 @@ private fun FilesDialog(
               onRename = { renameTarget = it },
               onDelete = { deleteTarget = it },
               onCopyPath = { path -> clipboard.setPrimaryClip(ClipData.newPlainText("Workspace path", path)) },
+              allowMutations = !state.isRunning,
               language = language,
             )
           }
@@ -4243,6 +4470,7 @@ private fun WorkspaceFileTreeNode(
   onRename: (WorkspaceFileNode) -> Unit,
   onDelete: (WorkspaceFileNode) -> Unit,
   onCopyPath: (String) -> Unit,
+  allowMutations: Boolean,
 ) {
   var menuOpen by remember { mutableStateOf(false) }
   val expanded = node.path in expandedPaths
@@ -4303,6 +4531,7 @@ private fun WorkspaceFileTreeNode(
             menuOpen = false
             onRename(node)
           },
+          enabled = allowMutations,
         )
         DropdownMenuItem(
           text = { Text(t(language, "Delete", "\u5220\u9664")) },
@@ -4310,6 +4539,7 @@ private fun WorkspaceFileTreeNode(
             menuOpen = false
             onDelete(node)
           },
+          enabled = allowMutations,
         )
         DropdownMenuItem(
           text = { Text(t(language, "Copy path", "\u590d\u5236\u8def\u5f84")) },

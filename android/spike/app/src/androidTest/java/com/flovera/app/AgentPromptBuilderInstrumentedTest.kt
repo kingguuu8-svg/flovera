@@ -83,7 +83,7 @@ class AgentPromptBuilderInstrumentedTest {
     assertTrue(systemPrompt.contains("generic Flovera automation scripts under `.flovera/scripts`"))
     assertTrue(systemPrompt.contains("[\"flovera\",\"script\",\"run\",\"<name>\""))
     assertTrue(systemPrompt.contains("not Android-only macros"))
-    assertTrue(systemPrompt.contains("Use workspace_command_run for Office files"))
+    assertTrue(systemPrompt.contains("For DOCX, XLSX, PPTX, or PDF work"))
     assertTrue(systemPrompt.contains("flovera-office-suite"))
     assertTrue(systemPrompt.contains("openpyxl for XLSX"))
     assertTrue(systemPrompt.contains("fpdf2 plus an Android CJK font"))

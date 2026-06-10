@@ -399,7 +399,7 @@ object FloveraSkillRegistry {
         - PPTX: add `pil_shim` before `_pptx_analyze` on `sys.path`, then use `python-pptx 1.0.2`. The PIL compatibility layer maps the Image/ImageFont surface used by python-pptx to Android graphics APIs.
         - PDF: add `pil_shim` and `pdf_shim` to `sys.path`, then use `fpdf2 2.8.7`. For Chinese text, copy `/system/fonts/NotoSansCJK-Regular.ttc` into the workspace once with Groovy, register it with `add_font`, and let fpdf2 subset the used glyphs.
         - Use `workspace_command_run` for all Python or Groovy steps. Do not ask the Android user to open a terminal.
-        - For an existing DOCX/XLSX/PPTX, begin with `["flovera", "office", "inspect", "<path>"]`; validate before and after structural edits.
+        - For an existing DOCX/XLSX/PPTX, use `flovera office` as the structural inspection and validation layer. Begin with `["flovera", "office", "inspect", "<path>"]`; validate before and after structural edits.
         - `["flovera", "office", "text", ...]` and `replace` remain useful for lightweight extraction and simple replacement. Apache POI is an optional structural backend for DOCX/XLSX only, not the preferred creation pipeline.
         - Do not use POI XSLF for PPTX or ordinary docx4j on Android unless `inspect` explicitly reports that backend as supported.
         - After producing DOCX/XLSX/PPTX, run `["flovera", "office", "validate", "<path>"]` and `artifact_inspect`. After producing PDF, run `artifact_inspect`.
