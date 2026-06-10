@@ -627,33 +627,41 @@ private fun MissingApiSettingsEntry(
   onOpenSettings: () -> Unit,
   modifier: Modifier = Modifier,
 ) {
-  val designFrontend = floveraDesignFrontendEnabled()
-  val designLight = floveraDesignStyleEnabled()
   Surface(
     modifier = modifier
-      .height(44.dp)
+      .heightIn(min = 60.dp)
       .semantics { contentDescription = "Open settings to configure model API" }
       .clickable(onClick = onOpenSettings),
     shape = FloveraFabShape,
-    color = when {
-      designLight -> FloveraDesignElevated
-      designFrontend -> FloveraDesignDarkSettingMask
-      else -> MaterialTheme.colorScheme.errorContainer
-    },
-    contentColor = when {
-      designLight -> FloveraDesignMuted
-      designFrontend -> FloveraDesignDarkSettingOnMask
-      else -> MaterialTheme.colorScheme.onErrorContainer
-    },
-    tonalElevation = if (designFrontend) 0.dp else 3.dp,
+    color = MaterialTheme.colorScheme.errorContainer,
+    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+    tonalElevation = 2.dp,
   ) {
     Row(
-      modifier = Modifier.padding(horizontal = 14.dp),
-      horizontalArrangement = Arrangement.spacedBy(8.dp),
+      modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+      horizontalArrangement = Arrangement.spacedBy(10.dp),
       verticalAlignment = Alignment.CenterVertically,
     ) {
-      Icon(if (designFrontend) Icons.Filled.Tune else Icons.Filled.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
-      Text(t(language, "Configure API", "\u914d\u7f6e API"), style = MaterialTheme.typography.labelLarge)
+      Icon(Icons.Filled.Settings, contentDescription = null, modifier = Modifier.size(20.dp))
+      Column(
+        modifier = Modifier.weight(1f),
+        verticalArrangement = Arrangement.spacedBy(1.dp),
+      ) {
+        Text(
+          t(language, "Model API not configured", "\u5c1a\u672a\u914d\u7f6e\u6a21\u578b API"),
+          fontWeight = FontWeight.SemiBold,
+          style = MaterialTheme.typography.labelLarge,
+        )
+        Text(
+          t(
+            language,
+            "Configure an API key to start chatting",
+            "\u914d\u7f6e API \u5bc6\u94a5\u540e\u5373\u53ef\u5f00\u59cb\u5bf9\u8bdd",
+          ),
+          style = MaterialTheme.typography.bodySmall,
+        )
+      }
+      Icon(Icons.Filled.ChevronRight, contentDescription = null, modifier = Modifier.size(20.dp))
     }
   }
 }
@@ -764,6 +772,13 @@ private fun MainDisplayBottomBar(
       ),
       verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
+      if (!hasUsableApi) {
+        MissingApiSettingsEntry(
+          language = language,
+          onOpenSettings = onOpenSettings,
+          modifier = Modifier.fillMaxWidth(),
+        )
+      }
       BottomDisplayStatusLine(
         path = displayTargetPath,
         mimeType = displayMimeType,
@@ -787,12 +802,16 @@ private fun MainDisplayBottomBar(
           value = state.input,
           onValueChange = controller::updateInput,
           enabled = hasUsableApi || state.isRunning,
-          placeholder = t(language, "Message Flovera to create or edit", "\u548c Flovera \u5bf9\u8bdd\u6765\u521b\u5efa\u6216\u4fee\u6539"),
+          placeholder = if (hasUsableApi || state.isRunning) {
+            t(language, "Message Flovera to create or edit", "\u548c Flovera \u5bf9\u8bdd\u6765\u521b\u5efa\u6216\u4fee\u6539")
+          } else {
+            t(language, "Configure model API to start", "\u8bf7\u5148\u914d\u7f6e\u6a21\u578b API")
+          },
           modifier = Modifier.weight(1f),
         )
         CompactBarAction(
           contentDescription = when {
-            actionOpensSettings -> "Open settings to configure model API"
+            actionOpensSettings -> "Open model settings"
             !hasInput -> "Open conversation"
             else -> "Send lightweight message"
           },
@@ -1449,13 +1468,6 @@ private fun EmptyWorkspacePrompt(
             )
           }
         }
-      }
-      if (!hasUsableApi) {
-        MissingApiSettingsEntry(
-          language = state.settings.language,
-          onOpenSettings = onOpenSettings,
-          modifier = Modifier.fillMaxWidth(),
-        )
       }
     }
   }

@@ -2800,6 +2800,7 @@ data class FloveraCapabilities(
   val workspaceArtifactWorkspaceOwnedHttp: Boolean = true,
   val workspaceArtifactPythonHttpLifecycle: Boolean = true,
   val workspaceArtifactPythonHttpDiagnostics: Boolean = true,
+  val workspaceArtifactBackendFailureIsolation: Boolean = true,
   val workspaceArtifactViewportHelper: Boolean = true,
   val workspaceArtifactViewportCssVars: List<String> = listOf(
     "--flovera-viewport-height",

@@ -214,10 +214,14 @@ object FloveraSkillRegistry {
         Required workflow:
         - Build portable files first: `README.md`, `src/`, optional `src/server.py`, `src/web/`, `data/`, `outputs/`, and `flovera.app.json`.
         - Design for Android/mobile WebView before desktop. Use responsive layout, readable touch targets, safe bottom spacing, and stable first-screen content.
+        - Do not use a percentage-height chain such as `html, body, #app { height: 100%; }` for the page root. It can collapse to zero height inside Flovera WebView, especially when combined with `overflow: hidden`.
+        - Drive the root with `min-height: var(--flovera-viewport-height, 100vh)` and a column flex layout. Give nested flexible panes `flex: 1; min-height: 0` so editors, canvases, and scroll regions remain visible.
         - Prefer `local_http` with a Python stdlib `python_http` server for interactive apps. Use standard HTTP/fetch/SSE.
+        - A declared `python_http` command and `server.py` must accept the same arguments. Prefer `--host` and `--port` flags with `HOST`/`PORT` environment fallbacks; do not declare flags while parsing only positional `sys.argv` values.
         - Keep `flovera.app.json` as a small adapter. Do not invent a project-specific JSON handoff protocol as the main integration.
         - After writing or changing `flovera.app.json`, call `artifact_diagnose`. Do not claim registration or usability until diagnostics confirm the manifest and preview path.
         - If unsure about the manifest shape, call `artifact_diagnose` with `includeReference=true` and compare with the hidden reference app.
+        - Registration is not proof that the backend starts or the first screen is visible. Before reporting completion, verify the server parser matches the manifest command and verify the opened preview has visible first-screen content.
         - For games and touch-heavy UI, reason through first launch, first input, restart/new-game, touch/click path, viewport fit, and safe-bottom behavior before reporting completion.
       """.trimIndent()
 

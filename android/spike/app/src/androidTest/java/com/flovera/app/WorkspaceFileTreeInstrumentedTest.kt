@@ -230,6 +230,9 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(skill.contains("# Flovera Android WebView App"))
     assertTrue(skill.startsWith("---"))
     assertTrue(skill.contains("artifact_diagnose"))
+    assertTrue(skill.contains("height: 100%"))
+    assertTrue(skill.contains("min-height: var(--flovera-viewport-height, 100vh)"))
+    assertTrue(skill.contains("must accept the same arguments"))
     assertTrue(pythonSkill.contains("name: flovera-python-workspace-command"))
     assertTrue(pythonSkill.contains("description_zh:"))
     assertTrue(pythonSkill.contains("workspace_command_run"))
@@ -452,6 +455,73 @@ class WorkspaceFileTreeInstrumentedTest {
     assertEquals("error", status.state)
     assertTrue(status.detail.contains("python_http script does not exist"))
     assertFalse(status.detail.contains("/__flovera__/workspace/"))
+
+    settingsFile.delete()
+    File(File(context.filesDir, "workspaces"), workspaceId).deleteRecursively()
+  }
+
+  @Test
+  fun controllerContainsAutoStartedPythonHttpFailureWithoutCrashingApp() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspaceId = "controller-local-http-contained-${System.currentTimeMillis()}"
+    val workspace = WorkspaceManager(context, workspaceId).also { it.ensureSeedFiles() }
+    workspace.writeFile(
+      "broken/src/web/index.html",
+      "<!doctype html><title>Contained backend failure</title>",
+      createAutoSnapshot = false,
+    )
+    workspace.writeFile(
+      "broken/src/server.py",
+      """
+        import sys
+
+        host = sys.argv[1] if len(sys.argv) > 1 else "127.0.0.1"
+        port = int(sys.argv[2]) if len(sys.argv) > 2 else 8090
+        raise RuntimeError(f"unexpectedly reached {host}:{port}")
+      """.trimIndent(),
+      createAutoSnapshot = false,
+    )
+    workspace.writeFile(
+      "broken/flovera.app.json",
+      """
+        {
+          "schemaVersion": 1,
+          "name": "Contained backend failure",
+          "kind": "interactive",
+          "entrypoints": {
+            "preview": { "kind": "local_http", "path": "src/web/index.html" },
+            "server": {
+              "kind": "python_http",
+              "command": "python src/server.py --host 127.0.0.1 --port ${'$'}{PORT}",
+              "cwd": "."
+            }
+          }
+        }
+      """.trimIndent(),
+      createAutoSnapshot = false,
+    )
+    val settingsFile = File(context.filesDir, "$workspaceId-settings.json")
+    val settingsStore = SettingsStore(context, settingsFile).also {
+      it.save(
+        AppSettings(
+          activeWorkspaceId = workspaceId,
+          provider = "",
+          model = "",
+          selectedHtmlPath = "broken/src/web/index.html",
+        ),
+      )
+    }
+
+    val controller = AgentController(context, settingsStore = settingsStore)
+    val selectedError = awaitSelectedHtmlError(controller)
+
+    assertNull(controller.state.value.selectedHtmlUrl)
+    assertTrue(selectedError.contains("Artifact backend failed to start"))
+    assertTrue(selectedError.contains("invalid literal for int()"))
+    val status = controller.state.value.workspaceArtifactServerStatuses
+      .single { it.manifestPath == "broken/flovera.app.json" }
+    assertEquals("error", status.state)
+    assertTrue(status.detail.contains("invalid literal for int()"))
 
     settingsFile.delete()
     File(File(context.filesDir, "workspaces"), workspaceId).deleteRecursively()
@@ -2951,6 +3021,7 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"workspaceArtifactWorkspaceOwnedHttp\": true"))
     assertTrue(capabilities.contains("\"workspaceArtifactPythonHttpLifecycle\": true"))
     assertTrue(capabilities.contains("\"workspaceArtifactPythonHttpDiagnostics\": true"))
+    assertTrue(capabilities.contains("\"workspaceArtifactBackendFailureIsolation\": true"))
     assertTrue(capabilities.contains("\"workspaceArtifactViewportHelper\": true"))
     assertTrue(capabilities.contains("\"workspaceArtifactViewportCssVars\""))
     assertTrue(capabilities.contains("\"--flovera-viewport-height\""))

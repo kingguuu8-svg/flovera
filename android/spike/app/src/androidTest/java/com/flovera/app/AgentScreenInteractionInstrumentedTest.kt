@@ -109,6 +109,8 @@ class AgentScreenInteractionInstrumentedTest {
 
     composeRule.onNodeWithText("No preview \u00b7 choose display").assertIsDisplayed()
     composeRule.onNodeWithText("Make a scientific calculator").assertIsDisplayed()
+    composeRule.onNodeWithText("Model API not configured").assertIsDisplayed()
+    composeRule.onNodeWithText("Configure an API key to start chatting").assertIsDisplayed()
     composeRule.onNodeWithContentDescription("Open settings to configure model API").assertIsDisplayed()
     composeRule.runOnIdle {
       val state = controller.state.value
@@ -120,6 +122,34 @@ class AgentScreenInteractionInstrumentedTest {
       assertEquals(null, state.selectedHtmlUrl)
       assertTrue(state.htmlFiles.contains("index.html"))
     }
+  }
+
+  @Test
+  fun missingApiGuidanceFollowsChineseLanguageSetting() {
+    val context = composeRule.activity.applicationContext
+    val root = File(context.cacheDir, "missing-api-zh-${System.currentTimeMillis()}").apply {
+      deleteRecursively()
+      mkdirs()
+    }
+    val workspaceId = "missing-api-zh-${System.currentTimeMillis()}"
+    val settingsStore = SettingsStore(context, File(root, "settings.json")).also {
+      it.save(AppSettings(selectedHtmlPath = "", language = "zh", activeWorkspaceId = workspaceId))
+    }
+    val controller = AgentController(
+      context,
+      settingsStore = settingsStore,
+      sessionStore = AgentSessionStore(context, File(root, "sessions")),
+    )
+
+    composeRule.setContent {
+      AgentScreen(controller)
+    }
+
+    composeRule.onNodeWithText("\u5c1a\u672a\u914d\u7f6e\u6a21\u578b API").assertIsDisplayed()
+    composeRule.onNodeWithText("\u914d\u7f6e API \u5bc6\u94a5\u540e\u5373\u53ef\u5f00\u59cb\u5bf9\u8bdd").assertIsDisplayed()
+    composeRule.onNodeWithContentDescription("Open settings to configure model API").performClick()
+    composeRule.onNodeWithText("\u8bbe\u7f6e").assertIsDisplayed()
+    root.deleteRecursively()
   }
 
   @Test

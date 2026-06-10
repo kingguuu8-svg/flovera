@@ -1045,7 +1045,10 @@ silently fall back to static HTML when startup fails. App startup and backend
 startup are separate phases: Flovera opens the shell first, then starts the
 selected backend asynchronously with a visible loading state and stale-result
 guard for rapid HTML switching or pinning. Startup waits through real-device
-Python cold-start latency and then reports a server status error.
+Python cold-start latency and then reports a server status error. Workspace
+backend exceptions are contained inside the artifact runtime and recorded as
+preview/status errors; malformed user server code cannot terminate Flovera or
+trap the user in an auto-restored crash loop.
 Remaining work is richer artifact validation and broader UX polish.
 
 - Goal: let the agent create a portable project that can be opened, run, edited,
@@ -1076,7 +1079,9 @@ Remaining work is richer artifact validation and broader UX polish.
       and extend startup tolerance for real-device Python cold starts.
   11. Done: move python_http startup off app initialization into an asynchronous
       preview-loading phase with stale-result protection.
-  12. Remaining: add render-level validation beyond the current WebView
+  12. Done: isolate uncaught workspace python_http exceptions from the Android
+      app process and preserve their details in preview/runtime status.
+  13. Remaining: add render-level validation beyond the current WebView
       visibility probe and make artifact diagnostics more user-facing.
 - Acceptance criteria:
   - generated artifacts remain understandable and runnable outside Flovera with
@@ -1089,6 +1094,8 @@ Remaining work is richer artifact validation and broader UX polish.
     URL or reports a backend startup error, never a misleading static fallback;
   - opening Flovera, pinning HTML, or switching HTML does not synchronously wait
     for Python startup;
+  - a malformed auto-restored workspace backend reports its startup error while
+    Flovera remains usable for switching previews, editing, and recovery;
   - the main flow does not rely on each project inventing its own
     `input.json`/`output.json` protocol.
 
@@ -1151,7 +1158,10 @@ validation.
 - Update artifact-generation guidance so HTML is explicitly designed for
   Android/mobile WebView first: responsive viewport, tap targets, safe bottom
   area, no first-load autofocus, no zero-height roots, and no desktop-only
-  assumptions.
+  assumptions. The built-in app skill now explicitly rejects percentage-height
+  root chains, requires the Flovera viewport `min-height` contract with
+  `min-height: 0` flex children, and requires python_http command arguments to
+  match the server parser.
 - Acceptance criteria:
   - the agent can compare a generated app against the hidden reference without
     copying it into the user's visible workspace;
@@ -1172,6 +1182,12 @@ content probe after dynamic-page startup has a short grace period, and reports
 specific likely invisible-content causes such as missing body, zero viewport,
 empty body, or no visible candidates. Remaining work is a user-facing artifact
 validator or `artifact_inspect` successor with richer DOM diagnostics.
+
+The app-owned WebView skill now carries the exact real-device failure pattern:
+`html, body, #app { height: 100%; }` can collapse inside the Flovera WebView.
+Generated full-height pages must use
+`min-height: var(--flovera-viewport-height, 100vh)` at the root and
+`flex: 1; min-height: 0` for nested editors, canvases, or scroll panes.
 
 - Treat Android WebView layout differences as a Flovera runtime responsibility,
   not something every generated artifact must rediscover.

@@ -154,7 +154,7 @@ class WorkspacePythonHttpRuntime(
               )
           } catch (error: Throwable) {
             startupError.set(error)
-            throw error
+            lastErrors[key] = error.message ?: error::class.java.simpleName
           }
         },
       )
