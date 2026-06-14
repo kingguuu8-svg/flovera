@@ -102,7 +102,7 @@ class WorkspaceController(context: Context, workspaceId: String) {
             )
           },
       ),
-      providerProfileCatalog = ModelProviderCatalog.providers.map { provider ->
+      providerProfileCatalog = ModelProviderCatalog.selectableProviders.map { provider ->
         val profile = ModelProviderCatalog.runtimeProfileFor(provider, settings)
         FloveraProviderProfileView(
           id = provider.id,
@@ -136,7 +136,7 @@ class WorkspaceController(context: Context, workspaceId: String) {
           customRequestBody = false,
         )
       },
-      providerApiModes = ModelProviderCatalog.supportedApiModes,
+      providerApiModes = ModelProviderCatalog.supportedSelectableApiModes,
     )
   }
 

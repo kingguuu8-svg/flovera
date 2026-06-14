@@ -43,7 +43,7 @@ class SettingsController(private val store: SettingsStore) {
   }
 
   fun draftFor(settings: AppSettings): ModelSettingsDraft {
-    val provider = ModelProviderCatalog.findProvider(settings.provider) ?: ModelProviderCatalog.defaultProvider
+    val provider = ModelProviderCatalog.findSelectableProvider(settings.provider) ?: ModelProviderCatalog.defaultProvider
     val model = settings.model.ifBlank { provider.defaultModel }
     return ModelSettingsDraft(
       providerId = provider.id,
@@ -56,7 +56,7 @@ class SettingsController(private val store: SettingsStore) {
   }
 
   fun draftForProvider(settings: AppSettings, providerId: String): ModelSettingsDraft? {
-    val provider = ModelProviderCatalog.findProvider(providerId) ?: return null
+    val provider = ModelProviderCatalog.findSelectableProvider(providerId) ?: return null
     return ModelSettingsDraft(
       providerId = provider.id,
       model = provider.defaultModel,
@@ -68,8 +68,12 @@ class SettingsController(private val store: SettingsStore) {
   }
 
   fun saveModelSettings(settings: AppSettings, draft: ModelSettingsDraft): AppSettings {
-    val provider = ModelProviderCatalog.findProvider(draft.providerId) ?: ModelProviderCatalog.defaultProvider
-    val model = draft.model.trim().ifBlank { provider.defaultModel }
+    val provider = ModelProviderCatalog.findSelectableProvider(draft.providerId) ?: ModelProviderCatalog.defaultProvider
+    val model = if (provider.id == draft.providerId.trim().lowercase()) {
+      draft.model.trim().ifBlank { provider.defaultModel }
+    } else {
+      provider.defaultModel
+    }
     val updated = settings
       .copy(
         provider = provider.id,
@@ -185,11 +189,16 @@ class SettingsController(private val store: SettingsStore) {
   }
 
   fun applySettingsProposal(settings: AppSettings, changes: SettingsProposalChanges): AppSettings {
-    val provider = changes.provider
-      ?.let { ModelProviderCatalog.findProvider(it.trim()) }
-      ?: ModelProviderCatalog.findProvider(settings.provider)
+    val proposedProviderId = changes.provider?.trim()?.takeIf { it.isNotBlank() }
+    val proposedProvider = proposedProviderId?.let { ModelProviderCatalog.findSelectableProvider(it) }
+    val provider = proposedProvider
+      ?: ModelProviderCatalog.findSelectableProvider(settings.provider)
       ?: ModelProviderCatalog.defaultProvider
-    val model = changes.model?.trim()?.takeIf { it.isNotBlank() } ?: settings.model.ifBlank { provider.defaultModel }
+    val model = if (proposedProviderId != null && proposedProvider == null) {
+      provider.defaultModel
+    } else {
+      changes.model?.trim()?.takeIf { it.isNotBlank() } ?: settings.model.ifBlank { provider.defaultModel }
+    }
     val maxIterations = changes.maxAgentIterations
       ?.let { normalizeMaxAgentIterations(it) }
       ?: settings.maxAgentIterations
@@ -268,7 +277,7 @@ class SettingsController(private val store: SettingsStore) {
   }
 
   private fun normalizeProviderAndModel(settings: AppSettings): AppSettings {
-    val provider = ModelProviderCatalog.findProvider(settings.provider) ?: ModelProviderCatalog.defaultProvider
+    val provider = ModelProviderCatalog.findSelectableProvider(settings.provider) ?: ModelProviderCatalog.defaultProvider
     val model = settings.model.ifBlank { provider.defaultModel }
     return settings.copy(provider = provider.id, model = model)
   }

@@ -269,7 +269,7 @@ class AgentController(
   }
 
   fun updateAgentRules(value: String) {
-    if (rejectMutationWhileRunning("AGENT.md editing")) return
+    if (rejectMutationWhileRunning("Rule editing")) return
     _state.update { it.copy(agentRulesDraft = value) }
   }
 
@@ -390,9 +390,9 @@ class AgentController(
   }
 
   fun saveAgentRules(content: String = _state.value.agentRulesDraft) {
-    if (rejectMutationWhileRunning("AGENT.md editing")) return
+    if (rejectMutationWhileRunning("Rule editing")) return
     workspaceController.writeAgentRules(content)
-    refreshWorkspaceState(status = "AGENT.md saved")
+    refreshWorkspaceState(status = "Rule saved")
     _state.update { it.copy(agentRulesDraft = content) }
   }
 

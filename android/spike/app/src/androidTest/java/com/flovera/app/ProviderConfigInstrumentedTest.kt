@@ -81,6 +81,10 @@ class ProviderConfigInstrumentedTest {
     assertTrue(ModelProviderCatalog.supportedApiModes.contains("anthropic_messages"))
     assertTrue(ModelProviderCatalog.supportedApiModes.contains("bedrock_converse"))
     assertTrue(ModelProviderCatalog.supportedApiModes.contains("codex_responses"))
+    assertEquals(listOf("deepseek"), ModelProviderCatalog.selectableProviders.map { it.id })
+    assertEquals(listOf("chat_completions"), ModelProviderCatalog.supportedSelectableApiModes)
+    assertEquals(null, ModelProviderCatalog.findSelectableProvider("openai"))
+    assertEquals("deepseek", ModelProviderCatalog.findSelectableProvider("deepseek")?.id)
   }
 
   @Test
@@ -1681,6 +1685,8 @@ class ProviderConfigInstrumentedTest {
           customOpenAIBaseUrl = "https://llm.example.com/",
           customOpenAIChatCompletionsPath = "v1/chat/completions",
           customOpenAICompatibilityMode = "ollama",
+          provider = "openai",
+          model = "gpt-4.1",
           openRouterProviderPreferences = JsonObject(mapOf("sort" to JsonPrimitive("throughput"))),
           openRouterMinCodingScore = 1.2,
           modelContextWindowTokens = 512_000,
@@ -1696,6 +1702,8 @@ class ProviderConfigInstrumentedTest {
       assertTrue(updated.webSearchUserConfigured)
       assertTrue(updated.backgroundKeepAliveEnabled)
       assertEquals("zh", updated.language)
+      assertEquals("deepseek", updated.provider)
+      assertEquals(ModelProviderCatalog.defaultProvider.defaultModel, updated.model)
       assertEquals(0, updated.maxAgentIterations)
       assertEquals("full", updated.agentAuthorityMode)
       assertEquals("max", updated.deepSeekThinkingEffort)
@@ -1916,15 +1924,15 @@ class ProviderConfigInstrumentedTest {
       assertEquals(ModelProviderCatalog.defaultProvider.defaultModel, normalized.model)
 
       val openAiDraft = controller.draftForProvider(normalized, "openai")
-      assertEquals("openai", openAiDraft?.providerId)
+      assertEquals(null, openAiDraft)
 
       val saved = controller.saveModelSettings(
         normalized,
         ModelSettingsDraft(providerId = "openai", model = "  ", apiKey = " openai-key "),
       )
-      assertEquals("openai", saved.provider)
-      assertEquals(ModelProviderCatalog.findProvider("openai")?.defaultModel, saved.model)
-      assertEquals("openai-key", saved.apiKeyFor("openai"))
+      assertEquals("deepseek", saved.provider)
+      assertEquals(ModelProviderCatalog.defaultProvider.defaultModel, saved.model)
+      assertEquals("openai-key", saved.apiKeyFor("deepseek"))
 
       val customSaved = controller.saveModelSettings(
         saved,
@@ -1937,9 +1945,9 @@ class ProviderConfigInstrumentedTest {
           customOpenAICompatibilityMode = "OLLAMA",
         ),
       )
-      assertEquals("custom-openai", customSaved.provider)
-      assertEquals("custom-model", customSaved.model)
-      assertEquals("custom-key", customSaved.apiKeyFor("custom-openai"))
+      assertEquals("deepseek", customSaved.provider)
+      assertEquals(ModelProviderCatalog.defaultProvider.defaultModel, customSaved.model)
+      assertEquals("custom-key", customSaved.apiKeyFor("deepseek"))
       assertEquals("https://llm.example.com/v1", customSaved.customOpenAIProvider.baseUrl)
       assertEquals("/chat/completions", customSaved.customOpenAIProvider.chatCompletionsPath)
       assertEquals("ollama", customSaved.customOpenAIProvider.compatibilityMode)
@@ -1948,9 +1956,9 @@ class ProviderConfigInstrumentedTest {
         customSaved,
         ModelSettingsDraft(providerId = "claude", model = "", apiKey = " anthropic-key "),
       )
-      assertEquals("anthropic", aliasSaved.provider)
-      assertEquals(ModelProviderCatalog.requireProvider("anthropic").defaultModel, aliasSaved.model)
-      assertEquals("anthropic-key", aliasSaved.apiKeyFor("anthropic"))
+      assertEquals("deepseek", aliasSaved.provider)
+      assertEquals(ModelProviderCatalog.defaultProvider.defaultModel, aliasSaved.model)
+      assertEquals("anthropic-key", aliasSaved.apiKeyFor("deepseek"))
     } finally {
       store.save(original)
     }

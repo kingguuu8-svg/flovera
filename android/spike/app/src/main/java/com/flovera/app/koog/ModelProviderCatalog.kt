@@ -908,7 +908,13 @@ object ModelProviderCatalog {
 
   val defaultProvider: ModelProviderSpec = providers.first()
 
+  val selectableProviders: List<ModelProviderSpec> = providers.filter { it.id == defaultProvider.id }
+
   val supportedApiModes: List<String> = providers
+    .map { it.apiMode.id }
+    .distinct()
+
+  val supportedSelectableApiModes: List<String> = selectableProviders
     .map { it.apiMode.id }
     .distinct()
 
@@ -916,6 +922,14 @@ object ModelProviderCatalog {
     val normalized = providerId.trim().lowercase()
     if (normalized.isBlank()) return null
     return providers.firstOrNull { provider ->
+      provider.id == normalized || normalized in provider.aliases
+    }
+  }
+
+  fun findSelectableProvider(providerId: String): ModelProviderSpec? {
+    val normalized = providerId.trim().lowercase()
+    if (normalized.isBlank()) return null
+    return selectableProviders.firstOrNull { provider ->
       provider.id == normalized || normalized in provider.aliases
     }
   }

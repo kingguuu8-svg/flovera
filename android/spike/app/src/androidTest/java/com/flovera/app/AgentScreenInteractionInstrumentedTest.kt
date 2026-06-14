@@ -1,6 +1,7 @@
 package com.flovera.app
 
 import androidx.activity.ComponentActivity
+import android.content.ClipboardManager
 import android.graphics.Bitmap
 import android.graphics.pdf.PdfDocument
 import androidx.compose.ui.test.hasSetTextAction
@@ -55,7 +56,7 @@ class AgentScreenInteractionInstrumentedTest {
   }
 
   private fun usableSettings(settings: AppSettings = AppSettings()): AppSettings {
-    return settings.copy(provider = "lmstudio", model = "local-model")
+    return settings.copy(provider = "deepseek", model = "deepseek-v4-pro", apiKey = "test-deepseek-key")
   }
 
   @Test
@@ -467,7 +468,7 @@ class AgentScreenInteractionInstrumentedTest {
     composeRule.onNodeWithContentDescription("More").performClick()
     composeRule.onNodeWithText("Sessions").assertIsNotEnabled()
     composeRule.onNodeWithText("Settings").assertIsNotEnabled()
-    composeRule.onNodeWithText("AGENT.md").assertIsNotEnabled()
+    composeRule.onNodeWithText("Rule").assertIsNotEnabled()
 
     composeRule.runOnIdle {
       controller.openSession(originalSessionId)
@@ -643,12 +644,49 @@ class AgentScreenInteractionInstrumentedTest {
     composeRule.onNodeWithText("Sessions").assertIsDisplayed()
     composeRule.onNodeWithText("Open Preview").assertIsDisplayed()
     composeRule.onNodeWithText("Files").assertIsDisplayed()
+    assertEquals(0, composeRule.onAllNodesWithText("Snapshots").fetchSemanticsNodes().size)
     composeRule.onNodeWithText("Permissions").performClick()
     composeRule.onNodeWithText("Grant all").assertIsDisplayed()
     composeRule.onNodeWithText("Done").performClick()
     composeRule.onNodeWithContentDescription("More").performClick()
-    composeRule.onNodeWithText("AGENT.md").assertIsDisplayed()
+    composeRule.onNodeWithText("Rule").assertIsDisplayed()
     composeRule.onNodeWithText("Settings").assertIsDisplayed()
+  }
+
+  @Test
+  fun conversationUserAndAssistantMessagesCanBeCopied() {
+    val context = composeRule.activity.applicationContext
+    val workspaceId = "copy-messages-${System.currentTimeMillis()}"
+    val store = AgentSessionStore(context)
+    val session = store.create("copy messages")
+    store.appendMessage(session, SessionMessage(role = "user", content = "copy this user text"))
+    store.appendMessage(session, SessionMessage(role = "assistant", content = "copy this assistant text"))
+    SettingsStore(context).save(
+      usableSettings(
+        AppSettings(
+          language = "en",
+          activeWorkspaceId = workspaceId,
+          activeSessionId = session.id,
+        ),
+      ),
+    )
+    val controller = AgentController(context)
+
+    composeRule.setContent {
+      AgentScreen(controller)
+    }
+
+    openConversation()
+    composeRule.onNodeWithContentDescription("Copy You message").performClick()
+    composeRule.runOnIdle {
+      val clipboard = context.getSystemService(ClipboardManager::class.java)
+      assertEquals("copy this user text", clipboard.primaryClip?.getItemAt(0)?.coerceToText(context).toString())
+    }
+    composeRule.onNodeWithContentDescription("Copy Assistant message").performClick()
+    composeRule.runOnIdle {
+      val clipboard = context.getSystemService(ClipboardManager::class.java)
+      assertEquals("copy this assistant text", clipboard.primaryClip?.getItemAt(0)?.coerceToText(context).toString())
+    }
   }
 
   @Test
@@ -1052,7 +1090,7 @@ class AgentScreenInteractionInstrumentedTest {
 
     openConversation()
     composeRule.onNodeWithContentDescription("More").performClick()
-    composeRule.onNodeWithText("AGENT.md").performClick()
+    composeRule.onNodeWithText("Rule").performClick()
     composeRule.onAllNodes(hasSetTextAction())[0].performTextClearance()
     composeRule.onAllNodes(hasSetTextAction())[0].performTextInput("discard me")
     composeRule.onNodeWithText("Cancel").performClick()

@@ -20,11 +20,8 @@ import android.widget.ImageView
 import android.widget.Toast
 import android.text.TextUtils
 import android.text.method.LinkMovementMethod
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -69,6 +66,7 @@ import androidx.compose.material.icons.filled.ChatBubble
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Preview
@@ -166,7 +164,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -262,7 +259,6 @@ private enum class AgentPanel {
   HtmlFiles,
   ArtifactJobs,
   Files,
-  Snapshots,
   Skills,
   Secrets,
   Permissions,
@@ -306,7 +302,6 @@ fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
   val hasUsableApi = hasUsableProviderApi(state.settings)
   val displayTargetPath = currentDisplayTargetPath(state)
   var starterPromptsDismissed by remember { mutableStateOf(false) }
-  var revealNextMainDisplayConversationBlocks by remember { mutableStateOf(false) }
   var previewChromeColor by remember { mutableStateOf<Color?>(null) }
   fun openPanelFromMainDisplay(panel: AgentPanel) {
     panelStack = listOf(panel)
@@ -330,7 +325,6 @@ fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
     }
     val createsNewProjectSession = !hasPreviewSurface && state.session?.messages.orEmpty().isEmpty()
     if (createsNewProjectSession && !state.isRunning) {
-      revealNextMainDisplayConversationBlocks = true
       controller.submitInNewSession(trimmed)
     } else {
       controller.submit()
@@ -360,16 +354,6 @@ fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
           chromeColorSamplingEnabled = designFrontend,
           onChromeColorSampled = { previewChromeColor = it },
         )
-        MainDisplayMessageOverlay(
-          state = state,
-          language = language,
-          revealInitialBlocks = revealNextMainDisplayConversationBlocks,
-          onInitialBlocksRevealed = { revealNextMainDisplayConversationBlocks = false },
-          modifier = Modifier
-            .align(Alignment.BottomCenter)
-            .fillMaxHeight(0.33f)
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-        )
         MainDisplayStarterPrompts(
           visible = !starterPromptsDismissed && !hasPreviewSurface && state.selectedHtmlError.isBlank(),
           language = language,
@@ -377,7 +361,6 @@ fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
           onSubmitPreset = { prompt ->
             if (!state.isRunning && hasUsableApi) {
               starterPromptsDismissed = true
-              revealNextMainDisplayConversationBlocks = true
               controller.submitInNewSession(prompt)
             }
           },
@@ -435,13 +418,6 @@ fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
       language = language,
       onDismiss = ::dismissTopPanel,
       onShowDisplay = ::dismissConversationPanel,
-    )
-
-    AgentPanel.Snapshots -> SnapshotsDialog(
-      state = state,
-      controller = controller,
-      language = language,
-      onDismiss = ::dismissTopPanel,
     )
 
     AgentPanel.Skills -> SkillsDialog(
@@ -1000,115 +976,6 @@ private fun CompactBarAction(
 }
 
 @Composable
-private fun MainDisplayMessageOverlay(
-  state: AgentScreenState,
-  language: String,
-  revealInitialBlocks: Boolean,
-  onInitialBlocksRevealed: () -> Unit,
-  modifier: Modifier = Modifier,
-) {
-  val sessionId = state.session?.id.orEmpty()
-  val currentBlocks = remember(state.session?.messages, state.assistantDraft) {
-    mainDisplayConversationDisplayBlocks(state)
-  }
-  val workspaceMessagePaths = remember(state.workspaceTree) { state.workspaceTree.workspaceMessageLinkPaths() }
-  val currentLifecycleIds = currentBlocks.map { it.overlayLifecycleId() }.toSet()
-  var initialized by remember(sessionId) { mutableStateOf(false) }
-  var seenIds by remember(sessionId) { mutableStateOf<Set<String>>(emptySet()) }
-  var activeIds by remember(sessionId) { mutableStateOf<Set<String>>(emptySet()) }
-
-  LaunchedEffect(sessionId, currentLifecycleIds, revealInitialBlocks) {
-    if (!initialized) {
-      seenIds = currentLifecycleIds
-      if (revealInitialBlocks && currentLifecycleIds.isNotEmpty()) {
-        activeIds = currentLifecycleIds
-        onInitialBlocksRevealed()
-      }
-      initialized = true
-      return@LaunchedEffect
-    }
-    val newIds = currentLifecycleIds - seenIds
-    if (newIds.isNotEmpty()) {
-      activeIds = activeIds + newIds
-      seenIds = seenIds + newIds
-    }
-    activeIds = activeIds.intersect(currentLifecycleIds)
-  }
-
-  val visibleBlocks = currentBlocks
-    .distinctBy { it.overlayLifecycleId() }
-    .filter { it.overlayLifecycleId() in activeIds }
-    .takeLast(5)
-  if (visibleBlocks.isNotEmpty()) {
-    Column(
-      modifier = modifier.fillMaxWidth(),
-      verticalArrangement = Arrangement.spacedBy(7.dp, Alignment.Bottom),
-    ) {
-      visibleBlocks.forEach { block ->
-        val lifecycleId = block.overlayLifecycleId()
-        key(lifecycleId) {
-          FadingConversationDisplayBlock(
-            block = block,
-            lifecycleId = lifecycleId,
-            workspaceMessagePaths = workspaceMessagePaths,
-            language = language,
-            onOpenPath = {},
-            onExpired = { expiredId -> activeIds = activeIds - expiredId },
-          )
-        }
-      }
-    }
-  }
-}
-
-@Composable
-private fun FadingConversationDisplayBlock(
-  block: ConversationDisplayBlock,
-  lifecycleId: String,
-  workspaceMessagePaths: List<String>,
-  language: String,
-  onOpenPath: (String) -> Unit,
-  onExpired: (String) -> Unit,
-) {
-  var visible by remember(lifecycleId) { mutableStateOf(true) }
-  val designStyle = floveraDesignStyleEnabled()
-
-  LaunchedEffect(lifecycleId) {
-    delay(2000)
-    visible = false
-    delay(1000)
-    onExpired(lifecycleId)
-  }
-
-  AnimatedVisibility(
-    visible = visible,
-    enter = fadeIn(animationSpec = tween(durationMillis = 120)),
-    exit = fadeOut(animationSpec = tween(durationMillis = 1000)),
-  ) {
-    Surface(
-      modifier = Modifier
-        .fillMaxWidth(),
-      shape = RoundedCornerShape(if (designStyle) 12.dp else 18.dp),
-      color = if (designStyle) FloveraDesignSurface.copy(alpha = 0.92f) else MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
-      contentColor = if (designStyle) FloveraDesignText else MaterialTheme.colorScheme.onSurface,
-      tonalElevation = if (designStyle) 0.dp else 6.dp,
-      border = if (designStyle) BorderStroke(1.dp, FloveraDesignAccent.copy(alpha = 0.24f)) else null,
-    ) {
-      Box(modifier = Modifier.padding(horizontal = 8.dp, vertical = 7.dp)) {
-        ConversationDisplayBlockContent(
-          block = block,
-          workspaceMessagePaths = workspaceMessagePaths,
-          language = language,
-          onOpenPath = onOpenPath,
-          onRevert = null,
-          maxContentLines = 2,
-        )
-      }
-    }
-  }
-}
-
-@Composable
 private fun ConversationDisplayBlockContent(
   block: ConversationDisplayBlock,
   workspaceMessagePaths: List<String>,
@@ -1171,35 +1038,6 @@ private fun ConversationDisplayBlocks(
       }
     }
   }
-}
-
-private fun mainDisplayConversationDisplayBlocks(state: AgentScreenState): List<ConversationDisplayBlock> {
-  val blocks = mutableListOf<ConversationDisplayBlock>()
-  state.session?.messages.orEmpty()
-    .takeLast(4)
-    .forEachIndexed { index, message ->
-      blocks += conversationDisplayBlocksForMessage(
-        message = message,
-        messageIndex = index,
-        streaming = false,
-        includeCompression = false,
-        allowRevert = false,
-        includeStreamingAssistantText = true,
-        animateStreamingText = false,
-      )
-    }
-  state.assistantDraft?.let { draft ->
-    blocks += conversationDisplayBlocksForMessage(
-      message = draft,
-      messageIndex = null,
-      streaming = true,
-      includeCompression = false,
-      allowRevert = false,
-      includeStreamingAssistantText = false,
-      animateStreamingText = false,
-      )
-    }
-  return blocks.filter(::shouldShowMainDisplayOverlayBlock)
 }
 
 private fun conversationDisplayBlocksForMessage(
@@ -1292,31 +1130,6 @@ private fun navigationBarsBottomPaddingWhenImeHidden(): androidx.compose.ui.unit
   val imeBottom = WindowInsets.ime.getBottom(density)
   if (imeBottom > 0) return 0.dp
   return with(density) { WindowInsets.navigationBars.getBottom(density).toDp() }
-}
-
-private fun shouldShowMainDisplayOverlayBlock(block: ConversationDisplayBlock): Boolean {
-  return when (block) {
-    is ConversationCompressionDisplayBlock -> false
-    is ConversationMessageDisplayBlock -> block.message.content.isNotBlank()
-    is ConversationTimelineDisplayBlock -> shouldShowMainDisplayOverlayTimelineEvent(block.event)
-  }
-}
-
-private fun shouldShowMainDisplayOverlayTimelineEvent(event: AgentRunTimelineEvent): Boolean {
-  return when (event.type) {
-    "tool_call" -> event.status != "running"
-    "run_failed",
-    "run_interrupted" -> true
-    else -> false
-  }
-}
-
-private fun ConversationDisplayBlock.overlayLifecycleId(): String {
-  return when (this) {
-    is ConversationMessageDisplayBlock -> "overlay-message:${message.role}:${message.timestampMillis}"
-    is ConversationTimelineDisplayBlock -> "overlay-event:${event.type}:${event.title}:${event.timestampMillis}"
-    is ConversationCompressionDisplayBlock -> "overlay-compression:${message.timestampMillis}"
-  }
 }
 
 @Composable
@@ -2435,14 +2248,6 @@ private fun ConversationDialog(
                   },
                 )
                 DropdownMenuItem(
-                  text = { Text(t(language, "Snapshots", "\u5feb\u7167")) },
-                  onClick = {
-                    moreMenuOpen = false
-                    onOpenPanel(AgentPanel.Snapshots)
-                  },
-                  enabled = !state.isRunning,
-                )
-                DropdownMenuItem(
                   text = { Text(t(language, "Skills", "\u6280\u80fd")) },
                   onClick = {
                     moreMenuOpen = false
@@ -2467,7 +2272,7 @@ private fun ConversationDialog(
                   enabled = !state.isRunning,
                 )
                 DropdownMenuItem(
-                  text = { Text("AGENT.md") },
+                  text = { Text(t(language, "Rule", "\u89c4\u5219")) },
                   onClick = {
                     moreMenuOpen = false
                     onOpenPanel(AgentPanel.AgentFile)
@@ -2860,8 +2665,10 @@ private fun MessageBubble(
   maxContentLines: Int? = null,
 ) {
   val designStyle = floveraDesignStyleEnabled()
+  val context = LocalContext.current
   val isUser = message.role == "user"
   val isError = message.role == "error"
+  val canCopy = message.content.isNotBlank() && !streaming && (isUser || message.role == "assistant")
   val horizontal = if (isUser) Arrangement.End else Arrangement.Start
   val bubbleColor = when {
     isUser && designStyle -> FloveraDesignUserBubble
@@ -2934,14 +2741,34 @@ private fun MessageBubble(
                 style = MaterialTheme.typography.labelSmall,
               )
             }
-            onRevert?.let {
-              IconButton(
-                onClick = it,
-                modifier = Modifier.semantics {
-                  contentDescription = "Revert to before this message"
-                },
-              ) {
-                Text("\u21A9", color = textColor.copy(alpha = 0.82f), style = MaterialTheme.typography.titleMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
+              if (canCopy) {
+                IconButton(
+                  onClick = {
+                    context.getSystemService(ClipboardManager::class.java)
+                      ?.setPrimaryClip(ClipData.newPlainText(if (isUser) "User message" else "Assistant message", message.content))
+                    Toast.makeText(
+                      context,
+                      if (isUser) "Copied user message" else "Copied assistant message",
+                      Toast.LENGTH_SHORT,
+                    ).show()
+                  },
+                  modifier = Modifier.semantics {
+                    contentDescription = if (isUser) "Copy You message" else "Copy Assistant message"
+                  },
+                ) {
+                  Icon(Icons.Filled.ContentCopy, contentDescription = null, tint = textColor.copy(alpha = 0.82f), modifier = Modifier.size(18.dp))
+                }
+              }
+              onRevert?.let {
+                IconButton(
+                  onClick = it,
+                  modifier = Modifier.semantics {
+                    contentDescription = "Revert to before this message"
+                  },
+                ) {
+                  Text("\u21A9", color = textColor.copy(alpha = 0.82f), style = MaterialTheme.typography.titleMedium)
+                }
               }
             }
           }
@@ -4849,12 +4676,12 @@ private fun AgentFileDialog(
 
   AlertDialog(
     onDismissRequest = onDismiss,
-    title = { Text("AGENT.md") },
+    title = { Text(t(language, "Rule", "\u89c4\u5219")) },
     text = {
       OutlinedTextField(
         value = agentRulesDraft,
         onValueChange = { agentRulesDraft = it },
-        label = { Text(t(language, "Workspace agent rules", "Workspace agent \u89c4\u5219")) },
+        label = { Text(t(language, "Workspace rules", "Workspace \u89c4\u5219")) },
         minLines = 10,
         modifier = Modifier.fillMaxWidth(),
       )
@@ -5215,7 +5042,7 @@ private fun SettingsDialog(
     mutableStateOf(state.settings.backgroundKeepAliveEnabled)
   }
   val settingsContext = LocalContext.current
-  val selectedProvider = ModelProviderCatalog.findProvider(providerDraft) ?: ModelProviderCatalog.defaultProvider
+  val selectedProvider = ModelProviderCatalog.findSelectableProvider(providerDraft) ?: ModelProviderCatalog.defaultProvider
   var providerMenuOpen by remember { mutableStateOf(false) }
   var modelMenuOpen by remember { mutableStateOf(false) }
   var languageMenuOpen by remember { mutableStateOf(false) }
@@ -5238,7 +5065,7 @@ private fun SettingsDialog(
             Text(selectedProvider.label)
           }
           DropdownMenu(expanded = providerMenuOpen, onDismissRequest = { providerMenuOpen = false }) {
-            ModelProviderCatalog.providers.forEach { provider ->
+            ModelProviderCatalog.selectableProviders.forEach { provider ->
               DropdownMenuItem(
                 text = { Text(provider.label) },
                 onClick = {
@@ -5498,8 +5325,8 @@ private fun SettingsDialog(
         Text(
           t(
             language,
-            "Full Authority auto-applies settings proposals after a workspace snapshot and audit log. Android permissions and secrets remain app-owned boundaries.",
-            "Full Authority 会在创建 workspace 快照和审计日志后自动应用设置提案。Android 权限和密钥仍然是 app 边界。",
+            "Full Authority auto-applies settings proposals after an audit log. Android permissions and secrets remain app-owned boundaries.",
+            "Full Authority 会在记录审计日志后自动应用设置提案。Android 权限和密钥仍然是 app 边界。",
           ),
           color = MaterialTheme.colorScheme.onSurfaceVariant,
           style = MaterialTheme.typography.bodySmall,

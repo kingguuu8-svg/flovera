@@ -242,13 +242,13 @@ Main path:
 
 1. User opens Conversation from the main workspace surface.
 2. User opens settings from the conversation secondary menu.
-3. User selects provider and model.
+3. User edits the DeepSeek model and API key.
 4. User enters API key.
 5. Agent loop uses that configuration without hardcoded secrets.
 
 Counter-paths:
 
-- User switches provider: API keys are scoped by provider.
+- Legacy or proposed non-DeepSeek providers are normalized back to DeepSeek.
 - Key is missing: agent reports configuration error without starting a broken loop.
 - Network tools are on by default: agent sees `fetch_url` and `download_file`.
 - Network tools are explicitly off: agent does not see or call network tools.
@@ -258,7 +258,8 @@ Acceptance criteria:
 
 - `.env`, `setting.json`, API keys, and local paths are not hardcoded into source.
 - Settings persist across app restarts.
-- Provider settings are validated and normalized.
+- Provider settings are validated and normalized; the app-owned selection
+  surface exposes DeepSeek only.
 - Network tools default to enabled, remain inspectable in Settings, and preserve
   an explicit user-disabled choice.
 
@@ -603,7 +604,7 @@ user-facing inspection of applied changes.
 ### Workspace Secret Manager
 
 Status: Baseline implemented. Flovera now has a user-managed Secrets panel at
-the same surface level as Preview, Snapshots, Skills, AGENT.md, and Settings.
+the same surface level as Preview, Skills, Rule, and Settings.
 Secrets are stored in the app settings store, which is encrypted by the existing
 settings persistence layer. Agent-visible entries enter the request only as
 environment-variable refs and are synchronized into `.flovera/settings-view.json`
@@ -620,12 +621,13 @@ Remaining scope:
 
 ### Custom URL Routing And Request Model
 
-Status: Partially implemented for provider routing metadata. Provider profiles,
+Status: Parked as an internal compatibility layer. Provider profiles,
 transport metadata, request hooks, field omission/addition, and app-owned
 OpenAI-compatible routes exist. The new workspace-owned `python_http` path means
 user-created AI apps can now use ordinary HTTP/SSE without requiring app-level
-custom URL routes. Remaining work is a general app settings UI/schema for
-advanced request templates and auditable route changes.
+custom URL routes. The app-owned provider selection surface now exposes only
+DeepSeek; other provider profiles may remain in code for compatibility tests but
+must not be advertised as selectable app configuration.
 
 - Add a configurable URL routing model for workspace HTML and app-controlled
   internal routes.
@@ -648,7 +650,7 @@ advanced request templates and auditable route changes.
 ### Agent Rules And Runtime Control
 
 Status: Partially implemented. Workspace `AGENT.md` rules are read from the same
-file shown in Flovera's AGENT.md editor and appended directly to the end of the
+file shown in Flovera's Rule/规则 editor and appended directly to the end of the
 app-owned system prompt as user-owned workspace guidance. The rules no longer
 need a separate user-message reminder for the agent to inspect AGENT.md. Users
 can interrupt runs, queue follow-up inputs, mark queued inputs as guidance, and
@@ -1110,7 +1112,8 @@ than the original text. Streaming draft messages deliberately use a lightweight
 plain-text path that renders each runtime-throttled draft immediately while the
 runtime coalesces adjacent text deltas, so token-by-token output stays visible
 without blocking conversation scrolling; finalized messages then re-render with
-the full Markdown renderer.
+the full Markdown renderer. User messages and finalized assistant messages have
+explicit copy buttons beside the speaker label.
 Remaining work is inline workspace-path links inside the rendered Markdown
 surface, richer code-block styling, math/scientific formula rendering, and
 regression examples from real malformed provider output.
@@ -1351,11 +1354,11 @@ and media rendering.
 
 ### Workspace Snapshots
 
-Status: Baseline implemented. Manual and automatic workspace snapshots exist,
-restore/delete are wired through the controller, snapshots cover workspace
-files and `.flovera` metadata, and a regression test verifies file counts after
-restore. Remaining work is stronger UX around destructive restore confirmation
-and clearer session-level restore context.
+Status: Hidden from the app-owned user surface. The snapshot implementation and
+regression coverage remain in code, but the Conversation menu no longer exposes
+a Snapshots entry and `.flovera/capabilities.json` advertises snapshots as
+disabled. Automatic internal restore points may still be used by guarded runtime
+paths where needed, but snapshots are not a visible Flovera feature.
 
 - Add workspace snapshot save and restore.
 - Snapshot scope should cover workspace files, `.flovera` metadata, selected
