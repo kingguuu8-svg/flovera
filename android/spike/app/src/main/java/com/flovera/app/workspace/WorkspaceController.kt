@@ -34,7 +34,7 @@ class WorkspaceController(context: Context, workspaceId: String) {
 
   fun readAgentRules(): String = workspace.readAgentRules()
 
-  fun writeAgentRules(content: String): String = workspace.writeFile("AGENT.md", content)
+  fun writeAgentRules(content: String): String = workspace.writeAgentRules(content)
 
   fun syncFloveraSettings(settings: AppSettings) {
     val provider = ModelProviderCatalog.findProvider(settings.provider) ?: ModelProviderCatalog.defaultProvider

@@ -221,12 +221,13 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
       createAutoSnapshot = false,
     )
     writeFile(
-      path = "AGENT.md",
+      path = AGENT_RULES_FILE,
       content = "",
       overwrite = false,
       createAutoSnapshot = false,
     )
     clearLegacySeedAgentRules()
+    migrateLegacyAgentRules()
     writeFile(
       path = "index.html",
       content = """
@@ -972,11 +973,28 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
   }
 
   private fun clearLegacySeedAgentRules() {
-    val current = runCatching { readFile("AGENT.md") }.getOrDefault("")
+    val current = runCatching { readFile(LEGACY_AGENT_RULES_FILE) }.getOrDefault("")
     if (current.trim() == LEGACY_SEED_AGENT_RULES.trim()) {
       writeFile(
-        path = "AGENT.md",
+        path = LEGACY_AGENT_RULES_FILE,
         content = "",
+        overwrite = true,
+        createAutoSnapshot = false,
+      )
+    }
+  }
+
+  private fun migrateLegacyAgentRules() {
+    val legacyFile = safeFile(LEGACY_AGENT_RULES_FILE)
+    if (!legacyFile.isFile) return
+    val legacyRules = readUtf8Text(legacyFile)
+    if (legacyRules.isBlank()) return
+    val currentFile = safeFile(AGENT_RULES_FILE)
+    val currentRules = if (currentFile.isFile) readUtf8Text(currentFile) else ""
+    if (currentRules.isBlank()) {
+      writeFile(
+        path = AGENT_RULES_FILE,
+        content = legacyRules,
         overwrite = true,
         createAutoSnapshot = false,
       )
@@ -1098,7 +1116,15 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     }
   }
 
-  fun readAgentRules(): String = readFile("AGENT.md")
+  fun readAgentRules(): String {
+    val currentFile = safeFile(AGENT_RULES_FILE)
+    if (currentFile.isFile) return readUtf8Text(currentFile)
+    val legacyFile = safeFile(LEGACY_AGENT_RULES_FILE)
+    if (legacyFile.isFile) return readUtf8Text(legacyFile)
+    return ""
+  }
+
+  fun writeAgentRules(content: String): String = writeFile(AGENT_RULES_FILE, content)
 
   fun readFloveraSkillPromptDescriptors(): String = FloveraSkillRegistry.promptDescriptors(root, json)
 
@@ -2415,6 +2441,8 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
   }
 
   private companion object {
+    const val AGENT_RULES_FILE = "AGENTS.md"
+    const val LEGACY_AGENT_RULES_FILE = "AGENT.md"
     const val WORKSPACE_ARTIFACT_MANIFEST_NAME = "flovera.app.json"
     const val WORKSPACE_ARTIFACT_PREVIEW_WEBVIEW = "webview"
     const val WORKSPACE_ARTIFACT_PREVIEW_LOCAL_HTTP = "local_http"
@@ -2832,8 +2860,13 @@ data class FloveraCapabilities(
   val modelTextDeltaStreaming: Boolean = true,
   val modelTextDeltaStreamingSource: String = "koog_stream_frame_event_handler",
   val modelTextDeltaPolicy: String = "optional_model_output_not_required",
+  val modelTextToolBoundaryFlush: Boolean = true,
   val finalAssistantResponseStreamingSource: String = "koog_stream_frame_event_handler_compat",
+  val finalizedMarkdownSegmentedRendering: Boolean = true,
   val mainSurfaceHtmlQuickPicker: Boolean = true,
+  val conversationComposerAttachments: Boolean = true,
+  val conversationPhotoLibraryImport: Boolean = true,
+  val conversationVoiceInput: Boolean = true,
   val conversationPathLinks: Boolean = true,
   val webPreview: Boolean = true,
   val previewFormats: List<String> = listOf("html", "markdown", "json", "csv", "text", "code", "image", "pdf", "docx", "xlsx", "pptx"),

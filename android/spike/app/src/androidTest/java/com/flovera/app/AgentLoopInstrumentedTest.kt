@@ -34,7 +34,7 @@ class AgentLoopInstrumentedTest {
       maxAgentIterations = 8,
     )
     workspace.writeFile(
-      path = "AGENT.md",
+      path = "AGENTS.md",
       content = "# Agent Rules\n\n- For this test, create files exactly as requested and keep responses concise.",
     )
     val recorder = ToolEventRecorder()
@@ -86,7 +86,7 @@ class AgentLoopInstrumentedTest {
       networkEnabled = true,
     )
     workspace.writeFile(
-      path = "AGENT.md",
+      path = "AGENTS.md",
       content = """
         # Agent Rules
 

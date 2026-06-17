@@ -139,11 +139,14 @@ Acceptance criteria:
   the bottom, the list continues to follow the newest output.
 - Path chips shown at the bottom of a conversation message open the referenced
   workspace file on the main surface instead of only entering text selection.
+- The conversation composer exposes explicit attachment and voice-entry controls.
+  The attachment entry imports selected system photo-library media into the
+  workspace and appends the imported workspace path to the editable prompt.
 - Message list uses lazy rendering.
 - Tool events are collapsed by default when they are not the main answer.
 - Every message has a timestamp.
 - Running state disables only actions that would corrupt the active loop.
-- Running state freezes session switching/creation, AGENT.md edits, provider and
+- Running state freezes session switching/creation, AGENTS.md edits, provider and
   model settings, skills, secrets, snapshots, settings proposals, workspace
   mutations, preview pinning, and artifact start/retry/stop. Read-only preview,
   file inspection/share, queued messages, guidance, and explicit interruption
@@ -456,7 +459,10 @@ chrono buffer preserves MODEL_TEXT_DELTA segments, user guidance events, and
 completed tool events in chronological order. Text-before-tool,
 text-between-tools, and text-after-tools ordering is correct in
 `transcriptEvents`; real-device debug verification also covers guidance inserted
-between model text and a tool call. Rapid model text deltas are coalesced into
+between model text and a tool call. Koog tool-call streaming frames now emit a
+lightweight stream-boundary event so the last visible text delta before a tool
+call is flushed to the conversation before the tool result returns. Rapid model
+text deltas are coalesced into
 contiguous chrono text segments and draft UI updates are throttled so streaming
 output does not rebuild the full transcript on every token. Remaining work is
 richer tool lifecycle coverage and handling provider-specific streaming finish
@@ -649,10 +655,11 @@ must not be advertised as selectable app configuration.
 
 ### Agent Rules And Runtime Control
 
-Status: Partially implemented. Workspace `AGENT.md` rules are read from the same
+Status: Partially implemented. Workspace `AGENTS.md` rules are read from the same
 file shown in Flovera's Rule/规则 editor and appended directly to the end of the
 app-owned system prompt as user-owned workspace guidance. The rules no longer
-need a separate user-message reminder for the agent to inspect AGENT.md. Users
+need a separate user-message reminder for the agent to inspect AGENTS.md. Legacy
+`AGENT.md` content is migrated into `AGENTS.md` when seeding a workspace. Users
 can interrupt runs, queue follow-up inputs, mark queued inputs as guidance, and
 active runs use an Android foreground service with status notifications.
 Guidance sent while a run is active is visible in the conversation as a user
@@ -671,7 +678,7 @@ explicit background lifecycle diagnostics.
 
 - Separate system rules from user/workspace rules:
   - System rules are app-owned product and safety constraints.
-  - User rules are workspace-owned instructions, stored in `AGENT.md` or a
+  - User rules are workspace-owned instructions, stored in `AGENTS.md` or a
     future `.flovera/rules/` structure.
   - The UI should make the boundary visible so users know which rules they can
     edit and which rules are product constraints.
@@ -726,7 +733,7 @@ that improve repeat workflows without turning the composer into a hidden shell.
 
 Status: Partially implemented. The app-owned prompt is split into stable
 sections, embeds stable Flovera runtime boundaries, appends the current
-workspace `AGENT.md` content at the system prompt tail as user-owned guidance,
+workspace `AGENTS.md` content at the system prompt tail as user-owned guidance,
 discourages repeated `.flovera` rediscovery, and warns against treating mocked
 files or JSON handoff protocols as proof of interactive artifact completion.
 Remaining work is golden prompt snapshots, token-cost diagnostics, and
@@ -1111,9 +1118,11 @@ characters/newlines and repairs common UTF-8 mojibake when it is clearly safer
 than the original text. Streaming draft messages deliberately use a lightweight
 plain-text path that renders each runtime-throttled draft immediately while the
 runtime coalesces adjacent text deltas, so token-by-token output stays visible
-without blocking conversation scrolling; finalized messages then re-render with
-the full Markdown renderer. User messages and finalized assistant messages have
-explicit copy buttons beside the speaker label.
+without blocking conversation scrolling; finalized short messages then re-render
+with the full Markdown renderer, while long finalized messages first stay as
+plain text for one frame and then render through segmented Markwon blocks to
+avoid a single large markdown parse on the UI path. User messages and finalized
+assistant messages have explicit copy buttons beside the speaker label.
 Remaining work is inline workspace-path links inside the rendered Markdown
 surface, richer code-block styling, math/scientific formula rendering, and
 regression examples from real malformed provider output.

@@ -87,10 +87,23 @@ fun FloveraTheme(
 }
 
 private fun ColorScheme.withAccent(accent: Color, darkTheme: Boolean): ColorScheme {
+  val surfaceBase = if (darkTheme) FloveraSurfaceVariant else FloveraLightSurfaceVariant
+  val outlineBase = if (darkTheme) FloveraOutline else FloveraLightOutline
+  val outlineVariantBase = if (darkTheme) FloveraPanelLine else FloveraLightPanelLine
   val primaryContainer = if (darkTheme) {
     blend(accent, FloveraBackground, 0.82f)
   } else {
     blend(accent, Color.White, 0.78f)
+  }
+  val secondaryContainer = if (darkTheme) {
+    blend(accent, FloveraSurface, 0.78f)
+  } else {
+    blend(accent, Color.White, 0.86f)
+  }
+  val themedSurfaceVariant = if (darkTheme) {
+    blend(accent, surfaceBase, 0.86f)
+  } else {
+    blend(accent, surfaceBase, 0.9f)
   }
   val onPrimaryContainer = if (darkTheme) {
     blend(accent, Color.White, 0.82f)
@@ -99,9 +112,17 @@ private fun ColorScheme.withAccent(accent: Color, darkTheme: Boolean): ColorSche
   }
   return copy(
     primary = accent,
+    secondary = accent,
     tertiary = accent,
     primaryContainer = primaryContainer,
     onPrimaryContainer = onPrimaryContainer,
+    secondaryContainer = secondaryContainer,
+    onSecondaryContainer = if (darkTheme) blend(accent, Color.White, 0.84f) else FloveraLightText,
+    tertiaryContainer = secondaryContainer,
+    onTertiaryContainer = if (darkTheme) blend(accent, Color.White, 0.84f) else FloveraLightText,
+    surfaceVariant = themedSurfaceVariant,
+    outline = blend(accent, outlineBase, 0.68f),
+    outlineVariant = blend(accent, outlineVariantBase, 0.78f),
   )
 }
 

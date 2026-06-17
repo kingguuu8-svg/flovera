@@ -40,6 +40,7 @@ object AgentRunEventType {
   const val GUIDANCE_APPLIED = "guidance_applied"
   const val MODEL_TEXT_DELTA = "model_text_delta"
   const val FINAL_TEXT_DELTA = "final_text_delta"
+  const val STREAM_BOUNDARY = "stream_boundary"
   const val RUN_COMPLETED = "run_completed"
   const val RUN_FAILED = "run_failed"
   const val RUN_INTERRUPTED = "run_interrupted"

@@ -70,12 +70,12 @@ class AgentScreenInteractionInstrumentedTest {
     }
 
     composeRule.onNodeWithText("No preview \u00b7 choose display").assertIsDisplayed()
-    composeRule.onNodeWithText("Make a scientific calculator").assertIsDisplayed()
+    assertEquals(0, composeRule.onAllNodesWithText("Make a scientific calculator").fetchSemanticsNodes().size)
     composeRule.onNodeWithContentDescription("Open conversation").assertIsDisplayed()
   }
 
   @Test
-  fun starterPromptsFollowChineseLanguageSetting() {
+  fun conversationComposerExposesAttachmentAndVoiceInputs() {
     val context = composeRule.activity.applicationContext
     SettingsStore(context).save(usableSettings(AppSettings(selectedHtmlPath = "", language = "zh")))
     val controller = AgentController(context)
@@ -84,8 +84,13 @@ class AgentScreenInteractionInstrumentedTest {
       AgentScreen(controller)
     }
 
-    composeRule.onNodeWithText("\u505a\u4e00\u4e2a\u79d1\u5b66\u8ba1\u7b97\u5668").assertIsDisplayed()
-    composeRule.onNodeWithText("\u505a\u4e00\u4e2a\u8d2a\u5403\u86c7\u5c0f\u6e38\u620f").assertIsDisplayed()
+    assertEquals(0, composeRule.onAllNodesWithText("\u505a\u4e00\u4e2a\u79d1\u5b66\u8ba1\u7b97\u5668").fetchSemanticsNodes().size)
+    assertEquals(0, composeRule.onAllNodesWithText("\u505a\u4e00\u4e2a\u8d2a\u5403\u86c7\u5c0f\u6e38\u620f").fetchSemanticsNodes().size)
+    composeRule.onNodeWithContentDescription("Open conversation").performClick()
+    composeRule.onNodeWithContentDescription("Add attachment").assertIsDisplayed()
+    composeRule.onNodeWithContentDescription("Voice input").assertIsDisplayed()
+    composeRule.onNodeWithContentDescription("Add attachment").performClick()
+    composeRule.onNodeWithText("\u76f8\u518c").assertIsDisplayed()
   }
 
   @Test
@@ -109,7 +114,7 @@ class AgentScreenInteractionInstrumentedTest {
     }
 
     composeRule.onNodeWithText("No preview \u00b7 choose display").assertIsDisplayed()
-    composeRule.onNodeWithText("Make a scientific calculator").assertIsDisplayed()
+    assertEquals(0, composeRule.onAllNodesWithText("Make a scientific calculator").fetchSemanticsNodes().size)
     composeRule.onNodeWithText("Model API not configured").assertIsDisplayed()
     composeRule.onNodeWithText("Configure an API key to start chatting").assertIsDisplayed()
     composeRule.onNodeWithContentDescription("Open settings to configure model API").assertIsDisplayed()

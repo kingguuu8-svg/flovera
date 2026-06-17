@@ -643,6 +643,39 @@ class AgentController(
     return true
   }
 
+  fun importConversationAttachments(uris: List<Uri>) {
+    if (uris.isEmpty()) return
+    if (rejectMutationWhileRunning("File import")) return
+    val results = uris.map { uri -> workspaceController.importSharedFile(uri) }
+    val importedPaths = results.mapNotNull { result ->
+      result.removePrefix("Imported ").takeIf { it != result && it.isNotBlank() }
+    }
+    val attachmentText = if (importedPaths.isNotEmpty()) {
+      if (_state.value.settings.language == "zh") {
+        "已导入 workspace 文件：\n" + importedPaths.joinToString("\n") { "- $it" }
+      } else {
+        "Imported workspace file(s):\n" + importedPaths.joinToString("\n") { "- $it" }
+      }
+    } else {
+      results.joinToString("\n")
+    }
+    refreshWorkspaceState(
+      input = appendInputText(_state.value.input, attachmentText),
+      status = results.joinToString("; "),
+    )
+  }
+
+  fun appendInputText(text: String) {
+    val normalized = text.trim()
+    if (normalized.isBlank()) return
+    _state.update {
+      it.copy(
+        input = appendInputText(it.input, normalized),
+        status = if (it.settings.language == "zh") "已添加语音输入" else "Speech input added",
+      )
+    }
+  }
+
   fun newSession() {
     if (rejectMutationWhileRunning("Session changes")) return
     val session = sessionController.createSession()
@@ -1490,6 +1523,12 @@ class AgentController(
   private fun activateSession(session: AgentSession, status: String) {
     val settings = settingsController.setActiveSession(_state.value.settings, session.id)
     refreshWorkspaceState(settings = settings, session = session, isRunning = false, status = status)
+  }
+
+  private fun appendInputText(current: String, addition: String): String {
+    val trimmedAddition = addition.trim()
+    if (trimmedAddition.isBlank()) return current
+    return if (current.isBlank()) trimmedAddition else current.trimEnd() + "\n" + trimmedAddition
   }
 
   @Suppress("DEPRECATION")

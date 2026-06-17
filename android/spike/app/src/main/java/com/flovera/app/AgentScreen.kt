@@ -1,6 +1,7 @@
 ﻿package com.flovera.app
 
 import android.Manifest
+import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -11,6 +12,7 @@ import android.net.Uri
 import android.graphics.Bitmap
 import android.graphics.pdf.PdfRenderer
 import android.os.Build
+import android.speech.RecognizerIntent
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -20,6 +22,9 @@ import android.widget.ImageView
 import android.widget.Toast
 import android.text.TextUtils
 import android.text.method.LinkMovementMethod
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
@@ -69,6 +74,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Preview
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
@@ -164,6 +171,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -172,14 +180,15 @@ import org.json.JSONObject
 private val FloveraFabShape = RoundedCornerShape(999.dp)
 private val FloveraPanelShape = RoundedCornerShape(18.dp)
 private val FloveraSmallShape = RoundedCornerShape(8.dp)
-private val FloveraUserBubbleColor = Color(0xFF233640)
-private val FloveraUserBubbleBorder = Color(0xFF365A67)
 private val FloveraAssistantBubbleBorder = Color(0xFF2C3137)
 private val FloveraFabContainer = Color(0xFF172229)
 private val FloveraFabText = Color(0xFFDEF3F8)
 private val FloveraEmptyPanel = Color(0xFFF7F6F1)
 private val FloveraEmptyPanelBorder = Color(0xFFE4DED2)
 private val FloveraAnchorIconSize = 56.dp
+private const val MARKDOWN_SEGMENTED_RENDER_MIN_CHARS = 1600
+private const val MARKDOWN_SEGMENT_TARGET_CHARS = 900
+private const val MARKDOWN_SEGMENT_MAX_CHARS = 1400
 
 private enum class ConversationScrollMode {
   BottomLocked,
@@ -191,9 +200,6 @@ private val FloveraDesignElevated = Color(0xFFE9F0EF)
 private val FloveraDesignLine = Color(0xFFD4DEDC)
 private val FloveraDesignText = Color(0xFF1D232A)
 private val FloveraDesignMuted = Color(0xFF667174)
-private val FloveraDesignAccent = Color(0xFF127089)
-private val FloveraDesignAccentSoft = Color(0xFFD9EEF1)
-private val FloveraDesignUserBubble = Color(0xFFD7EFF0)
 private val FloveraDesignAssistantBubble = Color(0xFFEEF2F1)
 private val FloveraDesignDarkSettingMask = Color(0xFF5A3446)
 private val FloveraDesignDarkSettingOnMask = Color(0xFFFFD8E7)
@@ -301,7 +307,6 @@ fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
   val hasPreviewSurface = state.selectedPreviewPath.isNotBlank() || !state.selectedHtmlUrl.isNullOrBlank()
   val hasUsableApi = hasUsableProviderApi(state.settings)
   val displayTargetPath = currentDisplayTargetPath(state)
-  var starterPromptsDismissed by remember { mutableStateOf(false) }
   var previewChromeColor by remember { mutableStateOf<Color?>(null) }
   fun openPanelFromMainDisplay(panel: AgentPanel) {
     panelStack = listOf(panel)
@@ -353,20 +358,6 @@ fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
           controller = controller,
           chromeColorSamplingEnabled = designFrontend,
           onChromeColorSampled = { previewChromeColor = it },
-        )
-        MainDisplayStarterPrompts(
-          visible = !starterPromptsDismissed && !hasPreviewSurface && state.selectedHtmlError.isBlank(),
-          language = language,
-          enabled = !state.isRunning && hasUsableApi,
-          onSubmitPreset = { prompt ->
-            if (!state.isRunning && hasUsableApi) {
-              starterPromptsDismissed = true
-              controller.submitInNewSession(prompt)
-            }
-          },
-          modifier = Modifier
-            .align(Alignment.BottomCenter)
-            .padding(horizontal = 14.dp, vertical = 10.dp),
         )
       }
       MainDisplayBottomBar(
@@ -538,8 +529,8 @@ private fun FloveraIconAnchor(
     onClick = onClick,
     modifier = Modifier.semantics { this.contentDescription = contentDescription },
     shape = FloveraFabShape,
-    containerColor = if (designStyle) FloveraDesignSurface else FloveraFabContainer,
-    contentColor = if (designStyle) FloveraDesignAccent else FloveraFabText,
+    containerColor = if (designStyle) MaterialTheme.colorScheme.primaryContainer else FloveraFabContainer,
+    contentColor = if (designStyle) MaterialTheme.colorScheme.primary else FloveraFabText,
   ) {
     Image(
       painter = painterResource(
@@ -643,50 +634,6 @@ private fun MissingApiSettingsEntry(
 }
 
 @Composable
-private fun MainDisplayStarterPrompts(
-  visible: Boolean,
-  language: String,
-  enabled: Boolean,
-  onSubmitPreset: (String) -> Unit,
-  modifier: Modifier = Modifier,
-) {
-  if (!visible) return
-  val designStyle = floveraDesignStyleEnabled()
-  Row(
-    modifier = modifier
-      .fillMaxWidth()
-      .horizontalScroll(rememberScrollState()),
-    horizontalArrangement = Arrangement.spacedBy(8.dp),
-    verticalAlignment = Alignment.CenterVertically,
-  ) {
-    starterPrompts(language).forEach { prompt ->
-      Surface(
-        modifier = Modifier
-          .height(38.dp)
-          .clickable(enabled = enabled) { onSubmitPreset(prompt) },
-        shape = RoundedCornerShape(if (designStyle) 8.dp else 999.dp),
-        color = if (designStyle) FloveraDesignSurface.copy(alpha = 0.94f) else MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
-        contentColor = if (designStyle) FloveraDesignText else MaterialTheme.colorScheme.onSurface,
-        tonalElevation = 3.dp,
-        border = BorderStroke(1.dp, if (designStyle) FloveraDesignLine else MaterialTheme.colorScheme.outlineVariant),
-      ) {
-        Box(
-          modifier = Modifier.padding(horizontal = 13.dp),
-          contentAlignment = Alignment.Center,
-        ) {
-          Text(
-            text = prompt,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            style = MaterialTheme.typography.labelMedium,
-          )
-        }
-      }
-    }
-  }
-}
-
-@Composable
 private fun MainDisplayBottomBar(
   state: AgentScreenState,
   controller: AgentController,
@@ -763,7 +710,7 @@ private fun MainDisplayBottomBar(
         language = language,
         contentColor = barMutedColor,
         progressColor = if (barColor.luminance() > 0.5f) {
-          if (designStyle) FloveraDesignAccent else MaterialTheme.colorScheme.primary
+          MaterialTheme.colorScheme.primary
         } else {
           Color.White.copy(alpha = 0.86f)
         },
@@ -796,7 +743,7 @@ private fun MainDisplayBottomBar(
             actionOpensSettings && designStyle -> FloveraDesignElevated
             actionOpensSettings && designFrontend -> FloveraDesignDarkSettingMask
             actionOpensSettings -> MaterialTheme.colorScheme.errorContainer
-            hasInput && designStyle -> FloveraDesignText
+            hasInput && designStyle -> MaterialTheme.colorScheme.primary
             hasInput -> MaterialTheme.colorScheme.primaryContainer
             designStyle -> FloveraDesignElevated
             else -> MaterialTheme.colorScheme.surfaceVariant
@@ -805,9 +752,9 @@ private fun MainDisplayBottomBar(
             actionOpensSettings && designStyle -> FloveraDesignMuted
             actionOpensSettings && designFrontend -> FloveraDesignDarkSettingOnMask
             actionOpensSettings -> MaterialTheme.colorScheme.onErrorContainer
-            hasInput && designStyle -> Color.White
+            hasInput && designStyle -> MaterialTheme.colorScheme.onPrimary
             hasInput -> MaterialTheme.colorScheme.onPrimaryContainer
-            designStyle -> FloveraDesignAccent
+            designStyle -> MaterialTheme.colorScheme.primary
             else -> MaterialTheme.colorScheme.onSurfaceVariant
           },
           onClick = {
@@ -1215,10 +1162,11 @@ private fun EmptyWorkspacePrompt(
             maxLines = 3,
             shape = RoundedCornerShape(14.dp),
             colors = OutlinedTextFieldDefaults.colors(
-              focusedBorderColor = if (designStyle) FloveraDesignAccent else MaterialTheme.colorScheme.primary,
+              focusedBorderColor = MaterialTheme.colorScheme.primary,
               unfocusedBorderColor = if (designStyle) FloveraDesignLine else FloveraEmptyPanelBorder,
               focusedContainerColor = if (designStyle) FloveraDesignBackground else MaterialTheme.colorScheme.surface,
               unfocusedContainerColor = if (designStyle) FloveraDesignBackground else MaterialTheme.colorScheme.surface,
+              cursorColor = MaterialTheme.colorScheme.primary,
             ),
             modifier = Modifier.weight(1f),
           )
@@ -1236,12 +1184,12 @@ private fun EmptyWorkspacePrompt(
             shape = RoundedCornerShape(if (designStyle) 15.dp else 14.dp),
             color = when {
               state.input.isBlank() || !hasUsableApi || state.isRunning -> if (designStyle) FloveraDesignElevated else MaterialTheme.colorScheme.surfaceVariant
-              designStyle -> FloveraDesignText
+              designStyle -> MaterialTheme.colorScheme.primary
               else -> MaterialTheme.colorScheme.primaryContainer
             },
             contentColor = when {
               state.input.isBlank() || !hasUsableApi || state.isRunning -> if (designStyle) FloveraDesignMuted else MaterialTheme.colorScheme.onSurfaceVariant
-              designStyle -> Color.White
+              designStyle -> MaterialTheme.colorScheme.onPrimary
               else -> MaterialTheme.colorScheme.onPrimaryContainer
             },
           ) {
@@ -1252,33 +1200,6 @@ private fun EmptyWorkspacePrompt(
                 modifier = Modifier.size(20.dp),
               )
             }
-          }
-        }
-      }
-      Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-      ) {
-        starterPrompts(state.settings.language).forEach { prompt ->
-          OutlinedButton(
-            onClick = {
-              focusManager.clearFocus()
-              onSubmit(prompt)
-            },
-            enabled = !state.isRunning && hasUsableApi,
-            shape = FloveraFabShape,
-            border = BorderStroke(1.dp, if (designStyle) FloveraDesignLine else FloveraEmptyPanelBorder),
-            colors = ButtonDefaults.outlinedButtonColors(
-              containerColor = if (designStyle) FloveraDesignSurface else MaterialTheme.colorScheme.surface,
-              contentColor = if (designStyle) FloveraDesignText else MaterialTheme.colorScheme.onSurface,
-            ),
-            modifier = Modifier.fillMaxWidth(),
-          ) {
-            Text(
-              text = prompt,
-              maxLines = 1,
-              style = MaterialTheme.typography.labelMedium,
-            )
           }
         }
       }
@@ -1862,13 +1783,6 @@ private fun parseCsvLine(line: String): List<String> {
 
 private fun t(language: String, en: String, zh: String): String = if (language == "zh") zh else en
 
-private fun starterPrompts(language: String): List<String> {
-  return listOf(
-    t(language, "Make a scientific calculator", "\u505a\u4e00\u4e2a\u79d1\u5b66\u8ba1\u7b97\u5668"),
-    t(language, "Make a snake game", "\u505a\u4e00\u4e2a\u8d2a\u5403\u86c7\u5c0f\u6e38\u620f"),
-  )
-}
-
 private fun currentDisplayTargetPath(state: AgentScreenState): String {
   return state.selectedPreviewPath.ifBlank { state.selectedHtmlPath }
 }
@@ -2118,7 +2032,6 @@ private fun ConversationDialog(
   onDismiss: () -> Unit,
 ) {
   val listState = rememberLazyListState()
-  val focusManager = LocalFocusManager.current
   val messages = state.session?.messages.orEmpty()
   val latestContextRecord = state.session?.contextRecords?.lastOrNull()
   val displayTargetPath = currentDisplayTargetPath(state)
@@ -2405,59 +2318,11 @@ private fun ConversationDialog(
           )
         }
 
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.spacedBy(10.dp),
-          verticalAlignment = Alignment.Bottom,
-        ) {
-          OutlinedTextField(
-            value = state.input,
-            onValueChange = controller::updateInput,
-            placeholder = { Text(t(language, "Message Flovera", "\u548c Flovera \u5bf9\u8bdd")) },
-            minLines = 1,
-            maxLines = 4,
-            shape = RoundedCornerShape(12.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-              focusedBorderColor = if (designStyle) FloveraDesignAccent else MaterialTheme.colorScheme.primary,
-              unfocusedBorderColor = if (designStyle) FloveraDesignLine else MaterialTheme.colorScheme.outline,
-              focusedContainerColor = if (designStyle) FloveraDesignSurface else MaterialTheme.colorScheme.background,
-              unfocusedContainerColor = if (designStyle) FloveraDesignSurface else MaterialTheme.colorScheme.background,
-            ),
-            modifier = Modifier.weight(1f),
-          )
-          val hasInput = state.input.isNotBlank()
-          val actionStopsRun = state.isRunning && !hasInput
-          Surface(
-            modifier = Modifier
-              .size(52.dp)
-              .semantics { contentDescription = if (actionStopsRun) "Interrupt agent" else "Send message" }
-              .clickable(
-                onClick = {
-                  focusManager.clearFocus()
-                  if (actionStopsRun) controller.interruptAgentRun() else controller.submit()
-                },
-              ),
-            shape = RoundedCornerShape(if (designStyle) 15.dp else 12.dp),
-            color = when {
-              actionStopsRun -> MaterialTheme.colorScheme.errorContainer
-              designStyle -> FloveraDesignText
-              else -> MaterialTheme.colorScheme.primaryContainer
-            },
-            contentColor = when {
-              actionStopsRun -> MaterialTheme.colorScheme.onErrorContainer
-              designStyle -> Color.White
-              else -> MaterialTheme.colorScheme.onPrimaryContainer
-            },
-          ) {
-            Box(contentAlignment = Alignment.Center) {
-              if (actionStopsRun) {
-                Icon(Icons.Filled.Close, contentDescription = null, modifier = Modifier.size(20.dp))
-              } else {
-                Icon(if (designStyle) Icons.Filled.ArrowUpward else Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(20.dp))
-              }
-            }
-          }
-        }
+        ConversationComposer(
+          state = state,
+          controller = controller,
+          language = language,
+        )
       }
     }
   }
@@ -2496,6 +2361,159 @@ private fun ConversationDialog(
 }
 
 @Composable
+private fun ConversationComposer(
+  state: AgentScreenState,
+  controller: AgentController,
+  language: String,
+) {
+  val context = LocalContext.current
+  val focusManager = LocalFocusManager.current
+  val designStyle = floveraDesignStyleEnabled()
+  var attachmentMenuOpen by remember { mutableStateOf(false) }
+  val mediaPicker = rememberLauncherForActivityResult(
+    ActivityResultContracts.PickMultipleVisualMedia(10),
+  ) { uris ->
+    if (uris.isNotEmpty()) controller.importConversationAttachments(uris)
+  }
+  val speechLauncher = rememberLauncherForActivityResult(
+    ActivityResultContracts.StartActivityForResult(),
+  ) { result ->
+    if (result.resultCode == Activity.RESULT_OK) {
+      result.data
+        ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+        ?.firstOrNull()
+        ?.let(controller::appendInputText)
+    }
+  }
+  val hasInput = state.input.isNotBlank()
+  val actionStopsRun = state.isRunning && !hasInput
+
+  Row(
+    modifier = Modifier.fillMaxWidth(),
+    horizontalArrangement = Arrangement.spacedBy(8.dp),
+    verticalAlignment = Alignment.Bottom,
+  ) {
+    Box {
+      ComposerIconButton(
+        contentDescription = "Add attachment",
+        enabled = !state.isRunning,
+        onClick = { attachmentMenuOpen = true },
+      ) {
+        Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(20.dp))
+      }
+      DropdownMenu(expanded = attachmentMenuOpen, onDismissRequest = { attachmentMenuOpen = false }) {
+        DropdownMenuItem(
+          text = { Text(t(language, "Photo library", "\u76f8\u518c")) },
+          leadingIcon = { Icon(Icons.Filled.PhotoLibrary, contentDescription = null) },
+          onClick = {
+            attachmentMenuOpen = false
+            runCatching {
+              mediaPicker.launch(
+                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo),
+              )
+            }.onFailure {
+              Toast.makeText(context, t(language, "Photo picker unavailable", "\u65e0\u6cd5\u6253\u5f00\u76f8\u518c\u9009\u62e9"), Toast.LENGTH_SHORT).show()
+            }
+          },
+        )
+      }
+    }
+
+    OutlinedTextField(
+      value = state.input,
+      onValueChange = controller::updateInput,
+      placeholder = { Text(t(language, "Message Flovera", "\u548c Flovera \u5bf9\u8bdd")) },
+      minLines = 1,
+      maxLines = 4,
+      shape = RoundedCornerShape(if (designStyle) 12.dp else 14.dp),
+      colors = OutlinedTextFieldDefaults.colors(
+        focusedBorderColor = MaterialTheme.colorScheme.primary,
+        unfocusedBorderColor = if (designStyle) FloveraDesignLine else MaterialTheme.colorScheme.outline,
+        focusedContainerColor = if (designStyle) FloveraDesignSurface else MaterialTheme.colorScheme.background,
+        unfocusedContainerColor = if (designStyle) FloveraDesignSurface else MaterialTheme.colorScheme.background,
+        cursorColor = MaterialTheme.colorScheme.primary,
+      ),
+      modifier = Modifier
+        .weight(1f)
+        .semantics { contentDescription = "Conversation message input" },
+    )
+
+    ComposerIconButton(
+      contentDescription = "Voice input",
+      enabled = !state.isRunning,
+      onClick = {
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+          .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+          .putExtra(RecognizerIntent.EXTRA_LANGUAGE, if (language == "zh") Locale.CHINESE.toLanguageTag() else Locale.ENGLISH.toLanguageTag())
+          .putExtra(RecognizerIntent.EXTRA_PROMPT, t(language, "Speak your message", "\u8bf4\u51fa\u8981\u8f93\u5165\u7684\u5185\u5bb9"))
+        try {
+          speechLauncher.launch(intent)
+        } catch (_: ActivityNotFoundException) {
+          Toast.makeText(context, t(language, "Voice input unavailable", "\u8bed\u97f3\u8f93\u5165\u4e0d\u53ef\u7528"), Toast.LENGTH_SHORT).show()
+        }
+      },
+    ) {
+      Icon(Icons.Filled.Mic, contentDescription = null, modifier = Modifier.size(20.dp))
+    }
+
+    Surface(
+      modifier = Modifier
+        .size(52.dp)
+        .semantics { contentDescription = if (actionStopsRun) "Interrupt agent" else "Send message" }
+        .clickable(
+          onClick = {
+            focusManager.clearFocus()
+            if (actionStopsRun) controller.interruptAgentRun() else controller.submit()
+          },
+        ),
+      shape = RoundedCornerShape(if (designStyle) 15.dp else 14.dp),
+      color = when {
+        actionStopsRun -> MaterialTheme.colorScheme.errorContainer
+        designStyle -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.primaryContainer
+      },
+      contentColor = when {
+        actionStopsRun -> MaterialTheme.colorScheme.onErrorContainer
+        designStyle -> MaterialTheme.colorScheme.onPrimary
+        else -> MaterialTheme.colorScheme.onPrimaryContainer
+      },
+    ) {
+      Box(contentAlignment = Alignment.Center) {
+        if (actionStopsRun) {
+          Icon(Icons.Filled.Close, contentDescription = null, modifier = Modifier.size(20.dp))
+        } else {
+          Icon(if (designStyle) Icons.Filled.ArrowUpward else Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(20.dp))
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun ComposerIconButton(
+  contentDescription: String,
+  enabled: Boolean,
+  onClick: () -> Unit,
+  content: @Composable () -> Unit,
+) {
+  val designStyle = floveraDesignStyleEnabled()
+  Surface(
+    modifier = Modifier
+      .size(44.dp)
+      .semantics { this.contentDescription = contentDescription }
+      .clickable(enabled = enabled, onClick = onClick),
+    shape = RoundedCornerShape(if (designStyle) 12.dp else 14.dp),
+    color = if (enabled) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.48f),
+    contentColor = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.48f),
+    border = BorderStroke(1.dp, if (designStyle) FloveraDesignLine else MaterialTheme.colorScheme.outlineVariant),
+  ) {
+    Box(contentAlignment = Alignment.Center) {
+      content()
+    }
+  }
+}
+
+@Composable
 private fun ConversationRunStateBar(status: String, queuedCount: Int, language: String) {
   val designStyle = floveraDesignStyleEnabled()
   Surface(
@@ -2513,7 +2531,7 @@ private fun ConversationRunStateBar(status: String, queuedCount: Int, language: 
       CircularProgressIndicator(
         modifier = Modifier.size(16.dp),
         strokeWidth = 2.dp,
-        color = if (designStyle) FloveraDesignAccent else MaterialTheme.colorScheme.primary,
+        color = MaterialTheme.colorScheme.primary,
       )
       Text(
         text = status.ifBlank { t(language, "Running", "\u8fd0\u884c\u4e2d") },
@@ -2671,21 +2689,20 @@ private fun MessageBubble(
   val canCopy = message.content.isNotBlank() && !streaming && (isUser || message.role == "assistant")
   val horizontal = if (isUser) Arrangement.End else Arrangement.Start
   val bubbleColor = when {
-    isUser && designStyle -> FloveraDesignUserBubble
-    isUser -> FloveraUserBubbleColor
+    isUser -> MaterialTheme.colorScheme.primaryContainer
     isError -> MaterialTheme.colorScheme.errorContainer
     designStyle -> FloveraDesignAssistantBubble
     else -> MaterialTheme.colorScheme.surfaceVariant
   }
   val textColor = when {
+    isUser -> MaterialTheme.colorScheme.onPrimaryContainer
     designStyle && !isError -> FloveraDesignText
-    isUser -> MaterialTheme.colorScheme.onSurface
     isError -> MaterialTheme.colorScheme.onErrorContainer
     else -> MaterialTheme.colorScheme.onSurfaceVariant
   }
   val bubbleBorderColor = when {
+    isUser -> MaterialTheme.colorScheme.primary.copy(alpha = 0.36f)
     designStyle -> FloveraDesignLine
-    isUser -> FloveraUserBubbleBorder
     isError -> MaterialTheme.colorScheme.error
     else -> FloveraAssistantBubbleBorder
   }
@@ -3026,8 +3043,35 @@ private fun MarkdownMessageText(
     TruncatedPlainMessageText(content = normalized, color = color, maxLines = maxLines)
   } else if (streaming) {
     StreamingPlainMessageText(content = normalized, color = color, maxLines = maxLines)
+  } else if (normalized.length >= MARKDOWN_SEGMENTED_RENDER_MIN_CHARS) {
+    ProgressiveSegmentedMarkwonMessageText(content = normalized, color = color)
   } else {
     MarkwonMessageText(content = normalized, color = color, maxLines = maxLines)
+  }
+}
+
+@Composable
+private fun ProgressiveSegmentedMarkwonMessageText(content: String, color: Color) {
+  var renderMarkdown by remember(content) { mutableStateOf(false) }
+  LaunchedEffect(content) {
+    withFrameNanos { }
+    delay(80)
+    renderMarkdown = true
+  }
+  if (!renderMarkdown) {
+    StreamingPlainMessageText(content = content, color = color)
+    return
+  }
+  val segments = remember(content) { markdownRenderSegments(content) }
+  Column(
+    modifier = Modifier.fillMaxWidth(),
+    verticalArrangement = Arrangement.spacedBy(6.dp),
+  ) {
+    segments.forEachIndexed { index, segment ->
+      key("markdown-segment-$index") {
+        MarkwonMessageText(content = segment, color = color)
+      }
+    }
   }
 }
 
@@ -3094,6 +3138,30 @@ private fun MarkwonMessageText(content: String, color: Color, maxLines: Int? = n
       }
     },
   )
+}
+
+private fun markdownRenderSegments(content: String): List<String> {
+  val segments = mutableListOf<String>()
+  val current = StringBuilder()
+  var inCodeFence = false
+  fun flush() {
+    val segment = current.toString().trimEnd()
+    if (segment.isNotBlank()) segments += segment
+    current.clear()
+  }
+  content.lineSequence().forEach { line ->
+    if (line.trimStart().startsWith("```")) {
+      inCodeFence = !inCodeFence
+    }
+    current.appendLine(line)
+    val shouldSplitAtBlank = !inCodeFence && line.isBlank() && current.length >= MARKDOWN_SEGMENT_TARGET_CHARS
+    val shouldSplitAtSize = !inCodeFence && current.length >= MARKDOWN_SEGMENT_MAX_CHARS
+    if (shouldSplitAtBlank || shouldSplitAtSize) {
+      flush()
+    }
+  }
+  flush()
+  return segments.ifEmpty { listOf(content) }
 }
 
 @Composable

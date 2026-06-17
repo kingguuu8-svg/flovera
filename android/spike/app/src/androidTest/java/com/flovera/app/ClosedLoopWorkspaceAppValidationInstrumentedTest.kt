@@ -55,7 +55,7 @@ class ClosedLoopWorkspaceAppValidationInstrumentedTest {
       You are running inside Flovera as the workspace AI agent.
 
       Build a complete local web AI chat app in the folder `closed-loop-ai-chat/`.
-      Do not edit `.flovera/`, `AGENT.md`, app settings, API keys, provider settings, search settings, or files outside `closed-loop-ai-chat/`.
+      Do not edit `.flovera/`, `AGENTS.md`, app settings, API keys, provider settings, search settings, or files outside `closed-loop-ai-chat/`.
 
       Create these files:
       - `closed-loop-ai-chat/index.html`

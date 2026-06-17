@@ -516,6 +516,10 @@ class AgentRunController(
           }
         }
 
+        AgentRunEventType.STREAM_BOUNDARY -> {
+          forceDraft = true
+        }
+
         else -> {
           event.timelineEvent?.let { timelineEvent ->
             baseTimelineEvents = baseTimelineEvents + timelineEvent

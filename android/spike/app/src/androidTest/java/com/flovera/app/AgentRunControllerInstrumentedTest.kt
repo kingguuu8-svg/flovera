@@ -973,7 +973,7 @@ class AgentRunControllerInstrumentedTest {
     val workspaceId = "chrono-live-${System.currentTimeMillis()}"
     val workspace = WorkspaceManager(context, workspaceId).also { it.ensureSeedFiles() }
     workspace.writeFile(
-      path = "AGENT.md",
+      path = "AGENTS.md",
       content = """
         # Agent Rules
 
@@ -1117,6 +1117,42 @@ class AgentRunControllerInstrumentedTest {
   }
 
   @Test
+  fun streamBoundaryFlushesTextBeforeToolResultArrives() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val store = AgentSessionStore(context)
+    val sessions = SessionController(store)
+    val session = store.create("Stream boundary ${System.currentTimeMillis()}")
+    val workspace = WorkspaceManager(context, "stream-boundary-${System.currentTimeMillis()}").also { it.ensureSeedFiles() }
+    val controller = AgentRunController(runtime = BoundaryBeforeToolResultRuntime(), scope = this)
+    val drafts = mutableListOf<SessionMessage>()
+
+    val job = controller.submit(
+      input = "boundary before tool",
+      settings = AppSettings(),
+      session = session,
+      workspace = workspace,
+      appendUserPrompt = sessions::appendUserPrompt,
+      appendContextRecord = sessions::appendContextRecord,
+      appendCompressionDivider = sessions::appendCompressionDivider,
+      appendPromptContextBlocks = sessions::appendPromptContextBlocks,
+      appendMessage = sessions::appendMessage,
+      onStarted = { _, _ -> },
+      onDraft = { drafts += it },
+      onSessionUpdated = { _, _ -> },
+      onFinished = { _, _ -> },
+    )
+
+    assertNotNull(job)
+    job!!.join()
+
+    val boundaryDraft = drafts.firstOrNull { draft ->
+      draft.transcriptEvents.any { it.type == "assistant_text" && it.content == "visible before slow tool" } &&
+        draft.transcriptEvents.none { it.type == "tool_call" }
+    }
+    assertNotNull("stream boundary should flush text before the tool result is recorded", boundaryDraft)
+  }
+
+  @Test
   fun transcriptEventsKeepsFailureStatusAndErrorTextAfterStreamingStarted() = runBlocking {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val store = AgentSessionStore(context)
@@ -1185,6 +1221,35 @@ class AgentRunControllerInstrumentedTest {
       eventSink.emit(AgentRunEvent(type = AgentRunEventType.MODEL_TEXT_DELTA, modelTextDelta = "created "))
       eventSink.emit(AgentRunEvent(type = AgentRunEventType.MODEL_TEXT_DELTA, modelTextDelta = "file"))
       return "created file"
+    }
+  }
+
+  private class BoundaryBeforeToolResultRuntime : AgentRuntime {
+    override suspend fun run(
+      input: String,
+      agentRunId: String,
+      settings: AppSettings,
+      session: AgentSession,
+      workspace: WorkspaceManager,
+      recorder: ToolEventRecorder,
+    ): String {
+      return "fallback"
+    }
+
+    override suspend fun runStreaming(
+      input: String,
+      agentRunId: String,
+      settings: AppSettings,
+      session: AgentSession,
+      workspace: WorkspaceManager,
+      recorder: ToolEventRecorder,
+      eventSink: AgentRunEventSink,
+      guidanceProvider: AgentRunGuidanceProvider,
+    ): String {
+      eventSink.emit(AgentRunEvent(type = AgentRunEventType.MODEL_TEXT_DELTA, modelTextDelta = "visible before slow tool"))
+      eventSink.emit(AgentRunEvent(type = AgentRunEventType.STREAM_BOUNDARY))
+      recorder.record("slow_tool", """{"path":"input.txt"}""", "finished later")
+      return "done"
     }
   }
 

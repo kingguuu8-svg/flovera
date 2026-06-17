@@ -349,6 +349,23 @@ class WorkspaceFileTreeInstrumentedTest {
   }
 
   @Test
+  fun seedWorkspaceMigratesLegacyAgentRulesToAgentsMd() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "legacy-agent-rules-${System.currentTimeMillis()}")
+    workspace.writeFile(
+      path = "AGENT.md",
+      content = "legacy rule body",
+      overwrite = true,
+      createAutoSnapshot = false,
+    )
+
+    workspace.ensureSeedFiles()
+
+    assertEquals("legacy rule body", workspace.readAgentRules())
+    assertEquals("legacy rule body", workspace.readFile("AGENTS.md"))
+  }
+
+  @Test
   fun artifactDiagnoseToolReportsRegistrationState() = runBlocking {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val workspace = WorkspaceManager(context, "artifact-diagnose-${System.currentTimeMillis()}").also { it.ensureSeedFiles() }
@@ -3038,8 +3055,13 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"finalAssistantResponseStreaming\": true"))
     assertTrue(capabilities.contains("\"modelTextDeltaStreaming\": true"))
     assertTrue(capabilities.contains("\"modelTextDeltaPolicy\": \"optional_model_output_not_required\""))
+    assertTrue(capabilities.contains("\"modelTextToolBoundaryFlush\": true"))
     assertTrue(capabilities.contains("\"koog_stream_frame_event_handler\""))
+    assertTrue(capabilities.contains("\"finalizedMarkdownSegmentedRendering\": true"))
     assertTrue(capabilities.contains("\"mainSurfaceHtmlQuickPicker\": true"))
+    assertTrue(capabilities.contains("\"conversationComposerAttachments\": true"))
+    assertTrue(capabilities.contains("\"conversationPhotoLibraryImport\": true"))
+    assertTrue(capabilities.contains("\"conversationVoiceInput\": true"))
     assertTrue(capabilities.contains("\"conversationPathLinks\": true"))
     assertTrue(capabilities.contains("\"workspaceSearch\": true"))
     assertTrue(capabilities.contains("\"workspaceSearchScopes\""))

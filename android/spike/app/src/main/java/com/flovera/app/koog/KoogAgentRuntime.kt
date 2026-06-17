@@ -210,16 +210,33 @@ private class AgentRunStreamFrameForwarder(
 ) {
   var modelTextDeltaCount: Int = 0
     private set
+  private var currentResponseHasTextDelta: Boolean = false
+  private var toolBoundaryEmittedForCurrentResponse: Boolean = false
 
   fun emitStreamFrame(frame: StreamFrame) {
-    if (frame is StreamFrame.TextDelta && frame.text.isNotEmpty()) {
-      modelTextDeltaCount += 1
-      delegate.emit(
-        AgentRunEvent(
-          type = AgentRunEventType.MODEL_TEXT_DELTA,
-          modelTextDelta = frame.text,
-        ),
-      )
+    when (frame) {
+      is StreamFrame.TextDelta -> {
+        if (frame.text.isNotEmpty()) {
+          modelTextDeltaCount += 1
+          currentResponseHasTextDelta = true
+          toolBoundaryEmittedForCurrentResponse = false
+          delegate.emit(
+            AgentRunEvent(
+              type = AgentRunEventType.MODEL_TEXT_DELTA,
+              modelTextDelta = frame.text,
+            ),
+          )
+        }
+      }
+      is StreamFrame.ToolCallDelta,
+      is StreamFrame.ToolCallComplete -> {
+        if (currentResponseHasTextDelta && !toolBoundaryEmittedForCurrentResponse) {
+          toolBoundaryEmittedForCurrentResponse = true
+          currentResponseHasTextDelta = false
+          delegate.emit(AgentRunEvent(type = AgentRunEventType.STREAM_BOUNDARY))
+        }
+      }
+      else -> Unit
     }
   }
 
