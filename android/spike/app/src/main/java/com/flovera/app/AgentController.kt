@@ -407,6 +407,24 @@ class AgentController(
     )
   }
 
+  fun clearWorkspacePreview(status: String = "Preview closed") {
+    val settings = settingsController.setSelectedHtml(_state.value.settings, "")
+    refreshWorkspaceState(settings = settings, status = status)
+    _state.update {
+      it.copy(
+        selectedHtmlPath = "",
+        selectedHtmlUrl = null,
+        selectedHtmlLoading = false,
+        selectedHtmlError = "",
+        selectedPreviewPath = "",
+        selectedPreviewContent = "",
+        selectedPreviewMimeType = "",
+        selectedPreviewUri = "",
+        workspaceRootUrl = workspaceController.runtimeWorkspace().rootUrl(),
+      )
+    }
+  }
+
   fun selectWorkspacePreview(path: String) {
     if (path.endsWith(".html", ignoreCase = true) || path.endsWith(".htm", ignoreCase = true)) {
       selectHtmlFile(path)

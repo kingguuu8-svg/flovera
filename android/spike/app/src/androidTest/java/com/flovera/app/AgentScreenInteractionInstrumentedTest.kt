@@ -4,6 +4,7 @@ import androidx.activity.ComponentActivity
 import android.content.ClipboardManager
 import android.graphics.Bitmap
 import android.graphics.pdf.PdfDocument
+import android.speech.SpeechRecognizer
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -94,6 +95,18 @@ class AgentScreenInteractionInstrumentedTest {
   }
 
   @Test
+  fun voiceRecognitionErrorMessagesAreLocalized() {
+    assertEquals(
+      "No speech recognized",
+      voiceRecognitionErrorMessage("en", SpeechRecognizer.ERROR_NO_MATCH),
+    )
+    assertEquals(
+      "\u9700\u8981\u9ea6\u514b\u98ce\u6743\u9650",
+      voiceRecognitionErrorMessage("zh", SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS),
+    )
+  }
+
+  @Test
   fun firstOpenConfigurationStartsEmptyAndUnselected() {
     val context = composeRule.activity.applicationContext
     val root = File(context.cacheDir, "first-open-${System.currentTimeMillis()}").apply {
@@ -128,6 +141,34 @@ class AgentScreenInteractionInstrumentedTest {
       assertEquals(null, state.selectedHtmlUrl)
       assertTrue(state.htmlFiles.contains("index.html"))
     }
+  }
+
+  @Test
+  fun clearWorkspacePreviewResetsPersistedSelectedHtml() {
+    val context = composeRule.activity.applicationContext
+    val root = File(context.cacheDir, "clear-preview-${System.currentTimeMillis()}").apply {
+      deleteRecursively()
+      mkdirs()
+    }
+    val workspaceId = "clear-preview-${System.currentTimeMillis()}"
+    val settingsStore = SettingsStore(context, File(root, "settings.json")).also {
+      it.save(usableSettings(AppSettings(activeWorkspaceId = workspaceId, selectedHtmlPath = "index.html")))
+    }
+    val controller = AgentController(
+      context,
+      settingsStore = settingsStore,
+      sessionStore = AgentSessionStore(context, File(root, "sessions")),
+    )
+
+    assertEquals("index.html", controller.state.value.selectedHtmlPath)
+
+    controller.clearWorkspacePreview("renderer recovered")
+
+    assertEquals("", controller.state.value.selectedHtmlPath)
+    assertEquals("", controller.state.value.selectedPreviewPath)
+    assertEquals(null, controller.state.value.selectedHtmlUrl)
+    assertEquals("", settingsStore.load().selectedHtmlPath)
+    root.deleteRecursively()
   }
 
   @Test

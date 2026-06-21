@@ -1,7 +1,6 @@
 ﻿package com.flovera.app
 
 import android.Manifest
-import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -12,11 +11,15 @@ import android.net.Uri
 import android.graphics.Bitmap
 import android.graphics.pdf.PdfRenderer
 import android.os.Build
+import android.os.Bundle
+import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.webkit.RenderProcessGoneDetail
 import android.widget.TextView
 import android.widget.ImageView
 import android.widget.Toast
@@ -106,6 +109,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -1279,6 +1283,7 @@ private fun WorkspacePreview(
     startupError = htmlError,
     workspaceRootUrl = state.workspaceRootUrl,
     controller = controller,
+    onClosePreview = controller::clearWorkspacePreview,
     chromeColorSamplingEnabled = chromeColorSamplingEnabled,
     onChromeColorSampled = onChromeColorSampled,
   )
@@ -1543,6 +1548,7 @@ private fun WorkspaceWebView(
   startupError: String,
   workspaceRootUrl: String,
   controller: AgentController,
+  onClosePreview: (String) -> Unit,
   chromeColorSamplingEnabled: Boolean,
   onChromeColorSampled: (Color?) -> Unit,
 ) {
@@ -1582,12 +1588,24 @@ private fun WorkspaceWebView(
           modifier = Modifier.fillMaxSize(),
           contentAlignment = Alignment.Center,
         ) {
-          Text(
-            text = startupError.ifBlank { "" },
+          Column(
             modifier = Modifier.padding(24.dp),
-            color = MaterialTheme.colorScheme.error,
-            style = MaterialTheme.typography.bodyMedium,
-          )
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+          ) {
+            Text(
+              text = startupError.ifBlank { "" },
+              color = MaterialTheme.colorScheme.error,
+              style = MaterialTheme.typography.bodyMedium,
+            )
+            if (startupError.isNotBlank()) {
+              OutlinedButton(
+                onClick = { onClosePreview("Preview closed after startup failure") },
+              ) {
+                Text("Close preview")
+              }
+            }
+          }
         }
       }
     }
@@ -1601,6 +1619,10 @@ private fun WorkspaceWebView(
         webViewClient = FloveraWorkspaceWebViewClient(
           workspaceRootUrl = workspaceRootUrl,
           onError = { webError = it },
+          onRenderProcessGone = { message ->
+            webError = message
+            onClosePreview(message)
+          },
           chromeColorSamplingEnabled = chromeColorSamplingEnabled,
           onChromeColorSampled = onChromeColorSampled,
         )
@@ -1661,12 +1683,23 @@ private fun WorkspaceWebView(
         color = MaterialTheme.colorScheme.errorContainer,
         tonalElevation = 4.dp,
       ) {
-        Text(
-          text = message,
-          modifier = Modifier.padding(12.dp),
-          color = MaterialTheme.colorScheme.onErrorContainer,
-          style = MaterialTheme.typography.bodySmall,
-        )
+        Row(
+          modifier = Modifier.fillMaxWidth().padding(12.dp),
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Text(
+            text = message,
+            color = MaterialTheme.colorScheme.onErrorContainer,
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.weight(1f),
+          )
+          TextButton(
+            onClick = { onClosePreview("Preview closed after WebView error") },
+          ) {
+            Text("Close")
+          }
+        }
       }
     }
   }
@@ -1917,6 +1950,7 @@ private fun hasUsableProviderApi(settings: AppSettings): Boolean {
 private class FloveraWorkspaceWebViewClient(
   private val workspaceRootUrl: String,
   private val onError: (String) -> Unit,
+  private val onRenderProcessGone: (String) -> Unit,
   private val chromeColorSamplingEnabled: Boolean,
   private val onChromeColorSampled: (Color?) -> Unit,
 ) : WebViewClient() {
@@ -1933,6 +1967,12 @@ private class FloveraWorkspaceWebViewClient(
     if (request.isForMainFrame) {
       onError("WebView load failed: ${error.description}")
     }
+  }
+
+  override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+    val reason = if (detail.didCrash()) "crashed" else "was killed by Android"
+    onRenderProcessGone("Workspace WebView renderer $reason. Flovera closed the preview so the app can recover.")
+    return true
   }
 
   override fun onPageFinished(view: WebView, url: String) {
@@ -2370,29 +2410,171 @@ private fun ConversationComposer(
   val focusManager = LocalFocusManager.current
   val designStyle = floveraDesignStyleEnabled()
   var attachmentMenuOpen by remember { mutableStateOf(false) }
+  var voiceListening by remember { mutableStateOf(false) }
+  var voiceProcessing by remember { mutableStateOf(false) }
+  var voicePartialText by remember { mutableStateOf("") }
+  var voiceStatusText by remember { mutableStateOf("") }
+  val speechRecognizer = remember(context) {
+    if (SpeechRecognizer.isRecognitionAvailable(context)) SpeechRecognizer.createSpeechRecognizer(context) else null
+  }
+  val latestLanguage by rememberUpdatedState(language)
+  val latestController by rememberUpdatedState(controller)
   val mediaPicker = rememberLauncherForActivityResult(
     ActivityResultContracts.PickMultipleVisualMedia(10),
   ) { uris ->
     if (uris.isNotEmpty()) controller.importConversationAttachments(uris)
   }
-  val speechLauncher = rememberLauncherForActivityResult(
-    ActivityResultContracts.StartActivityForResult(),
-  ) { result ->
-    if (result.resultCode == Activity.RESULT_OK) {
-      result.data
-        ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
-        ?.firstOrNull()
-        ?.let(controller::appendInputText)
+  DisposableEffect(speechRecognizer) {
+    if (speechRecognizer != null) {
+      speechRecognizer.setRecognitionListener(
+        object : RecognitionListener {
+          override fun onReadyForSpeech(params: Bundle?) {
+            voiceListening = true
+            voiceProcessing = false
+            voicePartialText = ""
+            voiceStatusText = t(latestLanguage, "Listening...", "\u6b63\u5728\u542c...")
+          }
+
+          override fun onBeginningOfSpeech() {
+            voiceListening = true
+            voiceProcessing = false
+            voiceStatusText = t(latestLanguage, "Listening...", "\u6b63\u5728\u542c...")
+          }
+
+          override fun onRmsChanged(rmsdB: Float) = Unit
+
+          override fun onBufferReceived(buffer: ByteArray?) = Unit
+
+          override fun onEndOfSpeech() {
+            voiceListening = false
+            voiceProcessing = true
+            voiceStatusText = t(latestLanguage, "Recognizing...", "\u6b63\u5728\u8bc6\u522b...")
+          }
+
+          override fun onError(error: Int) {
+            voiceListening = false
+            voiceProcessing = false
+            voicePartialText = ""
+            voiceStatusText = ""
+            Toast.makeText(context, voiceRecognitionErrorMessage(latestLanguage, error), Toast.LENGTH_SHORT).show()
+          }
+
+          override fun onResults(results: Bundle?) {
+            val recognized = results
+              ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+              ?.firstOrNull()
+              .orEmpty()
+              .trim()
+            voiceListening = false
+            voiceProcessing = false
+            voicePartialText = ""
+            voiceStatusText = ""
+            if (recognized.isNotBlank()) {
+              latestController.appendInputText(recognized)
+            } else {
+              Toast.makeText(context, t(latestLanguage, "No speech recognized", "\u672a\u8bc6\u522b\u5230\u8bed\u97f3"), Toast.LENGTH_SHORT).show()
+            }
+          }
+
+          override fun onPartialResults(partialResults: Bundle?) {
+            voicePartialText = partialResults
+              ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+              ?.firstOrNull()
+              .orEmpty()
+          }
+
+          override fun onEvent(eventType: Int, params: Bundle?) = Unit
+        },
+      )
+    }
+    onDispose {
+      speechRecognizer?.cancel()
+      speechRecognizer?.destroy()
+    }
+  }
+  fun startVoiceRecognition() {
+    val recognizer = speechRecognizer
+    if (recognizer == null) {
+      Toast.makeText(context, t(language, "Voice recognition unavailable on this device", "\u5f53\u524d\u8bbe\u5907\u4e0d\u652f\u6301\u8bed\u97f3\u8bc6\u522b"), Toast.LENGTH_SHORT).show()
+      return
+    }
+    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+      .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+      .putExtra(RecognizerIntent.EXTRA_LANGUAGE, if (language == "zh") Locale.CHINESE.toLanguageTag() else Locale.getDefault().toLanguageTag())
+      .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+      .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+      .putExtra(RecognizerIntent.EXTRA_PROMPT, t(language, "Speak your message", "\u8bf4\u51fa\u8981\u8f93\u5165\u7684\u5185\u5bb9"))
+    voiceListening = true
+    voiceProcessing = false
+    voicePartialText = ""
+    voiceStatusText = t(language, "Listening...", "\u6b63\u5728\u542c...")
+    runCatching {
+      recognizer.startListening(intent)
+    }.onFailure {
+      voiceListening = false
+      voiceProcessing = false
+      voiceStatusText = ""
+      Toast.makeText(context, t(language, "Voice recognition failed to start", "\u8bed\u97f3\u8bc6\u522b\u542f\u52a8\u5931\u8d25"), Toast.LENGTH_SHORT).show()
+    }
+  }
+  val recordAudioPermissionLauncher = rememberLauncherForActivityResult(
+    ActivityResultContracts.RequestPermission(),
+  ) { granted ->
+    if (granted) {
+      startVoiceRecognition()
+    } else {
+      Toast.makeText(context, t(language, "Microphone permission is required", "\u9700\u8981\u9ea6\u514b\u98ce\u6743\u9650"), Toast.LENGTH_SHORT).show()
     }
   }
   val hasInput = state.input.isNotBlank()
   val actionStopsRun = state.isRunning && !hasInput
 
-  Row(
+  Column(
     modifier = Modifier.fillMaxWidth(),
-    horizontalArrangement = Arrangement.spacedBy(8.dp),
-    verticalAlignment = Alignment.Bottom,
+    verticalArrangement = Arrangement.spacedBy(6.dp),
   ) {
+    if (voiceListening || voiceProcessing || voicePartialText.isNotBlank()) {
+      Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.primaryContainer,
+      ) {
+        Row(
+          modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          CircularProgressIndicator(
+            modifier = Modifier.size(16.dp),
+            strokeWidth = 2.dp,
+            color = MaterialTheme.colorScheme.onPrimaryContainer,
+          )
+          Text(
+            text = voicePartialText.ifBlank { voiceStatusText },
+            color = MaterialTheme.colorScheme.onPrimaryContainer,
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.weight(1f),
+          )
+          TextButton(
+            onClick = {
+              speechRecognizer?.cancel()
+              voiceListening = false
+              voiceProcessing = false
+              voicePartialText = ""
+              voiceStatusText = ""
+            },
+          ) {
+            Text(t(language, "Cancel", "\u53d6\u6d88"))
+          }
+        }
+      }
+    }
+
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.spacedBy(8.dp),
+      verticalAlignment = Alignment.Bottom,
+    ) {
     Box {
       ComposerIconButton(
         contentDescription = "Add attachment",
@@ -2442,14 +2624,15 @@ private fun ConversationComposer(
       contentDescription = "Voice input",
       enabled = !state.isRunning,
       onClick = {
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-          .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-          .putExtra(RecognizerIntent.EXTRA_LANGUAGE, if (language == "zh") Locale.CHINESE.toLanguageTag() else Locale.ENGLISH.toLanguageTag())
-          .putExtra(RecognizerIntent.EXTRA_PROMPT, t(language, "Speak your message", "\u8bf4\u51fa\u8981\u8f93\u5165\u7684\u5185\u5bb9"))
-        try {
-          speechLauncher.launch(intent)
-        } catch (_: ActivityNotFoundException) {
-          Toast.makeText(context, t(language, "Voice input unavailable", "\u8bed\u97f3\u8f93\u5165\u4e0d\u53ef\u7528"), Toast.LENGTH_SHORT).show()
+        if (voiceListening || voiceProcessing) {
+          speechRecognizer?.stopListening()
+          voiceListening = false
+          voiceProcessing = true
+          voiceStatusText = t(language, "Recognizing...", "\u6b63\u5728\u8bc6\u522b...")
+        } else if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+          startVoiceRecognition()
+        } else {
+          recordAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
       },
     ) {
@@ -2485,6 +2668,7 @@ private fun ConversationComposer(
           Icon(if (designStyle) Icons.Filled.ArrowUpward else Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(20.dp))
         }
       }
+    }
     }
   }
 }
@@ -4146,6 +4330,21 @@ private fun SessionsDialog(
         renameTarget = null
       },
     )
+  }
+}
+
+internal fun voiceRecognitionErrorMessage(language: String, error: Int): String {
+  return when (error) {
+    SpeechRecognizer.ERROR_AUDIO -> t(language, "Audio recording error", "\u5f55\u97f3\u9519\u8bef")
+    SpeechRecognizer.ERROR_CLIENT -> t(language, "Voice recognition client error", "\u8bed\u97f3\u8bc6\u522b\u5ba2\u6237\u7aef\u9519\u8bef")
+    SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> t(language, "Microphone permission is required", "\u9700\u8981\u9ea6\u514b\u98ce\u6743\u9650")
+    SpeechRecognizer.ERROR_NETWORK -> t(language, "Voice recognition network error", "\u8bed\u97f3\u8bc6\u522b\u7f51\u7edc\u9519\u8bef")
+    SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> t(language, "Voice recognition timed out", "\u8bed\u97f3\u8bc6\u522b\u8d85\u65f6")
+    SpeechRecognizer.ERROR_NO_MATCH -> t(language, "No speech recognized", "\u672a\u8bc6\u522b\u5230\u8bed\u97f3")
+    SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> t(language, "Voice recognizer is busy", "\u8bed\u97f3\u8bc6\u522b\u6b63\u5728\u5fd9")
+    SpeechRecognizer.ERROR_SERVER -> t(language, "Voice recognition service error", "\u8bed\u97f3\u8bc6\u522b\u670d\u52a1\u9519\u8bef")
+    SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> t(language, "No speech was heard", "\u6ca1\u6709\u542c\u5230\u8bed\u97f3")
+    else -> t(language, "Voice recognition failed", "\u8bed\u97f3\u8bc6\u522b\u5931\u8d25")
   }
 }
 

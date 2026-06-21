@@ -142,6 +142,10 @@ Acceptance criteria:
 - The conversation composer exposes explicit attachment and voice-entry controls.
   The attachment entry imports selected system photo-library media into the
   workspace and appends the imported workspace path to the editable prompt.
+- Voice entry is app-owned through Android `SpeechRecognizer`, requests
+  microphone permission when needed, shows listening/recognizing state, captures
+  partial results, and maps recognition errors to user-facing messages instead
+  of depending on an external speech-input activity.
 - Message list uses lazy rendering.
 - Tool events are collapsed by default when they are not the main answer.
 - Every message has a timestamp.
@@ -1194,6 +1198,13 @@ content probe after dynamic-page startup has a short grace period, and reports
 specific likely invisible-content causes such as missing body, zero viewport,
 empty body, or no visible candidates. Remaining work is a user-facing artifact
 validator or `artifact_inspect` successor with richer DOM diagnostics.
+
+Flovera also handles Android WebView renderer-process exits. If workspace page
+code crashes or Android kills the renderer, the app treats the renderer loss as
+recoverable, clears the persisted selected preview, and leaves the user at the
+normal no-preview surface instead of reopening the same broken page on the next
+startup. WebView load and startup errors expose a close-preview recovery action
+for the same reason.
 
 The app-owned WebView skill now carries the exact real-device failure pattern:
 `html, body, #app { height: 100%; }` can collapse inside the Flovera WebView.
