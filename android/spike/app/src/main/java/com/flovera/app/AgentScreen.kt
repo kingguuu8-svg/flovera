@@ -11,10 +11,6 @@ import android.net.Uri
 import android.graphics.Bitmap
 import android.graphics.pdf.PdfRenderer
 import android.os.Build
-import android.os.Bundle
-import android.speech.RecognitionListener
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -77,7 +73,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Preview
 import androidx.compose.material.icons.filled.Refresh
@@ -93,6 +88,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -102,6 +98,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -2410,121 +2407,10 @@ private fun ConversationComposer(
   val focusManager = LocalFocusManager.current
   val designStyle = floveraDesignStyleEnabled()
   var attachmentMenuOpen by remember { mutableStateOf(false) }
-  var voiceListening by remember { mutableStateOf(false) }
-  var voiceProcessing by remember { mutableStateOf(false) }
-  var voicePartialText by remember { mutableStateOf("") }
-  var voiceStatusText by remember { mutableStateOf("") }
-  val speechRecognizer = remember(context) {
-    if (SpeechRecognizer.isRecognitionAvailable(context)) SpeechRecognizer.createSpeechRecognizer(context) else null
-  }
-  val latestLanguage by rememberUpdatedState(language)
-  val latestController by rememberUpdatedState(controller)
   val mediaPicker = rememberLauncherForActivityResult(
     ActivityResultContracts.PickMultipleVisualMedia(10),
   ) { uris ->
     if (uris.isNotEmpty()) controller.importConversationAttachments(uris)
-  }
-  DisposableEffect(speechRecognizer) {
-    if (speechRecognizer != null) {
-      speechRecognizer.setRecognitionListener(
-        object : RecognitionListener {
-          override fun onReadyForSpeech(params: Bundle?) {
-            voiceListening = true
-            voiceProcessing = false
-            voicePartialText = ""
-            voiceStatusText = t(latestLanguage, "Listening...", "\u6b63\u5728\u542c...")
-          }
-
-          override fun onBeginningOfSpeech() {
-            voiceListening = true
-            voiceProcessing = false
-            voiceStatusText = t(latestLanguage, "Listening...", "\u6b63\u5728\u542c...")
-          }
-
-          override fun onRmsChanged(rmsdB: Float) = Unit
-
-          override fun onBufferReceived(buffer: ByteArray?) = Unit
-
-          override fun onEndOfSpeech() {
-            voiceListening = false
-            voiceProcessing = true
-            voiceStatusText = t(latestLanguage, "Recognizing...", "\u6b63\u5728\u8bc6\u522b...")
-          }
-
-          override fun onError(error: Int) {
-            voiceListening = false
-            voiceProcessing = false
-            voicePartialText = ""
-            voiceStatusText = ""
-            Toast.makeText(context, voiceRecognitionErrorMessage(latestLanguage, error), Toast.LENGTH_SHORT).show()
-          }
-
-          override fun onResults(results: Bundle?) {
-            val recognized = results
-              ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-              ?.firstOrNull()
-              .orEmpty()
-              .trim()
-            voiceListening = false
-            voiceProcessing = false
-            voicePartialText = ""
-            voiceStatusText = ""
-            if (recognized.isNotBlank()) {
-              latestController.appendInputText(recognized)
-            } else {
-              Toast.makeText(context, t(latestLanguage, "No speech recognized", "\u672a\u8bc6\u522b\u5230\u8bed\u97f3"), Toast.LENGTH_SHORT).show()
-            }
-          }
-
-          override fun onPartialResults(partialResults: Bundle?) {
-            voicePartialText = partialResults
-              ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-              ?.firstOrNull()
-              .orEmpty()
-          }
-
-          override fun onEvent(eventType: Int, params: Bundle?) = Unit
-        },
-      )
-    }
-    onDispose {
-      speechRecognizer?.cancel()
-      speechRecognizer?.destroy()
-    }
-  }
-  fun startVoiceRecognition() {
-    val recognizer = speechRecognizer
-    if (recognizer == null) {
-      Toast.makeText(context, t(language, "Voice recognition unavailable on this device", "\u5f53\u524d\u8bbe\u5907\u4e0d\u652f\u6301\u8bed\u97f3\u8bc6\u522b"), Toast.LENGTH_SHORT).show()
-      return
-    }
-    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-      .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-      .putExtra(RecognizerIntent.EXTRA_LANGUAGE, if (language == "zh") Locale.CHINESE.toLanguageTag() else Locale.getDefault().toLanguageTag())
-      .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-      .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-      .putExtra(RecognizerIntent.EXTRA_PROMPT, t(language, "Speak your message", "\u8bf4\u51fa\u8981\u8f93\u5165\u7684\u5185\u5bb9"))
-    voiceListening = true
-    voiceProcessing = false
-    voicePartialText = ""
-    voiceStatusText = t(language, "Listening...", "\u6b63\u5728\u542c...")
-    runCatching {
-      recognizer.startListening(intent)
-    }.onFailure {
-      voiceListening = false
-      voiceProcessing = false
-      voiceStatusText = ""
-      Toast.makeText(context, t(language, "Voice recognition failed to start", "\u8bed\u97f3\u8bc6\u522b\u542f\u52a8\u5931\u8d25"), Toast.LENGTH_SHORT).show()
-    }
-  }
-  val recordAudioPermissionLauncher = rememberLauncherForActivityResult(
-    ActivityResultContracts.RequestPermission(),
-  ) { granted ->
-    if (granted) {
-      startVoiceRecognition()
-    } else {
-      Toast.makeText(context, t(language, "Microphone permission is required", "\u9700\u8981\u9ea6\u514b\u98ce\u6743\u9650"), Toast.LENGTH_SHORT).show()
-    }
   }
   val hasInput = state.input.isNotBlank()
   val actionStopsRun = state.isRunning && !hasInput
@@ -2533,165 +2419,110 @@ private fun ConversationComposer(
     modifier = Modifier.fillMaxWidth(),
     verticalArrangement = Arrangement.spacedBy(6.dp),
   ) {
-    if (voiceListening || voiceProcessing || voicePartialText.isNotBlank()) {
-      Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(10.dp),
-        color = MaterialTheme.colorScheme.primaryContainer,
-      ) {
-        Row(
-          modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-          horizontalArrangement = Arrangement.spacedBy(8.dp),
-          verticalAlignment = Alignment.CenterVertically,
-        ) {
-          CircularProgressIndicator(
-            modifier = Modifier.size(16.dp),
-            strokeWidth = 2.dp,
-            color = MaterialTheme.colorScheme.onPrimaryContainer,
-          )
-          Text(
-            text = voicePartialText.ifBlank { voiceStatusText },
-            color = MaterialTheme.colorScheme.onPrimaryContainer,
-            style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.weight(1f),
-          )
-          TextButton(
-            onClick = {
-              speechRecognizer?.cancel()
-              voiceListening = false
-              voiceProcessing = false
-              voicePartialText = ""
-              voiceStatusText = ""
-            },
-          ) {
-            Text(t(language, "Cancel", "\u53d6\u6d88"))
-          }
-        }
-      }
-    }
-
     Row(
       modifier = Modifier.fillMaxWidth(),
       horizontalArrangement = Arrangement.spacedBy(8.dp),
       verticalAlignment = Alignment.Bottom,
     ) {
-    Box {
-      ComposerIconButton(
-        contentDescription = "Add attachment",
-        enabled = !state.isRunning,
-        onClick = { attachmentMenuOpen = true },
-      ) {
-        Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(20.dp))
-      }
-      DropdownMenu(expanded = attachmentMenuOpen, onDismissRequest = { attachmentMenuOpen = false }) {
-        DropdownMenuItem(
-          text = { Text(t(language, "Photo library", "\u76f8\u518c")) },
-          leadingIcon = { Icon(Icons.Filled.PhotoLibrary, contentDescription = null) },
-          onClick = {
-            attachmentMenuOpen = false
-            runCatching {
-              mediaPicker.launch(
-                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo),
-              )
-            }.onFailure {
-              Toast.makeText(context, t(language, "Photo picker unavailable", "\u65e0\u6cd5\u6253\u5f00\u76f8\u518c\u9009\u62e9"), Toast.LENGTH_SHORT).show()
+      Box(modifier = Modifier.weight(1f)) {
+        OutlinedTextField(
+          value = state.input,
+          onValueChange = controller::updateInput,
+          placeholder = { Text(t(language, "Message Flovera", "\u548c Flovera \u5bf9\u8bdd")) },
+          minLines = 1,
+          maxLines = 4,
+          shape = RoundedCornerShape(if (designStyle) 12.dp else 14.dp),
+          leadingIcon = {
+            Box {
+              InlineComposerIconButton(
+                contentDescription = "Add attachment",
+                enabled = !state.isRunning,
+                onClick = { attachmentMenuOpen = true },
+              ) {
+                Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+              }
+              DropdownMenu(expanded = attachmentMenuOpen, onDismissRequest = { attachmentMenuOpen = false }) {
+                DropdownMenuItem(
+                  text = { Text(t(language, "Photo library", "\u76f8\u518c")) },
+                  leadingIcon = { Icon(Icons.Filled.PhotoLibrary, contentDescription = null) },
+                  onClick = {
+                    attachmentMenuOpen = false
+                    runCatching {
+                      mediaPicker.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo),
+                      )
+                    }.onFailure {
+                      Toast.makeText(context, t(language, "Photo picker unavailable", "\u65e0\u6cd5\u6253\u5f00\u76f8\u518c\u9009\u62e9"), Toast.LENGTH_SHORT).show()
+                    }
+                  },
+                )
+              }
             }
           },
+          colors = OutlinedTextFieldDefaults.colors(
+            focusedBorderColor = MaterialTheme.colorScheme.primary,
+            unfocusedBorderColor = if (designStyle) FloveraDesignLine else MaterialTheme.colorScheme.outline,
+            focusedContainerColor = if (designStyle) FloveraDesignSurface else MaterialTheme.colorScheme.background,
+            unfocusedContainerColor = if (designStyle) FloveraDesignSurface else MaterialTheme.colorScheme.background,
+            cursorColor = MaterialTheme.colorScheme.primary,
+          ),
+          modifier = Modifier
+            .fillMaxWidth()
+            .semantics { contentDescription = "Conversation message input" },
         )
       }
-    }
 
-    OutlinedTextField(
-      value = state.input,
-      onValueChange = controller::updateInput,
-      placeholder = { Text(t(language, "Message Flovera", "\u548c Flovera \u5bf9\u8bdd")) },
-      minLines = 1,
-      maxLines = 4,
-      shape = RoundedCornerShape(if (designStyle) 12.dp else 14.dp),
-      colors = OutlinedTextFieldDefaults.colors(
-        focusedBorderColor = MaterialTheme.colorScheme.primary,
-        unfocusedBorderColor = if (designStyle) FloveraDesignLine else MaterialTheme.colorScheme.outline,
-        focusedContainerColor = if (designStyle) FloveraDesignSurface else MaterialTheme.colorScheme.background,
-        unfocusedContainerColor = if (designStyle) FloveraDesignSurface else MaterialTheme.colorScheme.background,
-        cursorColor = MaterialTheme.colorScheme.primary,
-      ),
-      modifier = Modifier
-        .weight(1f)
-        .semantics { contentDescription = "Conversation message input" },
-    )
-
-    ComposerIconButton(
-      contentDescription = "Voice input",
-      enabled = !state.isRunning,
-      onClick = {
-        if (voiceListening || voiceProcessing) {
-          speechRecognizer?.stopListening()
-          voiceListening = false
-          voiceProcessing = true
-          voiceStatusText = t(language, "Recognizing...", "\u6b63\u5728\u8bc6\u522b...")
-        } else if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-          startVoiceRecognition()
-        } else {
-          recordAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-        }
-      },
-    ) {
-      Icon(Icons.Filled.Mic, contentDescription = null, modifier = Modifier.size(20.dp))
-    }
-
-    Surface(
-      modifier = Modifier
-        .size(52.dp)
-        .semantics { contentDescription = if (actionStopsRun) "Interrupt agent" else "Send message" }
-        .clickable(
-          onClick = {
-            focusManager.clearFocus()
-            if (actionStopsRun) controller.interruptAgentRun() else controller.submit()
-          },
-        ),
-      shape = RoundedCornerShape(if (designStyle) 15.dp else 14.dp),
-      color = when {
-        actionStopsRun -> MaterialTheme.colorScheme.errorContainer
-        designStyle -> MaterialTheme.colorScheme.primary
-        else -> MaterialTheme.colorScheme.primaryContainer
-      },
-      contentColor = when {
-        actionStopsRun -> MaterialTheme.colorScheme.onErrorContainer
-        designStyle -> MaterialTheme.colorScheme.onPrimary
-        else -> MaterialTheme.colorScheme.onPrimaryContainer
-      },
-    ) {
-      Box(contentAlignment = Alignment.Center) {
-        if (actionStopsRun) {
-          Icon(Icons.Filled.Close, contentDescription = null, modifier = Modifier.size(20.dp))
-        } else {
-          Icon(if (designStyle) Icons.Filled.ArrowUpward else Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(20.dp))
+      Surface(
+        modifier = Modifier
+          .size(52.dp)
+          .semantics { contentDescription = if (actionStopsRun) "Interrupt agent" else "Send message" }
+          .clickable(
+            onClick = {
+              focusManager.clearFocus()
+              if (actionStopsRun) controller.interruptAgentRun() else controller.submit()
+            },
+          ),
+        shape = RoundedCornerShape(if (designStyle) 15.dp else 14.dp),
+        color = when {
+          actionStopsRun -> MaterialTheme.colorScheme.errorContainer
+          designStyle -> MaterialTheme.colorScheme.primary
+          else -> MaterialTheme.colorScheme.primaryContainer
+        },
+        contentColor = when {
+          actionStopsRun -> MaterialTheme.colorScheme.onErrorContainer
+          designStyle -> MaterialTheme.colorScheme.onPrimary
+          else -> MaterialTheme.colorScheme.onPrimaryContainer
+        },
+      ) {
+        Box(contentAlignment = Alignment.Center) {
+          if (actionStopsRun) {
+            Icon(Icons.Filled.Close, contentDescription = null, modifier = Modifier.size(20.dp))
+          } else {
+            Icon(if (designStyle) Icons.Filled.ArrowUpward else Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(20.dp))
+          }
         }
       }
-    }
     }
   }
 }
 
 @Composable
-private fun ComposerIconButton(
+private fun InlineComposerIconButton(
   contentDescription: String,
   enabled: Boolean,
   onClick: () -> Unit,
   content: @Composable () -> Unit,
 ) {
-  val designStyle = floveraDesignStyleEnabled()
-  Surface(
+  Box(
     modifier = Modifier
-      .size(44.dp)
+      .size(36.dp)
       .semantics { this.contentDescription = contentDescription }
-      .clickable(enabled = enabled, onClick = onClick),
-    shape = RoundedCornerShape(if (designStyle) 12.dp else 14.dp),
-    color = if (enabled) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.48f),
-    contentColor = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.48f),
-    border = BorderStroke(1.dp, if (designStyle) FloveraDesignLine else MaterialTheme.colorScheme.outlineVariant),
+      .clickable(enabled = enabled, onClick = onClick)
+      .padding(6.dp),
+    contentAlignment = Alignment.Center,
   ) {
-    Box(contentAlignment = Alignment.Center) {
+    val alpha = if (enabled) 0.72f else 0.32f
+    CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha)) {
       content()
     }
   }
@@ -4330,21 +4161,6 @@ private fun SessionsDialog(
         renameTarget = null
       },
     )
-  }
-}
-
-internal fun voiceRecognitionErrorMessage(language: String, error: Int): String {
-  return when (error) {
-    SpeechRecognizer.ERROR_AUDIO -> t(language, "Audio recording error", "\u5f55\u97f3\u9519\u8bef")
-    SpeechRecognizer.ERROR_CLIENT -> t(language, "Voice recognition client error", "\u8bed\u97f3\u8bc6\u522b\u5ba2\u6237\u7aef\u9519\u8bef")
-    SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> t(language, "Microphone permission is required", "\u9700\u8981\u9ea6\u514b\u98ce\u6743\u9650")
-    SpeechRecognizer.ERROR_NETWORK -> t(language, "Voice recognition network error", "\u8bed\u97f3\u8bc6\u522b\u7f51\u7edc\u9519\u8bef")
-    SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> t(language, "Voice recognition timed out", "\u8bed\u97f3\u8bc6\u522b\u8d85\u65f6")
-    SpeechRecognizer.ERROR_NO_MATCH -> t(language, "No speech recognized", "\u672a\u8bc6\u522b\u5230\u8bed\u97f3")
-    SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> t(language, "Voice recognizer is busy", "\u8bed\u97f3\u8bc6\u522b\u6b63\u5728\u5fd9")
-    SpeechRecognizer.ERROR_SERVER -> t(language, "Voice recognition service error", "\u8bed\u97f3\u8bc6\u522b\u670d\u52a1\u9519\u8bef")
-    SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> t(language, "No speech was heard", "\u6ca1\u6709\u542c\u5230\u8bed\u97f3")
-    else -> t(language, "Voice recognition failed", "\u8bed\u97f3\u8bc6\u522b\u5931\u8d25")
   }
 }
 

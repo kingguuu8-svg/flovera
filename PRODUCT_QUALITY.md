@@ -139,13 +139,11 @@ Acceptance criteria:
   the bottom, the list continues to follow the newest output.
 - Path chips shown at the bottom of a conversation message open the referenced
   workspace file on the main surface instead of only entering text selection.
-- The conversation composer exposes explicit attachment and voice-entry controls.
-  The attachment entry imports selected system photo-library media into the
+- The conversation composer exposes a lightweight attachment entry inside the
+  message input. It imports selected system photo-library media into the
   workspace and appends the imported workspace path to the editable prompt.
-- Voice entry is app-owned through Android `SpeechRecognizer`, requests
-  microphone permission when needed, shows listening/recognizing state, captures
-  partial results, and maps recognition errors to user-facing messages instead
-  of depending on an external speech-input activity.
+  Voice input is intentionally not exposed in the main composer until Flovera
+  has a reliable open-source-friendly ASR provider path.
 - Message list uses lazy rendering.
 - Tool events are collapsed by default when they are not the main answer.
 - Every message has a timestamp.

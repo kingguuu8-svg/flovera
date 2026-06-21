@@ -4,7 +4,6 @@ import androidx.activity.ComponentActivity
 import android.content.ClipboardManager
 import android.graphics.Bitmap
 import android.graphics.pdf.PdfDocument
-import android.speech.SpeechRecognizer
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -76,7 +75,7 @@ class AgentScreenInteractionInstrumentedTest {
   }
 
   @Test
-  fun conversationComposerExposesAttachmentAndVoiceInputs() {
+  fun conversationComposerExposesAttachmentInput() {
     val context = composeRule.activity.applicationContext
     SettingsStore(context).save(usableSettings(AppSettings(selectedHtmlPath = "", language = "zh")))
     val controller = AgentController(context)
@@ -89,21 +88,9 @@ class AgentScreenInteractionInstrumentedTest {
     assertEquals(0, composeRule.onAllNodesWithText("\u505a\u4e00\u4e2a\u8d2a\u5403\u86c7\u5c0f\u6e38\u620f").fetchSemanticsNodes().size)
     composeRule.onNodeWithContentDescription("Open conversation").performClick()
     composeRule.onNodeWithContentDescription("Add attachment").assertIsDisplayed()
-    composeRule.onNodeWithContentDescription("Voice input").assertIsDisplayed()
+    assertEquals(0, composeRule.onAllNodesWithContentDescription("Voice input").fetchSemanticsNodes().size)
     composeRule.onNodeWithContentDescription("Add attachment").performClick()
     composeRule.onNodeWithText("\u76f8\u518c").assertIsDisplayed()
-  }
-
-  @Test
-  fun voiceRecognitionErrorMessagesAreLocalized() {
-    assertEquals(
-      "No speech recognized",
-      voiceRecognitionErrorMessage("en", SpeechRecognizer.ERROR_NO_MATCH),
-    )
-    assertEquals(
-      "\u9700\u8981\u9ea6\u514b\u98ce\u6743\u9650",
-      voiceRecognitionErrorMessage("zh", SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS),
-    )
   }
 
   @Test

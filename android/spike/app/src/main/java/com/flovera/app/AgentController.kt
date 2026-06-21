@@ -689,7 +689,7 @@ class AgentController(
     _state.update {
       it.copy(
         input = appendInputText(it.input, normalized),
-        status = if (it.settings.language == "zh") "已添加语音输入" else "Speech input added",
+        status = if (it.settings.language == "zh") "已添加到输入框" else "Added to input",
       )
     }
   }

@@ -17,15 +17,14 @@ No P0 was confirmed in this pass.
 
 ### P1 fixed
 
-1. Conversation voice input depended on an external speech-input activity.
-   - Impact: on devices without a compatible recognizer activity, the mic entry
-     looked present but was effectively unusable.
-   - Fix: conversation voice input now uses app-owned Android
-     `SpeechRecognizer`, requests `RECORD_AUDIO` at the point of use, displays
-     listening/recognizing state, accepts partial results, appends recognized
-     text to the composer, and reports localized recognition errors.
-   - Regression: `conversationComposerExposesAttachmentAndVoiceInputs` and
-     `voiceRecognitionErrorMessagesAreLocalized`.
+1. Conversation attachment input needed a lighter composer affordance.
+   - Impact: the separate composer utility buttons made the input area heavier
+     than the feature warranted.
+   - Fix: keep the photo-library attachment entry, but move it into the message
+     input as a light icon affordance. Voice input is not exposed in the main
+     composer until Flovera has a reliable open-source-friendly ASR provider
+     path.
+   - Regression: `conversationComposerExposesAttachmentInput`.
 
 2. Workspace WebView renderer failure could leave the user trapped in a bad
    auto-restored preview.
@@ -63,8 +62,7 @@ No P0 was confirmed in this pass.
   `firstInstallTime` preserved.
 - Test APK update-only: package `com.flovera.app.test`, device `e9512097`,
   `firstInstallTime` preserved.
-- `AgentScreenInteractionInstrumentedTest#conversationComposerExposesAttachmentAndVoiceInputs`
-- `AgentScreenInteractionInstrumentedTest#voiceRecognitionErrorMessagesAreLocalized`
+- `AgentScreenInteractionInstrumentedTest#conversationComposerExposesAttachmentInput`
 - `AgentScreenInteractionInstrumentedTest#clearWorkspacePreviewResetsPersistedSelectedHtml`
 - Full `AgentRunControllerInstrumentedTest`
 - Full `AgentPromptBuilderInstrumentedTest`
