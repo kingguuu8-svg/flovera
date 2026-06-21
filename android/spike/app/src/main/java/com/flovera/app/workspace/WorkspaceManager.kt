@@ -3058,6 +3058,12 @@ data class FloveraCapabilities(
   val skillEnableSwitch: Boolean = true,
   val skillBilingualDescriptions: Boolean = true,
   val skillDisabledStillReadable: Boolean = true,
+  val skillScopedWorkspaceCommandWorkflows: Boolean = true,
+  val skillScopedWorkspaceCommandWorkflowProfiles: List<String> = listOf(
+    "flovera webview audit-mobile-layout",
+    "flovera app verify-registration",
+    "flovera skill check",
+  ),
   val secretManager: Boolean = true,
   val secretRefsInPrompt: Boolean = true,
   val secretValuesInPrompt: Boolean = false,

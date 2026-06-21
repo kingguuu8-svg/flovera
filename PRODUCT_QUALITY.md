@@ -449,7 +449,14 @@ for cross-run prompt reconstruction, overflow retry, and skills retention.
   path, while `flovera-skill-creator` documents the standard folder shape,
   `SKILL.md` frontmatter requirements, bilingual registration fields, enable
   state, and validation checks so the agent can create or update skills through
-  ordinary workspace file tools.
+  ordinary workspace file tools. Skill-scoped workflow commands are now
+  implemented under `workspace_command_run` for the highest-friction seeded
+  skill flows: `flovera webview audit-mobile-layout` checks Android WebView
+  layout hazards, `flovera app verify-registration` wraps app registration
+  diagnostics in structured JSON, and `flovera skill check` validates standard
+  skill folder/frontmatter/manifest shape. These commands are intended to be
+  invoked from the relevant skill workflow rather than exposed as separate
+  global tools.
 - Remaining work: expand the extractor from generic summaries into richer
   structured file/artifact facts and polish the console skill management UI if
   large user registries need grouping or search.
@@ -1211,6 +1218,10 @@ The app-owned WebView skill now carries the exact real-device failure pattern:
 Generated full-height pages must use
 `min-height: var(--flovera-viewport-height, 100vh)` at the root and
 `flex: 1; min-height: 0` for nested editors, canvases, or scroll panes.
+The first deterministic validator for this rule is available through
+`workspace_command_run` as `flovera webview audit-mobile-layout`, so the skill
+can require a machine-checkable pass before the agent reports that a generated
+WebView app is usable.
 
 - Treat Android WebView layout differences as a Flovera runtime responsibility,
   not something every generated artifact must rediscover.

@@ -232,6 +232,8 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(skill.contains("artifact_diagnose"))
     assertTrue(skill.contains("height: 100%"))
     assertTrue(skill.contains("min-height: var(--flovera-viewport-height, 100vh)"))
+    assertTrue(skill.contains("[\"flovera\", \"webview\", \"audit-mobile-layout\", \"<preview-html-or-web-dir>\"]"))
+    assertTrue(skill.contains("[\"flovera\", \"app\", \"verify-registration\", \"<manifest-path>\"]"))
     assertTrue(skill.contains("must accept the same arguments"))
     assertTrue(pythonSkill.contains("name: flovera-python-workspace-command"))
     assertTrue(pythonSkill.contains("description_zh:"))
@@ -284,6 +286,7 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(skillCreator.contains("\"enabled\": true"))
     assertTrue(skillCreator.contains("\"descriptionEn\""))
     assertTrue(skillCreator.contains("\"descriptionZh\""))
+    assertTrue(skillCreator.contains("[\"flovera\", \"skill\", \"check\", \"<skill-id>\"]"))
 
     assertTrue(workspace.editFile(".flovera/skills/flovera-android-webview-app/SKILL.md", "artifact_diagnose", "artifact_diagnose immediately").contains("Edited"))
     assertTrue(workspace.readFile(".flovera/skills/flovera-android-webview-app/SKILL.md").contains("artifact_diagnose immediately"))
@@ -1348,6 +1351,104 @@ class WorkspaceFileTreeInstrumentedTest {
   }
 
   @Test
+  fun workspaceCommandRunExecutesSkillScopedWorkflowCommands() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "workspace-command-skill-workflows-${System.currentTimeMillis()}").also { it.ensureSeedFiles() }
+    workspace.writeFile(
+      "bad/src/web/index.html",
+      """
+      <!doctype html>
+      <html>
+        <head>
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <link rel="stylesheet" href="style.css">
+        </head>
+        <body><main id="app">Bad layout</main></body>
+      </html>
+      """.trimIndent(),
+      createAutoSnapshot = false,
+    )
+    workspace.writeFile(
+      "bad/src/web/style.css",
+      """
+      html, body, #app { height: 100%; overflow: hidden; }
+      #app { display: flex; flex-direction: column; }
+      """.trimIndent(),
+      createAutoSnapshot = false,
+    )
+    workspace.writeFile(
+      "good/src/web/index.html",
+      """
+      <!doctype html>
+      <html>
+        <head>
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <style>
+            html, body { margin: 0; }
+            #app { min-height: var(--flovera-viewport-height, 100vh); display: flex; flex-direction: column; }
+            .pane { flex: 1; min-height: 0; overflow: auto; }
+          </style>
+        </head>
+        <body><main id="app"><section class="pane">Good layout</section></main></body>
+      </html>
+      """.trimIndent(),
+      createAutoSnapshot = false,
+    )
+    workspace.writeFile(
+      "good/flovera.app.json",
+      """
+      {
+        "schemaVersion": 1,
+        "name": "Good Web App",
+        "kind": "app",
+        "entrypoints": {
+          "preview": {
+            "kind": "local_http",
+            "path": "src/web/index.html",
+            "urlPath": "/",
+            "fallback": "src/web/index.html"
+          }
+        },
+        "actions": [],
+        "outputs": []
+      }
+      """.trimIndent(),
+      createAutoSnapshot = false,
+    )
+    val tool = WorkspaceCommandRunTool(workspace, ToolEventRecorder())
+
+    val badAudit = tool.execute(
+      WorkspaceCommandRunTool.Args(argv = listOf("flovera", "webview", "audit-mobile-layout", "bad/src/web/index.html"), snapshotBeforeRun = false),
+    )
+    val goodAudit = tool.execute(
+      WorkspaceCommandRunTool.Args(argv = listOf("flovera", "webview", "audit-mobile-layout", "good/src/web/index.html"), snapshotBeforeRun = false),
+    )
+    val appVerify = tool.execute(
+      WorkspaceCommandRunTool.Args(argv = listOf("flovera", "app", "verify-registration", "good/flovera.app.json"), snapshotBeforeRun = false),
+    )
+    val skillCheck = tool.execute(
+      WorkspaceCommandRunTool.Args(argv = listOf("flovera", "skill", "check", "flovera-skill-creator"), snapshotBeforeRun = false),
+    )
+
+    assertTrue(badAudit, badAudit.contains("Workspace command status=error exitCode=2"))
+    assertTrue(badAudit, badAudit.contains("\"workflow\": \"flovera webview audit-mobile-layout\""))
+    assertTrue(badAudit, badAudit.contains("\"code\": \"percentage_height_root_chain\""))
+    assertTrue(goodAudit, goodAudit.contains("Workspace command status=ok exitCode=0"))
+    assertTrue(goodAudit, goodAudit.contains("\"ok\": true"))
+    assertTrue(appVerify, appVerify.contains("Workspace command status=ok exitCode=0"))
+    assertTrue(appVerify, appVerify.contains("\"workflow\": \"flovera app verify-registration\""))
+    assertTrue(appVerify, appVerify.contains("\"manifestPath\": \"good\\/flovera.app.json\""))
+    assertTrue(appVerify, appVerify.contains("\"preview\": \"good\\/src\\/web\\/index.html\""))
+    assertTrue(skillCheck, skillCheck.contains("Workspace command status=ok exitCode=0"))
+    assertTrue(skillCheck, skillCheck.contains("\"workflow\": \"flovera skill check\""))
+    assertTrue(skillCheck, skillCheck.contains("\"id\": \"flovera-skill-creator\""))
+    val audit = workspace.readFile(".flovera/logs/workspace-command.jsonl")
+    assertTrue(audit, audit.contains("\"riskCategory\":\"flovera.webview.audit\""))
+    assertTrue(audit, audit.contains("\"riskCategory\":\"flovera.app.verify\""))
+    assertTrue(audit, audit.contains("\"riskCategory\":\"flovera.skill.check\""))
+  }
+
+  @Test
   fun workspaceCommandRunInspectsAndEditsOfficeOoxmlPackages() = runBlocking {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val workspace = WorkspaceManager(context, "workspace-command-office-${System.currentTimeMillis()}")
@@ -1518,6 +1619,10 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"androidDesktopClickVerificationFallback\": true"))
     assertTrue(capabilities.contains("\"androidDesktopSetTextFocusRetry\": true"))
     assertTrue(capabilities.contains("\"androidDesktopFailureDiagnosisPath\": \".flovera/logs/ui-diagnosis\""))
+    assertTrue(capabilities.contains("\"skillScopedWorkspaceCommandWorkflows\": true"))
+    assertTrue(capabilities.contains("\"flovera webview audit-mobile-layout\""))
+    assertTrue(capabilities.contains("\"flovera app verify-registration\""))
+    assertTrue(capabilities.contains("\"flovera skill check\""))
   }
 
   @Test

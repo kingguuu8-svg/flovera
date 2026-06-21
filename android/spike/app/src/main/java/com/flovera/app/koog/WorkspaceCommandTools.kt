@@ -92,7 +92,7 @@ class WorkspaceCommandRunTool(
 ) : SimpleTool<WorkspaceCommandRunTool.Args>(
   argsType = typeToken<Args>(),
   name = "workspace_command_run",
-  description = "Primary bounded command-style execution surface for Flovera-owned workspace runtimes. Use this for normal Python execution, generated scripts, project commands, local Git/JGit work, Android system APIs, cross-app accessibility operations, workspace automation scripts, Office OOXML inspection/editing, and groovy scripts when JVM access is useful. This is not Android shell access: supported command profiles are python/python3, groovy, git, android, flovera script, and flovera office. The android profile provides permission-gated native APIs and an android ui surface for semantic inspection, screenshots, verified gestures, and persistent desktop-task recovery.",
+  description = "Primary bounded command-style execution surface for Flovera-owned workspace runtimes. Use this for normal Python execution, generated scripts, project commands, local Git/JGit work, Android system APIs, cross-app accessibility operations, workspace automation scripts, Office OOXML inspection/editing, skill-scoped Flovera workflow commands described by activated skills, and groovy scripts when JVM access is useful. This is not Android shell access: supported command profiles are python/python3, groovy, git, android, flovera script, flovera office, and activated-skill Flovera workflows. The android profile provides permission-gated native APIs and an android ui surface for semantic inspection, screenshots, verified gestures, and persistent desktop-task recovery.",
 ) {
   @Serializable
   data class Args(
@@ -151,7 +151,7 @@ class WorkspaceCommandGateway(
     if (argv.isEmpty()) {
       val risk = WorkspaceCommandRisk.unsupported("missing")
       return denied(
-        message = "Missing command argv. Supported now: python/python3, groovy, git, android, and flovera script command profiles.",
+        message = "Missing command argv. Supported now: python/python3, groovy, git, android, flovera script/office, and skill-scoped Flovera workflow command profiles.",
         args = args,
         argv = emptyList(),
         risk = risk,
@@ -163,7 +163,7 @@ class WorkspaceCommandGateway(
     if (adapter == null) {
       val risk = WorkspaceCommandRisk.unsupported(command)
       return denied(
-        message = "Unsupported workspace command: ${argv.first()}. Supported now: python, python3, experimental groovy, git, android, and flovera script command profiles. Android shell, npm, daemons, and shell operators are not enabled through this tool.",
+        message = "Unsupported workspace command: ${argv.first()}. Supported now: python, python3, experimental groovy, git, android, flovera script/office, and skill-scoped Flovera workflow command profiles. Android shell, npm, daemons, and shell operators are not enabled through this tool.",
         args = args,
         argv = argv,
         risk = risk,
@@ -721,6 +721,9 @@ private class FloveraCommandAdapter(
   override fun classify(argv: List<String>): WorkspaceCommandRisk {
     return when (argv.getOrNull(1)?.lowercase()) {
       "script" -> WorkspaceCommandRisk("flovera.script", listOf("workspace.read", "workspace.write", "automation.script"))
+      "webview" -> WorkspaceCommandRisk("flovera.webview.audit", listOf("workspace.read", "webview.audit"))
+      "app" -> WorkspaceCommandRisk("flovera.app.verify", listOf("workspace.read", "artifact.registration"))
+      "skill" -> WorkspaceCommandRisk("flovera.skill.check", listOf("workspace.read", "skill.registry"))
       "office" -> {
         val action = argv.getOrNull(2)?.lowercase().orEmpty()
         val permissions = if (action == "replace") listOf("workspace.read", "workspace.write", "office.ooxml") else listOf("workspace.read", "office.ooxml")
@@ -736,11 +739,14 @@ private class FloveraCommandAdapter(
     return runCatching {
       when (profile) {
         "script" -> scriptCommand(argv, args, startedAt)
+        "webview" -> webviewCommand(argv, startedAt)
+        "app" -> appCommand(argv, startedAt)
+        "skill" -> skillCommand(argv, startedAt)
         "office" -> officeCommand(argv, startedAt)
         else -> PythonRunResult(
           status = "error",
           exitCode = 1,
-          stderr = "Supported: flovera script list|run, flovera office inspect|validate|text|replace\n",
+          stderr = "Supported: flovera script list|run, flovera office inspect|validate|text|replace, plus skill-scoped Flovera workflow commands documented by activated skills.\n",
           elapsedMs = elapsed(startedAt),
         )
       }
@@ -909,6 +915,407 @@ private class FloveraCommandAdapter(
       if (value == "--$name") argv.getOrNull(index + 1)?.let(result::add)
     }
     return result
+  }
+
+  private fun webviewCommand(argv: List<String>, startedAt: Long): PythonRunResult {
+    val action = argv.getOrNull(2)?.lowercase().orEmpty().ifBlank { "audit-mobile-layout" }
+    if (action != "audit-mobile-layout") {
+      return PythonRunResult(
+        status = "error",
+        exitCode = 1,
+        stderr = "Supported: flovera webview audit-mobile-layout <html-or-directory-path>\n",
+        elapsedMs = elapsed(startedAt),
+      )
+    }
+    val rawPath = argv.getOrNull(3).orEmpty().ifBlank { optionValue(argv, "path").ifBlank { "." } }
+    val target = resolveWorkspacePath(rawPath)
+    val findings = JSONArray()
+    val checkedFiles = JSONArray()
+    val files = webviewAuditFiles(target)
+    files.forEach { file ->
+      checkedFiles.put(workspace.workspaceRelativePath(file))
+      auditWebviewFile(file, findings)
+    }
+    if (files.isEmpty()) {
+      findings.put(
+        workflowFinding(
+          level = "error",
+          code = "no_html_or_css_files",
+          path = workspace.workspaceRelativePath(target),
+          message = "No HTML or CSS files were found for mobile WebView layout audit.",
+          suggestion = "Pass the HTML preview file or the app web directory.",
+        ),
+      )
+    }
+    val errors = findings.countLevel("error")
+    val warnings = findings.countLevel("warning")
+    val output = JSONObject()
+      .put("ok", errors == 0)
+      .put("workflow", "flovera webview audit-mobile-layout")
+      .put("path", workspace.workspaceRelativePath(target))
+      .put("checkedFiles", checkedFiles)
+      .put("summary", JSONObject().put("errors", errors).put("warnings", warnings))
+      .put("findings", findings)
+    return PythonRunResult(
+      status = if (errors == 0) "ok" else "error",
+      exitCode = if (errors == 0) 0 else 2,
+      stdout = output.toString(2) + "\n",
+      elapsedMs = elapsed(startedAt),
+    )
+  }
+
+  private fun appCommand(argv: List<String>, startedAt: Long): PythonRunResult {
+    val action = argv.getOrNull(2)?.lowercase().orEmpty().ifBlank { "verify-registration" }
+    if (action != "verify-registration") {
+      return PythonRunResult(
+        status = "error",
+        exitCode = 1,
+        stderr = "Supported: flovera app verify-registration <flovera.app.json>\n",
+        elapsedMs = elapsed(startedAt),
+      )
+    }
+    val manifestPath = argv.getOrNull(3).orEmpty().ifBlank { optionValue(argv, "manifest") }.trim().replace('\\', '/')
+    val includeReference = "--include-reference" in argv
+    val artifacts = workspace.listWorkspaceArtifacts()
+    val matches = artifacts.filter { manifestPath.isBlank() || it.manifestPath == manifestPath }
+    val diagnostics = JSONArray()
+    matches.forEach { artifact ->
+      artifact.diagnostics.forEach { diagnostic ->
+        diagnostics.put(
+          JSONObject()
+            .put("artifact", artifact.manifestPath)
+            .put("level", diagnostic.level)
+            .put("path", diagnostic.path)
+            .put("message", diagnostic.message),
+        )
+      }
+    }
+    if (matches.isEmpty()) {
+      diagnostics.put(
+        JSONObject()
+          .put("level", "error")
+          .put("path", manifestPath.ifBlank { "flovera.app.json" })
+          .put("message", "No discovered Flovera app manifest matched the request."),
+      )
+    }
+    val artifactsJson = JSONArray()
+    matches.forEach { artifact ->
+      artifactsJson.put(
+        JSONObject()
+          .put("manifestPath", artifact.manifestPath)
+          .put("rootPath", artifact.rootPath)
+          .put("name", artifact.name)
+          .put("kind", artifact.kind)
+          .put("valid", artifact.valid)
+          .put("preview", artifact.preview?.path ?: JSONObject.NULL)
+          .put("previewKind", artifact.preview?.kind ?: JSONObject.NULL)
+          .put("serverCommand", artifact.preview?.command?.takeIf { it.isNotBlank() } ?: JSONObject.NULL)
+          .put("serverCwd", artifact.preview?.cwd ?: JSONObject.NULL)
+          .put("urlPath", artifact.preview?.urlPath ?: JSONObject.NULL)
+          .put("actions", JSONArray(artifact.actions.map { "${it.id}:${it.kind}" }))
+          .put("outputs", JSONArray(artifact.outputs)),
+      )
+    }
+    val errors = diagnostics.countLevel("error")
+    val warnings = diagnostics.countLevel("warning")
+    val ok = matches.isNotEmpty() && matches.all { it.valid && it.preview != null } && errors == 0
+    val output = JSONObject()
+      .put("ok", ok)
+      .put("workflow", "flovera app verify-registration")
+      .put("requestedManifest", if (manifestPath.isBlank()) JSONObject.NULL else manifestPath)
+      .put("discoveredManifests", artifacts.size)
+      .put("matchedManifests", matches.size)
+      .put("summary", JSONObject().put("errors", errors).put("warnings", warnings))
+      .put("artifacts", artifactsJson)
+      .put("diagnostics", diagnostics)
+      .put(
+        "diagnoseText",
+        workspace.diagnoseWorkspaceArtifact(
+          manifestPath = manifestPath,
+          includeReference = includeReference,
+        ),
+      )
+    if (includeReference) output.put("reference", workspace.referenceWorkspaceArtifactDemo())
+    return PythonRunResult(
+      status = if (ok) "ok" else "error",
+      exitCode = if (ok) 0 else 2,
+      stdout = output.toString(2) + "\n",
+      elapsedMs = elapsed(startedAt),
+    )
+  }
+
+  private fun skillCommand(argv: List<String>, startedAt: Long): PythonRunResult {
+    val action = argv.getOrNull(2)?.lowercase().orEmpty().ifBlank { "check" }
+    if (action != "check") {
+      return PythonRunResult(
+        status = "error",
+        exitCode = 1,
+        stderr = "Supported: flovera skill check [skill-id|skill-path|--all]\n",
+        elapsedMs = elapsed(startedAt),
+      )
+    }
+    val target = argv.getOrNull(3).orEmpty().takeUnless { it == "--all" }.orEmpty().ifBlank { optionValue(argv, "id") }
+    val manifestFile = resolveWorkspacePath(".flovera/skills/manifest.json")
+    val findings = JSONArray()
+    val checked = JSONArray()
+    val manifest = runCatching { JSONObject(manifestFile.readText(Charsets.UTF_8)) }.getOrElse { error ->
+      findings.put(
+        workflowFinding(
+          level = "error",
+          code = "manifest_json_invalid",
+          path = ".flovera/skills/manifest.json",
+          message = "Skill manifest is not valid JSON: ${error.message.orEmpty()}",
+          suggestion = "Rewrite .flovera/skills/manifest.json as a JSON object with version and skills array.",
+        ),
+      )
+      null
+    }
+    val skills = manifest?.optJSONArray("skills") ?: JSONArray()
+    val registrations = mutableListOf<JSONObject>()
+    for (index in 0 until skills.length()) {
+      skills.optJSONObject(index)?.let(registrations::add) ?: findings.put(
+        workflowFinding(
+          level = "error",
+          code = "manifest_skill_entry_invalid",
+          path = ".flovera/skills/manifest.json.skills[$index]",
+          message = "Skill manifest entry must be an object.",
+          suggestion = "Use one object per skill registration.",
+        ),
+      )
+    }
+    val selected = registrations.filter { registration ->
+      target.isBlank() ||
+        registration.optString("id") == target ||
+        registration.optString("path").replace('\\', '/') == target.replace('\\', '/')
+    }
+    val pathTarget = target.takeIf { it.isNotBlank() && (it.endsWith(".md") || it.contains('/')) }
+    val selectedOrPath = if (selected.isNotEmpty() || pathTarget == null) {
+      selected
+    } else {
+      listOf(
+        JSONObject()
+          .put("id", File(pathTarget).parentFile?.name.orEmpty().ifBlank { File(pathTarget).nameWithoutExtension })
+          .put("path", pathTarget),
+      )
+    }
+    if (selectedOrPath.isEmpty()) {
+      findings.put(
+        workflowFinding(
+          level = "error",
+          code = "skill_not_registered",
+          path = target.ifBlank { ".flovera/skills/manifest.json" },
+          message = "No skill registration matched the requested id or path.",
+          suggestion = "Register the skill in .flovera/skills/manifest.json, or pass --all to check registered skills.",
+        ),
+      )
+    }
+    selectedOrPath.forEach { registration ->
+      checkSkillRegistration(registration, findings, checked)
+    }
+    val errors = findings.countLevel("error")
+    val warnings = findings.countLevel("warning")
+    val output = JSONObject()
+      .put("ok", errors == 0)
+      .put("workflow", "flovera skill check")
+      .put("target", target.ifBlank { "--all" })
+      .put("checked", checked)
+      .put("summary", JSONObject().put("errors", errors).put("warnings", warnings))
+      .put("findings", findings)
+    return PythonRunResult(
+      status = if (errors == 0) "ok" else "error",
+      exitCode = if (errors == 0) 0 else 2,
+      stdout = output.toString(2) + "\n",
+      elapsedMs = elapsed(startedAt),
+    )
+  }
+
+  private fun webviewAuditFiles(target: File): List<File> {
+    val root = workspace.root.canonicalFile
+    val candidates = if (target.isFile) {
+      listOf(target) + linkedCssFiles(target)
+    } else {
+      target.walkTopDown()
+        .onEnter { dir ->
+          val relative = workspace.workspaceRelativePath(dir).replace('\\', '/')
+          relative == "." ||
+            relative != ".flovera" &&
+            !relative.startsWith(".flovera/") &&
+            relative != "node_modules" &&
+            !relative.endsWith("/node_modules") &&
+            !relative.contains("/node_modules/")
+        }
+        .filter { it.isFile && it.extension.lowercase() in setOf("html", "css") }
+        .take(80)
+        .toList()
+    }
+    return candidates
+      .map { it.canonicalFile }
+      .filter { it.path == root.path || it.path.startsWith(root.path + File.separator) }
+      .distinctBy { it.path }
+      .sortedBy { workspace.workspaceRelativePath(it) }
+  }
+
+  private fun linkedCssFiles(htmlFile: File): List<File> {
+    if (!htmlFile.isFile || !htmlFile.extension.equals("html", ignoreCase = true)) return emptyList()
+    val text = runCatching { htmlFile.readText(Charsets.UTF_8) }.getOrDefault("")
+    val hrefRegex = Regex("""<link\b[^>]*\bhref\s*=\s*["']([^"']+\.css(?:\?[^"']*)?)["']""", RegexOption.IGNORE_CASE)
+    return hrefRegex.findAll(text)
+      .mapNotNull { match ->
+        val href = match.groupValues[1].substringBefore('?').trim()
+        if (href.startsWith("http://") || href.startsWith("https://") || href.startsWith("//")) null else File(htmlFile.parentFile, href).canonicalFile
+      }
+      .filter { it.isFile }
+      .toList()
+  }
+
+  private fun auditWebviewFile(file: File, findings: JSONArray) {
+    val path = workspace.workspaceRelativePath(file)
+    val text = runCatching { file.readText(Charsets.UTF_8) }.getOrDefault("")
+    val compact = text.replace(Regex("""/\*.*?\*/""", setOf(RegexOption.DOT_MATCHES_ALL)), "")
+    if (file.extension.equals("html", ignoreCase = true) && !Regex("""<meta\s+name\s*=\s*["']viewport["']""", RegexOption.IGNORE_CASE).containsMatchIn(text)) {
+      findings.put(
+        workflowFinding(
+          level = "warning",
+          code = "missing_viewport_meta",
+          path = path,
+          message = "HTML file does not declare a viewport meta tag.",
+          suggestion = "Add <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">.",
+        ),
+      )
+    }
+    val hasFloveraViewport = compact.contains("--flovera-viewport-height") ||
+      compact.contains("FloveraViewport") ||
+      Regex("""min-height\s*:\s*var\(\s*--flovera-viewport-height""", RegexOption.IGNORE_CASE).containsMatchIn(compact)
+    val rootHeightChain = Regex("""(?is)(html\s*,\s*body(?:\s*,\s*#[\w-]+)?|body\s*,\s*html|#(?:app|root))\s*\{[^}]*\bheight\s*:\s*100%""")
+      .find(compact)
+    if (rootHeightChain != null && !hasFloveraViewport) {
+      findings.put(
+        workflowFinding(
+          level = "error",
+          code = "percentage_height_root_chain",
+          path = path,
+          message = "Root layout uses a percentage-height chain without the Flovera viewport-height contract.",
+          evidence = rootHeightChain.value.take(220),
+          suggestion = "Use min-height: var(--flovera-viewport-height, 100vh) at the root and flex: 1; min-height: 0 for nested scroll/editor/canvas panes.",
+        ),
+      )
+    }
+    val overflowHiddenRoot = Regex("""(?is)(html\s*,\s*body|body|html)\s*\{[^}]*\boverflow\s*:\s*hidden""").find(compact)
+    if (overflowHiddenRoot != null && !hasFloveraViewport) {
+      findings.put(
+        workflowFinding(
+          level = "warning",
+          code = "root_overflow_hidden",
+          path = path,
+          message = "Root overflow is hidden without an explicit Flovera viewport contract.",
+          evidence = overflowHiddenRoot.value.take(220),
+          suggestion = "Only hide root overflow when the visible root uses Flovera viewport sizing and internal panes own scrolling.",
+        ),
+      )
+    }
+    val viewportVarWithoutMinHeight = hasFloveraViewport &&
+      !Regex("""min-height\s*:\s*var\(\s*--flovera-viewport-height""", RegexOption.IGNORE_CASE).containsMatchIn(compact)
+    if (viewportVarWithoutMinHeight) {
+      findings.put(
+        workflowFinding(
+          level = "warning",
+          code = "viewport_var_without_root_min_height",
+          path = path,
+          message = "Flovera viewport data is referenced but no root min-height contract was found.",
+          suggestion = "Drive the app root with min-height: var(--flovera-viewport-height, 100vh).",
+        ),
+      )
+    }
+  }
+
+  private fun checkSkillRegistration(registration: JSONObject, findings: JSONArray, checked: JSONArray) {
+    val id = registration.optString("id").trim()
+    val path = registration.optString("path").trim().replace('\\', '/').ifBlank { ".flovera/skills/$id/SKILL.md" }
+    checked.put(JSONObject().put("id", id).put("path", path).put("enabled", registration.optBoolean("enabled", true)))
+    if (id.isBlank()) {
+      findings.put(workflowFinding("error", "skill_id_missing", ".flovera/skills/manifest.json", "Skill registration id is blank.", "Set id to the folder name under .flovera/skills."))
+    }
+    if (!Regex("""^\.flovera/skills/[^/]+/SKILL\.md$""").matches(path)) {
+      findings.put(workflowFinding("error", "skill_path_not_standard", path, "Skill path must use .flovera/skills/<skill-id>/SKILL.md.", "Move the skill body to the standard folder shape and update manifest path."))
+    }
+    listOf("descriptionEn", "descriptionZh").forEach { key ->
+      if (registration.optString(key).isBlank()) {
+        findings.put(workflowFinding("warning", "manifest_${key}_missing", path, "Manifest $key is blank.", "Keep bilingual user-facing descriptions explicit in the manifest."))
+      }
+    }
+    val file = runCatching { resolveWorkspacePath(path) }.getOrNull()
+    if (file == null || !file.isFile) {
+      findings.put(workflowFinding("error", "skill_file_missing", path, "Registered SKILL.md file does not exist.", "Create the file or fix the manifest path."))
+      return
+    }
+    val body = file.readText(Charsets.UTF_8)
+    val frontmatter = parseSkillFrontmatter(body)
+    if (frontmatter == null) {
+      findings.put(workflowFinding("error", "skill_frontmatter_missing", path, "SKILL.md must start with YAML frontmatter.", "Start the file with --- and include name and description fields."))
+      return
+    }
+    val name = frontmatter["name"].orEmpty()
+    val description = frontmatter["description"].orEmpty()
+    if (name.isBlank()) {
+      findings.put(workflowFinding("error", "skill_name_missing", path, "SKILL.md frontmatter name is blank.", "Set name to the skill id."))
+    } else if (id.isNotBlank() && name != id) {
+      findings.put(workflowFinding("warning", "skill_name_mismatch", path, "SKILL.md frontmatter name does not match manifest id.", "Keep name and manifest id synchronized unless intentionally portable."))
+    }
+    if (description.isBlank()) {
+      findings.put(workflowFinding("error", "skill_description_missing", path, "SKILL.md frontmatter description is blank.", "Add a concise English trigger description."))
+    }
+    if (!frontmatter.containsKey("description_zh")) {
+      findings.put(workflowFinding("warning", "skill_description_zh_missing", path, "SKILL.md frontmatter description_zh is missing.", "Add description_zh for user-facing Chinese readability."))
+    }
+    if (!Regex("""(?m)^#\s+\S+""").containsMatchIn(body.substringAfter("---", "").substringAfter("---", ""))) {
+      findings.put(workflowFinding("warning", "skill_heading_missing", path, "SKILL.md has no top-level Markdown heading after frontmatter.", "Add a short # heading before workflow instructions."))
+    }
+  }
+
+  private fun parseSkillFrontmatter(body: String): Map<String, String>? {
+    if (!body.startsWith("---")) return null
+    val end = body.indexOf("\n---", startIndex = 3)
+    if (end <= 0) return null
+    return body.substring(3, end)
+      .lineSequence()
+      .mapNotNull { line ->
+        val key = line.substringBefore(':', "").trim()
+        if (key.isBlank() || !line.contains(':')) null else key to line.substringAfter(':').trim().trim('"', '\'')
+      }
+      .toMap()
+  }
+
+  private fun resolveWorkspacePath(rawPath: String): File {
+    val file = File(workspace.root, rawPath.trim().trim('/')).canonicalFile
+    val root = workspace.root.canonicalFile
+    require(file.path == root.path || file.path.startsWith(root.path + File.separator)) { "Path escapes workspace: $rawPath" }
+    return file
+  }
+
+  private fun workflowFinding(
+    level: String,
+    code: String,
+    path: String,
+    message: String,
+    suggestion: String,
+    evidence: String = "",
+  ): JSONObject {
+    val json = JSONObject()
+      .put("level", level)
+      .put("code", code)
+      .put("path", path)
+      .put("message", message)
+      .put("suggestion", suggestion)
+    if (evidence.isNotBlank()) json.put("evidence", evidence)
+    return json
+  }
+
+  private fun JSONArray.countLevel(level: String): Int {
+    var count = 0
+    for (index in 0 until length()) {
+      if (optJSONObject(index)?.optString("level") == level) count += 1
+    }
+    return count
   }
 
   private fun officeCommand(argv: List<String>, startedAt: Long): PythonRunResult {
