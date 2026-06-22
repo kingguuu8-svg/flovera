@@ -3,6 +3,32 @@
 Flovera is pre-release. This changelog starts from the Android-local workspace
 agent product direction.
 
+## v0.2.1 - 2026-06-22
+
+### Improved
+
+- Kept more controller, workspace, Markdown, preview, and artifact work off the
+  UI thread so conversation scrolling and settings edits stay responsive during
+  long runs.
+- Refined conversation composer behavior, streaming rendering, and finalized
+  Markdown display.
+- Added skill-scoped workflow commands so skills can provide concrete checks
+  and repair flows instead of relying only on prompt instructions.
+- Simplified visible product surfaces around DeepSeek, rules, permissions,
+  skills, extension requests, and workspace tasks.
+
+### Fixed
+
+- Removed unavailable voice input from the conversation composer.
+- Hid internal diagnostics, handoff summaries, token breakdowns, tool args,
+  artifact job logs, and `.flovera` workspace internals from normal user-facing
+  views.
+- Kept context usage visible as used tokens versus total budget, with a clear
+  note that Flovera automatically compresses older background information near
+  the budget.
+- Hardened asynchronous controller/session tests and stability paths that could
+  make UI state appear stale.
+
 ## v0.2.0 - 2026-06-11
 
 ### Added

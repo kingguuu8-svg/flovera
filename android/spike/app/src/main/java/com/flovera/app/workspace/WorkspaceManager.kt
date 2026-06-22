@@ -1838,6 +1838,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     val isDirectory = file.isDirectory
     val children = if (isDirectory) {
       file.listFiles()
+        ?.filter(::isUserVisibleTreeFile)
         ?.sortedWith(compareBy<File> { !it.isDirectory }.thenBy { it.name.lowercase() })
         ?.map { toNode(it) }
         ?: emptyList()
@@ -1851,6 +1852,11 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
       sizeBytes = if (isDirectory) 0L else file.length(),
       children = children,
     )
+  }
+
+  private fun isUserVisibleTreeFile(file: File): Boolean {
+    val relative = relativeToRoot(file).replace('\\', '/')
+    return relative == "." || relative != ".flovera" && !relative.startsWith(".flovera/")
   }
 
   private fun searchFile(

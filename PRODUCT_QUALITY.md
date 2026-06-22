@@ -288,41 +288,43 @@ Backlog maintenance rules:
 
 Status: Baseline implemented for context usage visibility and compression
 markers. The app records context usage, displays a compact context ring and
-details dialog, includes request-overhead/tool-catalog estimate components, and
-shows compression dividers in conversation history. Remaining work is provider
-reported/tokenizer-backed accuracy, auditability, and automatic compression
-policy polish, including proactive compression that is not limited to threshold
-or provider-error recovery.
+details dialog, keeps request-overhead/tool-catalog estimate components in
+session records, and shows lightweight compression dividers in conversation
+history. The user-facing details show used tokens, total context budget, and
+automatic background compression behavior without exposing internal section
+breakdowns. Remaining work is provider reported/tokenizer-backed accuracy,
+auditability, and automatic compression policy polish, including proactive
+compression that is not limited to threshold or provider-error recovery.
 
 - Track context usage for each agent run and session.
-- Show how much context has been used, what was compressed, and what summary is
-  currently active.
+- Show how much context has been used and explain that older background
+  information is compressed automatically near the budget.
 - Improve the context estimate so the compact ring does not create false
-  confidence. The estimate should break down system prompt, workspace rules,
-  recent history, current input, workspace listing, tool schema/catalog overhead,
-  and provider/request-wrapper overhead where Flovera can reasonably estimate
-  them.
+  confidence. Internal records may keep system prompt, workspace rules, recent
+  history, current input, workspace listing, tool schema/catalog overhead, and
+  provider/request-wrapper overhead where Flovera can reasonably estimate them,
+  but the normal user surface should not show this split.
 - Label the number as estimated unless it comes from provider-reported usage or
   a tokenizer that matches the active model family. Do not present a precise
   percentage for unknown context windows or unverified model metadata.
 - Add regression tests with long histories, large workspace listings, low
   context-window overrides, and tool-heavy configurations to prove the displayed
   percentage rises and compression thresholds trigger when expected.
-- For known models, show context usage as a percentage of the configured model
-  context window. For unknown models, show only absolute usage and the estimate
-  source.
+- For known models, show context usage against the configured model context
+  window. For unknown models, show absolute usage and avoid implementation
+  details such as estimate source on the normal user surface.
 - Add a compact ring indicator for the active model context budget, starting
   with DeepSeek-specific model metadata before general provider discovery is
   mature.
 - Tie automatic compression thresholds to the active model context window and
   the current estimated request size.
-- When context is close to full, run a session handoff/compression skill,
-  continue the conversation from the compressed state, and insert a visible
-  conversation divider after the compressed summary.
+- When context is close to full, run session compression, continue the
+  conversation from the compressed state, and insert a visible conversation
+  divider that says older background information was organized.
 - Add proactive compression as an explicit user/app action. The user should be
   able to request compression before the next run, and Flovera may suggest or
   trigger it when session history is large even if the provider has not failed
-  yet. The compressed handoff must be visible in conversation history,
+  yet. The compressed state must be represented in conversation history,
   reversible through existing session/workspace recovery paths where possible,
   and must not silently discard recent interrupted-run transcript or tool
   history.
@@ -1125,14 +1127,14 @@ Android process starts a lightweight frame watchdog that logs slow UI frame gaps
 with the currently active Flovera background tasks. App-owned background work
 now has dedicated low-priority dispatchers for workspace mutations, workspace
 queries, Markdown rendering, and runtime jobs, so new heavy paths have a single
-programmatic place to run outside the UI thread.
+programmatic place to run outside the UI thread. Watchdog findings stay in logs
+instead of appearing as normal user-facing status copy.
 
 Implemented coverage:
 
 - A UI watchdog logs frame gaps above 300 ms and marks gaps above 1,000 ms as
-  frozen, including active Flovera task names for root-cause analysis. The same
-  signal is throttled back into Flovera status so severe local freezes are
-  visible without only relying on logcat.
+  frozen, including active Flovera task names for root-cause analysis, without
+  turning those diagnostics into normal conversation/status messages.
 - Markwon/CommonMark parsing for conversation Markdown runs on the Markdown
   dispatcher; the UI shows readable plain text until parsed spans are ready and
   only sets the parsed result on the TextView.
@@ -1316,8 +1318,8 @@ WebView app is usable.
 Status: Permission entry and command API mapping implemented. Flovera declares a broad
 development-stage permission set and exposes a top-level Permissions panel
 beside preview/snapshots/skills/secrets. Its Grant all action requests all
-missing runtime permissions together and then automatically walks the user
-through the Android system pages for battery optimization, overlay, all-files,
+basic permissions together and then automatically walks the user through the
+Android permission pages for battery optimization, overlay, all-files,
 unknown-app install, and exact-alarm access. Individual permission entries
 remain available as recovery paths for vendor-specific settings behavior.
 The agent can inspect permission state through `workspace_command_run`

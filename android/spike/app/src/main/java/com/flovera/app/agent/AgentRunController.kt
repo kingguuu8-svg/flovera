@@ -299,7 +299,7 @@ class AgentRunController(
           val compressionStartedEvent = lifecycleRunEvent(
             type = AgentRunEventType.COMPRESSION_STARTED,
             title = "Context overflow detected",
-            detail = "source=${overflowDetection.source}, reason=${overflowDetection.reason.take(TIMELINE_DETAIL_CHARS)}",
+            detail = "Flovera is compacting older background information before retrying.",
             status = AGENT_RUN_STATUS_RUNNING,
           )
           onRunEvent(compressionStartedEvent)
@@ -320,9 +320,9 @@ class AgentRunController(
             type = AgentRunEventType.COMPRESSION_COMPLETED,
             title = "Context overflow compressed",
             detail = buildString {
-              append("summarySource=${compressedRecord.summarySource.ifBlank { "local" }}")
+              append("Older background information was compacted automatically.")
               if (compressedRecord.compressionError.isNotBlank()) {
-                append(", error=${compressedRecord.compressionError.take(TIMELINE_DETAIL_CHARS)}")
+                append(" Some details may need to be rebuilt.")
               }
             },
             status = AGENT_RUN_STATUS_COMPLETED,
@@ -330,10 +330,10 @@ class AgentRunController(
           onRunEvent(compressionCompletedEvent)
           val retryBaseEvents = runState.persistedTimelineEvents(
             listOfNotNull(compressionCompletedEvent.timelineEvent),
-          ) + thinkingTimelineEvent("Retrying the interrupted request from the compressed handoff.")
+          ) + thinkingTimelineEvent("Retrying after updating context.")
           runState.resetForRecoveryRetry(
             baseTimelineEvents = retryBaseEvents,
-            statusContent = "Retrying from compressed handoff...",
+            statusContent = "Retrying after updating context...",
           )
           onSessionUpdated(currentSession, runState.draftMessage())
           recorder = newRecorder(currentSession)
@@ -886,7 +886,7 @@ class AgentRunController(
       events += AgentRunTimelineEvent(
         type = "compression",
         title = "Context compression started",
-        detail = "The estimated request is over the configured threshold, so Flovera is preparing a handoff summary before calling the model.",
+        detail = "Flovera is compacting older background information before continuing.",
         status = AGENT_RUN_STATUS_RUNNING,
         compact = false,
       )
@@ -904,15 +904,14 @@ class AgentRunController(
       type = "compression",
       title = "Context compressed",
       detail = buildString {
-        append("summarySource=${compressedRecord.summarySource.ifBlank { "local" }}")
-        append(", approximateTokens=${compressedRecord.approximateTokens}")
+        append("Older background information was compacted automatically.")
         if (compressedRecord.compressionError.isNotBlank()) {
-          append(", error=${compressedRecord.compressionError.take(TIMELINE_DETAIL_CHARS)}")
+          append(" Some details may need to be rebuilt.")
         }
       },
       status = AGENT_RUN_STATUS_COMPLETED,
       compact = false,
-    ) + thinkingTimelineEvent("Continuing the model request from the compressed handoff.")
+    ) + thinkingTimelineEvent("Continuing after updating context.")
   }
 
   private fun contextTimelineEvent(record: ContextUsageRecord): AgentRunTimelineEvent {
@@ -1029,8 +1028,8 @@ class AgentRunController(
     if (omitted > 0) {
       events += AgentRunTimelineEvent(
         type = "tool_omitted",
-        title = "Earlier tool calls hidden",
-        detail = "$omitted earlier completed tool call(s) are stored in the session tool event list.",
+        title = "Earlier steps hidden",
+        detail = "$omitted earlier step(s) are hidden here.",
         status = AGENT_RUN_STATUS_COMPLETED,
       )
     }
@@ -1038,17 +1037,7 @@ class AgentRunController(
       AgentRunTimelineEvent(
         type = "tool_call",
         title = "Tool: ${event.name}",
-        detail = buildString {
-          append(toolProgressLine(event))
-          if (event.args.isNotBlank()) {
-            appendLine()
-            append("args: ${event.args.take(TIMELINE_DETAIL_CHARS)}")
-          }
-          if (event.result.isNotBlank()) {
-            appendLine()
-            append("result: ${event.result.take(TIMELINE_DETAIL_CHARS)}")
-          }
-        },
+        detail = toolProgressLine(event),
         timestampMillis = event.timestampMillis,
         status = AGENT_RUN_STATUS_COMPLETED,
       )

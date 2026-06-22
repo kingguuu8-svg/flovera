@@ -2569,7 +2569,6 @@ private fun ConversationRunStateBar(status: String, queuedCount: Int, language: 
 
 @Composable
 private fun CompressionDivider(message: SessionMessage, language: String) {
-  var expanded by remember(message.timestampMillis, message.content) { mutableStateOf(false) }
   Column(
     modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
     verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -2577,37 +2576,13 @@ private fun CompressionDivider(message: SessionMessage, language: String) {
     ConversationRunEventRow(
       event = AgentRunTimelineEvent(
         type = "compression",
-        title = "Context compressed",
-        detail = formatMessageTime(message.timestampMillis),
+        title = t(language, "Context updated", "上下文已整理"),
+        detail = t(language, "Older background information was compressed automatically.", "较早的背景信息已自动压缩。"),
         timestampMillis = message.timestampMillis,
         status = "completed",
       ),
       language = language,
     )
-    TextButton(
-      onClick = { expanded = !expanded },
-      modifier = Modifier.align(Alignment.CenterHorizontally),
-    ) {
-      Text(
-        text = if (expanded) "Hide handoff summary" else "Show handoff summary",
-        style = MaterialTheme.typography.labelSmall,
-      )
-    }
-    if (expanded) {
-      Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = FloveraSmallShape,
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.34f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.58f)),
-      ) {
-        Box(modifier = Modifier.padding(10.dp)) {
-          MarkdownMessageText(
-            content = message.content,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-          )
-        }
-      }
-    }
   }
 }
 
@@ -2859,7 +2834,7 @@ private fun ConversationRunEventRow(event: AgentRunTimelineEvent, language: Stri
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
       )
-      compactRunEventDetail(event)?.let { detail ->
+      compactRunEventDetail(event, language)?.let { detail ->
         Text(
           text = detail,
           color = color.copy(alpha = 0.62f),
@@ -2905,8 +2880,8 @@ private fun compactConversationTranscriptEvents(
     .let { if (it < 0) 0 else it }
   val omitted = ConversationTranscriptEvent(
     type = "tool_omitted",
-    title = "Earlier tool calls hidden",
-    detail = "$omittedToolCalls earlier completed tool call(s) are stored in the session tool event list.",
+    title = "Earlier steps hidden",
+    detail = "$omittedToolCalls earlier step(s) are hidden here.",
     status = "completed",
   )
   visible.add(insertionIndex, omitted)
@@ -2953,17 +2928,17 @@ private fun compactConversationRunEvents(message: SessionMessage): List<AgentRun
 
 private fun compactRunEventTitle(event: AgentRunTimelineEvent, language: String): String {
   return when (event.type) {
-    "thinking" -> t(language, "Thinking", "\u601d\u8003")
+    "thinking" -> t(language, "Working", "\u6b63\u5728\u5904\u7406")
     "tool_call" -> {
       val toolName = event.title.removePrefix("Tool: ").ifBlank { event.title }
-      t(language, "Tool: $toolName", "\u5de5\u5177\uff1a$toolName")
+      toolEventTitle(toolName, language)
     }
-    "tool_omitted" -> t(language, event.title, "\u5df2\u9690\u85cf\u66f4\u65e9\u5de5\u5177\u8c03\u7528")
+    "tool_omitted" -> t(language, event.title, "\u5df2\u9690\u85cf\u8f83\u65e9\u6b65\u9aa4")
     "assistant_text_streaming" -> t(language, "Writing update", "\u6b63\u5728\u8f93\u51fa\u8fdb\u5c55")
     "final_response_streaming" -> t(language, "Writing answer", "\u6b63\u5728\u8f93\u51fa\u56de\u7b54")
     "run_failed" -> t(language, "Run failed", "\u8fd0\u884c\u5931\u8d25")
     "run_interrupted" -> t(language, "Run interrupted", "\u8fd0\u884c\u5df2\u4e2d\u65ad")
-    "compression" -> t(language, event.title, event.title)
+    "compression" -> t(language, "Context updated", "\u4e0a\u4e0b\u6587\u5df2\u6574\u7406")
     "guidance" -> if (event.status == "applied") {
       t(language, "Guidance applied", "\u5df2\u5e94\u7528\u5f15\u5bfc")
     } else {
@@ -2973,13 +2948,31 @@ private fun compactRunEventTitle(event: AgentRunTimelineEvent, language: String)
   }
 }
 
-private fun compactRunEventDetail(event: AgentRunTimelineEvent): String? {
+private fun compactRunEventDetail(event: AgentRunTimelineEvent, language: String): String? {
+  if (event.type == "compression") return null
+  if (event.type == "assistant_text_streaming" || event.type == "final_response_streaming") return null
+  if (event.type == "tool_omitted") return t(language, "Earlier steps are hidden here.", "\u8f83\u65e9\u6b65\u9aa4\u5df2\u5728\u6b64\u5904\u9690\u85cf\u3002")
   if (event.type == "tool_call") return event.detail.lineSequence().firstOrNull()?.takeIf { it.isNotBlank() }
   if (event.type == "thinking") {
-    return event.detail.takeIf { it.isNotBlank() }
-      ?: if (event.status == "running") "Waiting for the next step." else null
+    return if (event.status == "running") t(language, "Working on the next step.", "\u6b63\u5728\u5904\u7406\u4e0b\u4e00\u6b65\u3002") else null
   }
   return event.detail.takeIf { it.isNotBlank() }
+}
+
+private fun toolEventTitle(toolName: String, language: String): String {
+  return when (toolName) {
+    "list_files" -> t(language, "Checked files", "\u67e5\u770b\u6587\u4ef6")
+    "workspace_search" -> t(language, "Searched workspace", "\u641c\u7d22\u5de5\u4f5c\u533a")
+    "read_file" -> t(language, "Read file", "\u8bfb\u53d6\u6587\u4ef6")
+    "write_file", "edit_file" -> t(language, "Updated file", "\u66f4\u65b0\u6587\u4ef6")
+    "python_run" -> t(language, "Ran Python", "\u8fd0\u884c Python")
+    "workspace_command_run" -> t(language, "Ran command", "\u8fd0\u884c\u547d\u4ee4")
+    "python_package_install" -> t(language, "Checked package", "\u68c0\u67e5\u4f9d\u8d56")
+    "artifact_inspect" -> t(language, "Checked app", "\u68c0\u67e5\u5e94\u7528")
+    "fetch_url", "download_file" -> t(language, "Fetched network content", "\u83b7\u53d6\u7f51\u7edc\u5185\u5bb9")
+    "web_search" -> t(language, "Searched web", "\u641c\u7d22\u7f51\u9875")
+    else -> t(language, "Workspace step", "\u5de5\u4f5c\u533a\u6b65\u9aa4")
+  }
 }
 
 private fun toolEventInlineDetail(event: ToolEvent): String {
@@ -3347,38 +3340,16 @@ private fun ContextUsageDetailsDialog(record: ContextUsageRecord, language: Stri
   )
 }
 
-private fun formatContextUsageCompact(record: ContextUsageRecord, language: String): String {
-  val percent = formatContextPercent(record, language)
-  val window = effectiveContextWindow(record)
-  val used = formatTokenCount(record.approximateTokens)
-  val total = window?.let(::formatTokenCount) ?: "?"
-  val prefix = if (isEstimatedContextRecord(record)) t(language, "est ", "\u4f30 ") else ""
-  return "$prefix$percent · $used/$total"
-}
-
 private fun formatContextUsageDetails(record: ContextUsageRecord, language: String): String {
   val window = effectiveContextWindow(record)
   val used = formatTokenCount(record.approximateTokens)
   val total = window?.let(::formatTokenCount) ?: t(language, "unknown", "\u672a\u77e5")
-  val requestChars = record.estimatedRequestChars.takeIf { it > 0 }
-    ?: (record.inputChars + record.historyChars + record.rulesChars + record.workspaceListingChars)
-  val estimateLabel = when {
-    isTokenizerContextRecord(record) -> {
-      t(language, "Tokenized from the request payload.", "\u57fa\u4e8e\u8bf7\u6c42 payload \u5206\u8bcd\u7edf\u8ba1\u3002")
-    }
-    isEstimatedContextRecord(record) -> {
-      t(language, "Estimated from request characters.", "\u57fa\u4e8e\u8bf7\u6c42\u5b57\u7b26\u6570\u4f30\u7b97\u3002")
-    }
-    else -> {
-      t(language, "Reported by provider.", "\u6765\u81ea provider \u62a5\u544a\u3002")
-    }
-  }
   return buildString {
     appendLine(
       t(
         language,
-        "Used $used tokens, total $total. $estimateLabel",
-        "\u5df2\u7528 $used tokens\uff0c\u5171 $total\u3002$estimateLabel",
+        "Used $used tokens, total $total.",
+        "\u5df2\u7528 $used tokens\uff0c\u5171 $total\u3002",
       ),
     )
     appendLine(
@@ -3388,25 +3359,7 @@ private fun formatContextUsageDetails(record: ContextUsageRecord, language: Stri
         "Flovera \u4f1a\u5728\u4e0a\u4e0b\u6587\u63a5\u8fd1\u9884\u7b97\u65f6\u81ea\u52a8\u538b\u7f29\u5176\u80cc\u666f\u4fe1\u606f\u3002",
       ),
     )
-    appendLine()
-    appendLine(t(language, "Breakdown:", "\u62c6\u5206\uff1a"))
-    appendLine("- inputChars=${record.inputChars}")
-    appendLine("- historyChars=${record.historyChars}")
-    appendLine("- rulesChars=${record.rulesChars}")
-    appendLine("- workspaceListingChars=${record.workspaceListingChars}")
-    appendLine("- toolSchemaChars=${record.toolSchemaChars}")
-    appendLine("- providerOverheadChars=${record.providerOverheadChars}")
-    appendLine("- tokenUsageSource=${record.tokenUsageSource}")
-    append("- estimatedRequestChars=$requestChars")
   }
-}
-
-private fun formatContextPercent(record: ContextUsageRecord, language: String): String {
-  val permille = effectiveContextPermille(record) ?: return t(language, "estimate", "\u4f30\u7b97")
-  if (permille in 1..99) return String.format(Locale.US, "%.1f%%", permille / 10.0)
-  val value = ((permille + 5) / 10).coerceIn(0, 100)
-  if (value == 0 && record.approximateTokens > 0) return t(language, "<1%", "<1%")
-  return "$value%"
 }
 
 private fun effectiveContextWindow(record: ContextUsageRecord): Int? {
@@ -3421,17 +3374,6 @@ private fun effectiveContextPermille(record: ContextUsageRecord): Int? {
   return ((record.approximateTokens.coerceAtLeast(0).toLong() * 1_000L) / window)
     .coerceIn(0L, 1_000L)
     .toInt()
-}
-
-private fun isEstimatedContextRecord(record: ContextUsageRecord): Boolean {
-  return !record.tokenUsageSource.equals("provider", ignoreCase = true) &&
-    !record.tokenUsageSource.equals("provider_reported", ignoreCase = true) &&
-    !isTokenizerContextRecord(record)
-}
-
-private fun isTokenizerContextRecord(record: ContextUsageRecord): Boolean {
-  return record.tokenUsageSource.equals("tokenizer", ignoreCase = true) ||
-    record.tokenUsageSource.startsWith("tokenizer_", ignoreCase = true)
 }
 
 private fun formatTokenCount(tokens: Int): String {
@@ -3896,14 +3838,7 @@ private fun WorkspaceArtifactPickerRow(
       Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text(artifact.name, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
         Text(
-          listOfNotNull(
-            artifact.kind.takeIf { it.isNotBlank() },
-            artifact.preview?.kind?.takeIf { it.isNotBlank() }?.let { "preview=$it" },
-            serverStatus?.state?.takeIf { it.isNotBlank() }?.let { "server=$it" },
-            serverStatus?.port?.let { "port=$it" },
-            previewPath.takeIf { it.isNotBlank() },
-            artifact.actions.takeIf { it.isNotEmpty() }?.joinToString(prefix = "actions=", separator = ",") { it.id },
-          ).joinToString("  "),
+          workspaceArtifactStatusText(artifact.valid, previewPath, serverStatus?.state, language),
           color = MaterialTheme.colorScheme.onSurfaceVariant,
           maxLines = 2,
           overflow = TextOverflow.Ellipsis,
@@ -3911,7 +3846,7 @@ private fun WorkspaceArtifactPickerRow(
         )
         if (!artifact.valid && artifact.diagnostics.isNotEmpty()) {
           Text(
-            artifact.diagnostics.first().message,
+            t(language, "This app needs to be repaired before it can open.", "\u8fd9\u4e2a\u5e94\u7528\u9700\u8981\u4fee\u590d\u540e\u624d\u80fd\u6253\u5f00\u3002"),
             color = MaterialTheme.colorScheme.error,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
@@ -3920,7 +3855,7 @@ private fun WorkspaceArtifactPickerRow(
         }
         if (serverStatus?.detail?.isNotBlank() == true) {
           Text(
-            serverStatus.detail,
+            t(language, "The preview service could not start.", "\u9884\u89c8\u670d\u52a1\u672a\u80fd\u542f\u52a8\u3002"),
             color = MaterialTheme.colorScheme.error,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
@@ -3943,6 +3878,19 @@ private fun WorkspaceArtifactPickerRow(
   }
 }
 
+private fun workspaceArtifactStatusText(
+  valid: Boolean,
+  previewPath: String,
+  serverState: String?,
+  language: String,
+): String {
+  if (!valid) return t(language, "Needs repair", "\u9700\u8981\u4fee\u590d")
+  if (serverState == "running") return t(language, "Running preview", "\u9884\u89c8\u8fd0\u884c\u4e2d")
+  if (serverState == "starting") return t(language, "Starting preview", "\u6b63\u5728\u542f\u52a8\u9884\u89c8")
+  if (previewPath.isNotBlank()) return t(language, "Ready to open", "\u53ef\u6253\u5f00")
+  return t(language, "Preview unavailable", "\u6682\u65e0\u53ef\u7528\u9884\u89c8")
+}
+
 @Composable
 private fun ArtifactJobsDialog(
   state: AgentScreenState,
@@ -3953,7 +3901,7 @@ private fun ArtifactJobsDialog(
 ) {
   AlertDialog(
     onDismissRequest = onDismiss,
-    title = { Text(t(language, "Artifact Jobs", "Artifact Jobs")) },
+    title = { Text(t(language, "Workspace Tasks", "\u5de5\u4f5c\u533a\u4efb\u52a1")) },
     text = {
       LazyColumn(
         modifier = Modifier.fillMaxWidth().heightIn(min = 160.dp, max = 480.dp),
@@ -3967,7 +3915,7 @@ private fun ArtifactJobsDialog(
         }
         if (state.workspaceArtifactJobs.isEmpty()) {
           item {
-            Text(t(language, "No artifact jobs yet.", "No artifact jobs yet."), style = MaterialTheme.typography.bodyMedium)
+            Text(t(language, "No workspace tasks yet.", "\u6682\u65e0\u5de5\u4f5c\u533a\u4efb\u52a1\u3002"), style = MaterialTheme.typography.bodyMedium)
           }
         } else {
           items(state.workspaceArtifactJobs, key = { it.id }) { job ->
@@ -4011,13 +3959,13 @@ private fun ArtifactJobRow(
       Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
           Text(
-            "${job.actionId}  ${job.status}",
+            t(language, "Workspace task", "\u5de5\u4f5c\u533a\u4efb\u52a1"),
             color = MaterialTheme.colorScheme.onSurface,
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.SemiBold,
           )
           Text(
-            "${job.artifactRootPath}  ${formatSnapshotTime(job.updatedAtMillis)}",
+            "${workspaceArtifactJobStatusLabel(job.status, language)}  ${formatSnapshotTime(job.updatedAtMillis)}",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -4025,7 +3973,7 @@ private fun ArtifactJobRow(
           )
         }
         OutlinedButton(onClick = { controller.rerunWorkspaceArtifactJob(job.id) }) {
-          Text(t(language, "Rerun", "Rerun"))
+          Text(t(language, "Retry", "\u91cd\u8bd5"))
         }
         OutlinedButton(
           enabled = job.status == "queued" || job.status == "running",
@@ -4034,8 +3982,13 @@ private fun ArtifactJobRow(
           Text(t(language, "Cancel", "\u53d6\u6d88"))
         }
       }
-      ArtifactJobStream("stdout", job.stdout)
-      ArtifactJobStream("stderr", job.stderr.ifBlank { job.error })
+      if (job.status == "failed") {
+        Text(
+          t(language, "This task failed. You can retry it or ask Flovera to fix the generated app.", "\u4efb\u52a1\u5931\u8d25\u3002\u53ef\u4ee5\u91cd\u8bd5\uff0c\u6216\u8ba9 Flovera \u4fee\u590d\u751f\u6210\u7684\u5e94\u7528\u3002"),
+          color = MaterialTheme.colorScheme.error,
+          style = MaterialTheme.typography.bodySmall,
+        )
+      }
       if (job.outputPaths.isNotEmpty()) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
           job.outputPaths.take(3).forEach { output ->
@@ -4054,23 +4007,15 @@ private fun ArtifactJobRow(
   }
 }
 
-@Composable
-private fun ArtifactJobStream(label: String, text: String) {
-  if (text.isBlank()) return
-  Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
-  Surface(
-    modifier = Modifier.fillMaxWidth(),
-    shape = FloveraSmallShape,
-    color = MaterialTheme.colorScheme.background,
-    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-  ) {
-    Text(
-      text = text.take(1200),
-      modifier = Modifier.padding(8.dp),
-      color = MaterialTheme.colorScheme.onSurface,
-      fontFamily = FontFamily.Monospace,
-      style = MaterialTheme.typography.bodySmall,
-    )
+private fun workspaceArtifactJobStatusLabel(status: String, language: String): String {
+  return when (status) {
+    "queued" -> t(language, "Waiting", "\u7b49\u5f85\u4e2d")
+    "running" -> t(language, "Running", "\u8fd0\u884c\u4e2d")
+    "succeeded" -> t(language, "Completed", "\u5df2\u5b8c\u6210")
+    "cancelled" -> t(language, "Cancelled", "\u5df2\u53d6\u6d88")
+    "interrupted" -> t(language, "Interrupted", "\u5df2\u4e2d\u65ad")
+    "failed" -> t(language, "Failed", "\u5931\u8d25")
+    else -> status
   }
 }
 
@@ -4861,8 +4806,8 @@ private fun PermissionsDialog(
         Text(
           t(
             language,
-            "Grant Android permissions here. Flovera requests runtime permissions together, then opens each required Android system permission page in sequence.",
-            "\u5728\u8fd9\u91cc\u7edf\u4e00\u6388\u6743 Android \u6743\u9650\u3002Flovera \u4f1a\u5148\u6279\u91cf\u8bf7\u6c42\u8fd0\u884c\u65f6\u6743\u9650\uff0c\u518d\u4f9d\u6b21\u6253\u5f00\u9700\u8981\u7684 Android \u7cfb\u7edf\u6388\u6743\u9875\u3002",
+            "Grant Flovera permissions here. Flovera requests basic permissions first, then opens each permission page that needs manual confirmation.",
+            "\u5728\u8fd9\u91cc\u6388\u4e88 Flovera \u9700\u8981\u7684\u6743\u9650\u3002Flovera \u4f1a\u5148\u8bf7\u6c42\u57fa\u7840\u6743\u9650\uff0c\u518d\u4f9d\u6b21\u6253\u5f00\u9700\u8981\u624b\u52a8\u786e\u8ba4\u7684\u6743\u9650\u9875\u3002",
           ),
           color = MaterialTheme.colorScheme.onSurfaceVariant,
           style = MaterialTheme.typography.bodySmall,
@@ -4929,7 +4874,7 @@ private fun PermissionStatusItem(
       Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text(label, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
         Text(
-          "${status.capability.id} · $statusText",
+          statusText,
           color = MaterialTheme.colorScheme.onSurfaceVariant,
           style = MaterialTheme.typography.bodySmall,
         )
@@ -4970,8 +4915,8 @@ private fun SkillsDialog(
         Text(
           t(
             language,
-            "Enabled skills enter the next request as visible descriptors. Disabled skills stay editable under .flovera/skills.",
-            "\u5f00\u542f\u7684\u6280\u80fd\u4f1a\u4f5c\u4e3a\u5165\u53e3\u8bf4\u660e\u8fdb\u5165\u4e0b\u4e00\u6b21\u8bf7\u6c42\u4f53\u3002\u5173\u95ed\u7684\u6280\u80fd\u4ecd\u53ef\u5728 .flovera/skills \u4e0b\u7f16\u8f91\u548c\u67e5\u770b\u3002",
+            "Enabled skills help Flovera handle matching tasks. Disabled skills will not be used automatically.",
+            "\u5f00\u542f\u7684\u6280\u80fd\u4f1a\u5e2e\u52a9 Flovera \u5904\u7406\u5339\u914d\u7684\u4efb\u52a1\u3002\u5173\u95ed\u540e\u4e0d\u4f1a\u81ea\u52a8\u4f7f\u7528\u3002",
           ),
           color = MaterialTheme.colorScheme.onSurfaceVariant,
           style = MaterialTheme.typography.bodySmall,
@@ -4980,8 +4925,8 @@ private fun SkillsDialog(
           Text(
             t(
               language,
-              "No registered skills. Add entries in .flovera/skills/manifest.json.",
-              "\u6682\u65e0\u5df2\u6ce8\u518c\u7684\u6280\u80fd\u3002\u53ef\u5728 .flovera/skills/manifest.json \u4e2d\u6dfb\u52a0\u5165\u53e3\u3002",
+              "No skills are registered yet.",
+              "\u6682\u65e0\u5df2\u6ce8\u518c\u7684\u6280\u80fd\u3002",
             ),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodySmall,
@@ -5267,8 +5212,8 @@ private fun SettingsDialog(
           Text(
             t(
               language,
-              "Ollama mode adds the profile-controlled num_ctx option from model context. Custom request bodies are not enabled.",
-              "Ollama \u6a21\u5f0f\u4f1a\u6839\u636e\u6a21\u578b\u4e0a\u4e0b\u6587\u6ce8\u5165 profile \u63a7\u5236\u7684 num_ctx\u3002\u5f53\u524d\u4e0d\u5f00\u653e\u81ea\u5b9a\u4e49\u8bf7\u6c42\u4f53\u3002",
+              "Ollama compatibility helps local Ollama-style services receive a suitable context setting.",
+              "Ollama \u517c\u5bb9\u6a21\u5f0f\u4f1a\u5e2e\u52a9\u672c\u5730 Ollama \u98ce\u683c\u670d\u52a1\u4f7f\u7528\u5408\u9002\u7684\u4e0a\u4e0b\u6587\u8bbe\u7f6e\u3002",
             ),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodySmall,
@@ -5438,14 +5383,14 @@ private fun SettingsDialog(
         Text(
           t(
             language,
-            "Full Authority auto-applies settings proposals after an audit log. Android permissions and secrets remain app-owned boundaries.",
-            "Full Authority 会在记录审计日志后自动应用设置提案。Android 权限和密钥仍然是 app 边界。",
+            "Full Authority lets Flovera apply supported setting changes automatically. Android permissions and saved secrets still stay under your control.",
+            "Full Authority 允许 Flovera 自动应用受支持的设置变更。Android 权限和已保存的密钥仍由你控制。",
           ),
           color = MaterialTheme.colorScheme.onSurfaceVariant,
           style = MaterialTheme.typography.bodySmall,
         )
         if (state.settingsProposals.isNotEmpty()) {
-          Text(t(language, "Pending proposals", "\u5f85\u786e\u8ba4\u63d0\u6848"), style = MaterialTheme.typography.titleSmall)
+          Text(t(language, "Pending changes", "\u5f85\u786e\u8ba4\u53d8\u66f4"), style = MaterialTheme.typography.titleSmall)
           state.settingsProposals.forEach { proposal ->
             SettingsProposalItem(
               proposal = proposal,
@@ -5456,7 +5401,7 @@ private fun SettingsDialog(
           }
         }
         if (state.controlledToolProposals.isNotEmpty()) {
-          Text(t(language, "Tool proposals", "\u5de5\u5177\u63d0\u6848"), style = MaterialTheme.typography.titleSmall)
+          Text(t(language, "Extension requests", "\u6269\u5c55\u8bf7\u6c42"), style = MaterialTheme.typography.titleSmall)
           state.controlledToolProposals.forEach { proposal ->
             ControlledToolProposalItem(
               proposal = proposal,
@@ -5617,7 +5562,7 @@ private fun FloveraSkillSettingsItem(
           style = MaterialTheme.typography.bodySmall,
         )
         Text(
-          skill.path,
+          t(language, if (skill.enabled) "Enabled" else "Disabled", if (skill.enabled) "\u5df2\u5f00\u542f" else "\u5df2\u5173\u95ed"),
           color = MaterialTheme.colorScheme.onSurfaceVariant,
           style = MaterialTheme.typography.labelSmall,
         )
@@ -5707,7 +5652,7 @@ private fun SettingsProposalItem(
         Text(proposal.reason, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
       }
       Text(
-        settingsProposalSummary(proposal),
+        settingsProposalSummary(proposal, language),
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         style = MaterialTheme.typography.bodySmall,
       )
@@ -5743,15 +5688,15 @@ private fun ControlledToolProposalItem(
         Text(proposal.reason, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
       }
       Text(
-        controlledToolProposalSummary(proposal),
+        controlledToolProposalSummary(proposal, language),
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         style = MaterialTheme.typography.bodySmall,
       )
       Text(
         t(
           language,
-          "Recorded only. Tool and MCP installation are not enabled in this build.",
-          "\u4ec5\u8bb0\u5f55\u63d0\u6848\u3002\u5f53\u524d\u7248\u672c\u4e0d\u5f00\u653e\u5de5\u5177\u6216 MCP \u5b89\u88c5\u3002",
+          "This request is saved for review. Automatic extension installation is not available in this version.",
+          "\u8fd9\u4e2a\u8bf7\u6c42\u5df2\u4fdd\u5b58\u4f9b\u67e5\u770b\u3002\u5f53\u524d\u7248\u672c\u4e0d\u652f\u6301\u81ea\u52a8\u5b89\u88c5\u6269\u5c55\u3002",
         ),
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         style = MaterialTheme.typography.bodySmall,
@@ -5763,47 +5708,59 @@ private fun ControlledToolProposalItem(
   }
 }
 
-private fun settingsProposalSummary(proposal: WorkspaceSettingsProposal): String {
+private fun settingsProposalSummary(proposal: WorkspaceSettingsProposal, language: String): String {
   val changes = proposal.changes
   val parts = listOfNotNull(
-    changes.provider?.let { "provider=$it" },
-    changes.model?.let { "model=$it" },
-    changes.selectedHtmlPath?.let { "selectedHtml=$it" },
-    changes.maxAgentIterations?.let { "maxIterations=$it" },
-    changes.networkEnabled?.let { "network=$it" },
-    changes.webSearchEnabled?.let { "webSearch=$it" },
-    changes.backgroundKeepAliveEnabled?.let { "backgroundKeepAlive=$it" },
-    changes.pythonRunToolFallbackEnabled?.let { "pythonRunFallback=$it" },
-    changes.language?.let { "language=$it" },
-    changes.themeMode?.let { "themeMode=$it" },
-    changes.themeColor?.let { "themeColor=$it" },
-    changes.agentAuthorityMode?.let { "authority=$it" },
-    changes.deepSeekThinkingEffort?.let { "deepSeekThinking=$it" },
-    changes.customOpenAIBaseUrl?.let { "customBaseUrl=$it" },
-    changes.customOpenAIChatCompletionsPath?.let { "customChatPath=$it" },
-    changes.customOpenAICompatibilityMode?.let { "customCompatibility=$it" },
-    changes.modelContextWindowTokens?.let { "context=$it" },
-    changes.modelCompressionThresholdPercent?.let { "compression=$it%" },
+    changes.provider?.let { t(language, "Provider: $it", "\u6a21\u578b\u670d\u52a1\uff1a$it") },
+    changes.model?.let { t(language, "Model: $it", "\u6a21\u578b\uff1a$it") },
+    changes.selectedHtmlPath?.let { t(language, "Preview: $it", "\u9884\u89c8\uff1a$it") },
+    changes.maxAgentIterations?.let { t(language, "Run limit: $it", "\u8fd0\u884c\u6b65\u6570\u4e0a\u9650\uff1a$it") },
+    changes.networkEnabled?.let { t(language, "Network: ${enabledLabel(language, it)}", "\u7f51\u7edc\uff1a${enabledLabel(language, it)}") },
+    changes.webSearchEnabled?.let { t(language, "Web search: ${enabledLabel(language, it)}", "\u7f51\u9875\u641c\u7d22\uff1a${enabledLabel(language, it)}") },
+    changes.backgroundKeepAliveEnabled?.let { t(language, "Background keep-alive: ${enabledLabel(language, it)}", "\u540e\u53f0\u4fdd\u6301\uff1a${enabledLabel(language, it)}") },
+    changes.pythonRunToolFallbackEnabled?.let { t(language, "Python compatibility: ${enabledLabel(language, it)}", "Python \u517c\u5bb9\u6267\u884c\uff1a${enabledLabel(language, it)}") },
+    changes.language?.let { t(language, "Language: ${languageLabel(it)}", "\u8bed\u8a00\uff1a${languageLabel(it)}") },
+    changes.themeMode?.let { t(language, "Theme: $it", "\u4e3b\u9898\uff1a$it") },
+    changes.themeColor?.let { t(language, "Theme color: $it", "\u4e3b\u9898\u8272\uff1a$it") },
+    changes.agentAuthorityMode?.let { t(language, "Authority: ${authorityModeLabel(language, it)}", "\u6743\u9650\uff1a${authorityModeLabel(language, it)}") },
+    changes.deepSeekThinkingEffort?.let { t(language, "DeepSeek thinking: ${deepSeekThinkingEffortLabel(language, it)}", "DeepSeek \u601d\u8003\uff1a${deepSeekThinkingEffortLabel(language, it)}") },
+    changes.customOpenAIBaseUrl?.let { t(language, "Custom endpoint changed", "\u81ea\u5b9a\u4e49\u7aef\u70b9\u5df2\u66f4\u6539") },
+    changes.customOpenAIChatCompletionsPath?.let { t(language, "Custom chat path changed", "\u81ea\u5b9a\u4e49\u5bf9\u8bdd\u8def\u5f84\u5df2\u66f4\u6539") },
+    changes.customOpenAICompatibilityMode?.let { t(language, "Compatibility: ${customOpenAICompatibilityModeLabel(language, it)}", "\u517c\u5bb9\u6a21\u5f0f\uff1a${customOpenAICompatibilityModeLabel(language, it)}") },
+    changes.modelContextWindowTokens?.let { t(language, "Context budget: $it tokens", "\u4e0a\u4e0b\u6587\u9884\u7b97\uff1a$it tokens") },
+    changes.modelCompressionThresholdPercent?.let { t(language, "Auto-compress near $it%", "\u63a5\u8fd1 $it% \u65f6\u81ea\u52a8\u538b\u7f29") },
   )
-  return parts.ifEmpty { listOf(proposal.path) }.joinToString(", ")
+  return parts.ifEmpty { listOf(t(language, "Settings change", "\u8bbe\u7f6e\u53d8\u66f4")) }.joinToString(", ")
 }
 
-private fun controlledToolProposalSummary(proposal: WorkspaceControlledToolProposal): String {
+private fun controlledToolProposalSummary(proposal: WorkspaceControlledToolProposal, language: String): String {
   val parts = listOfNotNull(
-    "type=${proposal.type}",
-    proposal.name.takeIf { it.isNotBlank() }?.let { "name=$it" },
-    proposal.command.takeIf { it.isNotBlank() }?.let { "command=$it" },
-    proposal.endpoint.takeIf { it.isNotBlank() }?.let { "endpoint=$it" },
-    proposal.requestedCapabilities.takeIf { it.isNotEmpty() }?.joinToString(prefix = "capabilities=", separator = "|"),
-    proposal.permissions.takeIf { it.isNotEmpty() }?.joinToString(prefix = "permissions=", separator = "|"),
+    t(language, "Extension: ${proposalTypeLabel(proposal.type, language)}", "\u6269\u5c55\uff1a${proposalTypeLabel(proposal.type, language)}"),
+    proposal.name.takeIf { it.isNotBlank() }?.let { t(language, "Name: $it", "\u540d\u79f0\uff1a$it") },
+    proposal.endpoint.takeIf { it.isNotBlank() }?.let { t(language, "Endpoint: $it", "\u8fde\u63a5\u5730\u5740\uff1a$it") },
+    proposal.command.takeIf { it.isNotBlank() }?.let { t(language, "Requires local command support", "\u9700\u8981\u672c\u5730\u547d\u4ee4\u652f\u6301") },
+    proposal.requestedCapabilities.takeIf { it.isNotEmpty() }?.let { t(language, "Requests extra abilities", "\u8bf7\u6c42\u989d\u5916\u80fd\u529b") },
+    proposal.permissions.takeIf { it.isNotEmpty() }?.let { t(language, "Requests additional permissions", "\u8bf7\u6c42\u989d\u5916\u6743\u9650") },
   )
-  return parts.joinToString(", ")
+  return parts.ifEmpty { listOf(t(language, "Extension request", "\u6269\u5c55\u8bf7\u6c42")) }.joinToString(", ")
+}
+
+private fun enabledLabel(language: String, enabled: Boolean): String {
+  return if (enabled) t(language, "on", "\u5f00\u542f") else t(language, "off", "\u5173\u95ed")
+}
+
+private fun proposalTypeLabel(type: String, language: String): String {
+  return when (type) {
+    "mcp" -> "MCP"
+    "tool" -> t(language, "Extension", "\u6269\u5c55")
+    else -> t(language, "Extension", "\u6269\u5c55")
+  }
 }
 
 private fun authorityModeLabel(language: String, authorityMode: String): String {
   return when (authorityMode) {
-    "assisted" -> t(language, "Assisted: agent proposes, user confirms", "Assisted\uff1aagent \u63d0\u6848\uff0c\u7528\u6237\u786e\u8ba4")
-    "full" -> t(language, "Full Authority: auto-apply proposals", "Full Authority\uff1a\u81ea\u52a8\u5e94\u7528\u63d0\u6848")
+    "assisted" -> t(language, "Assisted: ask before changes", "Assisted\uff1a\u53d8\u66f4\u524d\u8be2\u95ee")
+    "full" -> t(language, "Full Authority: apply supported changes", "Full Authority\uff1a\u5e94\u7528\u53d7\u652f\u6301\u7684\u53d8\u66f4")
     else -> t(language, "Safe: read-only app settings", "Safe\uff1a\u53ea\u8bfb app \u8bbe\u7f6e")
   }
 }

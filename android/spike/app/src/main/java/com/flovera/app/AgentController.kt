@@ -598,10 +598,6 @@ class AgentController(
     val now = System.currentTimeMillis()
     if (now - lastUiFrameWarningAtMillis < UI_FRAME_WARNING_MIN_INTERVAL_MS) return
     lastUiFrameWarningAtMillis = now
-    val taskSummary = activeTasks.take(96)
-    _state.update {
-      it.copy(status = "UI $severity frame ${gapMillis}ms; active: $taskSummary")
-    }
   }
 
   private fun launchWorkspaceMutation(surface: String, taskName: String, block: () -> Unit) {
@@ -616,13 +612,13 @@ class AgentController(
 
   private fun reportBackgroundMutationFailure(surface: String, throwable: Throwable) {
     val reason = throwable.message?.takeIf { it.isNotBlank() } ?: throwable::class.java.simpleName
-    _state.update { it.copy(status = "$surface failed: $reason") }
+    _state.update { it.copy(status = "Action failed: $reason") }
   }
 
   private fun rejectMutationWhileRunning(surface: String): Boolean {
     if (!_state.value.isRunning) return false
     _state.update {
-      it.copy(status = "$surface is locked while the agent is running")
+      it.copy(status = "Please wait for the current run to finish")
     }
     return true
   }
@@ -679,7 +675,7 @@ class AgentController(
     }
     artifactRunJobs[job.id] = runJob
     launchWorkspaceMutation("Artifact job refresh", "startWorkspaceArtifactAction") {
-      refreshWorkspaceState(status = "Artifact job started: ${target.action.id}")
+      refreshWorkspaceState(status = "Workspace task started")
     }
     return artifactJobJson.encodeToString(job)
   }
@@ -705,35 +701,35 @@ class AgentController(
     )
     launchWorkspaceMutation("Artifact job refresh", "cancelWorkspaceArtifactJob") {
       persistWorkspaceArtifactJob(canceled)
-      refreshWorkspaceState(status = "Artifact job cancelled: ${canceled.actionId}")
+      refreshWorkspaceState(status = "Workspace task cancelled")
     }
     return artifactJobJson.encodeToString(canceled)
   }
 
   fun rerunWorkspaceArtifactJob(jobId: String) {
     if (rejectMutationWhileRunning("Artifact actions")) return
-    _state.update { it.copy(status = "Rerunning artifact job...") }
+    _state.update { it.copy(status = "Rerunning workspace task...") }
     launchWorkspaceMutation("Artifact rerun", "rerunWorkspaceArtifactJob") {
-      val job = workspaceController.readWorkspaceArtifactJob(jobId) ?: return@launchWorkspaceMutation reportStatus("Artifact job not found")
+      val job = workspaceController.readWorkspaceArtifactJob(jobId) ?: return@launchWorkspaceMutation reportStatus("Workspace task not found")
       val target = workspaceController.resolveWorkspaceArtifactActionByManifest(job.artifactManifestPath, job.actionId)
-        ?: return@launchWorkspaceMutation reportStatus("Artifact action not found: ${job.actionId}")
+        ?: return@launchWorkspaceMutation reportStatus("Workspace task action not found")
       val inputJson = job.inputPath.takeIf { it.isNotBlank() }?.let { path ->
         workspaceController.previewTextFile(path).takeUnless { it.startsWith("File does not exist:") }
       }.orEmpty()
       startWorkspaceArtifactAction(target, inputJson)
-      refreshWorkspaceState(status = "Artifact job rerun started: ${job.actionId}")
+      refreshWorkspaceState(status = "Workspace task rerun started")
     }
   }
 
   fun stopWorkspaceArtifactServer(manifestPath: String) {
     if (rejectMutationWhileRunning("Artifact server changes")) return
-    _state.update { it.copy(status = "Stopping artifact server...") }
+    _state.update { it.copy(status = "Stopping preview service...") }
     launchWorkspaceMutation("Artifact server stop", "stopWorkspaceArtifactServer") {
       val stopped = workspacePythonHttpRuntime.stopManifest(manifestPath)
       _state.update {
         it.copy(
           workspaceArtifactServerStatuses = workspacePythonHttpRuntime.statusesFor(it.workspaceArtifacts),
-          status = if (stopped) "Artifact server stopped" else "Artifact server was not running",
+          status = if (stopped) "Preview service stopped" else "Preview service was not running",
         )
       }
     }
@@ -799,44 +795,44 @@ class AgentController(
   fun approveSettingsProposal(path: String) {
     if (rejectMutationWhileRunning("Settings proposals")) return
     val current = _state.value
-    _state.update { it.copy(status = "Applying settings proposal...") }
+    _state.update { it.copy(status = "Applying setting change...") }
     launchWorkspaceMutation("Settings proposal apply", "approveSettingsProposal") {
       val proposal = workspaceController.listSettingsProposals().firstOrNull { it.path == path }
       if (proposal == null) {
-        _state.update { it.copy(status = "Settings proposal not found") }
+        _state.update { it.copy(status = "Setting change not found") }
       } else {
         val settings = settingsController.applySettingsProposal(current.settings, proposal.changes)
         workspaceController.deleteSettingsProposal(path)
-        refreshWorkspaceState(settings = settings, status = "Settings proposal applied: ${proposal.title}")
+        refreshWorkspaceState(settings = settings, status = "Setting change applied: ${proposal.title}")
       }
     }
   }
 
   fun rejectSettingsProposal(path: String) {
     if (rejectMutationWhileRunning("Settings proposals")) return
-    _state.update { it.copy(status = "Rejecting settings proposal...") }
+    _state.update { it.copy(status = "Rejecting setting change...") }
     launchWorkspaceMutation("Settings proposal reject", "rejectSettingsProposal") {
       val deleted = workspaceController.deleteSettingsProposal(path)
-      refreshWorkspaceState(status = if (deleted) "Settings proposal rejected" else "Settings proposal not found")
+      refreshWorkspaceState(status = if (deleted) "Setting change rejected" else "Setting change not found")
     }
   }
 
   fun dismissControlledToolProposal(path: String) {
     if (rejectMutationWhileRunning("Tool proposals")) return
-    _state.update { it.copy(status = "Dismissing tool proposal...") }
+    _state.update { it.copy(status = "Dismissing extension request...") }
     launchWorkspaceMutation("Tool proposal dismiss", "dismissControlledToolProposal") {
       val deleted = workspaceController.deleteControlledToolProposal(path)
-      refreshWorkspaceState(status = if (deleted) "Tool proposal dismissed" else "Tool proposal not found")
+      refreshWorkspaceState(status = if (deleted) "Extension request dismissed" else "Extension request not found")
     }
   }
 
   fun setFloveraSkillEnabled(id: String, enabled: Boolean) {
     if (rejectMutationWhileRunning("Skill settings")) return
-    val status = "Skill ${if (enabled) "enabled" else "disabled"}: $id"
+    val status = if (enabled) "Skill enabled" else "Skill disabled"
     _state.update { it.copy(status = status) }
     launchWorkspaceMutation("Skill settings", "setFloveraSkillEnabled") {
       val updated = workspaceController.setFloveraSkillEnabled(id, enabled)
-      refreshWorkspaceState(status = if (updated) status else "Skill not found: $id")
+      refreshWorkspaceState(status = if (updated) status else "Skill not found")
     }
   }
 
@@ -1581,7 +1577,7 @@ class AgentController(
     persistWorkspaceArtifactJob(finished)
     artifactRunJobs.remove(jobId)
     launchWorkspaceMutation("Artifact job finish", "executeWorkspaceArtifactJob") {
-      refreshWorkspaceState(status = "Artifact job ${finished.status}: ${target.action.id}")
+      refreshWorkspaceState(status = "Workspace task ${finished.status}")
     }
   }
 
@@ -1694,7 +1690,7 @@ class AgentController(
     val fullAuthorityResult = applyFullAuthoritySettingsProposals(settings)
     val settingsAfterAuthority = fullAuthorityResult.settings
     val statusAfterAuthority = if (fullAuthorityResult.appliedCount > 0) {
-      "Full Authority applied ${fullAuthorityResult.appliedCount} settings proposal(s)"
+      "Full Authority applied ${fullAuthorityResult.appliedCount} setting change(s)"
     } else {
       status
     }
