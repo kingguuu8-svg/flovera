@@ -166,9 +166,11 @@ class AgentController(
   private val uiStateScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
   private val artifactJobScope = CoroutineScope(SupervisorJob() + FloveraDispatchers.runtimeDispatcher)
   private val workspaceMutationScope = CoroutineScope(SupervisorJob() + FloveraDispatchers.workspaceMutationDispatcher)
+  private val workspaceQueryScope = CoroutineScope(SupervisorJob() + FloveraDispatchers.workspaceQueryDispatcher)
   private val artifactRunJobs = ConcurrentHashMap<String, Job>()
   private var selectedHtmlLoadJob: Job? = null
   @Volatile private var selectedHtmlLoadGeneration: Long = 0
+  @Volatile private var selectedPreviewLoadGeneration: Long = 0
   private var pendingAssistantDraft: SessionMessage? = null
   private var pendingAssistantDraftFlushJob: Job? = null
   private var lastAssistantDraftFlushAtMillis: Long = 0
@@ -460,19 +462,33 @@ class AgentController(
   }
 
   fun selectHtmlFile(path: String) {
+    selectedPreviewLoadGeneration += 1
     val current = _state.value
-    val settings = settingsController.setSelectedHtml(current.settings, path)
-    refreshWorkspaceState(
-      settings = settings,
-      status = "Displaying $path",
-      resetPreviewToSelectedHtml = true,
-      startSelectedHtmlBackend = true,
-    )
+    _state.update {
+      it.copy(
+        selectedHtmlPath = path,
+        selectedPreviewPath = path,
+        selectedPreviewContent = "",
+        selectedPreviewMimeType = if (path.isBlank()) "" else "text/html",
+        selectedPreviewUri = "",
+        selectedHtmlLoading = path.isNotBlank(),
+        status = "Displaying $path",
+      )
+    }
+    launchWorkspaceMutation("Preview selection", "selectHtmlFile") {
+      val settings = settingsController.setSelectedHtml(current.settings, path)
+      refreshWorkspaceState(
+        settings = settings,
+        status = "Displaying $path",
+        resetPreviewToSelectedHtml = true,
+        startSelectedHtmlBackend = true,
+      )
+    }
   }
 
   fun clearWorkspacePreview(status: String = "Preview closed") {
-    val settings = settingsController.setSelectedHtml(_state.value.settings, "")
-    refreshWorkspaceState(settings = settings, status = status)
+    selectedPreviewLoadGeneration += 1
+    val current = _state.value
     _state.update {
       it.copy(
         selectedHtmlPath = "",
@@ -486,6 +502,10 @@ class AgentController(
         workspaceRootUrl = workspaceController.runtimeWorkspace().rootUrl(),
       )
     }
+    launchWorkspaceMutation("Preview selection", "clearWorkspacePreview") {
+      val settings = settingsController.setSelectedHtml(current.settings, "")
+      refreshWorkspaceState(settings = settings, status = status)
+    }
   }
 
   fun selectWorkspacePreview(path: String) {
@@ -493,30 +513,46 @@ class AgentController(
       selectHtmlFile(path)
       return
     }
-    val mimeType = workspaceController.mimeType(path)
-    val isImage = mimeType.startsWith("image/")
-    val isPdf = mimeType == "application/pdf" || path.endsWith(".pdf", ignoreCase = true)
-    val isOfficeDocument = isOfficeDocumentPreview(path)
-    val canPreviewAsText = canPreviewAsText(path, mimeType)
-    val content = when {
-      isImage -> ""
-      isPdf -> ""
-      isOfficeDocument -> ""
-      canPreviewAsText -> workspaceController.previewTextFile(path)
-      else -> "No built-in preview for $mimeType. Use Open with or Share from the file menu."
-    }
+    selectedPreviewLoadGeneration += 1
+    val generation = selectedPreviewLoadGeneration
     _state.update {
       it.copy(
         selectedPreviewPath = path,
-        selectedPreviewContent = content,
-        selectedPreviewMimeType = mimeType,
-        selectedPreviewUri = if (isImage || isPdf || isOfficeDocument) {
-          workspaceFileUri(path)?.toString().orEmpty()
-        } else {
-          ""
-        },
-        status = "Previewing $path",
+        selectedPreviewContent = "",
+        selectedPreviewMimeType = "",
+        selectedPreviewUri = "",
+        status = "Loading preview $path",
       )
+    }
+    workspaceQueryScope.launch {
+      runCatching {
+        FloveraPerformance.trace("workspace-query", "selectWorkspacePreview") {
+          workspacePreviewSelection(path)
+        }
+      }.onSuccess { preview ->
+        _state.update {
+          if (generation != selectedPreviewLoadGeneration) {
+            it
+          } else {
+            it.copy(
+              selectedPreviewPath = preview.path,
+              selectedPreviewContent = preview.content,
+              selectedPreviewMimeType = preview.mimeType,
+              selectedPreviewUri = preview.uri,
+              status = preview.status,
+            )
+          }
+        }
+      }.onFailure { throwable ->
+        val reason = throwable.message?.takeIf { it.isNotBlank() } ?: throwable::class.java.simpleName
+        _state.update {
+          if (generation != selectedPreviewLoadGeneration) {
+            it
+          } else {
+            it.copy(status = "Preview failed: $reason")
+          }
+        }
+      }
     }
   }
 
@@ -1641,6 +1677,41 @@ class AgentController(
     val error: String = "",
     val requiresBackend: Boolean = false,
   )
+
+  private data class WorkspacePreviewSelection(
+    val path: String,
+    val content: String,
+    val mimeType: String,
+    val uri: String,
+    val status: String,
+  )
+
+  private fun workspacePreviewSelection(path: String): WorkspacePreviewSelection {
+    val mimeType = workspaceController.mimeType(path)
+    val isImage = mimeType.startsWith("image/")
+    val isPdf = mimeType == "application/pdf" || path.endsWith(".pdf", ignoreCase = true)
+    val isOfficeDocument = isOfficeDocumentPreview(path)
+    val canPreviewAsText = canPreviewAsText(path, mimeType)
+    val content = when {
+      isImage -> ""
+      isPdf -> ""
+      isOfficeDocument -> ""
+      canPreviewAsText -> workspaceController.previewTextFile(path)
+      else -> "No built-in preview for $mimeType. Use Open with or Share from the file menu."
+    }
+    val uri = if (isImage || isPdf || isOfficeDocument) {
+      workspaceFileUri(path)?.toString().orEmpty()
+    } else {
+      ""
+    }
+    return WorkspacePreviewSelection(
+      path = path,
+      content = content,
+      mimeType = mimeType,
+      uri = uri,
+      status = "Previewing $path",
+    )
+  }
 
   private fun workspaceRootUrl(selectedHtmlUrl: String?, snapshot: WorkspaceSnapshot): String {
     return if (selectedHtmlUrl?.startsWith("http://127.0.0.1:") == true) {

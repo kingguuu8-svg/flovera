@@ -1140,15 +1140,18 @@ Implemented coverage:
 - Network/background toggles, workspace refresh, preview pinning, settings/tool
   proposals, skill toggles, secret management, and shared/attachment imports
   now enter the same workspace mutation queue.
+- Non-HTML workspace preview selection now uses a background workspace query
+  with generation checks, so stale preview reads cannot overwrite a newer user
+  selection.
 - Assistant draft updates are coalesced before entering Compose state, with
   run-boundary flushes for session updates, finish, interrupt, and guidance
   events so the final visible history remains complete.
 
 Remaining work:
 
-- Move the rest of synchronous workspace scans, preview text reads, selected
-  preview changes, file mutations, snapshot actions, session switching, and
-  artifact job lifecycle updates through the same background boundary.
+- Move the rest of synchronous file mutations, snapshot actions, session
+  switching, selected HTML metadata refreshes, and artifact job lifecycle
+  updates through the same background boundary.
 - Add a user-visible diagnostics surface or session log entry for repeated UI
   freeze events, not only logcat warnings.
 - Add deterministic tests around draft coalescing and asynchronous setting/rule
