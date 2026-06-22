@@ -284,20 +284,26 @@ class AgentController(
 
   fun setNetworkEnabled(enabled: Boolean) {
     if (rejectMutationWhileRunning("Network settings")) return
-    val settings = settingsController.setNetworkEnabled(_state.value.settings, enabled)
+    val current = _state.value
+    val optimistic = current.settings.copy(networkEnabled = enabled, networkUserConfigured = true)
+    val status = if (enabled) "Network tools enabled" else "Network tools disabled"
     _state.update {
       it.copy(
-        settings = settings,
-        status = if (enabled) "Network tools enabled" else "Network tools disabled",
+        settings = optimistic,
+        status = status,
       )
+    }
+    launchWorkspaceMutation("Network settings", "setNetworkEnabled") {
+      val settings = settingsController.setNetworkEnabled(current.settings, enabled)
+      refreshWorkspaceState(settings = settings, status = status)
     }
   }
 
   fun setBackgroundKeepAliveEnabled(enabled: Boolean) {
     if (rejectMutationWhileRunning("Background settings")) return
     val current = _state.value
-    val settings = settingsController.setBackgroundKeepAlive(current.settings, enabled)
-    workspaceController.syncFloveraSettings(settings)
+    val optimistic = current.settings.copy(backgroundKeepAliveEnabled = enabled)
+    val status = if (enabled) "Background keep-alive enabled" else "Background keep-alive disabled"
     if (enabled) {
       if (!current.isRunning) startBackgroundKeepAliveService()
     } else if (!current.isRunning) {
@@ -305,9 +311,13 @@ class AgentController(
     }
     _state.update {
       it.copy(
-        settings = settings,
-        status = if (enabled) "Background keep-alive enabled" else "Background keep-alive disabled",
+        settings = optimistic,
+        status = status,
       )
+    }
+    launchWorkspaceMutation("Background settings", "setBackgroundKeepAliveEnabled") {
+      val settings = settingsController.setBackgroundKeepAlive(current.settings, enabled)
+      refreshWorkspaceState(settings = settings, status = status)
     }
   }
 
@@ -331,31 +341,25 @@ class AgentController(
     if (rejectMutationWhileRunning("Settings")) return
     val current = _state.value
     _state.update { it.copy(status = "Saving settings...") }
-    workspaceMutationScope.launch {
-      runCatching {
-        FloveraPerformance.trace("workspace-mutation", "saveModelSettings") {
-          saveModelSettingsBlocking(
-            current = current,
-            providerId = providerId,
-            model = model,
-            apiKey = apiKey,
-            customOpenAIBaseUrl = customOpenAIBaseUrl,
-            customOpenAIChatCompletionsPath = customOpenAIChatCompletionsPath,
-            customOpenAICompatibilityMode = customOpenAICompatibilityMode,
-            language = language,
-            themeMode = themeMode,
-            themeColor = themeColor,
-            authorityMode = authorityMode,
-            deepSeekThinkingEffort = deepSeekThinkingEffort,
-            networkEnabled = networkEnabled,
-            webSearchEnabled = webSearchEnabled,
-            braveSearchApiKey = braveSearchApiKey,
-            backgroundKeepAliveEnabled = backgroundKeepAliveEnabled,
-          )
-        }
-      }.onFailure { throwable ->
-        reportBackgroundMutationFailure("Settings save", throwable)
-      }
+    launchWorkspaceMutation("Settings save", "saveModelSettings") {
+      saveModelSettingsBlocking(
+        current = current,
+        providerId = providerId,
+        model = model,
+        apiKey = apiKey,
+        customOpenAIBaseUrl = customOpenAIBaseUrl,
+        customOpenAIChatCompletionsPath = customOpenAIChatCompletionsPath,
+        customOpenAICompatibilityMode = customOpenAICompatibilityMode,
+        language = language,
+        themeMode = themeMode,
+        themeColor = themeColor,
+        authorityMode = authorityMode,
+        deepSeekThinkingEffort = deepSeekThinkingEffort,
+        networkEnabled = networkEnabled,
+        webSearchEnabled = webSearchEnabled,
+        braveSearchApiKey = braveSearchApiKey,
+        backgroundKeepAliveEnabled = backgroundKeepAliveEnabled,
+      )
     }
   }
 
@@ -448,16 +452,10 @@ class AgentController(
   fun saveAgentRules(content: String = _state.value.agentRulesDraft) {
     if (rejectMutationWhileRunning("Rule editing")) return
     _state.update { it.copy(agentRulesDraft = content, status = "Saving rule...") }
-    workspaceMutationScope.launch {
-      runCatching {
-        FloveraPerformance.trace("workspace-mutation", "saveAgentRules") {
-          workspaceController.writeAgentRules(content)
-          refreshWorkspaceState(status = "Rule saved")
-          _state.update { it.copy(agentRulesDraft = content) }
-        }
-      }.onFailure { throwable ->
-        reportBackgroundMutationFailure("Rule save", throwable)
-      }
+    launchWorkspaceMutation("Rule save", "saveAgentRules") {
+      workspaceController.writeAgentRules(content)
+      refreshWorkspaceState(status = "Rule saved")
+      _state.update { it.copy(agentRulesDraft = content) }
     }
   }
 
@@ -524,16 +522,34 @@ class AgentController(
 
   fun setHtmlPinned(path: String, pinned: Boolean) {
     if (rejectMutationWhileRunning("Preview pinning")) return
-    val settings = settingsController.setPinnedHtmlPath(_state.value.settings, path, pinned)
-    refreshWorkspaceState(settings = settings, status = if (pinned) "HTML pinned" else "HTML unpinned")
+    val status = if (pinned) "HTML pinned" else "HTML unpinned"
+    _state.update { it.copy(status = status) }
+    val current = _state.value
+    launchWorkspaceMutation("Preview pinning", "setHtmlPinned") {
+      val settings = settingsController.setPinnedHtmlPath(current.settings, path, pinned)
+      refreshWorkspaceState(settings = settings, status = status)
+    }
   }
 
   fun refreshWorkspaceFiles() {
-    refreshWorkspaceState(status = "Workspace refreshed")
+    _state.update { it.copy(status = "Refreshing workspace...") }
+    launchWorkspaceMutation("Workspace refresh", "refreshWorkspaceFiles") {
+      refreshWorkspaceState(status = "Workspace refreshed")
+    }
   }
 
   fun reportStatus(status: String) {
     _state.update { it.copy(status = status) }
+  }
+
+  private fun launchWorkspaceMutation(surface: String, taskName: String, block: () -> Unit) {
+    workspaceMutationScope.launch {
+      runCatching {
+        FloveraPerformance.trace("workspace-mutation", taskName, block)
+      }.onFailure { throwable ->
+        reportBackgroundMutationFailure(surface, throwable)
+      }
+    }
   }
 
   private fun reportBackgroundMutationFailure(surface: String, throwable: Throwable) {
@@ -655,28 +671,46 @@ class AgentController(
 
   fun approveSettingsProposal(path: String) {
     if (rejectMutationWhileRunning("Settings proposals")) return
-    val proposal = workspaceController.listSettingsProposals().firstOrNull { it.path == path } ?: return
-    val settings = settingsController.applySettingsProposal(_state.value.settings, proposal.changes)
-    workspaceController.deleteSettingsProposal(path)
-    refreshWorkspaceState(settings = settings, status = "Settings proposal applied: ${proposal.title}")
+    val current = _state.value
+    _state.update { it.copy(status = "Applying settings proposal...") }
+    launchWorkspaceMutation("Settings proposal apply", "approveSettingsProposal") {
+      val proposal = workspaceController.listSettingsProposals().firstOrNull { it.path == path }
+      if (proposal == null) {
+        _state.update { it.copy(status = "Settings proposal not found") }
+      } else {
+        val settings = settingsController.applySettingsProposal(current.settings, proposal.changes)
+        workspaceController.deleteSettingsProposal(path)
+        refreshWorkspaceState(settings = settings, status = "Settings proposal applied: ${proposal.title}")
+      }
+    }
   }
 
   fun rejectSettingsProposal(path: String) {
     if (rejectMutationWhileRunning("Settings proposals")) return
-    val deleted = workspaceController.deleteSettingsProposal(path)
-    refreshWorkspaceState(status = if (deleted) "Settings proposal rejected" else "Settings proposal not found")
+    _state.update { it.copy(status = "Rejecting settings proposal...") }
+    launchWorkspaceMutation("Settings proposal reject", "rejectSettingsProposal") {
+      val deleted = workspaceController.deleteSettingsProposal(path)
+      refreshWorkspaceState(status = if (deleted) "Settings proposal rejected" else "Settings proposal not found")
+    }
   }
 
   fun dismissControlledToolProposal(path: String) {
     if (rejectMutationWhileRunning("Tool proposals")) return
-    val deleted = workspaceController.deleteControlledToolProposal(path)
-    refreshWorkspaceState(status = if (deleted) "Tool proposal dismissed" else "Tool proposal not found")
+    _state.update { it.copy(status = "Dismissing tool proposal...") }
+    launchWorkspaceMutation("Tool proposal dismiss", "dismissControlledToolProposal") {
+      val deleted = workspaceController.deleteControlledToolProposal(path)
+      refreshWorkspaceState(status = if (deleted) "Tool proposal dismissed" else "Tool proposal not found")
+    }
   }
 
   fun setFloveraSkillEnabled(id: String, enabled: Boolean) {
     if (rejectMutationWhileRunning("Skill settings")) return
-    val updated = workspaceController.setFloveraSkillEnabled(id, enabled)
-    refreshWorkspaceState(status = if (updated) "Skill ${if (enabled) "enabled" else "disabled"}: $id" else "Skill not found: $id")
+    val status = "Skill ${if (enabled) "enabled" else "disabled"}: $id"
+    _state.update { it.copy(status = status) }
+    launchWorkspaceMutation("Skill settings", "setFloveraSkillEnabled") {
+      val updated = workspaceController.setFloveraSkillEnabled(id, enabled)
+      refreshWorkspaceState(status = if (updated) status else "Skill not found: $id")
+    }
   }
 
   fun saveWorkspaceSecret(
@@ -688,31 +722,41 @@ class AgentController(
     agentAllowed: Boolean,
   ) {
     if (rejectMutationWhileRunning("Secret settings")) return
-    val settings = settingsController.saveWorkspaceSecret(
-      settings = _state.value.settings,
-      originalName = originalName,
-      name = name,
-      label = label,
-      description = description,
-      value = value,
-      agentAllowed = agentAllowed,
-    )
-    refreshWorkspaceState(settings = settings, status = "Secret saved: ${name.trim()}")
+    val current = _state.value
+    _state.update { it.copy(status = "Saving secret...") }
+    launchWorkspaceMutation("Secret save", "saveWorkspaceSecret") {
+      val settings = settingsController.saveWorkspaceSecret(
+        settings = current.settings,
+        originalName = originalName,
+        name = name,
+        label = label,
+        description = description,
+        value = value,
+        agentAllowed = agentAllowed,
+      )
+      refreshWorkspaceState(settings = settings, status = "Secret saved: ${name.trim()}")
+    }
   }
 
   fun deleteWorkspaceSecret(name: String) {
     if (rejectMutationWhileRunning("Secret settings")) return
-    val settings = settingsController.deleteWorkspaceSecret(_state.value.settings, name)
-    refreshWorkspaceState(settings = settings, status = "Secret deleted: ${name.trim()}")
+    val current = _state.value
+    _state.update { it.copy(status = "Deleting secret...") }
+    launchWorkspaceMutation("Secret delete", "deleteWorkspaceSecret") {
+      val settings = settingsController.deleteWorkspaceSecret(current.settings, name)
+      refreshWorkspaceState(settings = settings, status = "Secret deleted: ${name.trim()}")
+    }
   }
 
   fun setWorkspaceSecretAgentAllowed(name: String, allowed: Boolean) {
     if (rejectMutationWhileRunning("Secret settings")) return
-    val settings = settingsController.setWorkspaceSecretAgentAllowed(_state.value.settings, name, allowed)
-    refreshWorkspaceState(
-      settings = settings,
-      status = "Secret ${if (allowed) "enabled" else "disabled"} for agent: ${name.trim()}",
-    )
+    val current = _state.value
+    val status = "Secret ${if (allowed) "enabled" else "disabled"} for agent: ${name.trim()}"
+    _state.update { it.copy(status = status) }
+    launchWorkspaceMutation("Secret settings", "setWorkspaceSecretAgentAllowed") {
+      val settings = settingsController.setWorkspaceSecretAgentAllowed(current.settings, name, allowed)
+      refreshWorkspaceState(settings = settings, status = status)
+    }
   }
 
   fun workspaceFileUri(path: String): Uri? {
@@ -726,31 +770,37 @@ class AgentController(
     if (rejectMutationWhileRunning("File import")) return false
     val uris = sharedUris(intent)
     if (uris.isEmpty()) return false
-    val results = uris.map { uri -> workspaceController.importSharedFile(uri) }
-    refreshWorkspaceState(status = results.joinToString("; "))
+    _state.update { it.copy(status = "Importing shared file...") }
+    launchWorkspaceMutation("File import", "importSharedIntent") {
+      val results = uris.map { uri -> workspaceController.importSharedFile(uri) }
+      refreshWorkspaceState(status = results.joinToString("; "))
+    }
     return true
   }
 
   fun importConversationAttachments(uris: List<Uri>) {
     if (uris.isEmpty()) return
     if (rejectMutationWhileRunning("File import")) return
-    val results = uris.map { uri -> workspaceController.importSharedFile(uri) }
-    val importedPaths = results.mapNotNull { result ->
-      result.removePrefix("Imported ").takeIf { it != result && it.isNotBlank() }
-    }
-    val attachmentText = if (importedPaths.isNotEmpty()) {
-      if (_state.value.settings.language == "zh") {
-        "已导入 workspace 文件：\n" + importedPaths.joinToString("\n") { "- $it" }
-      } else {
-        "Imported workspace file(s):\n" + importedPaths.joinToString("\n") { "- $it" }
+    _state.update { it.copy(status = "Importing attachment...") }
+    launchWorkspaceMutation("File import", "importConversationAttachments") {
+      val results = uris.map { uri -> workspaceController.importSharedFile(uri) }
+      val importedPaths = results.mapNotNull { result ->
+        result.removePrefix("Imported ").takeIf { it != result && it.isNotBlank() }
       }
-    } else {
-      results.joinToString("\n")
+      val attachmentText = if (importedPaths.isNotEmpty()) {
+        if (_state.value.settings.language == "zh") {
+        "已导入 workspace 文件：\n" + importedPaths.joinToString("\n") { "- $it" }
+        } else {
+          "Imported workspace file(s):\n" + importedPaths.joinToString("\n") { "- $it" }
+        }
+      } else {
+        results.joinToString("\n")
+      }
+      refreshWorkspaceState(
+        input = appendInputText(_state.value.input, attachmentText),
+        status = results.joinToString("; "),
+      )
     }
-    refreshWorkspaceState(
-      input = appendInputText(_state.value.input, attachmentText),
-      status = results.joinToString("; "),
-    )
   }
 
   fun appendInputText(text: String) {
