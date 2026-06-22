@@ -1143,15 +1143,18 @@ Implemented coverage:
 - Non-HTML workspace preview selection now uses a background workspace query
   with generation checks, so stale preview reads cannot overwrite a newer user
   selection.
+- File rename/delete, snapshot create/restore/delete, session create/open/rename
+  /duplicate/archive/restore/pin/revert, and most artifact lifecycle refreshes
+  now run their workspace/session IO through the same background boundary.
 - Assistant draft updates are coalesced before entering Compose state, with
   run-boundary flushes for session updates, finish, interrupt, and guidance
   events so the final visible history remains complete.
 
 Remaining work:
 
-- Move the rest of synchronous file mutations, snapshot actions, session
-  switching, selected HTML metadata refreshes, and artifact job lifecycle
-  updates through the same background boundary.
+- Move the remaining agent-run completion refreshes, selected HTML metadata
+  refreshes, and artifact bridge return-path IO through explicit non-UI
+  boundaries where the existing callback/bridge contract allows it.
 - Add a user-visible diagnostics surface or session log entry for repeated UI
   freeze events, not only logcat warnings.
 - Add deterministic tests around draft coalescing and asynchronous setting/rule

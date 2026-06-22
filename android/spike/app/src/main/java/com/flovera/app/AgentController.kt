@@ -620,7 +620,9 @@ class AgentController(
       executeWorkspaceArtifactJob(job.id, target, inputJson)
     }
     artifactRunJobs[job.id] = runJob
-    refreshWorkspaceState(status = "Artifact job started: ${target.action.id}")
+    launchWorkspaceMutation("Artifact job refresh", "startWorkspaceArtifactAction") {
+      refreshWorkspaceState(status = "Artifact job started: ${target.action.id}")
+    }
     return workspaceController.workspaceArtifactJobJson(job.id)
   }
 
@@ -639,70 +641,96 @@ class AgentController(
         error = "Cancellation requested by WebView.",
       ),
     )
-    refreshWorkspaceState(status = "Artifact job cancelled: ${canceled.actionId}")
+    launchWorkspaceMutation("Artifact job refresh", "cancelWorkspaceArtifactJob") {
+      refreshWorkspaceState(status = "Artifact job cancelled: ${canceled.actionId}")
+    }
     return workspaceController.workspaceArtifactJobJson(id)
   }
 
   fun rerunWorkspaceArtifactJob(jobId: String) {
     if (rejectMutationWhileRunning("Artifact actions")) return
-    val job = workspaceController.readWorkspaceArtifactJob(jobId) ?: return reportStatus("Artifact job not found")
-    val target = workspaceController.resolveWorkspaceArtifactActionByManifest(job.artifactManifestPath, job.actionId)
-      ?: return reportStatus("Artifact action not found: ${job.actionId}")
-    val inputJson = job.inputPath.takeIf { it.isNotBlank() }?.let { path ->
-      workspaceController.previewTextFile(path).takeUnless { it.startsWith("File does not exist:") }
-    }.orEmpty()
-    startWorkspaceArtifactAction(target, inputJson)
-    refreshWorkspaceState(status = "Artifact job rerun started: ${job.actionId}")
+    _state.update { it.copy(status = "Rerunning artifact job...") }
+    launchWorkspaceMutation("Artifact rerun", "rerunWorkspaceArtifactJob") {
+      val job = workspaceController.readWorkspaceArtifactJob(jobId) ?: return@launchWorkspaceMutation reportStatus("Artifact job not found")
+      val target = workspaceController.resolveWorkspaceArtifactActionByManifest(job.artifactManifestPath, job.actionId)
+        ?: return@launchWorkspaceMutation reportStatus("Artifact action not found: ${job.actionId}")
+      val inputJson = job.inputPath.takeIf { it.isNotBlank() }?.let { path ->
+        workspaceController.previewTextFile(path).takeUnless { it.startsWith("File does not exist:") }
+      }.orEmpty()
+      startWorkspaceArtifactAction(target, inputJson)
+      refreshWorkspaceState(status = "Artifact job rerun started: ${job.actionId}")
+    }
   }
 
   fun stopWorkspaceArtifactServer(manifestPath: String) {
     if (rejectMutationWhileRunning("Artifact server changes")) return
-    val stopped = workspacePythonHttpRuntime.stopManifest(manifestPath)
-    _state.update {
-      it.copy(
-        workspaceArtifactServerStatuses = workspacePythonHttpRuntime.statusesFor(it.workspaceArtifacts),
-        status = if (stopped) "Artifact server stopped" else "Artifact server was not running",
-      )
+    _state.update { it.copy(status = "Stopping artifact server...") }
+    launchWorkspaceMutation("Artifact server stop", "stopWorkspaceArtifactServer") {
+      val stopped = workspacePythonHttpRuntime.stopManifest(manifestPath)
+      _state.update {
+        it.copy(
+          workspaceArtifactServerStatuses = workspacePythonHttpRuntime.statusesFor(it.workspaceArtifacts),
+          status = if (stopped) "Artifact server stopped" else "Artifact server was not running",
+        )
+      }
     }
   }
 
   fun renameWorkspacePath(path: String, newName: String) {
     if (rejectMutationWhileRunning("Workspace changes")) return
-    val status = workspaceController.rename(path, newName)
-    refreshWorkspaceState(status = status)
+    _state.update { it.copy(status = "Renaming workspace path...") }
+    launchWorkspaceMutation("Workspace rename", "renameWorkspacePath") {
+      val status = workspaceController.rename(path, newName)
+      refreshWorkspaceState(status = status)
+    }
   }
 
   fun deleteWorkspacePath(path: String) {
     if (rejectMutationWhileRunning("Workspace changes")) return
-    val status = workspaceController.deletePath(path)
-    refreshWorkspaceState(
-      status = status,
-      resetPreviewToSelectedHtml = _state.value.selectedPreviewPath == path,
-    )
+    val resetPreview = _state.value.selectedPreviewPath == path
+    _state.update { it.copy(status = "Deleting workspace path...") }
+    launchWorkspaceMutation("Workspace delete", "deleteWorkspacePath") {
+      val status = workspaceController.deletePath(path)
+      refreshWorkspaceState(
+        status = status,
+        resetPreviewToSelectedHtml = resetPreview,
+      )
+    }
   }
 
   fun createWorkspaceSnapshot(name: String) {
     if (rejectMutationWhileRunning("Snapshot changes")) return
     val current = _state.value
-    val snapshot = workspaceController.createSnapshot(name, current.selectedHtmlPath)
-    refreshWorkspaceState(status = "Snapshot created: ${snapshot.name}")
+    _state.update { it.copy(status = "Creating snapshot...") }
+    launchWorkspaceMutation("Snapshot create", "createWorkspaceSnapshot") {
+      val snapshot = workspaceController.createSnapshot(name, current.selectedHtmlPath)
+      refreshWorkspaceState(status = "Snapshot created: ${snapshot.name}")
+    }
   }
 
   fun restoreWorkspaceSnapshot(snapshotId: String) {
     if (rejectMutationWhileRunning("Snapshot restore")) return
-    val restored = workspaceController.restoreSnapshot(snapshotId) ?: return
-    val settings = if (restored.selectedHtmlPath.isBlank()) {
-      _state.value.settings
-    } else {
-      settingsController.setSelectedHtml(_state.value.settings, restored.selectedHtmlPath)
+    val current = _state.value
+    _state.update { it.copy(status = "Restoring snapshot...") }
+    launchWorkspaceMutation("Snapshot restore", "restoreWorkspaceSnapshot") {
+      val restored = workspaceController.restoreSnapshot(snapshotId)
+        ?: return@launchWorkspaceMutation reportStatus("Snapshot not found")
+      val settings = if (restored.selectedHtmlPath.isBlank()) {
+        current.settings
+      } else {
+        settingsController.setSelectedHtml(current.settings, restored.selectedHtmlPath)
+      }
+      refreshWorkspaceState(settings = settings, status = "Snapshot restored: ${restored.name}")
     }
-    refreshWorkspaceState(settings = settings, status = "Snapshot restored: ${restored.name}")
   }
 
   fun deleteWorkspaceSnapshot(snapshotId: String) {
     if (rejectMutationWhileRunning("Snapshot changes")) return
-    val deleted = workspaceController.deleteSnapshot(snapshotId)
-    refreshWorkspaceState(status = if (deleted) "Snapshot deleted" else "Snapshot could not be deleted")
+    _state.update { it.copy(status = "Deleting snapshot...") }
+    launchWorkspaceMutation("Snapshot delete", "deleteWorkspaceSnapshot") {
+      val deleted = workspaceController.deleteSnapshot(snapshotId)
+      refreshWorkspaceState(status = if (deleted) "Snapshot deleted" else "Snapshot could not be deleted")
+    }
   }
 
   fun approveSettingsProposal(path: String) {
@@ -852,16 +880,19 @@ class AgentController(
 
   fun newSession() {
     if (rejectMutationWhileRunning("Session changes")) return
-    val session = sessionController.createSession()
-    _state.update {
-      it.copy(
-        session = session,
-        sessions = sessionController.listActive(),
-        archivedSessions = sessionController.listArchived(),
-        agentRulesDraft = workspaceController.readAgentRules(),
-        input = "",
-        status = "New draft session",
-      )
+    _state.update { it.copy(status = "Creating session...") }
+    launchWorkspaceMutation("Session create", "newSession") {
+      val session = sessionController.createSession()
+      _state.update {
+        it.copy(
+          session = session,
+          sessions = sessionController.listActive(),
+          archivedSessions = sessionController.listArchived(),
+          agentRulesDraft = workspaceController.readAgentRules(),
+          input = "",
+          status = "New draft session",
+        )
+      }
     }
   }
 
@@ -870,92 +901,122 @@ class AgentController(
     val current = _state.value
     val session = current.session ?: return
     if (session.messages.isNotEmpty()) return
-    val fallback = sessionController.nextUsableSession()
-    val settings = settingsController.setActiveSession(current.settings, fallback?.id)
-    refreshWorkspaceState(
-      settings = settings,
-      session = fallback,
-      isRunning = false,
-      status = if (fallback == null) "No active session" else "Session loaded",
-    )
+    _state.update { it.copy(status = "Closing draft session...") }
+    launchWorkspaceMutation("Session discard", "discardEmptyDraftSession") {
+      val fallback = sessionController.nextUsableSession()
+      val settings = settingsController.setActiveSession(current.settings, fallback?.id)
+      refreshWorkspaceState(
+        settings = settings,
+        session = fallback,
+        isRunning = false,
+        status = if (fallback == null) "No active session" else "Session loaded",
+      )
+    }
   }
 
   fun openSession(sessionId: String) {
     if (rejectMutationWhileRunning("Session switching")) return
-    val session = sessionController.openSession(sessionId) ?: return
-    val settings = settingsController.setActiveSession(_state.value.settings, session.id)
-    _state.update {
-      it.copy(
-        settings = settings,
-        session = session,
-        sessions = sessionController.listActive(),
-        archivedSessions = sessionController.listArchived(),
-        agentRulesDraft = workspaceController.readAgentRules(),
-        status = "Session loaded",
-      )
+    val current = _state.value
+    _state.update { it.copy(status = "Loading session...") }
+    launchWorkspaceMutation("Session switching", "openSession") {
+      val session = sessionController.openSession(sessionId)
+        ?: return@launchWorkspaceMutation reportStatus("Session not found")
+      val settings = settingsController.setActiveSession(current.settings, session.id)
+      _state.update {
+        it.copy(
+          settings = settings,
+          session = session,
+          sessions = sessionController.listActive(),
+          archivedSessions = sessionController.listArchived(),
+          agentRulesDraft = workspaceController.readAgentRules(),
+          status = "Session loaded",
+        )
+      }
     }
   }
 
   fun renameSession(sessionId: String, title: String) {
     if (rejectMutationWhileRunning("Session changes")) return
-    val renamed = sessionController.renameSession(sessionId, title) ?: return
-    val active = if (_state.value.session?.id == renamed.id) renamed else _state.value.session
-    _state.update {
-      it.copy(
-        session = active,
-        sessions = sessionController.listActive(),
-        archivedSessions = sessionController.listArchived(),
-        status = "Session renamed",
-      )
+    val currentSession = _state.value.session
+    _state.update { it.copy(status = "Renaming session...") }
+    launchWorkspaceMutation("Session rename", "renameSession") {
+      val renamed = sessionController.renameSession(sessionId, title)
+        ?: return@launchWorkspaceMutation reportStatus("Session not found")
+      val active = if (currentSession?.id == renamed.id) renamed else currentSession
+      _state.update {
+        it.copy(
+          session = active,
+          sessions = sessionController.listActive(),
+          archivedSessions = sessionController.listArchived(),
+          status = "Session renamed",
+        )
+      }
     }
   }
 
   fun duplicateSession(sessionId: String) {
     if (rejectMutationWhileRunning("Session changes")) return
-    val copy = sessionController.duplicateSession(sessionId) ?: return
-    activateSession(copy, "Session copied")
+    _state.update { it.copy(status = "Copying session...") }
+    launchWorkspaceMutation("Session duplicate", "duplicateSession") {
+      val copy = sessionController.duplicateSession(sessionId)
+        ?: return@launchWorkspaceMutation reportStatus("Session not found")
+      activateSession(copy, "Session copied")
+    }
   }
 
   fun archiveSession(sessionId: String) {
     if (rejectMutationWhileRunning("Session changes")) return
-    sessionController.archiveSession(sessionId) ?: return
     val current = _state.value
-    if (current.session?.id == sessionId) {
-      val next = sessionController.nextUsableSession()
-      if (next == null) {
-        val settings = settingsController.setActiveSession(current.settings, null)
-        refreshWorkspaceState(settings = settings, session = null, isRunning = false, status = "Session archived")
+    _state.update { it.copy(status = "Archiving session...") }
+    launchWorkspaceMutation("Session archive", "archiveSession") {
+      sessionController.archiveSession(sessionId)
+        ?: return@launchWorkspaceMutation reportStatus("Session not found")
+      if (current.session?.id == sessionId) {
+        val next = sessionController.nextUsableSession()
+        if (next == null) {
+          val settings = settingsController.setActiveSession(current.settings, null)
+          refreshWorkspaceState(settings = settings, session = null, isRunning = false, status = "Session archived")
+        } else {
+          activateSession(next, "Session archived")
+        }
       } else {
-        activateSession(next, "Session archived")
-      }
-    } else {
-      _state.update {
-        it.copy(
-          sessions = sessionController.listActive(),
-          archivedSessions = sessionController.listArchived(),
-          status = "Session archived",
-        )
+        _state.update {
+          it.copy(
+            sessions = sessionController.listActive(),
+            archivedSessions = sessionController.listArchived(),
+            status = "Session archived",
+          )
+        }
       }
     }
   }
 
   fun restoreSession(sessionId: String) {
     if (rejectMutationWhileRunning("Session changes")) return
-    val restored = sessionController.restoreSession(sessionId) ?: return
-    activateSession(restored, "Session restored")
+    _state.update { it.copy(status = "Restoring session...") }
+    launchWorkspaceMutation("Session restore", "restoreSession") {
+      val restored = sessionController.restoreSession(sessionId)
+        ?: return@launchWorkspaceMutation reportStatus("Session not found")
+      activateSession(restored, "Session restored")
+    }
   }
 
   fun setSessionPinned(sessionId: String, pinned: Boolean) {
     if (rejectMutationWhileRunning("Session changes")) return
-    val updated = sessionController.setSessionPinned(sessionId, pinned) ?: return
-    val active = if (_state.value.session?.id == updated.id) updated else _state.value.session
-    _state.update {
-      it.copy(
-        session = active,
-        sessions = sessionController.listActive(),
-        archivedSessions = sessionController.listArchived(),
-        status = if (pinned) "Session pinned" else "Session unpinned",
-      )
+    val currentSession = _state.value.session
+    _state.update { it.copy(status = if (pinned) "Pinning session..." else "Unpinning session...") }
+    launchWorkspaceMutation("Session pin", "setSessionPinned") {
+      val updated = sessionController.setSessionPinned(sessionId, pinned)
+        ?: return@launchWorkspaceMutation reportStatus("Session not found")
+      val active = if (currentSession?.id == updated.id) updated else currentSession
+      _state.update {
+        it.copy(
+          session = active,
+          sessions = sessionController.listActive(),
+          archivedSessions = sessionController.listArchived(),
+          status = if (pinned) "Session pinned" else "Session unpinned",
+        )
+      }
     }
   }
 
@@ -965,25 +1026,31 @@ class AgentController(
     val session = current.session ?: return
     val selectedMessage = session.messages.getOrNull(messageIndex) ?: return
     if (selectedMessage.role != "user") return
-    val restored = sessionController.revertToBeforeMessage(session.id, messageIndex)
-    if (restored == null && messageIndex == 0) {
-      val settings = settingsController.setActiveSession(current.settings, null)
+    _state.update { it.copy(status = "Reverting conversation...") }
+    launchWorkspaceMutation("Session revert", "revertSessionToMessage") {
+      val restored = sessionController.revertToBeforeMessage(session.id, messageIndex)
+      if (restored == null && messageIndex == 0) {
+        val settings = settingsController.setActiveSession(current.settings, null)
+        refreshWorkspaceState(
+          settings = settings,
+          session = sessionController.createSession(),
+          input = selectedMessage.content,
+          isRunning = false,
+          status = "Conversation reverted",
+        )
+        return@launchWorkspaceMutation
+      }
+      if (restored == null) {
+        reportStatus("Conversation could not be reverted")
+        return@launchWorkspaceMutation
+      }
       refreshWorkspaceState(
-        settings = settings,
-        session = sessionController.createSession(),
+        session = restored,
         input = selectedMessage.content,
         isRunning = false,
         status = "Conversation reverted",
       )
-      return
     }
-    if (restored == null) return
-    refreshWorkspaceState(
-      session = restored,
-      input = selectedMessage.content,
-      isRunning = false,
-      status = "Conversation reverted",
-    )
   }
 
   fun submit() {
