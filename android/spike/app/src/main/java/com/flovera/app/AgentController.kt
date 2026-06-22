@@ -122,6 +122,11 @@ private fun QueuedAgentInput.toRunInput(): AgentRunInput {
   return AgentRunInput(modelInput = modelInput, visibleInput = content)
 }
 
+private fun upsertSession(sessions: List<AgentSession>, session: AgentSession): List<AgentSession> {
+  if (sessions.none { it.id == session.id }) return listOf(session) + sessions
+  return sessions.map { current -> if (current.id == session.id) session else current }
+}
+
 private fun SessionMessage.withMergedTranscriptEvents(
   extraEvents: List<ConversationTranscriptEvent>,
 ): SessionMessage {
@@ -1143,7 +1148,7 @@ class AgentController(
       additionalTranscriptEvents = { runTranscriptEvents.toList() },
       guidanceProvider = { consumeGuidanceForActiveRun() },
       onStarted = { withUser, draft ->
-        val settings = settingsController.setActiveSession(current.settings, withUser.id)
+        val settings = current.settings.copy(activeSessionId = withUser.id)
         notifyAgentRunRunning(draft.content, force = true)
         _state.update {
           it.copy(
@@ -1153,8 +1158,11 @@ class AgentController(
             status = "Running agent loop...",
             assistantDraft = draft,
             session = withUser,
-            sessions = sessionController.listActive(),
+            sessions = upsertSession(it.sessions, withUser),
           )
+        }
+        launchWorkspaceMutation("Agent run start", "persistActiveRunSession") {
+          settingsController.setActiveSession(current.settings, withUser.id)
         }
       },
       onDraft = { draft ->
@@ -1167,7 +1175,7 @@ class AgentController(
         _state.update {
           it.copy(
             session = updatedSession,
-            sessions = sessionController.listActive(),
+            sessions = upsertSession(it.sessions, updatedSession),
             assistantDraft = draft,
           )
         }
@@ -1192,24 +1200,44 @@ class AgentController(
           if (_state.value.settings.backgroundKeepAliveEnabled) {
             startBackgroundKeepAliveService()
           }
-          refreshWorkspaceState(
-            session = updated,
-            isRunning = false,
-            status = status,
-          )
+          _state.update {
+            it.copy(
+              session = updated,
+              sessions = upsertSession(it.sessions, updated),
+              isRunning = false,
+              assistantDraft = null,
+              status = "Finalizing workspace...",
+            )
+          }
+          launchWorkspaceMutation("Agent run finish", "finishAgentRun") {
+            refreshWorkspaceState(
+              session = updated,
+              isRunning = false,
+              status = status,
+            )
+          }
         } else {
           _state.update {
             it.copy(
               queuedInputs = if (unappliedGuidance.isNotEmpty()) it.queuedInputs else it.queuedInputs.drop(1),
+              session = updated,
+              sessions = upsertSession(it.sessions, updated),
+              isRunning = false,
+              assistantDraft = null,
+              status = "Finalizing queued message...",
             )
           }
           notifyAgentRunRunning("Running queued message...", force = true)
-          refreshWorkspaceState(
-            session = updated,
-            isRunning = false,
-            status = "Running queued message...",
-          )
-          startAgentRun(nextInput.toRunInput(), updated)
+          launchWorkspaceMutation("Agent run queue", "finishQueuedAgentRun") {
+            refreshWorkspaceState(
+              session = updated,
+              isRunning = false,
+              status = "Running queued message...",
+            )
+            uiStateScope.launch {
+              startAgentRun(nextInput.toRunInput(), updated)
+            }
+          }
         }
       },
     )

@@ -1146,15 +1146,19 @@ Implemented coverage:
 - File rename/delete, snapshot create/restore/delete, session create/open/rename
   /duplicate/archive/restore/pin/revert, and most artifact lifecycle refreshes
   now run their workspace/session IO through the same background boundary.
+- Agent run start/session update paths update session lists in memory instead
+  of rereading session storage, and agent run finish/queued-run finalization
+  sends workspace refresh through the mutation queue before reporting completion
+  or launching the queued run.
 - Assistant draft updates are coalesced before entering Compose state, with
   run-boundary flushes for session updates, finish, interrupt, and guidance
   events so the final visible history remains complete.
 
 Remaining work:
 
-- Move the remaining agent-run completion refreshes, selected HTML metadata
-  refreshes, and artifact bridge return-path IO through explicit non-UI
-  boundaries where the existing callback/bridge contract allows it.
+- Move the remaining selected HTML metadata refreshes and artifact bridge
+  return-path IO through explicit non-UI boundaries where the existing
+  callback/bridge contract allows it.
 - Add a user-visible diagnostics surface or session log entry for repeated UI
   freeze events, not only logcat warnings.
 - Add deterministic tests around draft coalescing and asynchronous setting/rule
