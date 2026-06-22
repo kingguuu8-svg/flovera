@@ -1152,15 +1152,16 @@ Implemented coverage:
   of rereading session storage, and agent run finish/queued-run finalization
   sends workspace refresh through the mutation queue before reporting completion
   or launching the queued run.
+- Artifact WebView bridge action calls resolve against the current in-memory
+  artifact state and return in-memory job JSON first; job persistence, UI
+  refresh, cancellation persistence, and runtime completion refreshes run off
+  the bridge/UI return path.
 - Assistant draft updates are coalesced before entering Compose state, with
   run-boundary flushes for session updates, finish, interrupt, and guidance
   events so the final visible history remains complete.
 
 Remaining work:
 
-- Move the remaining selected HTML metadata refreshes and artifact bridge
-  return-path IO through explicit non-UI boundaries where the existing
-  callback/bridge contract allows it.
 - Promote repeated UI freeze events from transient status into a richer
   diagnostics surface or session log entry when the app grows a diagnostics
   panel.

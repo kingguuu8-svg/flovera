@@ -38,7 +38,10 @@ import com.flovera.app.workspace.WorkspaceSettingsProposal
 import com.flovera.app.workspace.WorkspaceSnapshot
 import com.flovera.app.workspace.WorkspaceSnapshotRecord
 import java.io.File
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -110,6 +113,7 @@ private const val RUN_NOTIFICATION_MIN_INTERVAL_MS = 1_500L
 private const val ASSISTANT_DRAFT_UI_UPDATE_INTERVAL_MS = 80L
 private const val UI_FRAME_WARNING_MIN_INTERVAL_MS = 5_000L
 private const val WORKSPACE_ARTIFACT_ACTION_PYTHON_JOB = "python_job"
+private const val WORKSPACE_ARTIFACT_JOB_QUEUED = "queued"
 private const val WORKSPACE_ARTIFACT_PREVIEW_LOCAL_HTTP = "local_http"
 
 private fun QueuedAgentInput.toRunInput(): AgentRunInput {
@@ -168,12 +172,17 @@ class AgentController(
   private val appContext = context.applicationContext
   private val settingsController = SettingsController(settingsStore)
   private val sessionController = SessionController(sessionStore)
+  private val artifactJobJson = Json {
+    encodeDefaults = true
+    ignoreUnknownKeys = true
+  }
   private var activeRunJob: Job? = null
   private val uiStateScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
   private val artifactJobScope = CoroutineScope(SupervisorJob() + FloveraDispatchers.runtimeDispatcher)
   private val workspaceMutationScope = CoroutineScope(SupervisorJob() + FloveraDispatchers.workspaceMutationDispatcher)
   private val workspaceQueryScope = CoroutineScope(SupervisorJob() + FloveraDispatchers.workspaceQueryDispatcher)
   private val artifactRunJobs = ConcurrentHashMap<String, Job>()
+  private val artifactJobCache = ConcurrentHashMap<String, WorkspaceArtifactJob>()
   private var selectedHtmlLoadJob: Job? = null
   @Volatile private var selectedHtmlLoadGeneration: Long = 0
   @Volatile private var selectedPreviewLoadGeneration: Long = 0
@@ -625,14 +634,46 @@ class AgentController(
     val trimmedActionId = actionId.trim()
     if (trimmedActionId.isBlank()) return artifactBridgeError("missing action id")
     val previewPath = _state.value.selectedPreviewPath.ifBlank { _state.value.selectedHtmlPath }
-    val target = workspaceController.resolveWorkspaceArtifactAction(previewPath, trimmedActionId)
+    val target = resolveWorkspaceArtifactActionFromState(previewPath, trimmedActionId)
       ?: return artifactBridgeError("artifact action not found or ambiguous: $trimmedActionId")
     return startWorkspaceArtifactAction(target, inputJson)
   }
 
+  private fun resolveWorkspaceArtifactActionFromState(previewPath: String, actionId: String): WorkspaceArtifactActionTarget? {
+    val artifacts = _state.value.workspaceArtifacts.filter { it.valid }
+    val scopedMatches = artifacts
+      .filter { artifact -> previewPath.isNotBlank() && artifact.preview?.path == previewPath }
+      .mapNotNull { artifact ->
+        artifact.actions.firstOrNull { it.id == actionId }?.let { action ->
+          WorkspaceArtifactActionTarget(artifact, action)
+        }
+      }
+    if (scopedMatches.size == 1) return scopedMatches.single()
+    val globalMatches = artifacts
+      .mapNotNull { artifact ->
+        artifact.actions.firstOrNull { it.id == actionId }?.let { action ->
+          WorkspaceArtifactActionTarget(artifact, action)
+        }
+      }
+    return globalMatches.singleOrNull()
+  }
+
   private fun startWorkspaceArtifactAction(target: WorkspaceArtifactActionTarget, inputJson: String): String {
     val inputPath = target.action.inputPath
-    val job = workspaceController.createWorkspaceArtifactJob(target, inputPath)
+    val now = System.currentTimeMillis()
+    val job = WorkspaceArtifactJob(
+      id = UUID.randomUUID().toString(),
+      artifactManifestPath = target.artifact.manifestPath,
+      artifactRootPath = target.artifact.rootPath,
+      actionId = target.action.id,
+      actionKind = target.action.kind,
+      status = WORKSPACE_ARTIFACT_JOB_QUEUED,
+      createdAtMillis = now,
+      updatedAtMillis = now,
+      inputPath = inputPath,
+      outputPaths = target.action.outputs,
+    )
+    artifactJobCache[job.id] = job
     val runJob = artifactJobScope.launch {
       executeWorkspaceArtifactJob(job.id, target, inputJson)
     }
@@ -640,28 +681,33 @@ class AgentController(
     launchWorkspaceMutation("Artifact job refresh", "startWorkspaceArtifactAction") {
       refreshWorkspaceState(status = "Artifact job started: ${target.action.id}")
     }
-    return workspaceController.workspaceArtifactJobJson(job.id)
+    return artifactJobJson.encodeToString(job)
   }
 
   fun getWorkspaceArtifactJob(jobId: String): String {
-    return workspaceController.workspaceArtifactJobJson(jobId.trim())
+    val id = jobId.trim()
+    return artifactJobCache[id]?.let { artifactJobJson.encodeToString(it) }
+      ?: workspaceController.workspaceArtifactJobJson(id)
   }
 
   fun cancelWorkspaceArtifactJob(jobId: String): String {
     val id = jobId.trim()
     val running = artifactRunJobs.remove(id)
     running?.cancel()
-    val current = workspaceController.readWorkspaceArtifactJob(id) ?: return artifactBridgeError("artifact job not found: $id")
-    val canceled = workspaceController.updateWorkspaceArtifactJob(
+    val current = artifactJobCache[id]
+      ?: workspaceController.readWorkspaceArtifactJob(id)
+      ?: return artifactBridgeError("artifact job not found: $id")
+    val canceled = cacheWorkspaceArtifactJob(
       current.copy(
         status = "cancelled",
         error = "Cancellation requested by WebView.",
       ),
     )
     launchWorkspaceMutation("Artifact job refresh", "cancelWorkspaceArtifactJob") {
+      persistWorkspaceArtifactJob(canceled)
       refreshWorkspaceState(status = "Artifact job cancelled: ${canceled.actionId}")
     }
-    return workspaceController.workspaceArtifactJobJson(id)
+    return artifactJobJson.encodeToString(canceled)
   }
 
   fun rerunWorkspaceArtifactJob(jobId: String) {
@@ -1459,16 +1505,26 @@ class AgentController(
     if (_state.value.settings.backgroundKeepAliveEnabled) {
       startBackgroundKeepAliveService()
     }
-    refreshWorkspaceState(
-      session = interrupted ?: current.session,
-      isRunning = false,
-      status = "Agent loop interrupted",
-    )
+    _state.update {
+      it.copy(
+        session = interrupted ?: current.session,
+        isRunning = false,
+        assistantDraft = null,
+        status = "Finalizing interrupted run...",
+      )
+    }
+    launchWorkspaceMutation("Agent interrupt", "interruptAgentRun") {
+      refreshWorkspaceState(
+        session = interrupted ?: current.session,
+        isRunning = false,
+        status = "Agent loop interrupted",
+      )
+    }
   }
 
   private suspend fun executeWorkspaceArtifactJob(jobId: String, target: WorkspaceArtifactActionTarget, inputJson: String) {
-    val started = workspaceController.readWorkspaceArtifactJob(jobId) ?: return
-    workspaceController.updateWorkspaceArtifactJob(started.copy(status = "running", error = ""))
+    val started = artifactJobCache[jobId] ?: workspaceController.readWorkspaceArtifactJob(jobId) ?: return
+    persistWorkspaceArtifactJob(started.copy(status = "running", error = ""))
     val result = runCatching {
       require(target.action.kind == WORKSPACE_ARTIFACT_ACTION_PYTHON_JOB) {
         "Unsupported artifact action kind: ${target.action.kind}"
@@ -1483,8 +1539,8 @@ class AgentController(
       val inputPath = declaredInputPath(target, inputJson, argv)
       if (inputPath.isNotBlank()) {
         val writtenInputPath = workspaceController.writeWorkspaceArtifactInput(jobId, target.artifact.rootPath, inputPath, inputJson)
-        workspaceController.readWorkspaceArtifactJob(jobId)?.let { currentJob ->
-          workspaceController.updateWorkspaceArtifactJob(currentJob.copy(inputPath = writtenInputPath))
+        (artifactJobCache[jobId] ?: workspaceController.readWorkspaceArtifactJob(jobId))?.let { currentJob ->
+          persistWorkspaceArtifactJob(currentJob.copy(inputPath = writtenInputPath))
         }
       }
       ensureWorkspaceArtifactOutputDirectories(target)
@@ -1500,7 +1556,7 @@ class AgentController(
         environment = workspaceArtifactActionEnvironment(target),
       )
     }
-    val current = workspaceController.readWorkspaceArtifactJob(jobId) ?: return
+    val current = artifactJobCache[jobId] ?: workspaceController.readWorkspaceArtifactJob(jobId) ?: return
     val finished = result.fold(
       onSuccess = { pythonResult ->
         current.copy(
@@ -1522,9 +1578,11 @@ class AgentController(
         )
       },
     )
-    workspaceController.updateWorkspaceArtifactJob(finished)
+    persistWorkspaceArtifactJob(finished)
     artifactRunJobs.remove(jobId)
-    refreshWorkspaceState(status = "Artifact job ${finished.status}: ${target.action.id}")
+    launchWorkspaceMutation("Artifact job finish", "executeWorkspaceArtifactJob") {
+      refreshWorkspaceState(status = "Artifact job ${finished.status}: ${target.action.id}")
+    }
   }
 
   private fun declaredInputPath(
@@ -1610,6 +1668,18 @@ class AgentController(
       .put("status", "error")
       .put("error", message)
       .toString()
+  }
+
+  private fun cacheWorkspaceArtifactJob(job: WorkspaceArtifactJob): WorkspaceArtifactJob {
+    val cached = job.copy(updatedAtMillis = System.currentTimeMillis())
+    artifactJobCache[cached.id] = cached
+    return cached
+  }
+
+  private fun persistWorkspaceArtifactJob(job: WorkspaceArtifactJob): WorkspaceArtifactJob {
+    val persisted = workspaceController.updateWorkspaceArtifactJob(job)
+    artifactJobCache[persisted.id] = persisted
+    return persisted
   }
 
   private fun refreshWorkspaceState(
