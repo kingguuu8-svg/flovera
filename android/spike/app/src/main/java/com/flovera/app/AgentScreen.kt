@@ -19,6 +19,7 @@ import android.webkit.RenderProcessGoneDetail
 import android.widget.TextView
 import android.widget.ImageView
 import android.widget.Toast
+import android.text.Spanned
 import android.text.TextUtils
 import android.text.method.LinkMovementMethod
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -154,6 +155,7 @@ import com.flovera.app.koog.ModelProviderCatalog
 import com.flovera.app.platform.AndroidPermissionCapabilities
 import com.flovera.app.platform.AndroidPermissionType
 import com.flovera.app.platform.findActivity
+import com.flovera.app.performance.FloveraDispatchers
 import com.flovera.app.session.ContextUsageRecord
 import com.flovera.app.session.ConversationTranscriptEvent
 import com.flovera.app.session.AgentRunTimelineEvent
@@ -3120,6 +3122,21 @@ private fun MarkwonMessageText(content: String, color: Color, maxLines: Int? = n
       .usePlugin(TablePlugin.create(context))
       .build()
   }
+  var parsedMarkdown by remember(content) { mutableStateOf<Spanned?>(null) }
+  var markdownParseFailed by remember(content) { mutableStateOf(false) }
+  LaunchedEffect(content, markwon) {
+    parsedMarkdown = null
+    markdownParseFailed = false
+    runCatching {
+      FloveraDispatchers.runMarkdown("parse ${content.length} chars") {
+        markwon.toMarkdown(content)
+      }
+    }.onSuccess { parsed ->
+      parsedMarkdown = parsed
+    }.onFailure {
+      markdownParseFailed = true
+    }
+  }
   val textColor = color.toArgb()
   AndroidView(
     modifier = Modifier.fillMaxWidth(),
@@ -3146,10 +3163,23 @@ private fun MarkwonMessageText(content: String, color: Color, maxLines: Int? = n
         textView.setMaxLines(maxLines)
         textView.ellipsize = TextUtils.TruncateAt.END
       }
-      runCatching {
-        markwon.setMarkdown(textView, content)
-      }.onFailure {
+      val parsed = parsedMarkdown
+      if (parsed != null) {
+        runCatching {
+          markwon.setParsedMarkdown(textView, parsed)
+          textView.tag = content
+        }.onFailure {
+          textView.text = content
+          textView.tag = content
+        }
+      } else if (markdownParseFailed) {
+        if (textView.tag != content) {
+          textView.text = content
+          textView.tag = content
+        }
+      } else if (textView.tag != content) {
         textView.text = content
+        textView.tag = content
       }
     },
   )

@@ -17,12 +17,14 @@ import androidx.compose.ui.Modifier
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.flovera.app.platform.AndroidPermissionCapabilities
+import com.flovera.app.performance.UiResponsivenessMonitor
 import com.flovera.app.web.FloveraWebBridge
 import com.flovera.app.theme.FloveraTheme
 import java.util.ArrayDeque
 
 class MainActivity : ComponentActivity() {
   private lateinit var controller: AgentController
+  private val uiResponsivenessMonitor = UiResponsivenessMonitor()
   private val pendingSpecialPermissionIds = ArrayDeque<String>()
   private var permissionGrantFlowActive = false
   private val runtimePermissionLauncher = registerForActivityResult(
@@ -38,6 +40,7 @@ class MainActivity : ComponentActivity() {
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
+    uiResponsivenessMonitor.start()
 
     val styleShowcaseMode = resources.getBoolean(R.bool.style_showcase_mode)
 
@@ -88,6 +91,11 @@ class MainActivity : ComponentActivity() {
     super.onNewIntent(intent)
     setIntent(intent)
     consumeShareIntent(intent)
+  }
+
+  override fun onDestroy() {
+    uiResponsivenessMonitor.stop()
+    super.onDestroy()
   }
 
   override fun onRequestPermissionsResult(

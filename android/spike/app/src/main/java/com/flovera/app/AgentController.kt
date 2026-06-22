@@ -16,6 +16,8 @@ import com.flovera.app.config.SettingsController
 import com.flovera.app.config.SettingsStore
 import com.flovera.app.koog.FloveraPythonRuntime
 import com.flovera.app.koog.ModelProviderCatalog
+import com.flovera.app.performance.FloveraDispatchers
+import com.flovera.app.performance.FloveraPerformance
 import com.flovera.app.session.AgentSession
 import com.flovera.app.session.AgentRunTimelineEvent
 import com.flovera.app.session.AgentSessionStore
@@ -41,6 +43,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -104,6 +107,7 @@ const val QUEUED_INPUT_REQUEST = "request"
 const val QUEUED_INPUT_GUIDANCE = "guidance"
 
 private const val RUN_NOTIFICATION_MIN_INTERVAL_MS = 1_500L
+private const val ASSISTANT_DRAFT_UI_UPDATE_INTERVAL_MS = 80L
 private const val WORKSPACE_ARTIFACT_ACTION_PYTHON_JOB = "python_job"
 private const val WORKSPACE_ARTIFACT_PREVIEW_LOCAL_HTTP = "local_http"
 
@@ -159,10 +163,15 @@ class AgentController(
   private val settingsController = SettingsController(settingsStore)
   private val sessionController = SessionController(sessionStore)
   private var activeRunJob: Job? = null
-  private val artifactJobScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+  private val uiStateScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+  private val artifactJobScope = CoroutineScope(SupervisorJob() + FloveraDispatchers.runtimeDispatcher)
+  private val workspaceMutationScope = CoroutineScope(SupervisorJob() + FloveraDispatchers.workspaceMutationDispatcher)
   private val artifactRunJobs = ConcurrentHashMap<String, Job>()
   private var selectedHtmlLoadJob: Job? = null
   @Volatile private var selectedHtmlLoadGeneration: Long = 0
+  private var pendingAssistantDraft: SessionMessage? = null
+  private var pendingAssistantDraftFlushJob: Job? = null
+  private var lastAssistantDraftFlushAtMillis: Long = 0
   private var activeRunTranscriptEvents: MutableList<ConversationTranscriptEvent>? = null
   private val activeRunGuidanceLock = Any()
   private val activeRunPendingGuidance = mutableListOf<String>()
@@ -321,6 +330,53 @@ class AgentController(
   ) {
     if (rejectMutationWhileRunning("Settings")) return
     val current = _state.value
+    _state.update { it.copy(status = "Saving settings...") }
+    workspaceMutationScope.launch {
+      runCatching {
+        FloveraPerformance.trace("workspace-mutation", "saveModelSettings") {
+          saveModelSettingsBlocking(
+            current = current,
+            providerId = providerId,
+            model = model,
+            apiKey = apiKey,
+            customOpenAIBaseUrl = customOpenAIBaseUrl,
+            customOpenAIChatCompletionsPath = customOpenAIChatCompletionsPath,
+            customOpenAICompatibilityMode = customOpenAICompatibilityMode,
+            language = language,
+            themeMode = themeMode,
+            themeColor = themeColor,
+            authorityMode = authorityMode,
+            deepSeekThinkingEffort = deepSeekThinkingEffort,
+            networkEnabled = networkEnabled,
+            webSearchEnabled = webSearchEnabled,
+            braveSearchApiKey = braveSearchApiKey,
+            backgroundKeepAliveEnabled = backgroundKeepAliveEnabled,
+          )
+        }
+      }.onFailure { throwable ->
+        reportBackgroundMutationFailure("Settings save", throwable)
+      }
+    }
+  }
+
+  private fun saveModelSettingsBlocking(
+    current: AgentScreenState,
+    providerId: String,
+    model: String,
+    apiKey: String,
+    customOpenAIBaseUrl: String,
+    customOpenAIChatCompletionsPath: String,
+    customOpenAICompatibilityMode: String,
+    language: String,
+    themeMode: String,
+    themeColor: String,
+    authorityMode: String,
+    deepSeekThinkingEffort: String,
+    networkEnabled: Boolean,
+    webSearchEnabled: Boolean,
+    braveSearchApiKey: String,
+    backgroundKeepAliveEnabled: Boolean,
+  ) {
     val modelSettings = settingsController.saveModelSettings(
       current.settings,
       ModelSettingsDraft(
@@ -391,9 +447,18 @@ class AgentController(
 
   fun saveAgentRules(content: String = _state.value.agentRulesDraft) {
     if (rejectMutationWhileRunning("Rule editing")) return
-    workspaceController.writeAgentRules(content)
-    refreshWorkspaceState(status = "Rule saved")
-    _state.update { it.copy(agentRulesDraft = content) }
+    _state.update { it.copy(agentRulesDraft = content, status = "Saving rule...") }
+    workspaceMutationScope.launch {
+      runCatching {
+        FloveraPerformance.trace("workspace-mutation", "saveAgentRules") {
+          workspaceController.writeAgentRules(content)
+          refreshWorkspaceState(status = "Rule saved")
+          _state.update { it.copy(agentRulesDraft = content) }
+        }
+      }.onFailure { throwable ->
+        reportBackgroundMutationFailure("Rule save", throwable)
+      }
+    }
   }
 
   fun selectHtmlFile(path: String) {
@@ -469,6 +534,11 @@ class AgentController(
 
   fun reportStatus(status: String) {
     _state.update { it.copy(status = status) }
+  }
+
+  private fun reportBackgroundMutationFailure(surface: String, throwable: Throwable) {
+    val reason = throwable.message?.takeIf { it.isNotBlank() } ?: throwable::class.java.simpleName
+    _state.update { it.copy(status = "$surface failed: $reason") }
   }
 
   private fun rejectMutationWhileRunning(surface: String): Boolean {
@@ -936,11 +1006,10 @@ class AgentController(
       },
       onDraft = { draft ->
         notifyAgentRunRunning(draft.content.lineSequence().firstOrNull().orEmpty().ifBlank { "Working..." })
-        _state.update {
-          it.copy(assistantDraft = draft)
-        }
+        publishAssistantDraftThrottled(draft)
       },
       onSessionUpdated = { updatedSession, draft ->
+        flushPendingAssistantDraftNow()
         notifyAgentRunRunning(draft.content)
         _state.update {
           it.copy(
@@ -951,6 +1020,7 @@ class AgentController(
         }
       },
       onFinished = { updated, succeeded ->
+        flushPendingAssistantDraftNow()
         activeRunJob = null
         val unappliedGuidance = drainPendingActiveRunGuidance()
         if (activeRunTranscriptEvents === runTranscriptEvents) {
@@ -1016,6 +1086,33 @@ class AgentController(
     agentRunStatusNotifier.running(body)
   }
 
+  private fun publishAssistantDraftThrottled(draft: SessionMessage) {
+    pendingAssistantDraft = draft
+    val now = System.currentTimeMillis()
+    val elapsed = now - lastAssistantDraftFlushAtMillis
+    if (elapsed >= ASSISTANT_DRAFT_UI_UPDATE_INTERVAL_MS && pendingAssistantDraftFlushJob?.isActive != true) {
+      flushPendingAssistantDraftNow()
+      return
+    }
+    if (pendingAssistantDraftFlushJob?.isActive == true) return
+    val delayMillis = (ASSISTANT_DRAFT_UI_UPDATE_INTERVAL_MS - elapsed).coerceAtLeast(16L)
+    pendingAssistantDraftFlushJob = uiStateScope.launch {
+      delay(delayMillis)
+      flushPendingAssistantDraftNow()
+    }
+  }
+
+  private fun flushPendingAssistantDraftNow() {
+    pendingAssistantDraftFlushJob?.cancel()
+    pendingAssistantDraftFlushJob = null
+    val draft = pendingAssistantDraft ?: return
+    pendingAssistantDraft = null
+    lastAssistantDraftFlushAtMillis = System.currentTimeMillis()
+    _state.update {
+      it.copy(assistantDraft = draft)
+    }
+  }
+
   private fun resetAgentRunNotificationThrottle() {
     lastRunNotificationAtMillis = 0
     lastRunNotificationBody = ""
@@ -1067,6 +1164,7 @@ class AgentController(
   }
 
   private fun recordGuidanceAppliedForActiveRun(guidanceItems: List<String>) {
+    flushPendingAssistantDraftNow()
     val events = activeRunTranscriptEvents ?: return
     val now = System.currentTimeMillis()
     guidanceItems.forEach { guidance ->
@@ -1093,6 +1191,7 @@ class AgentController(
   }
 
   private fun recordGuidanceQueuedForActiveRun() {
+    flushPendingAssistantDraftNow()
     val events = activeRunTranscriptEvents ?: return
     val now = System.currentTimeMillis()
     events += ConversationTranscriptEvent(
@@ -1121,6 +1220,7 @@ class AgentController(
   }
 
   fun interruptAgentRun() {
+    flushPendingAssistantDraftNow()
     val current = _state.value
     if (!current.isRunning) return
     activeRunJob?.cancel()

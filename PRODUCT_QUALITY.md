@@ -1117,6 +1117,49 @@ Remaining work is richer artifact validation and broader UX polish.
   - the main flow does not rely on each project inventing its own
     `input.json`/`output.json` protocol.
 
+### UI Responsiveness Boundary
+
+Status: Partial implementation in progress. Flovera now treats foreground UI
+responsiveness as a product boundary instead of an incidental optimization. The
+Android process starts a lightweight frame watchdog that logs slow UI frame gaps
+with the currently active Flovera background tasks. App-owned background work
+now has dedicated low-priority dispatchers for workspace mutations, workspace
+queries, Markdown rendering, and runtime jobs, so new heavy paths have a single
+programmatic place to run outside the UI thread.
+
+Implemented coverage:
+
+- A UI watchdog logs frame gaps above 300 ms and marks gaps above 1,000 ms as
+  frozen, including active Flovera task names for root-cause analysis.
+- Markwon/CommonMark parsing for conversation Markdown runs on the Markdown
+  dispatcher; the UI shows readable plain text until parsed spans are ready and
+  only sets the parsed result on the TextView.
+- Settings save and AGENTS.md rule save enter the single workspace mutation
+  queue, update visible status immediately, and report background failures
+  instead of blocking the touch path.
+- Assistant draft updates are coalesced before entering Compose state, with
+  run-boundary flushes for session updates, finish, interrupt, and guidance
+  events so the final visible history remains complete.
+
+Remaining work:
+
+- Move the rest of synchronous workspace scans, preview text reads, individual
+  setting toggles, secret changes, skill toggles, and proposal handling through
+  the same background boundary.
+- Add a user-visible diagnostics surface or session log entry for repeated UI
+  freeze events, not only logcat warnings.
+- Add deterministic tests around draft coalescing and asynchronous setting/rule
+  save failures.
+
+Acceptance criteria:
+
+- Touch, scroll, and text input remain responsive while Markdown finalization,
+  rules save, settings save, workspace refresh, or runtime jobs are active.
+- Long-running Python/Groovy/Office/runtime work cannot share the UI thread or
+  spawn unbounded same-priority work.
+- When the UI freezes, the next available diagnostic identifies the active
+  Flovera task category instead of leaving the cause to manual guessing.
+
 ### Conversation Rendering And Markdown Fidelity
 
 Status: Baseline implemented for finalized conversation messages. Flovera now
@@ -1128,10 +1171,11 @@ than the original text. Streaming draft messages deliberately use a lightweight
 plain-text path that renders each runtime-throttled draft immediately while the
 runtime coalesces adjacent text deltas, so token-by-token output stays visible
 without blocking conversation scrolling; finalized short messages then re-render
-with the full Markdown renderer, while long finalized messages first stay as
-plain text for one frame and then render through segmented Markwon blocks to
-avoid a single large markdown parse on the UI path. User messages and finalized
-assistant messages have explicit copy buttons beside the speaker label.
+with the full Markdown renderer through an asynchronous Markdown dispatcher,
+while long finalized messages first stay as plain text for one frame and then
+render through segmented Markwon blocks without running the parse on the UI
+path. User messages and finalized assistant messages have explicit copy buttons
+beside the speaker label.
 Remaining work is inline workspace-path links inside the rendered Markdown
 surface, richer code-block styling, math/scientific formula rendering, and
 regression examples from real malformed provider output.
@@ -1140,6 +1184,8 @@ regression examples from real malformed provider output.
   mixed newlines, BOM characters, and common UTF-8 mojibake.
 - Done: render finalized Markdown through Markwon instead of Flovera's small
   hand-rolled Markdown parser.
+- Done: move Markwon parsing for finalized conversation Markdown onto a
+  dedicated low-priority Markdown dispatcher.
 - Done: keep streaming drafts on a lightweight plain-text path and throttle
   runtime draft updates to preserve scroll responsiveness during provider token
   output.
