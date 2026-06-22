@@ -24,7 +24,7 @@ import java.util.ArrayDeque
 
 class MainActivity : ComponentActivity() {
   private lateinit var controller: AgentController
-  private val uiResponsivenessMonitor = UiResponsivenessMonitor()
+  private var uiResponsivenessMonitor: UiResponsivenessMonitor? = null
   private val pendingSpecialPermissionIds = ArrayDeque<String>()
   private var permissionGrantFlowActive = false
   private val runtimePermissionLauncher = registerForActivityResult(
@@ -40,7 +40,6 @@ class MainActivity : ComponentActivity() {
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
-    uiResponsivenessMonitor.start()
 
     val styleShowcaseMode = resources.getBoolean(R.bool.style_showcase_mode)
 
@@ -60,6 +59,9 @@ class MainActivity : ComponentActivity() {
     }
 
     controller = AgentControllerProvider.get(applicationContext)
+    uiResponsivenessMonitor = UiResponsivenessMonitor { frameGap ->
+      controller.reportUiFrameGap(frameGap.severity, frameGap.gapMillis, frameGap.activeTasks)
+    }.also { it.start() }
     consumeShareIntent(intent)
     setContent {
       val appController = remember { controller }
@@ -94,7 +96,8 @@ class MainActivity : ComponentActivity() {
   }
 
   override fun onDestroy() {
-    uiResponsivenessMonitor.stop()
+    uiResponsivenessMonitor?.stop()
+    uiResponsivenessMonitor = null
     super.onDestroy()
   }
 

@@ -125,6 +125,7 @@ object FloveraDispatchers {
 class UiResponsivenessMonitor(
   private val slowFrameMillis: Long = 300L,
   private val frozenFrameMillis: Long = 1_000L,
+  private val onFrameGap: (UiFrameGap) -> Unit = {},
 ) {
   private var started = false
   private var lastFrameAtMillis = 0L
@@ -139,9 +140,17 @@ class UiResponsivenessMonitor(
         if (gap >= slowFrameMillis && now - lastLogAtMillis >= slowFrameMillis) {
           lastLogAtMillis = now
           val severity = if (gap >= frozenFrameMillis) "frozen" else "slow"
+          val activeTasks = FloveraPerformance.activeTaskSummary()
           Log.w(
             "FloveraUiWatchdog",
-            "UI $severity frame gap ${gap}ms; activeTasks=${FloveraPerformance.activeTaskSummary()}",
+            "UI $severity frame gap ${gap}ms; activeTasks=$activeTasks",
+          )
+          onFrameGap(
+            UiFrameGap(
+              severity = severity,
+              gapMillis = gap,
+              activeTasks = activeTasks,
+            ),
           )
         }
       }
@@ -165,3 +174,9 @@ class UiResponsivenessMonitor(
     Choreographer.getInstance().removeFrameCallback(callback)
   }
 }
+
+data class UiFrameGap(
+  val severity: String,
+  val gapMillis: Long,
+  val activeTasks: String,
+)

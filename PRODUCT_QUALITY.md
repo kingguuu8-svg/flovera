@@ -1130,7 +1130,9 @@ programmatic place to run outside the UI thread.
 Implemented coverage:
 
 - A UI watchdog logs frame gaps above 300 ms and marks gaps above 1,000 ms as
-  frozen, including active Flovera task names for root-cause analysis.
+  frozen, including active Flovera task names for root-cause analysis. The same
+  signal is throttled back into Flovera status so severe local freezes are
+  visible without only relying on logcat.
 - Markwon/CommonMark parsing for conversation Markdown runs on the Markdown
   dispatcher; the UI shows readable plain text until parsed spans are ready and
   only sets the parsed result on the TextView.
@@ -1159,8 +1161,9 @@ Remaining work:
 - Move the remaining selected HTML metadata refreshes and artifact bridge
   return-path IO through explicit non-UI boundaries where the existing
   callback/bridge contract allows it.
-- Add a user-visible diagnostics surface or session log entry for repeated UI
-  freeze events, not only logcat warnings.
+- Promote repeated UI freeze events from transient status into a richer
+  diagnostics surface or session log entry when the app grows a diagnostics
+  panel.
 - Add deterministic tests around draft coalescing and asynchronous setting/rule
   save failures.
 

@@ -108,6 +108,7 @@ const val QUEUED_INPUT_GUIDANCE = "guidance"
 
 private const val RUN_NOTIFICATION_MIN_INTERVAL_MS = 1_500L
 private const val ASSISTANT_DRAFT_UI_UPDATE_INTERVAL_MS = 80L
+private const val UI_FRAME_WARNING_MIN_INTERVAL_MS = 5_000L
 private const val WORKSPACE_ARTIFACT_ACTION_PYTHON_JOB = "python_job"
 private const val WORKSPACE_ARTIFACT_PREVIEW_LOCAL_HTTP = "local_http"
 
@@ -179,6 +180,7 @@ class AgentController(
   private var pendingAssistantDraft: SessionMessage? = null
   private var pendingAssistantDraftFlushJob: Job? = null
   private var lastAssistantDraftFlushAtMillis: Long = 0
+  private var lastUiFrameWarningAtMillis: Long = 0
   private var activeRunTranscriptEvents: MutableList<ConversationTranscriptEvent>? = null
   private val activeRunGuidanceLock = Any()
   private val activeRunPendingGuidance = mutableListOf<String>()
@@ -581,6 +583,16 @@ class AgentController(
 
   fun reportStatus(status: String) {
     _state.update { it.copy(status = status) }
+  }
+
+  fun reportUiFrameGap(severity: String, gapMillis: Long, activeTasks: String) {
+    val now = System.currentTimeMillis()
+    if (now - lastUiFrameWarningAtMillis < UI_FRAME_WARNING_MIN_INTERVAL_MS) return
+    lastUiFrameWarningAtMillis = now
+    val taskSummary = activeTasks.take(96)
+    _state.update {
+      it.copy(status = "UI $severity frame ${gapMillis}ms; active: $taskSummary")
+    }
   }
 
   private fun launchWorkspaceMutation(surface: String, taskName: String, block: () -> Unit) {
