@@ -199,18 +199,21 @@ class SessionManagementInstrumentedTest {
         SessionMessage(role = "user", content = "persisted"),
       )
       controller.openSession(first.id)
+      waitUntil { controller.state.value.session?.id == first.id }
 
       controller.renameSession(first.id, "Managed ${System.currentTimeMillis()}")
-      assertTrue(controller.state.value.session?.title?.startsWith("Managed ") == true)
+      waitUntil { controller.state.value.session?.title?.startsWith("Managed ") == true }
       controller.setSessionPinned(first.id, true)
-      assertNotNull(controller.state.value.session?.pinnedAtMillis)
+      waitUntil { controller.state.value.session?.pinnedAtMillis != null }
 
       controller.duplicateSession(first.id)
+      waitUntil { controller.state.value.session?.id != first.id }
       val duplicate = controller.state.value.session
       assertNotNull(duplicate)
       assertNotEquals(first.id, duplicate?.id)
 
       controller.archiveSession(duplicate!!.id)
+      waitUntil { controller.state.value.archivedSessions.any { it.id == duplicate.id } }
       val afterArchive = controller.state.value
       assertNotEquals(duplicate.id, afterArchive.session?.id)
       assertTrue(afterArchive.archivedSessions.any { it.id == duplicate.id })
@@ -249,6 +252,7 @@ class SessionManagementInstrumentedTest {
   fun controllerRevertExcludesSelectedMessage() {
     withIsolatedController("revert-excludes") { controller, store ->
       controller.newSession()
+      waitUntil { controller.state.value.session != null }
       val session = controller.state.value.session
       assertNotNull(session)
 
@@ -257,7 +261,9 @@ class SessionManagementInstrumentedTest {
       store.appendMessage(two, SessionMessage(role = "user", content = "three"))
 
       controller.openSession(session.id)
+      waitUntil { controller.state.value.session?.messages?.size == 3 }
       controller.revertSessionToMessage(2)
+      waitUntil { controller.state.value.input == "three" }
 
       val reverted = controller.state.value.session
       assertEquals(2, reverted?.messages?.size)
@@ -270,6 +276,7 @@ class SessionManagementInstrumentedTest {
   fun controllerRejectsRevertFromAssistantMessage() {
     withIsolatedController("reject-assistant-revert") { controller, store ->
       controller.newSession()
+      waitUntil { controller.state.value.session != null }
       val session = controller.state.value.session
       assertNotNull(session)
 
@@ -278,6 +285,7 @@ class SessionManagementInstrumentedTest {
       store.appendMessage(two, SessionMessage(role = "user", content = "three"))
 
       controller.openSession(session.id)
+      waitUntil { controller.state.value.session?.messages?.size == 3 }
       controller.updateInput("draft")
       controller.revertSessionToMessage(1)
 
@@ -291,6 +299,7 @@ class SessionManagementInstrumentedTest {
   fun controllerRevertsFirstUserMessageIntoDraftInput() {
     withIsolatedController("revert-first") { controller, store ->
       controller.newSession()
+      waitUntil { controller.state.value.session != null }
       val session = controller.state.value.session
       assertNotNull(session)
 
@@ -298,7 +307,9 @@ class SessionManagementInstrumentedTest {
       store.appendMessage(one, SessionMessage(role = "assistant", content = "answer"))
 
       controller.openSession(session.id)
+      waitUntil { controller.state.value.session?.messages?.size == 2 }
       controller.revertSessionToMessage(0)
+      waitUntil { controller.state.value.input == "rewrite me" }
 
       val state = controller.state.value
       assertEquals("rewrite me", state.input)
@@ -864,6 +875,15 @@ class SessionManagementInstrumentedTest {
       File(context.filesDir, "workspaces/$workspaceId").deleteRecursively()
       File(context.filesDir, "workspace-snapshots/$workspaceId").deleteRecursively()
     }
+  }
+
+  private fun waitUntil(timeoutMillis: Long = 5_000, predicate: () -> Boolean) {
+    val deadline = System.currentTimeMillis() + timeoutMillis
+    while (System.currentTimeMillis() < deadline) {
+      if (predicate()) return
+      Thread.sleep(25)
+    }
+    assertTrue("Timed out waiting for controller state", predicate())
   }
 
   private data class SessionStoreHarness(
