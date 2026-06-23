@@ -13,11 +13,13 @@ data class AgentRequestContext(
   val workspaceUserRules: String,
   val historyEntries: List<RuntimeHistoryEntry>,
   val workspaceMemory: String,
+  val workspaceTodo: String,
   val skillDescriptors: String,
   val secretRefs: String,
 ) {
   val historyChars: Int = historyEntries.sumOf { it.role.length + it.content.length + 2 }
   val workspaceMemoryChars: Int = workspaceMemory.length
+  val workspaceTodoChars: Int = workspaceTodo.length
 }
 
 object AgentRequestContextAssembler {
@@ -40,6 +42,7 @@ object AgentRequestContextAssembler {
     } else {
       ""
     }
+    val workspaceTodo = workspace.readFloveraTodo()
     val skillDescriptors = workspace.readFloveraSkillPromptDescriptors()
     val secretRefs = settings.agentVisibleSecretRefs().joinToString("\n") { secret ->
       "- ${secret.normalizedName}: ${secret.displayLabel}"
@@ -62,11 +65,13 @@ object AgentRequestContextAssembler {
         secretRefs = secretRefs,
         workspaceMemoryEnabled = settings.workspaceMemoryEnabled,
         workspaceMemory = workspaceMemory,
+        workspaceTodo = workspaceTodo,
         historyEntries = historyEntries,
       ),
       workspaceUserRules = workspaceUserRules,
       historyEntries = historyEntries,
       workspaceMemory = workspaceMemory,
+      workspaceTodo = workspaceTodo,
       skillDescriptors = skillDescriptors,
       secretRefs = secretRefs,
     )

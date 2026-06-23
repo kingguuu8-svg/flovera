@@ -128,7 +128,9 @@ class AgentPromptBuilderInstrumentedTest {
     assertTrue(systemPrompt.contains("disabled by default to reduce tool schema overhead"))
     assertTrue(systemPrompt.contains("pythonRunToolFallback=disabled"))
     assertTrue(systemPrompt.contains("workspaceMemory=enabled_at_.flovera/memory.md"))
+    assertTrue(systemPrompt.contains("workspaceTodo=available_at_.flovera/todo.md"))
     assertTrue(systemPrompt.contains("Workspace memory lives at `.flovera/memory.md`"))
+    assertTrue(systemPrompt.contains("Workspace todo lives at `.flovera/todo.md`"))
     assertTrue(systemPrompt.contains("workspaceCommandRuntime=available_python_groovy_jvm_artifacts_flovera_scripts_office_ooxml_poi_backend_experimental"))
     assertTrue(systemPrompt.contains("workspaceCommandProfiles=python,groovy,git,android,flovera-script,flovera-office"))
     assertTrue(systemPrompt.contains("workspaceAutomationScripts=available_at_.flovera/scripts"))
@@ -217,6 +219,7 @@ class AgentPromptBuilderInstrumentedTest {
     assertTrue(userInput.contains("Request context source map:"))
     assertTrue(userInput.contains("Recent session history:"))
     assertTrue(userInput.contains("Workspace memory:"))
+    assertTrue(userInput.contains("Workspace todo:"))
     assertTrue(userInput.contains("Available Flovera skills:"))
     assertTrue(userInput.contains("Available user-managed secrets:"))
     assertTrue(userInput.contains("FLOVERA_SECRET_1"))
@@ -259,6 +262,7 @@ class AgentPromptBuilderInstrumentedTest {
       workspaceUserRules = "",
       workspaceMemoryEnabled = true,
       workspaceMemory = "- User prefers Chinese replies.",
+      workspaceTodo = "- [ ] Verify generated chart.",
     )
     val disabled = AgentPromptBuilder.userInput(
       input = "continue",
@@ -270,6 +274,8 @@ class AgentPromptBuilderInstrumentedTest {
 
     assertTrue(enabled.contains("Workspace memory:"))
     assertTrue(enabled.contains("User prefers Chinese replies."))
+    assertTrue(enabled.contains("Workspace todo:"))
+    assertTrue(enabled.contains("Verify generated chart."))
     assertTrue(disabled.contains("disabled in settings"))
     assertFalse(disabled.contains("Should not be active."))
   }

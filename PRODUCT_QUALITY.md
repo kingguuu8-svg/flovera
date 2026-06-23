@@ -468,6 +468,11 @@ the per-request context projection.
   instructs agents to update memory only for explicit or clearly stable
   rememberable facts and never for secrets, transient todos, raw tool output, or
   guesses.
+- Workspace todo baseline is implemented as `.flovera/todo.md` and injected by
+  the same assembler as short user-visible task state. It is intentionally a
+  lightweight editable file, not a hidden reasoning store or UI-heavy task
+  system, so agents can preserve multi-step progress, interruption checkpoints,
+  and handoff state without adding another global tool.
 - Remaining work: expand the extractor from generic summaries into richer
   structured file/artifact facts and polish the console skill management UI if
   large user registries need grouping or search.
@@ -760,7 +765,8 @@ discourages repeated `.flovera` rediscovery, and warns against treating mocked
 files or JSON handoff protocols as proof of interactive artifact completion.
 Runtime user prompts are now assembled through a dedicated request-context
 assembler with explicit sections for projected session history, workspace
-memory, skill descriptors, user-managed secret refs, and the current request.
+memory, workspace todo, skill descriptors, user-managed secret refs, and the
+current request.
 Remaining work is golden prompt snapshots, token-cost diagnostics, and
 regression checks for high-risk capability claims.
 
