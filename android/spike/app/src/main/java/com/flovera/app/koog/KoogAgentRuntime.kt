@@ -24,7 +24,6 @@ import com.flovera.app.agent.AgentRunEventType
 import com.flovera.app.config.AGENT_ITERATIONS_INTERNAL_GUARD
 import com.flovera.app.config.AppSettings
 import com.flovera.app.config.agentAllowedSecretEnvironment
-import com.flovera.app.config.agentVisibleSecretRefs
 import com.flovera.app.session.AgentSession
 import com.flovera.app.workspace.WorkspaceManager
 import kotlinx.coroutines.CancellationException
@@ -142,8 +141,13 @@ class KoogAgentRuntime(
     val webSearchAvailable = settings.networkEnabled && settings.webSearchEnabled && settings.braveSearchApiKey.isNotBlank()
     val secretEnvironment = settings.agentAllowedSecretEnvironment()
     val modelContext = ModelProviderCatalog.contextFor(settings)
-    val workspaceUserRules = workspace.readAgentRules()
     val client = clientFactory(provider, apiKey, settings)
+    val requestContext = AgentRequestContextAssembler.build(
+      input = input,
+      settings = settings,
+      session = session,
+      workspace = workspace,
+    )
 
     val agent = AIAgent(
       promptExecutor = MultiLLMPromptExecutor(client),
@@ -163,27 +167,13 @@ class KoogAgentRuntime(
         braveSearchApiKey = settings.braveSearchApiKey,
         secretEnvironment = secretEnvironment,
       ),
-      systemPrompt = AgentPromptBuilder.systemPrompt(
-        networkEnabled = settings.networkEnabled,
-        webSearchAvailable = webSearchAvailable,
-        authorityMode = settings.agentAuthorityMode,
-        pythonRunToolFallbackEnabled = settings.pythonRunToolFallbackEnabled,
-        workspaceUserRules = workspaceUserRules,
-      ),
+      systemPrompt = requestContext.systemPrompt,
       maxIterations = AGENT_ITERATIONS_INTERNAL_GUARD,
     )
 
     return agent.use {
       it.run(
-        AgentPromptBuilder.userInput(
-          input = input,
-          session = session,
-          workspaceUserRules = workspaceUserRules,
-          floveraSkillDescriptors = workspace.readFloveraSkillPromptDescriptors(),
-          secretRefs = settings.agentVisibleSecretRefs().joinToString("\n") { secret ->
-            "- ${secret.normalizedName}: ${secret.displayLabel}"
-          },
-        ),
+        requestContext.userPrompt,
         sessionId = agentRunId,
       )
     }

@@ -5099,6 +5099,9 @@ private fun SettingsDialog(
   var backgroundKeepAliveDraft by remember(state.settings.backgroundKeepAliveEnabled) {
     mutableStateOf(state.settings.backgroundKeepAliveEnabled)
   }
+  var workspaceMemoryDraft by remember(state.settings.workspaceMemoryEnabled) {
+    mutableStateOf(state.settings.workspaceMemoryEnabled)
+  }
   val settingsContext = LocalContext.current
   val selectedProvider = ModelProviderCatalog.findSelectableProvider(providerDraft) ?: ModelProviderCatalog.defaultProvider
   var providerMenuOpen by remember { mutableStateOf(false) }
@@ -5330,6 +5333,30 @@ private fun SettingsDialog(
             }
           }
         }
+        Text(t(language, "Agent context", "Agent \u4e0a\u4e0b\u6587"), style = MaterialTheme.typography.titleSmall)
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Column(modifier = Modifier.weight(1f)) {
+            Text(t(language, "Workspace memory", "\u5de5\u4f5c\u533a\u8bb0\u5fc6"), style = MaterialTheme.typography.bodyMedium)
+            Text(
+              t(
+                language,
+                "Adds .flovera/memory.md to the agent context for long-lived preferences and workspace facts.",
+                "\u5c06 .flovera/memory.md \u52a0\u5165 agent \u4e0a\u4e0b\u6587\uff0c\u7528\u4e8e\u957f\u671f\u504f\u597d\u548c\u5de5\u4f5c\u533a\u4e8b\u5b9e\u3002",
+              ),
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+              style = MaterialTheme.typography.bodySmall,
+            )
+          }
+          Switch(
+            checked = workspaceMemoryDraft,
+            onCheckedChange = { workspaceMemoryDraft = it },
+            modifier = Modifier.semantics { contentDescription = "Workspace memory switch" },
+          )
+        }
         Box {
           OutlinedButton(onClick = { languageMenuOpen = true }, modifier = Modifier.fillMaxWidth()) {
             Text(t(language, "Language: ${languageLabel(languageDraft)}", "\u8bed\u8a00\uff1a${languageLabel(languageDraft)}"))
@@ -5475,6 +5502,7 @@ private fun SettingsDialog(
             webSearchEnabled = webSearchEnabledDraft,
             braveSearchApiKey = braveSearchApiKeyDraft,
             backgroundKeepAliveEnabled = backgroundKeepAliveDraft,
+            workspaceMemoryEnabled = workspaceMemoryDraft,
           )
           onDismiss()
         },
@@ -5719,6 +5747,7 @@ private fun settingsProposalSummary(proposal: WorkspaceSettingsProposal, languag
     changes.webSearchEnabled?.let { t(language, "Web search: ${enabledLabel(language, it)}", "\u7f51\u9875\u641c\u7d22\uff1a${enabledLabel(language, it)}") },
     changes.backgroundKeepAliveEnabled?.let { t(language, "Background keep-alive: ${enabledLabel(language, it)}", "\u540e\u53f0\u4fdd\u6301\uff1a${enabledLabel(language, it)}") },
     changes.pythonRunToolFallbackEnabled?.let { t(language, "Python compatibility: ${enabledLabel(language, it)}", "Python \u517c\u5bb9\u6267\u884c\uff1a${enabledLabel(language, it)}") },
+    changes.workspaceMemoryEnabled?.let { t(language, "Workspace memory: ${enabledLabel(language, it)}", "\u5de5\u4f5c\u533a\u8bb0\u5fc6\uff1a${enabledLabel(language, it)}") },
     changes.language?.let { t(language, "Language: ${languageLabel(it)}", "\u8bed\u8a00\uff1a${languageLabel(it)}") },
     changes.themeMode?.let { t(language, "Theme: $it", "\u4e3b\u9898\uff1a$it") },
     changes.themeColor?.let { t(language, "Theme color: $it", "\u4e3b\u9898\u8272\uff1a$it") },

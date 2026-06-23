@@ -355,6 +355,7 @@ class AgentController(
     webSearchEnabled: Boolean = _state.value.settings.webSearchEnabled,
     braveSearchApiKey: String = _state.value.settings.braveSearchApiKey,
     backgroundKeepAliveEnabled: Boolean = _state.value.settings.backgroundKeepAliveEnabled,
+    workspaceMemoryEnabled: Boolean = _state.value.settings.workspaceMemoryEnabled,
   ) {
     if (rejectMutationWhileRunning("Settings")) return
     val current = _state.value
@@ -377,6 +378,7 @@ class AgentController(
         webSearchEnabled = webSearchEnabled,
         braveSearchApiKey = braveSearchApiKey,
         backgroundKeepAliveEnabled = backgroundKeepAliveEnabled,
+        workspaceMemoryEnabled = workspaceMemoryEnabled,
       )
     }
   }
@@ -398,6 +400,7 @@ class AgentController(
     webSearchEnabled: Boolean,
     braveSearchApiKey: String,
     backgroundKeepAliveEnabled: Boolean,
+    workspaceMemoryEnabled: Boolean,
   ) {
     val modelSettings = settingsController.saveModelSettings(
       current.settings,
@@ -420,14 +423,15 @@ class AgentController(
     val settingsWithNetwork = settingsController.setNetworkEnabled(settingsWithThinking, networkEnabled)
     val settingsWithSearch = settingsController.setWebSearch(settingsWithNetwork, webSearchEnabled, braveSearchApiKey)
     val settingsWithBackground = settingsController.setBackgroundKeepAlive(settingsWithSearch, backgroundKeepAliveEnabled)
+    val finalSettings = settingsController.setWorkspaceMemoryEnabled(settingsWithBackground, workspaceMemoryEnabled)
     if (backgroundKeepAliveEnabled) {
       if (!current.isRunning) startBackgroundKeepAliveService()
     } else if (!current.isRunning) {
       stopBackgroundKeepAliveService()
     }
-    val draft = settingsController.draftFor(settingsWithBackground)
-    workspaceController.syncFloveraSettings(settingsWithBackground)
-    val workspaceSnapshot = workspaceController.snapshot(settingsWithBackground.selectedHtmlPath)
+    val draft = settingsController.draftFor(finalSettings)
+    workspaceController.syncFloveraSettings(finalSettings)
+    val workspaceSnapshot = workspaceController.snapshot(finalSettings.selectedHtmlPath)
     val selectedHtmlTarget = selectedHtmlTarget(workspaceSnapshot)
     val workspaceRootUrl = workspaceRootUrl(selectedHtmlTarget.url, workspaceSnapshot)
     val artifactServerStatuses = workspacePythonHttpRuntime.statusesFor(workspaceSnapshot.workspaceArtifacts)
@@ -437,7 +441,7 @@ class AgentController(
       current.selectedHtmlLoading
     _state.update {
       it.copy(
-        settings = settingsWithBackground,
+        settings = finalSettings,
         providerDraft = draft.providerId,
         modelDraft = draft.model,
         apiKeyDraft = draft.apiKey,

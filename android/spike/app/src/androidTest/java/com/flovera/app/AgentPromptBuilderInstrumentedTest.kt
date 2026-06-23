@@ -127,6 +127,8 @@ class AgentPromptBuilderInstrumentedTest {
     assertTrue(systemPrompt.contains("python_run is a low-level direct Python evaluator fallback"))
     assertTrue(systemPrompt.contains("disabled by default to reduce tool schema overhead"))
     assertTrue(systemPrompt.contains("pythonRunToolFallback=disabled"))
+    assertTrue(systemPrompt.contains("workspaceMemory=enabled_at_.flovera/memory.md"))
+    assertTrue(systemPrompt.contains("Workspace memory lives at `.flovera/memory.md`"))
     assertTrue(systemPrompt.contains("workspaceCommandRuntime=available_python_groovy_jvm_artifacts_flovera_scripts_office_ooxml_poi_backend_experimental"))
     assertTrue(systemPrompt.contains("workspaceCommandProfiles=python,groovy,git,android,flovera-script,flovera-office"))
     assertTrue(systemPrompt.contains("workspaceAutomationScripts=available_at_.flovera/scripts"))
@@ -212,7 +214,9 @@ class AgentPromptBuilderInstrumentedTest {
     assertTrue(fullAuthorityPrompt.contains("does not expose plaintext secrets"))
     assertFalse(userInput.contains("Workspace user rules from AGENTS.md:"))
     assertFalse(userInput.contains(workspaceRule))
+    assertTrue(userInput.contains("Request context source map:"))
     assertTrue(userInput.contains("Recent session history:"))
+    assertTrue(userInput.contains("Workspace memory:"))
     assertTrue(userInput.contains("Available Flovera skills:"))
     assertTrue(userInput.contains("Available user-managed secrets:"))
     assertTrue(userInput.contains("FLOVERA_SECRET_1"))
@@ -237,6 +241,37 @@ class AgentPromptBuilderInstrumentedTest {
     assertTrue(userInput.contains(".flovera/skills/flovera-office-suite/SKILL.md"))
     assertTrue(userInput.contains("read its SKILL.md with read_file"))
     assertTrue(userInput.contains("Current user request:"))
+  }
+
+  @Test
+  fun userInputIncludesWorkspaceMemoryWhenEnabledAndMarksItDisabledWhenOff() {
+    val session = AgentSession(
+      id = "memory-prompt-test",
+      title = "Memory prompt test",
+      createdAtMillis = 1L,
+      updatedAtMillis = 1L,
+      messages = emptyList(),
+    )
+
+    val enabled = AgentPromptBuilder.userInput(
+      input = "continue",
+      session = session,
+      workspaceUserRules = "",
+      workspaceMemoryEnabled = true,
+      workspaceMemory = "- User prefers Chinese replies.",
+    )
+    val disabled = AgentPromptBuilder.userInput(
+      input = "continue",
+      session = session,
+      workspaceUserRules = "",
+      workspaceMemoryEnabled = false,
+      workspaceMemory = "- Should not be active.",
+    )
+
+    assertTrue(enabled.contains("Workspace memory:"))
+    assertTrue(enabled.contains("User prefers Chinese replies."))
+    assertTrue(disabled.contains("disabled in settings"))
+    assertFalse(disabled.contains("Should not be active."))
   }
 
   @Test

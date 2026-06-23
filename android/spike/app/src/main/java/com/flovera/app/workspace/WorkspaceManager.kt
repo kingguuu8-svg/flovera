@@ -1073,6 +1073,12 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     safeFile(".flovera/skills").mkdirs()
     safeFile(".flovera/python/site-packages").mkdirs()
     safeFile(".flovera/python/wheels").mkdirs()
+    writeFile(
+      path = FLOVERA_MEMORY_FILE,
+      content = "",
+      overwrite = false,
+      createAutoSnapshot = false,
+    )
     if (!staleArtifactJobsChecked) {
       markStaleWorkspaceArtifactJobsInterrupted()
       staleArtifactJobsChecked = true
@@ -1127,6 +1133,15 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
   fun writeAgentRules(content: String): String = writeFile(AGENT_RULES_FILE, content)
 
   fun readFloveraSkillPromptDescriptors(): String = FloveraSkillRegistry.promptDescriptors(root, json)
+
+  fun readFloveraMemory(maxChars: Int = MAX_FLOVERA_MEMORY_CHARS): String {
+    val file = safeFile(FLOVERA_MEMORY_FILE)
+    if (!file.isFile) return ""
+    val content = readUtf8Text(file).trim()
+    if (content.length <= maxChars) return content
+    return content.take(maxChars).trimEnd() +
+      "\n\n[truncated: showing first $maxChars chars of $FLOVERA_MEMORY_FILE]"
+  }
 
   fun listFloveraSkills(): List<FloveraSkillConsoleEntry> = FloveraSkillRegistry.consoleEntries(root, json)
 
@@ -1976,9 +1991,10 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     return when (scope) {
       WORKSPACE_SEARCH_SCOPE_PUBLIC -> false
       WORKSPACE_SEARCH_SCOPE_APP_METADATA -> {
-        normalized == ".flovera/manifest.json" ||
+          normalized == ".flovera/manifest.json" ||
           normalized == ".flovera/settings-view.json" ||
           normalized == ".flovera/capabilities.json" ||
+          normalized == FLOVERA_MEMORY_FILE ||
           normalized == ".flovera/skills/manifest.json" ||
           isFloveraSkillPath(normalized) ||
           normalized.startsWith(".flovera/proposals/")
@@ -2449,6 +2465,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
   private companion object {
     const val AGENT_RULES_FILE = "AGENTS.md"
     const val LEGACY_AGENT_RULES_FILE = "AGENT.md"
+    const val FLOVERA_MEMORY_FILE = ".flovera/memory.md"
     const val WORKSPACE_ARTIFACT_MANIFEST_NAME = "flovera.app.json"
     const val WORKSPACE_ARTIFACT_PREVIEW_WEBVIEW = "webview"
     const val WORKSPACE_ARTIFACT_PREVIEW_LOCAL_HTTP = "local_http"
@@ -2474,6 +2491,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     const val MAX_WORKSPACE_SEARCH_RESULTS = 25
     const val MAX_WORKSPACE_SEARCH_CONTEXT_LINES = 5
     const val MAX_WORKSPACE_SEARCH_FILE_BYTES = 512 * 1024L
+    const val MAX_FLOVERA_MEMORY_CHARS = 12_000
     const val DEFAULT_WORKSPACE_SEARCH_MAX_FILES = 2000
     const val MAX_WORKSPACE_SEARCH_FILES = 10000
     const val DEFAULT_WORKSPACE_SEARCH_SNIPPET_CHARS = 200
@@ -2747,6 +2765,7 @@ data class FloveraSettingsView(
   val webSearchUserConfigured: Boolean = false,
   val backgroundKeepAliveEnabled: Boolean = false,
   val pythonRunToolFallbackEnabled: Boolean = false,
+  val workspaceMemoryEnabled: Boolean = true,
   val language: String = "",
   val themeMode: String = "",
   val themeColor: String = "",
@@ -2881,6 +2900,9 @@ data class FloveraCapabilities(
   val foregroundAgentRunService: Boolean = true,
   val backgroundKeepAlive: Boolean = true,
   val backgroundKeepAliveEnabled: Boolean = false,
+  val workspaceMemory: Boolean = true,
+  val workspaceMemoryEnabled: Boolean = true,
+  val workspaceMemoryPath: String = ".flovera/memory.md",
   val networkTools: Boolean = false,
   val pythonRuntime: Boolean = true,
   val pythonRunTool: Boolean = false,
@@ -3112,6 +3134,7 @@ data class FloveraCapabilities(
         networkTools = settingsView.networkEnabled,
         webSearch = settingsView.webSearchEnabled,
         backgroundKeepAliveEnabled = settingsView.backgroundKeepAliveEnabled,
+        workspaceMemoryEnabled = settingsView.workspaceMemoryEnabled,
         pythonRunTool = settingsView.pythonRunToolFallbackEnabled,
         pythonRunToolFallbackEnabled = settingsView.pythonRunToolFallbackEnabled,
         providerApiModes = providerApiModes,

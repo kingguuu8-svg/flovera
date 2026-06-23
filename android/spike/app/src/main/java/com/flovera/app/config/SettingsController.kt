@@ -111,6 +111,12 @@ class SettingsController(private val store: SettingsStore) {
     return updated
   }
 
+  fun setWorkspaceMemoryEnabled(settings: AppSettings, enabled: Boolean): AppSettings {
+    val updated = settings.copy(workspaceMemoryEnabled = enabled)
+    store.save(updated)
+    return updated
+  }
+
   fun setLanguage(settings: AppSettings, language: String): AppSettings {
     val updated = settings.copy(language = normalizeLanguageId(language))
     store.save(updated)
@@ -213,6 +219,7 @@ class SettingsController(private val store: SettingsStore) {
       webSearchUserConfigured = if (changes.webSearchEnabled != null) true else settings.webSearchUserConfigured,
       backgroundKeepAliveEnabled = changes.backgroundKeepAliveEnabled ?: settings.backgroundKeepAliveEnabled,
       pythonRunToolFallbackEnabled = changes.pythonRunToolFallbackEnabled ?: settings.pythonRunToolFallbackEnabled,
+      workspaceMemoryEnabled = changes.workspaceMemoryEnabled ?: settings.workspaceMemoryEnabled,
       language = changes.language?.let { normalizeLanguageId(it) } ?: settings.language,
       themeMode = changes.themeMode?.let { normalizeThemeMode(it) } ?: settings.themeMode,
       themeColor = changes.themeColor?.let { normalizeThemeColor(it) } ?: settings.themeColor,
@@ -496,6 +503,7 @@ data class SettingsProposalChanges(
   val webSearchEnabled: Boolean? = null,
   val backgroundKeepAliveEnabled: Boolean? = null,
   val pythonRunToolFallbackEnabled: Boolean? = null,
+  val workspaceMemoryEnabled: Boolean? = null,
   val language: String? = null,
   val themeMode: String? = null,
   val themeColor: String? = null,

@@ -402,7 +402,8 @@ This is observability for the run loop, not hidden reasoning.
 
 ### Runtime Context Retention
 
-Status: Implemented for layered append-only prompt context history. Tool events
+Status: Implemented for layered append-only prompt context history plus a shared
+request-context assembly path. Tool events
 now carry bounded retention metadata (`success`, `resultKind`, `outputChars`,
 `outputTruncated`, `retentionPriority`, and `retentionReason`) at record time.
 When session messages are appended, Flovera appends stable `promptContextBlocks`
@@ -419,6 +420,9 @@ compression window. Compression dividers remain visible history markers but no
 longer replace prompt history with a handoff message. Current Koog run-loop
 tool results are still delivered directly inside the active run; the ledger is
 for cross-run prompt reconstruction, overflow retry, and skills retention.
+`AgentRequestContextAssembler` is now the shared path for real Koog requests and
+request-footprint/token estimation, separating append-only session storage from
+the per-request context projection.
 
 - Keep full session logs and conversation transcript available for UI/debug
   without forcing every tool result back into the next provider request.
@@ -457,6 +461,13 @@ for cross-run prompt reconstruction, overflow retry, and skills retention.
   skill folder/frontmatter/manifest shape. These commands are intended to be
   invoked from the relevant skill workflow rather than exposed as separate
   global tools.
+- Workspace memory baseline is implemented as `.flovera/memory.md`, exposed
+  through Settings, `.flovera/settings-view.json`, and
+  `.flovera/capabilities.json`. When enabled, the assembler injects the memory
+  file as a low-priority long-lived preference/fact context source. The prompt
+  instructs agents to update memory only for explicit or clearly stable
+  rememberable facts and never for secrets, transient todos, raw tool output, or
+  guesses.
 - Remaining work: expand the extractor from generic summaries into richer
   structured file/artifact facts and polish the console skill management UI if
   large user registries need grouping or search.
@@ -747,6 +758,9 @@ sections, embeds stable Flovera runtime boundaries, appends the current
 workspace `AGENTS.md` content at the system prompt tail as user-owned guidance,
 discourages repeated `.flovera` rediscovery, and warns against treating mocked
 files or JSON handoff protocols as proof of interactive artifact completion.
+Runtime user prompts are now assembled through a dedicated request-context
+assembler with explicit sections for projected session history, workspace
+memory, skill descriptors, user-managed secret refs, and the current request.
 Remaining work is golden prompt snapshots, token-cost diagnostics, and
 regression checks for high-risk capability claims.
 

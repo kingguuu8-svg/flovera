@@ -37,21 +37,15 @@ object AgentRequestFootprintBuilder {
     val webSearchAvailable = settings.networkEnabled && settings.webSearchEnabled && settings.braveSearchApiKey.isNotBlank()
     val provider = ModelProviderCatalog.findProvider(settings.provider)
     val modelContext = ModelProviderCatalog.contextFor(settings)
-    val workspaceUserRules = workspace.readAgentRules()
-    val systemPrompt = AgentPromptBuilder.systemPrompt(
-      networkEnabled = settings.networkEnabled,
-      webSearchAvailable = webSearchAvailable,
-      authorityMode = settings.agentAuthorityMode,
-      pythonRunToolFallbackEnabled = settings.pythonRunToolFallbackEnabled,
-      workspaceUserRules = workspaceUserRules,
-    )
-    val userPrompt = AgentPromptBuilder.userInput(
+    val requestContext = AgentRequestContextAssembler.build(
       input = input,
-      session = session,
-      workspaceUserRules = workspaceUserRules,
       currentVisibleInput = currentVisibleInput,
-      floveraSkillDescriptors = workspace.readFloveraSkillPromptDescriptors(),
+      settings = settings,
+      session = session,
+      workspace = workspace,
     )
+    val systemPrompt = requestContext.systemPrompt
+    val userPrompt = requestContext.userPrompt
     val toolDescriptors = workspaceToolRegistry(
       workspace = workspace,
       recorder = ToolEventRecorder {},
@@ -102,7 +96,7 @@ object AgentRequestFootprintBuilder {
       provider = provider?.id ?: settings.provider,
       model = settings.model,
       systemPrompt = systemPrompt,
-      workspaceUserRules = workspaceUserRules,
+      workspaceUserRules = requestContext.workspaceUserRules,
       userPrompt = userPrompt,
       toolSchemaJson = toolSchemaJson,
       payloadJson = payload.toString(),
