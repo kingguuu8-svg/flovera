@@ -71,13 +71,17 @@ chat -> workspace files -> diagnostics -> WebView preview -> revision
 - Persistent sessions and conversation history.
 - Chronological conversation rendering with compact tool and status events.
 - Workspace file read, write, edit, list, and search tools.
-- Workspace snapshots for safer iteration.
 - HTML/WebView preview and workspace-local HTTP preview.
 - `flovera.app.json` manifests for generated workspace apps.
 - `artifact_diagnose` checks for generated Flovera app registration.
 - Controlled Python runtime for bounded local generation and verification.
 - Preview support for HTML, Markdown, JSON, CSV, text, code, images, and PDFs.
-- Configurable model providers stored in app settings, not source code.
+- Editable workspace skills that can guide agent workflows without bloating the
+  core prompt.
+- User-managed secret entries for API keys and service tokens.
+- Optional workspace memory and todo files for stable preferences, facts, and
+  short task checkpoints.
+- DeepSeek provider settings stored in the app, not source code.
 - Network tools enabled by default, with settings controls.
 - Brave Search support when a Brave Search API key is configured.
 
@@ -89,8 +93,7 @@ chat -> workspace files -> diagnostics -> WebView preview -> revision
   checked on-device.
 - Provider API keys and app permissions live in Flovera app settings, not in the
   workspace source tree.
-- DeepSeek is the primary tested provider for the first preview. OpenAI-style,
-  Anthropic-style, and other provider routes are being expanded.
+- DeepSeek is the primary supported provider for the first preview.
 - MCP, Git, and broader shell-style workspace tooling are on the roadmap.
 
 ## Repository Layout

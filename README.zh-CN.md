@@ -65,13 +65,15 @@ Flovera 是一个基于 Android 端的轻量 agent 工作区程序。
 - 持久化 session 和对话历史。
 - 按时间顺序渲染对话，并用较轻量的形式展示工具和状态事件。
 - workspace 文件读取、写入、编辑、列表和搜索工具。
-- workspace 快照，用于更安全地迭代。
 - HTML 预览和 workspace-local HTTP 预览。
 - 使用 `flovera.app.json` 描述生成的 workspace app。
 - 使用 `artifact_diagnose` 检查生成的 Flovera app 是否成功注册。
 - 受控 Python runtime，用于本地生成、计算和验证。
 - 支持预览 HTML、Markdown、JSON、CSV、文本、代码、图片和 PDF。
-- provider 配置保存在应用设置里，不写入源码。
+- 可编辑的 workspace skills，用来扩展 agent 工作流，同时避免核心提示词过重。
+- 用户管理的密钥入口，用来保存 API key 和服务 token。
+- 可选的 workspace memory 和 todo 文件，用来记录稳定偏好、事实和短任务检查点。
+- DeepSeek provider 配置保存在应用设置里，不写入源码。
 - network 工具默认开启，并保留设置入口。
 - 配置 Brave Search API key 后支持 Web Search。
 
