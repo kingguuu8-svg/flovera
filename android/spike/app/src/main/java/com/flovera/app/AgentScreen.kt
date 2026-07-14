@@ -33,6 +33,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.layout.Arrangement
@@ -117,11 +119,13 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
@@ -129,6 +133,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
@@ -310,6 +317,8 @@ fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
   val hasPreviewSurface = state.selectedPreviewPath.isNotBlank() || !state.selectedHtmlUrl.isNullOrBlank()
   val hasUsableApi = hasUsableProviderApi(state.settings)
   val displayTargetPath = currentDisplayTargetPath(state)
+  val compactConversationInteractionSource = remember { MutableInteractionSource() }
+  val compactConversationPressed by compactConversationInteractionSource.collectIsPressedAsState()
   var previewChromeColor by remember { mutableStateOf<Color?>(null) }
   fun openPanelFromMainDisplay(panel: AgentPanel) {
     panelStack = listOf(panel)
@@ -375,8 +384,30 @@ fun AgentScreen(controller: AgentController, modifier: Modifier = Modifier) {
         onOpenConversation = { openPanelFromMainDisplay(AgentPanel.Conversation) },
         onOpenSettings = { openPanelFromMainDisplay(AgentPanel.Settings) },
         previewChromeColor = previewChromeColor,
+        compactConversationPressed = compactConversationPressed,
         onSubmit = ::submitFromMainDisplay,
       )
+    }
+    if (!state.settings.inputBarVisible) {
+      Box(
+        modifier = Modifier
+          .align(Alignment.BottomEnd)
+          .padding(bottom = navigationBarsBottomPaddingWhenImeHidden()),
+      ) {
+        Box(
+          modifier = Modifier
+            .widthIn(min = 52.dp, max = 52.dp)
+            .height(44.dp)
+            .testTag("compact-conversation-target")
+            .semantics { contentDescription = "Open conversation" }
+            .clickable(
+              interactionSource = compactConversationInteractionSource,
+              indication = null,
+              role = Role.Button,
+              onClick = { openPanelFromMainDisplay(AgentPanel.Conversation) },
+            ),
+        )
+      }
     }
   }
 
@@ -649,11 +680,13 @@ private fun MainDisplayBottomBar(
   onOpenConversation: () -> Unit,
   onOpenSettings: () -> Unit,
   previewChromeColor: Color?,
+  compactConversationPressed: Boolean,
   onSubmit: () -> Unit,
 ) {
   val focusManager = LocalFocusManager.current
-  val hasInput = state.input.isNotBlank()
-  val actionOpensSettings = !hasUsableApi && !state.isRunning
+  val showInput = state.settings.inputBarVisible
+  val hasInput = showInput && state.input.isNotBlank()
+  val actionOpensSettings = showInput && !hasUsableApi && !state.isRunning
   val bottomInsetPadding = navigationBarsBottomPaddingWhenImeHidden()
   val designFrontend = floveraDesignFrontendEnabled()
   val designStyle = floveraDesignStyleEnabled()
@@ -680,6 +713,67 @@ private fun MainDisplayBottomBar(
   } else {
     Color.White.copy(alpha = 0.72f)
   }
+  val progressColor = if (barColor.luminance() > 0.5f) {
+    MaterialTheme.colorScheme.primary
+  } else {
+    Color.White.copy(alpha = 0.86f)
+  }
+  val compactSegmentColor by animateColorAsState(
+    targetValue = if (compactConversationPressed) progressColor.copy(alpha = 0.12f) else Color.Transparent,
+    animationSpec = tween(durationMillis = 90),
+    label = "Compact conversation press",
+  )
+  val actionButton: @Composable () -> Unit = {
+    CompactBarAction(
+      contentDescription = when {
+        actionOpensSettings -> "Open model settings"
+        !hasInput -> "Open conversation"
+        else -> "Send lightweight message"
+      },
+      enabled = true,
+      containerColor = when {
+        actionOpensSettings && designStyle -> FloveraDesignElevated
+        actionOpensSettings && designFrontend -> FloveraDesignDarkSettingMask
+        actionOpensSettings -> MaterialTheme.colorScheme.errorContainer
+        hasInput && designStyle -> MaterialTheme.colorScheme.primary
+        hasInput -> MaterialTheme.colorScheme.primaryContainer
+        designStyle -> FloveraDesignElevated
+        else -> MaterialTheme.colorScheme.surfaceVariant
+      },
+      contentColor = when {
+        actionOpensSettings && designStyle -> FloveraDesignMuted
+        actionOpensSettings && designFrontend -> FloveraDesignDarkSettingOnMask
+        actionOpensSettings -> MaterialTheme.colorScheme.onErrorContainer
+        hasInput && designStyle -> MaterialTheme.colorScheme.onPrimary
+        hasInput -> MaterialTheme.colorScheme.onPrimaryContainer
+        designStyle -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+      },
+      onClick = {
+        focusManager.clearFocus()
+        when {
+          actionOpensSettings -> onOpenSettings()
+          hasInput -> onSubmit()
+          else -> onOpenConversation()
+        }
+      },
+    ) {
+      when {
+        actionOpensSettings -> Icon(if (designFrontend) Icons.Filled.Tune else Icons.Filled.Settings, contentDescription = null, modifier = Modifier.size(20.dp))
+        !hasInput && designFrontend -> Image(
+          painter = painterResource(id = floveraMarkDrawableForTheme()),
+          contentDescription = null,
+          modifier = Modifier.size(30.dp),
+        )
+        !hasInput -> Icon(Icons.Filled.ChatBubble, contentDescription = null, modifier = Modifier.size(20.dp))
+        else -> Icon(
+          if (designStyle) Icons.Filled.ArrowUpward else Icons.AutoMirrored.Filled.Send,
+          contentDescription = null,
+          modifier = Modifier.size(20.dp),
+        )
+      }
+    }
+  }
 
   Surface(
     modifier = Modifier
@@ -687,101 +781,110 @@ private fun MainDisplayBottomBar(
     color = barColor,
     contentColor = barContentColor,
     tonalElevation = if (hasAdaptiveChrome || designStyle) 0.dp else 4.dp,
-    border = if (hasAdaptiveChrome) null else BorderStroke(1.dp, floveraChromeBorderColor(barColor, designStyle)),
+    border = if (hasAdaptiveChrome || !showInput) null else BorderStroke(1.dp, floveraChromeBorderColor(barColor, designStyle)),
   ) {
     Column(
-      modifier = Modifier.padding(
-        start = 10.dp,
-        top = 6.dp,
-        end = 10.dp,
-        bottom = 6.dp + bottomInsetPadding,
+      modifier = (if (showInput) {
+        Modifier.padding(
+          start = 10.dp,
+          top = 6.dp,
+          end = 10.dp,
+          bottom = 6.dp + bottomInsetPadding,
+        )
+      } else {
+        Modifier.padding(bottom = bottomInsetPadding)
+      }).then(
+        if (showInput) {
+          Modifier
+        } else {
+          Modifier.drawBehind {
+            drawLine(
+              color = barMutedColor.copy(alpha = 0.18f),
+              start = Offset.Zero,
+              end = Offset(size.width, 0f),
+              strokeWidth = 1.dp.toPx(),
+            )
+          }
+        },
       ),
-      verticalArrangement = Arrangement.spacedBy(4.dp),
+      verticalArrangement = if (showInput) Arrangement.spacedBy(4.dp) else Arrangement.Top,
     ) {
       if (!hasUsableApi) {
         MissingApiSettingsEntry(
           language = language,
           onOpenSettings = onOpenSettings,
-          modifier = Modifier.fillMaxWidth(),
+          modifier = if (showInput) {
+            Modifier.fillMaxWidth()
+          } else {
+            Modifier.fillMaxWidth().padding(start = 10.dp, top = 6.dp, end = 10.dp, bottom = 4.dp)
+          },
         )
       }
-      BottomDisplayStatusLine(
-        path = displayTargetPath,
-        mimeType = displayMimeType,
-        isRunning = state.isRunning,
-        status = state.status,
-        language = language,
-        contentColor = barMutedColor,
-        progressColor = if (barColor.luminance() > 0.5f) {
-          MaterialTheme.colorScheme.primary
-        } else {
-          Color.White.copy(alpha = 0.86f)
-        },
-        onClick = onOpenPreview,
-      )
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.Bottom,
-      ) {
-        CompactMainInput(
-          value = state.input,
-          onValueChange = controller::updateInput,
-          enabled = hasUsableApi || state.isRunning,
-          placeholder = if (hasUsableApi || state.isRunning) {
-            t(language, "Message Flovera to create or edit", "\u548c Flovera \u5bf9\u8bdd\u6765\u521b\u5efa\u6216\u4fee\u6539")
-          } else {
-            t(language, "Configure model API to start", "\u8bf7\u5148\u914d\u7f6e\u6a21\u578b API")
-          },
-          modifier = Modifier.weight(1f),
+      if (showInput) {
+        BottomDisplayStatusLine(
+          path = displayTargetPath,
+          mimeType = displayMimeType,
+          isRunning = state.isRunning,
+          isLoading = state.isLoadingPreview,
+          status = state.status,
+          language = language,
+          contentColor = barMutedColor,
+          progressColor = progressColor,
+          onClick = onOpenPreview,
         )
-        CompactBarAction(
-          contentDescription = when {
-            actionOpensSettings -> "Open model settings"
-            !hasInput -> "Open conversation"
-            else -> "Send lightweight message"
-          },
-          enabled = true,
-          containerColor = when {
-            actionOpensSettings && designStyle -> FloveraDesignElevated
-            actionOpensSettings && designFrontend -> FloveraDesignDarkSettingMask
-            actionOpensSettings -> MaterialTheme.colorScheme.errorContainer
-            hasInput && designStyle -> MaterialTheme.colorScheme.primary
-            hasInput -> MaterialTheme.colorScheme.primaryContainer
-            designStyle -> FloveraDesignElevated
-            else -> MaterialTheme.colorScheme.surfaceVariant
-          },
-          contentColor = when {
-            actionOpensSettings && designStyle -> FloveraDesignMuted
-            actionOpensSettings && designFrontend -> FloveraDesignDarkSettingOnMask
-            actionOpensSettings -> MaterialTheme.colorScheme.onErrorContainer
-            hasInput && designStyle -> MaterialTheme.colorScheme.onPrimary
-            hasInput -> MaterialTheme.colorScheme.onPrimaryContainer
-            designStyle -> MaterialTheme.colorScheme.primary
-            else -> MaterialTheme.colorScheme.onSurfaceVariant
-          },
-          onClick = {
-            focusManager.clearFocus()
-            when {
-              actionOpensSettings -> onOpenSettings()
-              hasInput -> onSubmit()
-              else -> onOpenConversation()
-            }
-          },
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
+          verticalAlignment = Alignment.Bottom,
         ) {
-            when {
-              actionOpensSettings -> Icon(if (designFrontend) Icons.Filled.Tune else Icons.Filled.Settings, contentDescription = null, modifier = Modifier.size(20.dp))
-            !hasInput && designFrontend -> Image(
-              painter = painterResource(id = floveraMarkDrawableForTheme()),
-              contentDescription = null,
-              modifier = Modifier.size(30.dp),
-            )
-            !hasInput -> Icon(Icons.Filled.ChatBubble, contentDescription = null, modifier = Modifier.size(20.dp))
-            else -> Icon(
-              if (designStyle) Icons.Filled.ArrowUpward else Icons.AutoMirrored.Filled.Send,
-              contentDescription = null,
-              modifier = Modifier.size(20.dp),
-            )
+          CompactMainInput(
+            value = state.input,
+            onValueChange = controller::updateInput,
+            enabled = hasUsableApi || state.isRunning,
+            placeholder = if (hasUsableApi || state.isRunning) {
+              t(language, "Message Flovera to create or edit", "\u548c Flovera \u5bf9\u8bdd\u6765\u521b\u5efa\u6216\u4fee\u6539")
+            } else {
+              t(language, "Configure model API to start", "\u8bf7\u5148\u914d\u7f6e\u6a21\u578b API")
+            },
+            modifier = Modifier.weight(1f),
+          )
+          actionButton()
+        }
+      } else {
+        Row(
+          modifier = Modifier.fillMaxWidth().height(32.dp).testTag("compact-bottom-row"),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          BottomDisplayStatusLine(
+            path = displayTargetPath,
+            mimeType = displayMimeType,
+            isRunning = state.isRunning,
+            isLoading = state.isLoadingPreview,
+            status = state.status,
+            language = language,
+            contentColor = barMutedColor,
+            progressColor = progressColor,
+            onClick = onOpenPreview,
+            modifier = Modifier.weight(1f).padding(start = 10.dp, end = 8.dp),
+          )
+          Box(
+            modifier = Modifier
+              .widthIn(min = 1.dp, max = 1.dp)
+              .height(12.dp)
+              .background(barMutedColor.copy(alpha = 0.28f)),
+          )
+          Surface(
+            modifier = Modifier.widthIn(min = 52.dp, max = 52.dp).fillMaxHeight(),
+            color = compactSegmentColor,
+            contentColor = progressColor,
+          ) {
+            Box(contentAlignment = Alignment.Center) {
+              Icon(
+                Icons.Filled.ChatBubble,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+              )
+            }
           }
         }
       }
@@ -820,6 +923,7 @@ private fun CompactMainInput(
       textStyle = textStyle,
       modifier = Modifier
         .fillMaxSize()
+        .testTag("main-display-input")
         .padding(horizontal = 13.dp),
       decorationBox = { innerTextField ->
         Box(
@@ -847,11 +951,13 @@ private fun BottomDisplayStatusLine(
   path: String,
   mimeType: String,
   isRunning: Boolean,
+  isLoading: Boolean,
   status: String,
   language: String,
   contentColor: Color,
   progressColor: Color,
   onClick: () -> Unit,
+  modifier: Modifier = Modifier,
 ) {
   val displayText = if (path.isBlank()) {
     t(language, "No preview · choose display", "\u6682\u65e0\u9884\u89c8 · \u9009\u62e9\u5c55\u793a")
@@ -861,11 +967,13 @@ private fun BottomDisplayStatusLine(
   val runningText = status.ifBlank { t(language, "Running", "\u8fd0\u884c\u4e2d") }
   val text = if (isRunning) {
     "${t(language, "Running", "\u8fd0\u884c\u4e2d")} · $runningText · $displayText"
+  } else if (isLoading) {
+    "${t(language, "Loading", "\u52a0\u8f7d\u4e2d")} · $displayText"
   } else {
     displayText
   }
   Row(
-    modifier = Modifier
+    modifier = modifier
       .fillMaxWidth()
       .height(16.dp)
       .testTag("bottom-display-state")
@@ -880,7 +988,7 @@ private fun BottomDisplayStatusLine(
     horizontalArrangement = Arrangement.spacedBy(5.dp),
     verticalAlignment = Alignment.CenterVertically,
   ) {
-    if (isRunning) {
+    if (isRunning || isLoading) {
       CircularProgressIndicator(
         modifier = Modifier.size(10.dp),
         strokeWidth = 1.5.dp,
@@ -1240,52 +1348,80 @@ private fun WorkspacePreview(
     }
   }
 
-  if (isTextPreview) {
-    WorkspaceTextPreview(
-      path = previewPath,
-      content = previewContent,
-      mimeType = mimeType,
+  Box(modifier = Modifier.fillMaxSize()) {
+    when {
+      isTextPreview -> WorkspaceTextPreview(previewPath, previewContent, mimeType)
+      isImagePreview -> WorkspaceImagePreview(previewPath, mimeType, previewUri)
+      isPdfPreview -> WorkspacePdfPreview(previewPath, mimeType, previewUri)
+      isOfficePreview -> WorkspaceOfficePreview(previewPath, mimeType, previewUri)
+      else -> WorkspaceWebView(
+        url = htmlUrl,
+        loading = htmlLoading,
+        startupError = htmlError,
+        workspaceRootUrl = state.workspaceRootUrl,
+        controller = controller,
+        onClosePreview = controller::clearWorkspacePreview,
+        chromeColorSamplingEnabled = chromeColorSamplingEnabled,
+        onChromeColorSampled = onChromeColorSampled,
+      )
+    }
+    DelayedLoadingOverlay(
+      active = state.isLoadingPreview,
+      label = t(state.settings.language, "Loading preview", "\u6b63\u5728\u52a0\u8f7d\u9884\u89c8"),
+      testTag = "preview-loading",
     )
-    return
   }
+}
 
-  if (isImagePreview) {
-    WorkspaceImagePreview(
-      path = previewPath,
-      mimeType = mimeType,
-      uri = previewUri,
-    )
-    return
+@Composable
+private fun DelayedLoadingOverlay(
+  active: Boolean,
+  label: String,
+  testTag: String,
+) {
+  var visible by remember { mutableStateOf(false) }
+  LaunchedEffect(active) {
+    visible = false
+    if (active) {
+      delay(250)
+      visible = true
+    }
   }
-
-  if (isPdfPreview) {
-    WorkspacePdfPreview(
-      path = previewPath,
-      mimeType = mimeType,
-      uri = previewUri,
-    )
-    return
+  if (!visible) return
+  Surface(
+    modifier = Modifier
+      .fillMaxSize()
+      .testTag(testTag)
+      .pointerInput(Unit) {
+        awaitPointerEventScope {
+          while (true) {
+            awaitPointerEvent().changes.forEach { it.consume() }
+          }
+        }
+      }
+      .semantics {
+        contentDescription = label
+        liveRegion = LiveRegionMode.Polite
+      },
+    color = MaterialTheme.colorScheme.scrim.copy(alpha = 0.22f),
+  ) {
+    Box(contentAlignment = Alignment.Center) {
+      Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        tonalElevation = 6.dp,
+      ) {
+        Row(
+          modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
+          horizontalArrangement = Arrangement.spacedBy(10.dp),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+          Text(label, style = MaterialTheme.typography.bodyMedium)
+        }
+      }
+    }
   }
-
-  if (isOfficePreview) {
-    WorkspaceOfficePreview(
-      path = previewPath,
-      mimeType = mimeType,
-      uri = previewUri,
-    )
-    return
-  }
-
-  WorkspaceWebView(
-    url = htmlUrl,
-    loading = htmlLoading,
-    startupError = htmlError,
-    workspaceRootUrl = state.workspaceRootUrl,
-    controller = controller,
-    onClosePreview = controller::clearWorkspacePreview,
-    chromeColorSamplingEnabled = chromeColorSamplingEnabled,
-    onChromeColorSampled = onChromeColorSampled,
-  )
 }
 
 @Composable
@@ -1617,13 +1753,17 @@ private fun WorkspaceWebView(
       WebView(context).apply {
         webViewClient = FloveraWorkspaceWebViewClient(
           workspaceRootUrl = workspaceRootUrl,
-          onError = { webError = it },
+          onError = {
+            webError = it
+            controller.markPreviewLoadFailed(it)
+          },
           onRenderProcessGone = { message ->
             webError = message
             onClosePreview(message)
           },
           chromeColorSamplingEnabled = chromeColorSamplingEnabled,
           onChromeColorSampled = onChromeColorSampled,
+          onPageRendered = controller::markPreviewRendered,
         )
         settings.javaScriptEnabled = true
         settings.domStorageEnabled = true
@@ -1952,6 +2092,7 @@ private class FloveraWorkspaceWebViewClient(
   private val onRenderProcessGone: (String) -> Unit,
   private val chromeColorSamplingEnabled: Boolean,
   private val onChromeColorSampled: (Color?) -> Unit,
+  private val onPageRendered: (String) -> Unit,
 ) : WebViewClient() {
   override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
     return handleUrl(view, request.url)
@@ -1975,6 +2116,7 @@ private class FloveraWorkspaceWebViewClient(
   }
 
   override fun onPageFinished(view: WebView, url: String) {
+    onPageRendered(url)
     view.evaluateJavascript(WorkspaceWebViewHardening.viewportHelperJs, null)
     if (chromeColorSamplingEnabled) {
       view.scheduleWorkspaceChromeColorSample(onChromeColorSampled)
@@ -2338,6 +2480,11 @@ private fun ConversationDialog(
               Icon(Icons.Filled.ArrowDownward, contentDescription = null, modifier = Modifier.size(20.dp))
             }
           }
+          DelayedLoadingOverlay(
+            active = state.isSwitchingSession,
+            label = t(language, "Loading conversation", "\u6b63\u5728\u52a0\u8f7d\u5bf9\u8bdd"),
+            testTag = "session-loading",
+          )
         }
 
         if (state.queuedInputs.isNotEmpty()) {
@@ -5102,6 +5249,9 @@ private fun SettingsDialog(
   var workspaceMemoryDraft by remember(state.settings.workspaceMemoryEnabled) {
     mutableStateOf(state.settings.workspaceMemoryEnabled)
   }
+  var inputBarVisibleDraft by remember(state.settings.inputBarVisible) {
+    mutableStateOf(state.settings.inputBarVisible)
+  }
   val settingsContext = LocalContext.current
   val selectedProvider = ModelProviderCatalog.findSelectableProvider(providerDraft) ?: ModelProviderCatalog.defaultProvider
   var providerMenuOpen by remember { mutableStateOf(false) }
@@ -5438,6 +5588,29 @@ private fun SettingsDialog(
           }
         }
         Text(t(language, "Appearance", "\u5916\u89c2"), style = MaterialTheme.typography.titleSmall)
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(12.dp),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Column(modifier = Modifier.weight(1f)) {
+            Text(t(language, "Main input bar", "\u4e3b\u9875\u8f93\u5165\u680f"), style = MaterialTheme.typography.bodyMedium)
+            Text(
+              t(
+                language,
+                "Preview status and Conversation remain visible when this is off.",
+                "\u5173\u95ed\u540e\u4ecd\u4fdd\u7559\u9884\u89c8\u72b6\u6001\u548c Conversation \u5165\u53e3\u3002",
+              ),
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+              style = MaterialTheme.typography.bodySmall,
+            )
+          }
+          Switch(
+            checked = inputBarVisibleDraft,
+            onCheckedChange = { inputBarVisibleDraft = it },
+            modifier = Modifier.semantics { contentDescription = "Show main input bar" },
+          )
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
           OutlinedButton(
             onClick = { themeModeDraft = "dark" },
@@ -5503,6 +5676,7 @@ private fun SettingsDialog(
             braveSearchApiKey = braveSearchApiKeyDraft,
             backgroundKeepAliveEnabled = backgroundKeepAliveDraft,
             workspaceMemoryEnabled = workspaceMemoryDraft,
+            inputBarVisible = inputBarVisibleDraft,
           )
           onDismiss()
         },

@@ -111,6 +111,12 @@ class SettingsController(private val store: SettingsStore) {
     return updated
   }
 
+  fun setInputBarVisible(settings: AppSettings, visible: Boolean): AppSettings {
+    val updated = settings.copy(inputBarVisible = visible)
+    store.save(updated)
+    return updated
+  }
+
   fun setWorkspaceMemoryEnabled(settings: AppSettings, enabled: Boolean): AppSettings {
     val updated = settings.copy(workspaceMemoryEnabled = enabled)
     store.save(updated)

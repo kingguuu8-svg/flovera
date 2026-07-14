@@ -66,6 +66,7 @@ data class AppSettings(
   val webSearchEnabled: Boolean = true,
   val webSearchUserConfigured: Boolean = false,
   val backgroundKeepAliveEnabled: Boolean = false,
+  val inputBarVisible: Boolean = true,
   val pythonRunToolFallbackEnabled: Boolean = false,
   val workspaceMemoryEnabled: Boolean = true,
   val braveSearchApiKey: String = "",

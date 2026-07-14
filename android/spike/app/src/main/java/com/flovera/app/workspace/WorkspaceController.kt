@@ -30,6 +30,14 @@ class WorkspaceController(context: Context, workspaceId: String) {
     workspace.ensureSeedFiles()
   }
 
+  fun setActiveSession(sessionId: String?) {
+    workspace.setActiveSession(sessionId)
+  }
+
+  fun copySessionTodo(sourceSessionId: String, targetSessionId: String) {
+    workspace.copySessionTodo(sourceSessionId, targetSessionId)
+  }
+
   fun runtimeWorkspace(): WorkspaceManager = workspace
 
   fun readAgentRules(): String = workspace.readAgentRules()
@@ -56,6 +64,7 @@ class WorkspaceController(context: Context, workspaceId: String) {
         model = settings.model,
         activeWorkspaceId = settings.activeWorkspaceId,
         activeSessionId = settings.activeSessionId,
+        inputBarVisible = settings.inputBarVisible,
         selectedHtmlPath = settings.selectedHtmlPath,
         pinnedHtmlPaths = settings.pinnedHtmlPaths,
         recentHtmlPaths = settings.recentHtmlPaths,

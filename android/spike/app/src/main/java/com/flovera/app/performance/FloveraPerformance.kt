@@ -46,6 +46,14 @@ object FloveraPerformance {
     }
   }
 
+  suspend fun <T> traceQueued(category: String, name: String, queuedAtMillis: Long, block: () -> T): T {
+    val queueWaitMillis = SystemClock.uptimeMillis() - queuedAtMillis
+    if (queueWaitMillis >= LONG_BACKGROUND_TASK_MS) {
+      Log.i(TAG, "background task $category/$name waited ${queueWaitMillis}ms in queue")
+    }
+    return trace(category, name, block)
+  }
+
   fun activeTaskSummary(limit: Int = 4): String {
     val now = SystemClock.uptimeMillis()
     val tasks = activeTasks.values

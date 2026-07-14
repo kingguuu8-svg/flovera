@@ -91,6 +91,8 @@ Main path:
 Counter-paths:
 
 - User opens New and closes without sending: no session is created.
+- User opens New from an existing session and closes without sending: return to
+  that source session, not an unrelated recently sorted session.
 - User has many sessions: pinned sessions appear first, others sort by recent change time.
 - User wants organization: rename, duplicate, archive, restore, and pin are in a secondary menu.
 - User archives the current session: app switches to the next usable non-empty session.
@@ -105,6 +107,8 @@ Acceptance criteria:
 - Pinned sessions sort before unpinned sessions.
 - Unpinned sessions sort by latest update time.
 - Revert confirmation text matches the destructive behavior.
+- Session switches that exceed 250 ms show a local, accessible loading state;
+  the previous conversation remains available as the rollback state on failure.
 
 ### Conversation
 
@@ -216,6 +220,8 @@ Counter-paths:
 Acceptance criteria:
 
 - Main surface has no visible URL bar.
+- Preview switches that exceed 250 ms show a local loading state over the
+  previous content instead of leaving an unexplained stale page.
 - Empty state text is minimal and visually consistent with Flovera.
 - The `flovera` flavor uses the promoted design front-end: the primary display
   remains the workspace preview, the bottom command bar carries display state,
@@ -240,6 +246,16 @@ Implementation note, 2026-05-31:
   `AgentScreenInteractionInstrumentedTest#htmlQuickPickerOpensWorkspaceHtmlFromMainSurface`,
   and `AgentScreenInteractionInstrumentedTest#firstOpenConfigurationStartsEmptyAndUnselected`
   must pass on an update-only real-device APK.
+
+Implementation note, 2026-07-14:
+
+- The main input row is now settings-controlled. Turning it off removes the
+  input field and its dedicated row, merging preview status and Conversation
+  into a 32 dp segmented status strip. Conversation uses a quiet 52 dp segment
+  with a theme-color icon, clipped custom press feedback, and a transparent
+  44 dp touch target extending into the preview.
+- Preview/session loading indicators use a 250 ms delayed threshold to avoid
+  flicker on fast switches while making slower queued work explicit.
 
 ### Provider And Configuration
 
@@ -468,8 +484,10 @@ the per-request context projection.
   instructs agents to update memory only for explicit or clearly stable
   rememberable facts and never for secrets, transient todos, raw tool output, or
   guesses.
-- Workspace todo baseline is implemented as `.flovera/todo.md` and injected by
-  the same assembler as short user-visible task state. It is intentionally a
+- Workspace todo is exposed to the active agent as `.flovera/todo.md`, but its
+  storage is isolated per session and injected by the same assembler as short
+  user-visible task state. The legacy workspace-global file migrates once to
+  the first active session after upgrade. It is intentionally a
   lightweight editable file, not a hidden reasoning store or UI-heavy task
   system, so agents can preserve multi-step progress, interruption checkpoints,
   and handoff state without adding another global tool.
@@ -1167,7 +1185,11 @@ Implemented coverage:
 - Non-HTML workspace preview selection now uses a background workspace query
   with generation checks, so stale preview reads cannot overwrite a newer user
   selection.
-- File rename/delete, snapshot create/restore/delete, session create/open/rename
+- Workspace mutation/query diagnostics now record queue wait separately from
+  execution duration, exposing delays caused by the low-priority serialized
+  dispatcher rather than attributing them to the selected operation itself.
+- New-session draft creation is immediate in memory and no longer waits behind
+  workspace mutations. File rename/delete, snapshot create/restore/delete, session open/rename
   /duplicate/archive/restore/pin/revert, and most artifact lifecycle refreshes
   now run their workspace/session IO through the same background boundary.
 - Agent run start/session update paths update session lists in memory instead

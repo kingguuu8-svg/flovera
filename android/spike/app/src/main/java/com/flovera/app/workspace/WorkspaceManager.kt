@@ -208,6 +208,33 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     encodeDefaults = true
   }
   private var staleArtifactJobsChecked = false
+  @Volatile private var activeSessionId: String? = null
+
+  fun setActiveSession(sessionId: String?) {
+    val normalized = sessionId?.trim()?.takeIf { it.isNotBlank() }
+    require(normalized == null || SESSION_ID_REGEX.matches(normalized)) { "Invalid session id." }
+    activeSessionId = normalized
+    if (normalized == null) return
+
+    val target = sessionTodoFile(normalized)
+    val legacy = File(root, FLOVERA_TODO_FILE).canonicalFile
+    if (!target.exists() && legacy.isFile) {
+      target.parentFile?.mkdirs()
+      legacy.copyTo(target)
+      legacy.delete()
+    }
+  }
+
+  fun copySessionTodo(sourceSessionId: String, targetSessionId: String) {
+    require(SESSION_ID_REGEX.matches(sourceSessionId) && SESSION_ID_REGEX.matches(targetSessionId)) {
+      "Invalid session id."
+    }
+    val source = sessionTodoFile(sourceSessionId)
+    if (!source.isFile) return
+    val target = sessionTodoFile(targetSessionId)
+    target.parentFile?.mkdirs()
+    source.copyTo(target, overwrite = true)
+  }
 
   fun ensureSeedFiles() {
     writeFile(
@@ -1079,12 +1106,14 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
       overwrite = false,
       createAutoSnapshot = false,
     )
-    writeFile(
-      path = FLOVERA_TODO_FILE,
-      content = "",
-      overwrite = false,
-      createAutoSnapshot = false,
-    )
+    if (activeSessionId != null) {
+      writeFile(
+        path = FLOVERA_TODO_FILE,
+        content = "",
+        overwrite = false,
+        createAutoSnapshot = false,
+      )
+    }
     if (!staleArtifactJobsChecked) {
       markStaleWorkspaceArtifactJobsInterrupted()
       staleArtifactJobsChecked = true
@@ -1597,13 +1626,19 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     val dir = safeFile(path)
     if (!dir.exists()) return "Path does not exist: $path"
     if (!dir.isDirectory) return "${relativeToRoot(dir)} (${dir.length()} bytes)"
-    return dir.listFiles()
-      ?.sortedWith(compareBy<File> { !it.isDirectory }.thenBy { it.name.lowercase() })
-      ?.joinToString("\n") { file ->
+    val files = dir.listFiles()
+      ?.filterNot { relativeToRoot(it).replace('\\', '/').startsWith(FLOVERA_SESSION_TODO_ROOT) }
+      ?.toMutableList()
+      ?: mutableListOf()
+    if (relativeToRoot(dir).replace('\\', '/') == ".flovera") {
+      activeSessionId?.let(::sessionTodoFile)?.takeIf { it.isFile }?.let(files::add)
+    }
+    return files
+      .sortedWith(compareBy<File> { !it.isDirectory }.thenBy { it.name.lowercase() })
+      .joinToString("\n") { file ->
         val suffix = if (file.isDirectory) "/" else " (${file.length()} bytes)"
         relativeToRoot(file) + suffix
       }
-      ?: ""
   }
 
   fun searchFiles(
@@ -2002,6 +2037,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     if (normalized.startsWith(".") && !normalized.startsWith(".flovera/")) return false
     if (normalized.contains("/.") && !normalized.startsWith(".flovera/")) return false
     if (!normalized.startsWith(".flovera/")) return true
+    if (normalized.startsWith(FLOVERA_SESSION_TODO_ROOT)) return false
     if (normalized.startsWith(".flovera/retrieval/") || normalized.startsWith(".flovera/cache/")) return false
     return when (scope) {
       WORKSPACE_SEARCH_SCOPE_PUBLIC -> false
@@ -2152,7 +2188,18 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
   }
 
   private fun safeFile(path: String): File {
-    val requested = File(root, path).canonicalFile
+    val normalized = path.trim().replace('\\', '/')
+    require(
+      normalized == FLOVERA_TODO_FILE ||
+        normalized != FLOVERA_SESSION_TODO_ROOT.removeSuffix("/") && !normalized.startsWith(FLOVERA_SESSION_TODO_ROOT),
+    ) {
+      "Session todo storage is private; use $FLOVERA_TODO_FILE for the active session."
+    }
+    val requested = if (normalized == FLOVERA_TODO_FILE && activeSessionId != null) {
+      sessionTodoFile(requireNotNull(activeSessionId))
+    } else {
+      File(root, path).canonicalFile
+    }
     val canonicalRoot = root.canonicalFile
     require(requested.path == canonicalRoot.path || requested.path.startsWith(canonicalRoot.path + File.separator)) {
       "Path escapes workspace: $path"
@@ -2475,7 +2522,14 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
   }
 
   private fun relativeToRoot(file: File): String {
-    return file.canonicalFile.toRelativeString(root.canonicalFile).ifBlank { "." }
+    val canonical = file.canonicalFile
+    val currentTodo = activeSessionId?.let(::sessionTodoFile)
+    if (currentTodo != null && canonical == currentTodo) return FLOVERA_TODO_FILE
+    return canonical.toRelativeString(root.canonicalFile).ifBlank { "." }
+  }
+
+  private fun sessionTodoFile(sessionId: String): File {
+    return File(root, "$FLOVERA_SESSION_TODO_ROOT$sessionId/todo.md").canonicalFile
   }
 
   private companion object {
@@ -2483,6 +2537,8 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     const val LEGACY_AGENT_RULES_FILE = "AGENT.md"
     const val FLOVERA_MEMORY_FILE = ".flovera/memory.md"
     const val FLOVERA_TODO_FILE = ".flovera/todo.md"
+    const val FLOVERA_SESSION_TODO_ROOT = ".flovera/sessions/"
+    val SESSION_ID_REGEX = Regex("[A-Za-z0-9._-]+")
     const val WORKSPACE_ARTIFACT_MANIFEST_NAME = "flovera.app.json"
     const val WORKSPACE_ARTIFACT_PREVIEW_WEBVIEW = "webview"
     const val WORKSPACE_ARTIFACT_PREVIEW_LOCAL_HTTP = "local_http"
@@ -2782,6 +2838,7 @@ data class FloveraSettingsView(
   val webSearchEnabled: Boolean = false,
   val webSearchUserConfigured: Boolean = false,
   val backgroundKeepAliveEnabled: Boolean = false,
+  val inputBarVisible: Boolean = true,
   val pythonRunToolFallbackEnabled: Boolean = false,
   val workspaceMemoryEnabled: Boolean = true,
   val language: String = "",
@@ -2907,6 +2964,8 @@ data class FloveraCapabilities(
   val finalAssistantResponseStreamingSource: String = "koog_stream_frame_event_handler_compat",
   val finalizedMarkdownSegmentedRendering: Boolean = true,
   val mainSurfaceHtmlQuickPicker: Boolean = true,
+  val mainSurfaceInputBarConfigurable: Boolean = true,
+  val mainSurfaceInputBarVisible: Boolean = true,
   val conversationComposerAttachments: Boolean = true,
   val conversationPhotoLibraryImport: Boolean = true,
   val conversationVoiceInput: Boolean = true,
@@ -2923,6 +2982,7 @@ data class FloveraCapabilities(
   val workspaceMemoryPath: String = ".flovera/memory.md",
   val workspaceTodo: Boolean = true,
   val workspaceTodoPath: String = ".flovera/todo.md",
+  val workspaceTodoScope: String = "session",
   val networkTools: Boolean = false,
   val pythonRuntime: Boolean = true,
   val pythonRunTool: Boolean = false,
@@ -3154,6 +3214,7 @@ data class FloveraCapabilities(
         networkTools = settingsView.networkEnabled,
         webSearch = settingsView.webSearchEnabled,
         backgroundKeepAliveEnabled = settingsView.backgroundKeepAliveEnabled,
+        mainSurfaceInputBarVisible = settingsView.inputBarVisible,
         workspaceMemoryEnabled = settingsView.workspaceMemoryEnabled,
         pythonRunTool = settingsView.pythonRunToolFallbackEnabled,
         pythonRunToolFallbackEnabled = settingsView.pythonRunToolFallbackEnabled,

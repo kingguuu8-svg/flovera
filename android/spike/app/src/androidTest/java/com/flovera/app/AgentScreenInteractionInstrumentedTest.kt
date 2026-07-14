@@ -75,6 +75,48 @@ class AgentScreenInteractionInstrumentedTest {
   }
 
   @Test
+  fun hiddenMainInputKeepsPreviewStatusAndConversationEntry() {
+    val context = composeRule.activity.applicationContext
+    val settingsStore = SettingsStore(
+      context,
+      File(context.cacheDir, "hidden-main-input-${System.currentTimeMillis()}.json"),
+    )
+    settingsStore.save(
+      usableSettings(AppSettings(selectedHtmlPath = "", inputBarVisible = false)),
+    )
+    val controller = AgentController(context, settingsStore = settingsStore)
+
+    composeRule.setContent {
+      AgentScreen(controller)
+    }
+
+    assertEquals(0, composeRule.onAllNodesWithTag("main-display-input").fetchSemanticsNodes().size)
+    composeRule.onNodeWithTag("compact-bottom-row").assertIsDisplayed()
+    composeRule.onNodeWithTag("compact-conversation-target").assertIsDisplayed()
+    composeRule.onNodeWithTag("bottom-display-state").assertIsDisplayed()
+    composeRule.onNodeWithContentDescription("Open conversation").assertIsDisplayed()
+  }
+
+  @Test
+  fun hiddenMainInputKeepsMissingApiPromptVisible() {
+    val context = composeRule.activity.applicationContext
+    val settingsStore = SettingsStore(
+      context,
+      File(context.cacheDir, "hidden-main-input-missing-api-${System.currentTimeMillis()}.json"),
+    )
+    settingsStore.save(AppSettings(selectedHtmlPath = "", inputBarVisible = false))
+    val controller = AgentController(context, settingsStore = settingsStore)
+
+    composeRule.setContent {
+      AgentScreen(controller)
+    }
+
+    composeRule.onNodeWithText("Model API not configured").assertIsDisplayed()
+    composeRule.onNodeWithTag("compact-bottom-row").assertIsDisplayed()
+    composeRule.onNodeWithContentDescription("Open conversation").assertIsDisplayed()
+  }
+
+  @Test
   fun conversationComposerExposesAttachmentInput() {
     val context = composeRule.activity.applicationContext
     SettingsStore(context).save(usableSettings(AppSettings(selectedHtmlPath = "", language = "zh")))

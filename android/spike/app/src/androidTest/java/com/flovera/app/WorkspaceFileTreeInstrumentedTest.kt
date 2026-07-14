@@ -2944,6 +2944,26 @@ class WorkspaceFileTreeInstrumentedTest {
   }
 
   @Test
+  fun workspaceTodoIsIsolatedPerSessionAndMigratesLegacyContent() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "todo-scope-${System.currentTimeMillis()}")
+    workspace.writeFile(".flovera/todo.md", "legacy task", createAutoSnapshot = false)
+
+    workspace.setActiveSession("session-a")
+    assertEquals("legacy task", workspace.readFloveraTodo())
+    workspace.writeFile(".flovera/todo.md", "session A task", createAutoSnapshot = false)
+
+    workspace.setActiveSession("session-b")
+    assertEquals("", workspace.readFloveraTodo())
+    workspace.writeFile(".flovera/todo.md", "session B task", createAutoSnapshot = false)
+
+    workspace.setActiveSession("session-a")
+    assertEquals("session A task", workspace.readFloveraTodo())
+    workspace.setActiveSession("session-b")
+    assertEquals("session B task", workspace.readFloveraTodo())
+  }
+
+  @Test
   fun workspaceFloveraMetadataExposesCapabilitiesAndSettingsProposals() {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val workspaceId = "metadata-${System.currentTimeMillis()}"
@@ -2955,6 +2975,7 @@ class WorkspaceFileTreeInstrumentedTest {
           networkEnabled = true,
           webSearchEnabled = true,
           backgroundKeepAliveEnabled = true,
+          inputBarVisible = false,
           agentAuthorityMode = "assisted",
           workspaceSecrets = listOf(
             WorkspaceSecret(
@@ -3164,6 +3185,9 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(capabilities.contains("\"koog_stream_frame_event_handler\""))
     assertTrue(capabilities.contains("\"finalizedMarkdownSegmentedRendering\": true"))
     assertTrue(capabilities.contains("\"mainSurfaceHtmlQuickPicker\": true"))
+    assertTrue(capabilities.contains("\"mainSurfaceInputBarConfigurable\": true"))
+    assertTrue(capabilities.contains("\"mainSurfaceInputBarVisible\": false"))
+    assertTrue(capabilities.contains("\"workspaceTodoScope\": \"session\""))
     assertTrue(capabilities.contains("\"conversationComposerAttachments\": true"))
     assertTrue(capabilities.contains("\"conversationPhotoLibraryImport\": true"))
     assertTrue(capabilities.contains("\"conversationVoiceInput\": true"))
@@ -3233,6 +3257,7 @@ class WorkspaceFileTreeInstrumentedTest {
     assertTrue(settingsView.contains("\"customOpenAICompatibilityMode\""))
     assertTrue(settingsView.contains("\"reasoningEffort\""))
     assertTrue(settingsView.contains("\"backgroundKeepAliveEnabled\": true"))
+    assertTrue(settingsView.contains("\"inputBarVisible\": false"))
     assertTrue(settingsView.contains("\"openRouterProviderPreferences\""))
     assertTrue(settingsView.contains("\"openRouterMinCodingScore\""))
     assertTrue(settingsView.contains("\"secretRefs\""))

@@ -58,7 +58,7 @@ object AgentPromptBuilder {
       Request context source map:
       - Recent session history is a projection of append-only session messages and structured tool context.
       - Workspace memory is long-lived preference/fact context from .flovera/memory.md when enabled.
-      - Workspace todo is short user-visible task state from .flovera/todo.md.
+      - Workspace todo is session-scoped short user-visible task state from .flovera/todo.md.
       - Skills are descriptors only; read a relevant SKILL.md before applying that skill.
       - Current user request has priority over memory, skills, and older history.
 
@@ -131,7 +131,7 @@ Tool routing:
 - Use read_file for text inspection, edit_file for focused replacements, and write_file for new files or intentional full rewrites.
 - Flovera skills use the standard editable structure `.flovera/skills/<skill-id>/SKILL.md`, with registration in `.flovera/skills/manifest.json`. The request prompt lists compact skill descriptors only. When a listed skill is materially relevant, read that SKILL.md with read_file and follow the full instructions. The user and agent may create, edit, or register skills through ordinary workspace file tools.
 - Workspace memory lives at `.flovera/memory.md` and is controlled by the Memory setting. Treat it as long-lived user preference and workspace fact context, lower priority than the current user request and AGENTS.md. Update it only when the user explicitly asks you to remember something or when the user clearly establishes a stable preference/fact; never store secrets, transient todos, raw tool output, or guesses there.
-- Workspace todo lives at `.flovera/todo.md`. Use it for short user-visible task checkpoints on multi-step work, especially after planning, partial completion, interruption, or handoff. Keep entries factual and actionable; do not store hidden reasoning, secrets, raw tool output, or long transcripts there.
+- Workspace todo is scoped to the active session and exposed at `.flovera/todo.md`. Use it for short user-visible task checkpoints on multi-step work, especially after planning, partial completion, interruption, or handoff. Keep entries factual and actionable; do not store hidden reasoning, secrets, raw tool output, or long transcripts there.
 - Activated skills may define skill-scoped Flovera workflow commands that run through workspace_command_run. Use those commands only after reading the relevant skill workflow; do not treat them as separate global tools or invent undocumented variants.
 - Use workspace_command_run for Python execution by default, including calculation, file generation, algorithm validation, local scripting, `python -c` snippets, and Python scripts with command-line arguments such as `["python", "tools/check.py", "--input", "data.csv"]`.
 - Use workspace_command_run for Git with argv such as `["git","status"]`, `["git","diff"]`, `["git","add","."]`, or `["git","commit","-m","message"]`. Run `["git","init"]` first if the workspace has no repository. Do not use push, remote auth, shell git flags, or OS-level git assumptions.
@@ -219,7 +219,7 @@ Current run facts:
 - pythonRuntime=available
 - pythonRunToolFallback=${if (pythonRunToolFallbackEnabled) "enabled" else "disabled"}
 - workspaceMemory=${if (workspaceMemoryEnabled) "enabled_at_.flovera/memory.md" else "disabled"}
-- workspaceTodo=available_at_.flovera/todo.md
+- workspaceTodo=session_scoped_at_.flovera/todo.md
 - workspaceCommandRuntime=available_python_groovy_jvm_artifacts_flovera_scripts_office_ooxml_poi_backend_experimental
 - workspaceCommandProfiles=python,groovy,git,android,flovera-script,flovera-office
 - workspaceAutomationScripts=available_at_.flovera/scripts

@@ -192,6 +192,28 @@ class SessionManagementInstrumentedTest {
   }
 
   @Test
+  fun emptyNewSessionReturnsToItsSourceSession() {
+    withIsolatedController("draft-origin") { controller, store ->
+      val source = store.appendMessage(
+        store.create("Draft origin ${System.currentTimeMillis()}"),
+        SessionMessage(role = "user", content = "persisted"),
+      )
+      controller.openSession(source.id)
+      waitUntil { controller.state.value.session?.id == source.id }
+
+      controller.newSession()
+      val draft = controller.state.value.session
+      assertNotNull(draft)
+      assertNotEquals(source.id, draft?.id)
+      assertTrue(draft?.messages?.isEmpty() == true)
+
+      controller.discardEmptyDraftSession()
+      waitUntil { controller.state.value.session?.id == source.id }
+      assertEquals(source.id, controller.state.value.session?.id)
+    }
+  }
+
+  @Test
   fun controllerArchivesActiveSessionAndSwitchesToUsableSession() {
     withIsolatedController("archive-active") { controller, store ->
       val first = store.appendMessage(
