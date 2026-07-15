@@ -29,6 +29,12 @@ data class WorkspaceFileNode(
   val children: List<WorkspaceFileNode> = emptyList(),
 )
 
+data class WorkspaceCatalog(
+  val tree: WorkspaceFileNode,
+  val htmlFiles: List<String>,
+  val workspaceArtifacts: List<WorkspaceArtifact>,
+)
+
 data class WorkspaceSearchHit(
   val path: String,
   val lineNumber: Int,
@@ -208,6 +214,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     encodeDefaults = true
   }
   private var staleArtifactJobsChecked = false
+  @Volatile private var catalogCache: WorkspaceCatalog? = null
   @Volatile private var activeSessionId: String? = null
 
   fun setActiveSession(sessionId: String?) {
@@ -303,6 +310,8 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
   }
 
   private fun ensureWorkspaceArtifactDemo() {
+    val seedVersionFile = safeFile(FLOVERA_DEMO_SEED_VERSION_FILE)
+    if (seedVersionFile.isFile && readUtf8Text(seedVersionFile).trim() == FLOVERA_DEMO_SEED_VERSION) return
     writeWorkspaceArtifactDemoFile(
       path = "agent-demo/README.md",
       content = """
@@ -997,6 +1006,12 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
         }
       """.trimIndent(),
       )
+    writeFile(
+      path = FLOVERA_DEMO_SEED_VERSION_FILE,
+      content = FLOVERA_DEMO_SEED_VERSION,
+      overwrite = true,
+      createAutoSnapshot = false,
+    )
   }
 
   private fun clearLegacySeedAgentRules() {
@@ -1082,17 +1097,13 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
       overwrite = false,
       createAutoSnapshot = false,
     )
-    writeFile(
+    writeFileIfChanged(
       path = ".flovera/settings-view.json",
       content = json.encodeToString(settingsView),
-      overwrite = true,
-      createAutoSnapshot = false,
     )
-    writeFile(
+    writeFileIfChanged(
       path = ".flovera/capabilities.json",
       content = json.encodeToString(FloveraCapabilities.fromSettings(settingsView, providerProfileCatalog, providerApiModes)),
-      overwrite = true,
-      createAutoSnapshot = false,
     )
     safeFile(".flovera/proposals").mkdirs()
     safeFile(".flovera/tools").mkdirs()
@@ -1118,17 +1129,13 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
       markStaleWorkspaceArtifactJobsInterrupted()
       staleArtifactJobsChecked = true
     }
-    writeFile(
+    writeFileIfChanged(
       path = ".flovera/tools/manifest.json",
       content = json.encodeToString(FloveraPythonToolsManifest()),
-      overwrite = false,
-      createAutoSnapshot = false,
     )
-    writeFile(
+    writeFileIfChanged(
       path = ".flovera/python/wheel-catalog.json",
       content = json.encodeToString(FloveraPythonWheelCatalog.default()),
-      overwrite = true,
-      createAutoSnapshot = false,
     )
     ensureFloveraSkills()
   }
@@ -1141,11 +1148,9 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
       null
     }
     val mergedManifest = FloveraSkillRegistry.mergedDefaultManifest(existingManifest)
-    writeFile(
+    writeFileIfChanged(
       path = ".flovera/skills/manifest.json",
       content = json.encodeToString(mergedManifest),
-      overwrite = true,
-      createAutoSnapshot = false,
     )
     FloveraSkillRegistry.defaultRegistrations.forEach { registration ->
       writeFile(
@@ -1372,7 +1377,9 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     snapshotStore.createAutomatic(reason)
   }
 
-  fun restoreSnapshot(id: String): WorkspaceSnapshotRecord? = snapshotStore.restore(id)
+  fun restoreSnapshot(id: String): WorkspaceSnapshotRecord? {
+    return snapshotStore.restore(id).also { if (it != null) invalidateCatalogCache() }
+  }
 
   fun deleteSnapshot(id: String): Boolean = snapshotStore.delete(id)
 
@@ -1383,6 +1390,22 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
       .map { relativeToRoot(it) }
       .sorted()
       .toList()
+  }
+
+  fun catalog(): WorkspaceCatalog {
+    catalogCache?.let { return it }
+    val htmlFiles = mutableListOf<String>()
+    val workspaceArtifacts = mutableListOf<WorkspaceArtifact>()
+    val tree = catalogNode(root, "", htmlFiles, workspaceArtifacts)
+    return WorkspaceCatalog(
+      tree = tree,
+      htmlFiles = htmlFiles.sorted(),
+      workspaceArtifacts = workspaceArtifacts.sortedBy { it.manifestPath },
+    ).also { catalogCache = it }
+  }
+
+  fun invalidateCatalogCache() {
+    catalogCache = null
   }
 
   fun fileTree(): WorkspaceFileNode {
@@ -1826,7 +1849,24 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
       snapshotStore.createAutomatic("write_file:${relativeToRoot(file)}")
     }
     writeUtf8TextAtomically(file, content)
+    if (affectsWorkspaceCatalog(path)) invalidateCatalogCache()
     return "Wrote ${content.length} chars to ${relativeToRoot(file)}"
+  }
+
+  private fun writeFileIfChanged(path: String, content: String) {
+    val file = safeFile(path)
+    if (file.isFile && runCatching { readUtf8Text(file) == content }.getOrDefault(false)) return
+    writeFile(
+      path = path,
+      content = content,
+      overwrite = true,
+      createAutoSnapshot = false,
+    )
+  }
+
+  private fun affectsWorkspaceCatalog(path: String): Boolean {
+    val normalized = path.trim().replace('\\', '/')
+    return normalized != ".flovera" && !normalized.startsWith(".flovera/")
   }
 
   fun writeBytes(
@@ -1841,6 +1881,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
       snapshotStore.createAutomatic("write_bytes:${relativeToRoot(file)}")
     }
     writeBytesAtomically(file, content)
+    if (affectsWorkspaceCatalog(path)) invalidateCatalogCache()
     return "Wrote ${content.size} bytes to ${relativeToRoot(file)}"
   }
 
@@ -1850,6 +1891,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     val input = appContext.contentResolver.openInputStream(uri) ?: return "Could not open shared file: $uri"
     snapshotStore.createAutomatic("import:${relativeToRoot(target)}")
     writeStreamAtomically(target, input)
+    invalidateCatalogCache()
     return "Imported ${relativeToRoot(target)}"
   }
 
@@ -1861,6 +1903,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     val updated = current.replace(oldText, newText, ignoreCase = false)
     snapshotStore.createAutomatic("edit_file:${relativeToRoot(file)}")
     writeUtf8TextAtomically(file, updated)
+    if (affectsWorkspaceCatalog(path)) invalidateCatalogCache()
     return "Edited ${relativeToRoot(file)}"
   }
 
@@ -1879,6 +1922,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     if (target.exists()) return "Target already exists: ${relativeToRoot(target)}"
     snapshotStore.createAutomatic("rename:${relativeToRoot(file)}")
     return if (file.renameTo(target)) {
+      invalidateCatalogCache()
       "Renamed ${relativeToRoot(file)} to ${relativeToRoot(target)}"
     } else {
       "Failed to rename ${relativeToRoot(file)}"
@@ -1893,6 +1937,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     snapshotStore.createAutomatic("delete:$relative")
     val deleted = if (file.isDirectory) file.deleteRecursively() else file.delete()
     return if (deleted) {
+      invalidateCatalogCache()
       "Deleted $relative"
     } else {
       "Failed to delete $relative"
@@ -2528,6 +2573,52 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     return canonical.toRelativeString(root.canonicalFile).ifBlank { "." }
   }
 
+  private fun catalogNode(
+    file: File,
+    relativePath: String,
+    htmlFiles: MutableList<String>,
+    workspaceArtifacts: MutableList<WorkspaceArtifact>,
+  ): WorkspaceFileNode {
+    val isDirectory = file.isDirectory
+    if (!isDirectory) {
+      if (file.extension.equals("html", ignoreCase = true)) {
+        htmlFiles += relativePath
+      }
+      if (file.name == WORKSPACE_ARTIFACT_MANIFEST_NAME &&
+        workspaceArtifacts.size < MAX_WORKSPACE_ARTIFACT_MANIFESTS
+      ) {
+        workspaceArtifacts += artifactFromManifestFile(file)
+      }
+      return WorkspaceFileNode(
+        name = if (relativePath.isBlank()) "workspace" else file.name,
+        path = relativePath,
+        isDirectory = false,
+        sizeBytes = file.length(),
+      )
+    }
+
+    val children = file.listFiles()
+      ?.mapNotNull { child ->
+        val childPath = if (relativePath.isBlank()) child.name else "$relativePath/${child.name}"
+        child.takeIf { isUserVisibleTreePath(childPath) }?.let { it to childPath }
+      }
+      ?.sortedWith(compareBy<Pair<File, String>> { !it.first.isDirectory }.thenBy { it.first.name.lowercase() })
+      ?.map { (child, childPath) -> catalogNode(child, childPath, htmlFiles, workspaceArtifacts) }
+      ?: emptyList()
+    return WorkspaceFileNode(
+      name = if (relativePath.isBlank()) "workspace" else file.name,
+      path = relativePath,
+      isDirectory = true,
+      sizeBytes = 0L,
+      children = children,
+    )
+  }
+
+  private fun isUserVisibleTreePath(path: String): Boolean {
+    val normalized = path.replace('\\', '/')
+    return normalized == "." || normalized != ".flovera" && !normalized.startsWith(".flovera/")
+  }
+
   private fun sessionTodoFile(sessionId: String): File {
     return File(root, "$FLOVERA_SESSION_TODO_ROOT$sessionId/todo.md").canonicalFile
   }
@@ -2537,6 +2628,8 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     const val LEGACY_AGENT_RULES_FILE = "AGENT.md"
     const val FLOVERA_MEMORY_FILE = ".flovera/memory.md"
     const val FLOVERA_TODO_FILE = ".flovera/todo.md"
+    const val FLOVERA_DEMO_SEED_VERSION_FILE = ".flovera/demo-seed-version"
+    const val FLOVERA_DEMO_SEED_VERSION = "2"
     const val FLOVERA_SESSION_TODO_ROOT = ".flovera/sessions/"
     val SESSION_ID_REGEX = Regex("[A-Za-z0-9._-]+")
     const val WORKSPACE_ARTIFACT_MANIFEST_NAME = "flovera.app.json"

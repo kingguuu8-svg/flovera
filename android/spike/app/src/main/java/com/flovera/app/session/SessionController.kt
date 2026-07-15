@@ -1,19 +1,46 @@
 package com.flovera.app.session
 
+data class SessionLists(
+  val active: List<AgentSession>,
+  val archived: List<AgentSession>,
+)
+
 class SessionController(private val store: AgentSessionStore) {
-  fun initialSession(activeSessionId: String?): AgentSession? {
-    store.pruneEmptySessions()
-    val active = activeSessionId?.let { store.load(it) }
-    return if (active != null && active.archivedAtMillis == null && active.messages.isNotEmpty()) {
-      active
-    } else {
-      nextUsableSession()
-    }
+  fun initialSessionForStartup(activeSessionId: String?): AgentSession? {
+    return activeSessionId
+      ?.let(store::load)
+      ?.takeIf { it.archivedAtMillis == null && it.messages.isNotEmpty() }
   }
 
-  fun listActive(): List<AgentSession> = store.list()
+  fun initialSession(activeSessionId: String?): AgentSession? {
+    val sessions = listState()
+    return sessions.active.firstOrNull { it.id == activeSessionId && it.messages.isNotEmpty() }
+      ?: sessions.active.firstOrNull()
+  }
 
-  fun listArchived(): List<AgentSession> = store.listArchived()
+  fun listState(): SessionLists {
+    val all = store.list(includeArchived = true)
+    return SessionLists(
+      active = all.filter { it.archivedAtMillis == null },
+      archived = all
+        .filter { it.archivedAtMillis != null }
+        .sortedByDescending { it.archivedAtMillis },
+    )
+  }
+
+  fun listSummaryState(): SessionLists {
+    val all = store.listSummaries(includeArchived = true)
+    return SessionLists(
+      active = all.filter { it.archivedAtMillis == null },
+      archived = all
+        .filter { it.archivedAtMillis != null }
+        .sortedByDescending { it.archivedAtMillis },
+    )
+  }
+
+  fun listActive(): List<AgentSession> = listState().active
+
+  fun listArchived(): List<AgentSession> = listState().archived
 
   fun createSession(): AgentSession {
     return store.draft("New session")
@@ -75,7 +102,7 @@ class SessionController(private val store: AgentSessionStore) {
   }
 
   fun nextUsableSession(): AgentSession? {
-    return store.list().firstOrNull()
+    return listState().active.firstOrNull()
   }
 
   private fun firstPromptTitle(prompt: String): String {

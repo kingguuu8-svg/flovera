@@ -9,6 +9,7 @@ import com.flovera.app.koog.KoogAgentRuntime
 import com.flovera.app.koog.KoogSessionHandoffCompressor
 import com.flovera.app.koog.ModelProviderCatalog
 import com.flovera.app.koog.ToolEventRecorder
+import com.flovera.app.performance.FloveraDispatchers
 import com.flovera.app.session.AgentSession
 import com.flovera.app.session.AgentRunTimelineEvent
 import com.flovera.app.session.ContextUsageRecord
@@ -25,7 +26,6 @@ import java.util.Locale
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
@@ -40,7 +40,7 @@ class AgentRunController(
   private val runtime: AgentRuntime = KoogAgentRuntime(),
   private val handoffCompressor: SessionHandoffCompressor = KoogSessionHandoffCompressor(),
   private val contextOverflowDetector: ContextOverflowDetector = KoogContextOverflowDetector(),
-  private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
+  private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + FloveraDispatchers.runtimeDispatcher),
   private val shouldCompressContext: (ContextUsageRecord) -> Boolean = {
     it.contextBudgetStatus == AgentContextBudget.STATUS_COMPRESSION_RECOMMENDED
   },
@@ -74,147 +74,171 @@ class AgentRunController(
     val visibleTrimmed = visibleInput.trim().ifBlank { trimmed }
     if (trimmed.isBlank()) return null
 
-    val withUser = appendUserPrompt(session, visibleTrimmed)
-    val agentRunId = "${withUser.id}-${UUID.randomUUID()}"
-    val startedAtMillis = System.currentTimeMillis()
-    val contextRecord = estimateContextUsage(trimmed, visibleTrimmed, settings, withUser, workspace)
-    val contextCompressed = shouldCompressContext(contextRecord)
-    val runStartedEvent = lifecycleRunEvent(
-      type = AgentRunEventType.RUN_STARTED,
-      title = "Run started",
-      detail = "provider=${settings.provider}, model=${settings.model}, sessionId=${withUser.id}, agentRunId=$agentRunId",
-      status = AGENT_RUN_STATUS_RUNNING,
-    )
-    var activeRunEvents = listOfNotNull(runStartedEvent.timelineEvent) +
-      buildInitialRunTimeline(contextRecord, trimmed, contextCompressed)
-    val startedSession = if (contextCompressed) {
-      withUser
-    } else {
-      appendContextRecord(withUser, contextRecord)
-    }
-    val startDraft = if (contextCompressed) {
-      SessionMessage(
-        role = "assistant",
-        content = "Compressing context...",
-        runEvents = activeRunEvents,
-        transcriptEvents = buildConversationTranscriptEvents(
-          timelineEvents = activeRunEvents,
-          content = "",
-          role = "assistant",
-          includeContent = false,
-        ),
-      )
-    } else {
-      SessionMessage(
-        role = "assistant",
-        content = "Working...",
-        runEvents = activeRunEvents,
-        transcriptEvents = buildConversationTranscriptEvents(
-          timelineEvents = activeRunEvents,
-          content = "",
-          role = "assistant",
-          includeContent = false,
-        ),
-      )
-    }
-    val runState = AgentRunEventAccumulator(
-      statusContent = startDraft.content,
-      baseTimelineEvents = activeRunEvents,
-      buildToolProgressNarration = ::buildToolProgressNarration,
-      buildToolTimelineEvents = ::buildToolTimelineEvents,
-      buildConversationTranscriptEvents = ::buildConversationTranscriptEvents,
-      additionalTranscriptEvents = additionalTranscriptEvents,
-      onDraft = onDraft,
-    )
-    val eventSink = AgentRunEventSink { event ->
-      onRunEvent(event)
-      runState.emit(event)
-    }
-    onRunEvent(runStartedEvent)
-    onStarted(startedSession, startDraft)
-
-    suspend fun maybeAppendAssistantSummariesForCompression(source: AgentSession): AgentSession {
-      var updated = source
-      var usage = estimateContextUsage(trimmed, visibleTrimmed, settings, updated, workspace)
-      if ((usage.contextUsagePermille ?: 0) < PromptContextLedger.ASSISTANT_SUMMARY_TRIGGER_USAGE_PERMILLE) {
-        return updated
-      }
-      for (candidate in PromptContextLedger.assistantSummaryCandidates(updated, trimmed, visibleTrimmed)) {
-        if ((usage.contextUsagePermille ?: 0) < PromptContextLedger.ASSISTANT_SUMMARY_TRIGGER_USAGE_PERMILLE) {
-          break
-        }
-        val runContext = PromptContextLedger.withBackfilledBlocks(updated)
-          .filter { it.runIndex == candidate.run.index && it.kind == PromptContextLedger.KIND_RUN_CONTEXT }
-          .joinToString("\n") { it.content }
-        val summary = handoffCompressor.summarizeAssistantFinal(
-          settings = settings,
-          userContent = candidate.userContent,
-          assistantContent = candidate.assistantContent,
-          runContext = runContext,
-        ).trim()
-        if (summary.isBlank()) continue
-        val sourceMessage = updated.messages.getOrNull(candidate.sourceMessageIndex) ?: continue
-        updated = appendPromptContextBlocks(
-          updated,
-          listOf(
-            PromptContextLedger.buildAssistantSummaryBlock(
-              sourceMessageIndex = candidate.sourceMessageIndex,
-              runIndex = candidate.run.index,
-              role = candidate.assistantRole,
-              summary = summary,
-              sourceTimestampMillis = sourceMessage.timestampMillis,
-            ),
-          ),
-        )
-        usage = estimateContextUsage(trimmed, visibleTrimmed, settings, updated, workspace)
-      }
-      return updated
-    }
-
-    suspend fun prepareCompressionRestartSession(
-      source: AgentSession,
-      baseRecord: ContextUsageRecord,
-      interruptedRun: InterruptedRunHandoff? = null,
-    ): Pair<AgentSession, ContextUsageRecord> {
-      val compression = handoffCompressor.compress(
-        settings = settings,
-        session = source,
-        record = baseRecord,
-        workspace = workspace,
-        interruptedRun = interruptedRun,
-      )
-      val compressedRecord = baseRecord.copy(
-        compressed = true,
-        summary = compression.summary,
-        summarySource = compression.source,
-        compressionError = compression.error,
-      )
-      val withContext = appendContextRecord(source, compressedRecord)
-      val withDivider = appendCompressionDivider(withContext, compressedRecord, compression.summary)
-      return maybeAppendAssistantSummariesForCompression(withDivider) to compressedRecord
-    }
-
     return scope.launch {
-      var currentSession = if (contextCompressed) {
-        val (compressedSession, compressedRecord) = prepareCompressionRestartSession(
-          source = withUser,
-          baseRecord = contextRecord,
+      try {
+        val withUser = appendUserPrompt(session, visibleTrimmed)
+        val agentRunId = "${withUser.id}-${UUID.randomUUID()}"
+        val startedAtMillis = System.currentTimeMillis()
+        val contextRecord = estimateContextUsage(trimmed, visibleTrimmed, settings, withUser, workspace)
+        val contextCompressed = shouldCompressContext(contextRecord)
+        val runStartedEvent = lifecycleRunEvent(
+          type = AgentRunEventType.RUN_STARTED,
+          title = "Run started",
+          detail = "provider=${settings.provider}, model=${settings.model}, sessionId=${withUser.id}, agentRunId=$agentRunId",
+          status = AGENT_RUN_STATUS_RUNNING,
         )
-        compressedSession.also {
-          activeRunEvents = buildCompressedRunTimeline(activeRunEvents, compressedRecord)
-          runState.replaceBaseTimeline(activeRunEvents, statusContent = "Working...")
-          onSessionUpdated(
-            compressedSession,
-            runState.draftMessage(),
+        var activeRunEvents = listOfNotNull(runStartedEvent.timelineEvent) +
+          buildInitialRunTimeline(contextRecord, trimmed, contextCompressed)
+        val startedSession = if (contextCompressed) {
+          withUser
+        } else {
+          appendContextRecord(withUser, contextRecord)
+        }
+        val startDraft = if (contextCompressed) {
+          SessionMessage(
+            role = "assistant",
+            content = "Compressing context...",
+            runEvents = activeRunEvents,
+            transcriptEvents = buildConversationTranscriptEvents(
+              timelineEvents = activeRunEvents,
+              content = "",
+              role = "assistant",
+              includeContent = false,
+            ),
+          )
+        } else {
+          SessionMessage(
+            role = "assistant",
+            content = "Working...",
+            runEvents = activeRunEvents,
+            transcriptEvents = buildConversationTranscriptEvents(
+              timelineEvents = activeRunEvents,
+              content = "",
+              role = "assistant",
+              includeContent = false,
+            ),
           )
         }
-      } else {
-        startedSession
-      }
-      var latestCheckpointPath = checkpointPath(agentRunId)
+        val runState = AgentRunEventAccumulator(
+          statusContent = startDraft.content,
+          baseTimelineEvents = activeRunEvents,
+          buildToolProgressNarration = ::buildToolProgressNarration,
+          buildToolTimelineEvents = ::buildToolTimelineEvents,
+          buildConversationTranscriptEvents = ::buildConversationTranscriptEvents,
+          additionalTranscriptEvents = additionalTranscriptEvents,
+          onDraft = onDraft,
+        )
+        val eventSink = AgentRunEventSink { event ->
+          onRunEvent(event)
+          runState.emit(event)
+        }
+        onRunEvent(runStartedEvent)
+        onStarted(startedSession, startDraft)
 
-      fun newRecorder(sessionForCheckpoint: AgentSession): ToolEventRecorder {
-        return ToolEventRecorder { events ->
+        suspend fun maybeAppendAssistantSummariesForCompression(source: AgentSession): AgentSession {
+          var updated = source
+          var usage = estimateContextUsage(trimmed, visibleTrimmed, settings, updated, workspace)
+          if ((usage.contextUsagePermille ?: 0) < PromptContextLedger.ASSISTANT_SUMMARY_TRIGGER_USAGE_PERMILLE) {
+            return updated
+          }
+          for (candidate in PromptContextLedger.assistantSummaryCandidates(updated, trimmed, visibleTrimmed)) {
+            if ((usage.contextUsagePermille ?: 0) < PromptContextLedger.ASSISTANT_SUMMARY_TRIGGER_USAGE_PERMILLE) {
+              break
+            }
+            val runContext = PromptContextLedger.withBackfilledBlocks(updated)
+              .filter { it.runIndex == candidate.run.index && it.kind == PromptContextLedger.KIND_RUN_CONTEXT }
+              .joinToString("\n") { it.content }
+            val summary = handoffCompressor.summarizeAssistantFinal(
+              settings = settings,
+              userContent = candidate.userContent,
+              assistantContent = candidate.assistantContent,
+              runContext = runContext,
+            ).trim()
+            if (summary.isBlank()) continue
+            val sourceMessage = updated.messages.getOrNull(candidate.sourceMessageIndex) ?: continue
+            updated = appendPromptContextBlocks(
+              updated,
+              listOf(
+                PromptContextLedger.buildAssistantSummaryBlock(
+                  sourceMessageIndex = candidate.sourceMessageIndex,
+                  runIndex = candidate.run.index,
+                  role = candidate.assistantRole,
+                  summary = summary,
+                  sourceTimestampMillis = sourceMessage.timestampMillis,
+                ),
+              ),
+            )
+            usage = estimateContextUsage(trimmed, visibleTrimmed, settings, updated, workspace)
+          }
+          return updated
+        }
+
+        suspend fun prepareCompressionRestartSession(
+          source: AgentSession,
+          baseRecord: ContextUsageRecord,
+          interruptedRun: InterruptedRunHandoff? = null,
+        ): Pair<AgentSession, ContextUsageRecord> {
+          val compression = handoffCompressor.compress(
+            settings = settings,
+            session = source,
+            record = baseRecord,
+            workspace = workspace,
+            interruptedRun = interruptedRun,
+          )
+          val compressedRecord = baseRecord.copy(
+            compressed = true,
+            summary = compression.summary,
+            summarySource = compression.source,
+            compressionError = compression.error,
+          )
+          val withContext = appendContextRecord(source, compressedRecord)
+          val withDivider = appendCompressionDivider(withContext, compressedRecord, compression.summary)
+          return maybeAppendAssistantSummariesForCompression(withDivider) to compressedRecord
+        }
+
+        var currentSession = if (contextCompressed) {
+          val (compressedSession, compressedRecord) = prepareCompressionRestartSession(
+            source = withUser,
+            baseRecord = contextRecord,
+          )
+          compressedSession.also {
+            activeRunEvents = buildCompressedRunTimeline(activeRunEvents, compressedRecord)
+            runState.replaceBaseTimeline(activeRunEvents, statusContent = "Working...")
+            onSessionUpdated(
+              compressedSession,
+              runState.draftMessage(),
+            )
+          }
+        } else {
+          startedSession
+        }
+        var latestCheckpointPath = checkpointPath(agentRunId)
+
+        fun newRecorder(sessionForCheckpoint: AgentSession): ToolEventRecorder {
+          return ToolEventRecorder { events ->
+            latestCheckpointPath = saveRunCheckpoint(
+              status = AGENT_RUN_STATUS_RUNNING,
+              agentRunId = agentRunId,
+              startedAtMillis = startedAtMillis,
+              settings = settings,
+              session = sessionForCheckpoint,
+              input = trimmed,
+              toolEvents = events,
+              workspace = workspace,
+            )
+            eventSink.emit(
+              AgentRunEvent(
+                type = AgentRunEventType.TOOL_EVENTS_CHANGED,
+                title = "Tool events changed",
+                detail = "Completed tool calls: ${events.size}",
+                status = AGENT_RUN_STATUS_RUNNING,
+                toolEvents = events,
+              ),
+            )
+          }
+        }
+
+        fun saveRunningCheckpoint(sessionForCheckpoint: AgentSession, recorder: ToolEventRecorder) {
           latestCheckpointPath = saveRunCheckpoint(
             status = AGENT_RUN_STATUS_RUNNING,
             agentRunId = agentRunId,
@@ -222,232 +246,219 @@ class AgentRunController(
             settings = settings,
             session = sessionForCheckpoint,
             input = trimmed,
-            toolEvents = events,
-            workspace = workspace,
-          )
-          eventSink.emit(
-            AgentRunEvent(
-              type = AgentRunEventType.TOOL_EVENTS_CHANGED,
-              title = "Tool events changed",
-              detail = "Completed tool calls: ${events.size}",
-              status = AGENT_RUN_STATUS_RUNNING,
-              toolEvents = events,
-            ),
-          )
-        }
-      }
-
-      fun saveRunningCheckpoint(sessionForCheckpoint: AgentSession, recorder: ToolEventRecorder) {
-        latestCheckpointPath = saveRunCheckpoint(
-          status = AGENT_RUN_STATUS_RUNNING,
-          agentRunId = agentRunId,
-          startedAtMillis = startedAtMillis,
-          settings = settings,
-          session = sessionForCheckpoint,
-          input = trimmed,
-          toolEvents = recorder.snapshot(),
-          workspace = workspace,
-        )
-      }
-
-      suspend fun runRuntime(sessionForRun: AgentSession, recorderForRun: ToolEventRecorder): Result<String> {
-        return try {
-          Result.success(
-            runtime.runStreaming(
-              input = trimmed,
-              agentRunId = agentRunId,
-              settings = settings,
-              session = sessionForRun,
-              workspace = workspace,
-              recorder = recorderForRun,
-              eventSink = eventSink,
-              guidanceProvider = guidanceProvider,
-            ),
-          )
-        } catch (error: CancellationException) {
-          throw error
-        } catch (error: Throwable) {
-          Result.failure(error)
-        }
-      }
-
-      var recorder = newRecorder(currentSession)
-      saveRunningCheckpoint(currentSession, recorder)
-      var result = runRuntime(currentSession, recorder)
-      val firstError = result.exceptionOrNull()
-      if (firstError != null) {
-        val firstErrorCategory = classifyAgentRunError(firstError)
-        val overflowDetection = when (firstErrorCategory) {
-          AGENT_RUN_ERROR_CONTEXT -> ContextOverflowDetection(
-            isOverflow = true,
-            source = "local_error_classifier",
-            reason = "error category is context",
-          )
-          AGENT_RUN_ERROR_PROVIDER -> contextOverflowDetector.detect(settings, firstError)
-          else -> ContextOverflowDetection(
-            isOverflow = false,
-            source = "skipped_for_$firstErrorCategory",
-            reason = "only provider/context failures are eligible for overflow recovery",
-          )
-        }
-        if (overflowDetection.isOverflow) {
-          val interruptedRun = runState.interruptedRunHandoff(
-            originalInput = trimmed,
-            error = firstError,
-            failureStage = "provider_request",
-          )
-          val compressionStartedEvent = lifecycleRunEvent(
-            type = AgentRunEventType.COMPRESSION_STARTED,
-            title = "Context overflow detected",
-            detail = "Flovera is compacting older background information before retrying.",
-            status = AGENT_RUN_STATUS_RUNNING,
-          )
-          onRunEvent(compressionStartedEvent)
-          runState.emit(compressionStartedEvent)
-          val recoveryRecord = estimateContextUsage(trimmed, visibleTrimmed, settings, currentSession, workspace).copy(
-            id = UUID.randomUUID().toString(),
-            source = "agent_run_overflow_recovery",
-            contextBudgetStatus = AgentContextBudget.STATUS_COMPRESSION_RECOMMENDED,
-            contextBudgetReason = "Provider reported a likely context or token overflow during this run.",
-          )
-          val (preparedSession, compressedRecord) = prepareCompressionRestartSession(
-            source = currentSession,
-            baseRecord = recoveryRecord,
-            interruptedRun = interruptedRun,
-          )
-          currentSession = preparedSession
-          val compressionCompletedEvent = lifecycleRunEvent(
-            type = AgentRunEventType.COMPRESSION_COMPLETED,
-            title = "Context overflow compressed",
-            detail = buildString {
-              append("Older background information was compacted automatically.")
-              if (compressedRecord.compressionError.isNotBlank()) {
-                append(" Some details may need to be rebuilt.")
-              }
-            },
-            status = AGENT_RUN_STATUS_COMPLETED,
-          )
-          onRunEvent(compressionCompletedEvent)
-          val retryBaseEvents = runState.persistedTimelineEvents(
-            listOfNotNull(compressionCompletedEvent.timelineEvent),
-          ) + thinkingTimelineEvent("Retrying after updating context.")
-          runState.resetForRecoveryRetry(
-            baseTimelineEvents = retryBaseEvents,
-            statusContent = "Retrying after updating context...",
-          )
-          onSessionUpdated(currentSession, runState.draftMessage())
-          recorder = newRecorder(currentSession)
-          saveRunningCheckpoint(currentSession, recorder)
-          result = runRuntime(currentSession, recorder)
-        }
-      }
-
-      val assistantMessage = result.fold(
-        onSuccess = { output ->
-          saveRunCheckpoint(
-            status = AGENT_RUN_STATUS_COMPLETED,
-            agentRunId = agentRunId,
-            startedAtMillis = startedAtMillis,
-            settings = settings,
-            session = currentSession,
-            input = trimmed,
             toolEvents = recorder.snapshot(),
             workspace = workspace,
           )
-          val events = recorder.snapshot()
-          val finalContent = runState.finalTextOr(output)
-          val runCompletedEvent = lifecycleRunEvent(
-            type = AgentRunEventType.RUN_COMPLETED,
-            title = "Run completed",
-            detail = "Completed with ${events.size} tool call(s).",
-            status = AGENT_RUN_STATUS_COMPLETED,
-          )
-          onRunEvent(runCompletedEvent)
-          val persistedEvents = runState.persistedTimelineEvents(
-            listOfNotNull(
-              finalTimelineEvent(
-                title = "Final response ready",
-                detail = "The assistant response was saved to the session.",
-                status = AGENT_RUN_STATUS_COMPLETED,
+        }
+
+        suspend fun runRuntime(sessionForRun: AgentSession, recorderForRun: ToolEventRecorder): Result<String> {
+          return try {
+            Result.success(
+              runtime.runStreaming(
+                input = trimmed,
+                agentRunId = agentRunId,
+                settings = settings,
+                session = sessionForRun,
+                workspace = workspace,
+                recorder = recorderForRun,
+                eventSink = eventSink,
+                guidanceProvider = guidanceProvider,
               ),
-              runCompletedEvent.timelineEvent,
-            ),
-          )
-          SessionMessage(
-            role = "assistant",
-            content = finalContent,
-            toolEvents = events,
-            runEvents = persistedEvents,
-            transcriptEvents = runState.finalTranscriptEvents(persistedEvents, finalContent, "assistant"),
-          )
-        },
-        onFailure = { error ->
-          val events = recorder.snapshot()
-          val errorSummary = error.message ?: error.toString()
-          val errorCategory = classifyAgentRunError(error)
-          val logPath = saveErrorLog(
-            error = error,
-            errorCategory = errorCategory,
-            agentRunId = agentRunId,
-            settings = settings,
-            session = currentSession,
-            input = trimmed,
-            toolEvents = events,
-            workspace = workspace,
-          )
-          latestCheckpointPath = saveRunCheckpoint(
-            status = AGENT_RUN_STATUS_FAILED,
-            agentRunId = agentRunId,
-            startedAtMillis = startedAtMillis,
-            settings = settings,
-            session = currentSession,
-            input = trimmed,
-            toolEvents = events,
-            workspace = workspace,
-            errorSummary = errorSummary,
-            errorLogPath = logPath,
-            errorCategory = errorCategory,
-          )
-          val runFailedEvent = lifecycleRunEvent(
-            type = AgentRunEventType.RUN_FAILED,
-            title = "Run failed",
-            detail = "category=$errorCategory, log=$logPath, message=${errorSummary.take(TIMELINE_DETAIL_CHARS)}",
-            status = AGENT_RUN_STATUS_FAILED,
-          )
-          onRunEvent(runFailedEvent)
-          val message = buildString {
-            appendLine("Error category: $errorCategory")
-            appendLine()
-            append(errorSummary)
-            appendLine()
-            appendLine()
-            if (events.isNotEmpty()) {
-              appendLine("Run stopped after ${events.size} completed tool call(s).")
-              appendLine("Checkpoint saved: $latestCheckpointPath")
-              appendLine("Resume from this checkpoint instead of repeating completed tool calls.")
-              appendLine()
-              append(buildCompletedToolSummary(events))
-              appendLine()
-            }
-            append("Error log saved: ")
-            append(logPath)
+            )
+          } catch (error: CancellationException) {
+            throw error
+          } catch (error: Throwable) {
+            Result.failure(error)
           }
-          val persistedEvents = runState.persistedTimelineEvents(
-            listOfNotNull(
-              runFailedEvent.timelineEvent,
-            ),
-          )
-          SessionMessage(
-            role = "error",
-            content = message,
-            toolEvents = events,
-            runEvents = persistedEvents,
-            transcriptEvents = runState.finalTranscriptEvents(persistedEvents, message, "error"),
-          )
-        },
-      )
-      val updated = appendMessage(currentSession, assistantMessage)
-      onFinished(updated, result.isSuccess)
+        }
+
+        var recorder = newRecorder(currentSession)
+        saveRunningCheckpoint(currentSession, recorder)
+        var result = runRuntime(currentSession, recorder)
+        val firstError = result.exceptionOrNull()
+        if (firstError != null) {
+          val firstErrorCategory = classifyAgentRunError(firstError)
+          val overflowDetection = when (firstErrorCategory) {
+            AGENT_RUN_ERROR_CONTEXT -> ContextOverflowDetection(
+              isOverflow = true,
+              source = "local_error_classifier",
+              reason = "error category is context",
+            )
+            AGENT_RUN_ERROR_PROVIDER -> contextOverflowDetector.detect(settings, firstError)
+            else -> ContextOverflowDetection(
+              isOverflow = false,
+              source = "skipped_for_$firstErrorCategory",
+              reason = "only provider/context failures are eligible for overflow recovery",
+            )
+          }
+          if (overflowDetection.isOverflow) {
+            val interruptedRun = runState.interruptedRunHandoff(
+              originalInput = trimmed,
+              error = firstError,
+              failureStage = "provider_request",
+            )
+            val compressionStartedEvent = lifecycleRunEvent(
+              type = AgentRunEventType.COMPRESSION_STARTED,
+              title = "Context overflow detected",
+              detail = "Flovera is compacting older background information before retrying.",
+              status = AGENT_RUN_STATUS_RUNNING,
+            )
+            onRunEvent(compressionStartedEvent)
+            runState.emit(compressionStartedEvent)
+            val recoveryRecord = estimateContextUsage(trimmed, visibleTrimmed, settings, currentSession, workspace).copy(
+              id = UUID.randomUUID().toString(),
+              source = "agent_run_overflow_recovery",
+              contextBudgetStatus = AgentContextBudget.STATUS_COMPRESSION_RECOMMENDED,
+              contextBudgetReason = "Provider reported a likely context or token overflow during this run.",
+            )
+            val (preparedSession, compressedRecord) = prepareCompressionRestartSession(
+              source = currentSession,
+              baseRecord = recoveryRecord,
+              interruptedRun = interruptedRun,
+            )
+            currentSession = preparedSession
+            val compressionCompletedEvent = lifecycleRunEvent(
+              type = AgentRunEventType.COMPRESSION_COMPLETED,
+              title = "Context overflow compressed",
+              detail = buildString {
+                append("Older background information was compacted automatically.")
+                if (compressedRecord.compressionError.isNotBlank()) {
+                  append(" Some details may need to be rebuilt.")
+                }
+              },
+              status = AGENT_RUN_STATUS_COMPLETED,
+            )
+            onRunEvent(compressionCompletedEvent)
+            val retryBaseEvents = runState.persistedTimelineEvents(
+              listOfNotNull(compressionCompletedEvent.timelineEvent),
+            ) + thinkingTimelineEvent("Retrying after updating context.")
+            runState.resetForRecoveryRetry(
+              baseTimelineEvents = retryBaseEvents,
+              statusContent = "Retrying after updating context...",
+            )
+            onSessionUpdated(currentSession, runState.draftMessage())
+            recorder = newRecorder(currentSession)
+            saveRunningCheckpoint(currentSession, recorder)
+            result = runRuntime(currentSession, recorder)
+          }
+        }
+
+        val assistantMessage = result.fold(
+          onSuccess = { output ->
+            saveRunCheckpoint(
+              status = AGENT_RUN_STATUS_COMPLETED,
+              agentRunId = agentRunId,
+              startedAtMillis = startedAtMillis,
+              settings = settings,
+              session = currentSession,
+              input = trimmed,
+              toolEvents = recorder.snapshot(),
+              workspace = workspace,
+            )
+            val events = recorder.snapshot()
+            val finalContent = runState.finalTextOr(output)
+            val runCompletedEvent = lifecycleRunEvent(
+              type = AgentRunEventType.RUN_COMPLETED,
+              title = "Run completed",
+              detail = "Completed with ${events.size} tool call(s).",
+              status = AGENT_RUN_STATUS_COMPLETED,
+            )
+            onRunEvent(runCompletedEvent)
+            val persistedEvents = runState.persistedTimelineEvents(
+              listOfNotNull(
+                finalTimelineEvent(
+                  title = "Final response ready",
+                  detail = "The assistant response was saved to the session.",
+                  status = AGENT_RUN_STATUS_COMPLETED,
+                ),
+                runCompletedEvent.timelineEvent,
+              ),
+            )
+            SessionMessage(
+              role = "assistant",
+              content = finalContent,
+              toolEvents = events,
+              runEvents = persistedEvents,
+              transcriptEvents = runState.finalTranscriptEvents(persistedEvents, finalContent, "assistant"),
+            )
+          },
+          onFailure = { error ->
+            val events = recorder.snapshot()
+            val errorSummary = error.message ?: error.toString()
+            val errorCategory = classifyAgentRunError(error)
+            val logPath = saveErrorLog(
+              error = error,
+              errorCategory = errorCategory,
+              agentRunId = agentRunId,
+              settings = settings,
+              session = currentSession,
+              input = trimmed,
+              toolEvents = events,
+              workspace = workspace,
+            )
+            latestCheckpointPath = saveRunCheckpoint(
+              status = AGENT_RUN_STATUS_FAILED,
+              agentRunId = agentRunId,
+              startedAtMillis = startedAtMillis,
+              settings = settings,
+              session = currentSession,
+              input = trimmed,
+              toolEvents = events,
+              workspace = workspace,
+              errorSummary = errorSummary,
+              errorLogPath = logPath,
+              errorCategory = errorCategory,
+            )
+            val runFailedEvent = lifecycleRunEvent(
+              type = AgentRunEventType.RUN_FAILED,
+              title = "Run failed",
+              detail = "category=$errorCategory, log=$logPath, message=${errorSummary.take(TIMELINE_DETAIL_CHARS)}",
+              status = AGENT_RUN_STATUS_FAILED,
+            )
+            onRunEvent(runFailedEvent)
+            val message = buildString {
+              appendLine("Error category: $errorCategory")
+              appendLine()
+              append(errorSummary)
+              appendLine()
+              appendLine()
+              if (events.isNotEmpty()) {
+                appendLine("Run stopped after ${events.size} completed tool call(s).")
+                appendLine("Checkpoint saved: $latestCheckpointPath")
+                appendLine("Resume from this checkpoint instead of repeating completed tool calls.")
+                appendLine()
+                append(buildCompletedToolSummary(events))
+                appendLine()
+              }
+              append("Error log saved: ")
+              append(logPath)
+            }
+            val persistedEvents = runState.persistedTimelineEvents(
+              listOfNotNull(
+                runFailedEvent.timelineEvent,
+              ),
+            )
+            SessionMessage(
+              role = "error",
+              content = message,
+              toolEvents = events,
+              runEvents = persistedEvents,
+              transcriptEvents = runState.finalTranscriptEvents(persistedEvents, message, "error"),
+            )
+          },
+        )
+        val updated = appendMessage(currentSession, assistantMessage)
+        onFinished(updated, result.isSuccess)
+      } catch (error: CancellationException) {
+        throw error
+      } catch (error: Throwable) {
+        val failureMessage = SessionMessage(
+          role = "error",
+          content = error.message ?: error::class.java.simpleName,
+        )
+        val failedSession = runCatching { appendMessage(session, failureMessage) }.getOrDefault(session)
+        runCatching { onFinished(failedSession, false) }
+      }
     }
   }
 

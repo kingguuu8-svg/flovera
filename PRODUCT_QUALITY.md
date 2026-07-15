@@ -1173,6 +1173,22 @@ Implemented coverage:
 - A UI watchdog logs frame gaps above 300 ms and marks gaps above 1,000 ms as
   frozen, including active Flovera task names for root-cause analysis, without
   turning those diagnostics into normal conversation/status messages.
+- Session opening now uses a normal-priority interactive lane, reads only the
+  selected session, updates the visible state before active-session persistence,
+  and no longer rereads the complete active and archived session catalog on
+  every switch.
+- HTML preview selection now resolves against the in-memory workspace artifact
+  catalog, updates static displays without waiting for a full workspace refresh,
+  and persists the selected path independently from the display path.
+- Preview backend startup now runs on a lane separate from artifact jobs and
+  interrupts/cleans up stale startup attempts when the user selects another
+  preview.
+- Agent run preparation now starts on the runtime lane, while the UI publishes
+  a visible preparing state immediately; queued messages start before the
+  background workspace refresh and the refresh preserves the active run state.
+- Stopping a local HTTP artifact removes it from the active runtime catalog
+  immediately and performs Python thread cleanup asynchronously, so stopping
+  and restarting a preview do not wait on server shutdown.
 - Markwon/CommonMark parsing for conversation Markdown runs on the Markdown
   dispatcher; the UI shows readable plain text until parsed spans are ready and
   only sets the parsed result on the TextView.
@@ -1188,14 +1204,27 @@ Implemented coverage:
 - Workspace mutation/query diagnostics now record queue wait separately from
   execution duration, exposing delays caused by the low-priority serialized
   dispatcher rather than attributing them to the selected operation itself.
+- Production startup now publishes a lightweight controller shell first. Workspace
+  seeding, metadata synchronization, and the initial workspace snapshot run on the
+  mutation lane with explicit `Loading workspace...` status and startup phase
+  traces; a saved conversation is loaded asynchronously with `Loading
+  conversation...` semantics.
+- Startup no longer parses the complete session catalog or the active session
+  before the first workspace state. The Sessions panel loads metadata-only
+  summaries on demand, while opening a row loads the full conversation. Session
+  reads are cached by file stamp inside the process, and empty-session pruning is
+  folded into the one list pass instead of decoding the catalog twice.
+- Workspace tree, HTML, and artifact discovery now share one recursive catalog
+  traversal with propagated relative paths, cache the result until a workspace
+  mutation invalidates it, and skip unchanged Flovera metadata/demo seed writes.
 - New-session draft creation is immediate in memory and no longer waits behind
   workspace mutations. File rename/delete, snapshot create/restore/delete, session open/rename
   /duplicate/archive/restore/pin/revert, and most artifact lifecycle refreshes
   now run their workspace/session IO through the same background boundary.
 - Agent run start/session update paths update session lists in memory instead
   of rereading session storage, and agent run finish/queued-run finalization
-  sends workspace refresh through the mutation queue before reporting completion
-  or launching the queued run.
+  launches the next queued run before sending the full workspace refresh
+  through the mutation queue.
 - Artifact WebView bridge action calls resolve against the current in-memory
   artifact state and return in-memory job JSON first; job persistence, UI
   refresh, cancellation persistence, and runtime completion refreshes run off
@@ -1206,6 +1235,12 @@ Implemented coverage:
 
 Remaining work:
 
+- Continue profiling the Android cold-process/Compose first-frame path and the
+  full conversation decode for very large sessions. On the connected device,
+  the latest measured baseline was about 2.18 s cold launch, about 0.87 s
+  workspace initialization, and about 0.93 s asynchronous active-session load
+  with a 146 MB workspace and 21 MB session store; the UI shell is available
+  before the latter background work completes.
 - Promote repeated UI freeze events from transient status into a richer
   diagnostics surface or session log entry when the app grows a diagnostics
   panel.
@@ -1216,6 +1251,8 @@ Acceptance criteria:
 
 - Touch, scroll, and text input remain responsive while Markdown finalization,
   rules save, settings save, workspace refresh, or runtime jobs are active.
+- Cold launch publishes the shell and loading semantics before workspace/session
+  I/O, and opening a session row does not require a complete catalog refresh.
 - Long-running Python/Groovy/Office/runtime work cannot share the UI thread or
   spawn unbounded same-priority work.
 - When the UI freezes, the next available diagnostic identifies the active

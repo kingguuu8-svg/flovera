@@ -163,6 +163,7 @@ import com.flovera.app.platform.AndroidPermissionCapabilities
 import com.flovera.app.platform.AndroidPermissionType
 import com.flovera.app.platform.findActivity
 import com.flovera.app.performance.FloveraDispatchers
+import com.flovera.app.performance.FloveraPerformance
 import com.flovera.app.session.ContextUsageRecord
 import com.flovera.app.session.ConversationTranscriptEvent
 import com.flovera.app.session.AgentRunTimelineEvent
@@ -1750,7 +1751,8 @@ private fun WorkspaceWebView(
   AndroidView(
     modifier = Modifier.fillMaxSize().systemBarsPadding().semantics { contentDescription = "Workspace WebView" },
     factory = { context ->
-      WebView(context).apply {
+      FloveraPerformance.beginTask("startup", "webView/create").use {
+        WebView(context).apply {
         webViewClient = FloveraWorkspaceWebViewClient(
           workspaceRootUrl = workspaceRootUrl,
           onError = {
@@ -1794,8 +1796,9 @@ private fun WorkspaceWebView(
           "Flovera",
         )
         loadUrl(url)
-        if (chromeColorSamplingEnabled) {
-          scheduleWorkspaceChromeColorSample(onChromeColorSampled)
+          if (chromeColorSamplingEnabled) {
+            scheduleWorkspaceChromeColorSample(onChromeColorSampled)
+          }
         }
       }
     },
@@ -2324,6 +2327,7 @@ private fun ConversationDialog(
                   onClick = {
                     moreMenuOpen = false
                     sessionPickerOpen = true
+                    controller.loadSessionCatalog()
                   },
                   enabled = !state.isRunning,
                 )
@@ -4215,7 +4219,9 @@ private fun SessionsDialog(
             }
           }
         }
-        if (state.sessions.isEmpty()) {
+        if (state.sessionsLoading) {
+          Text(t(language, "Loading sessions...", "\u6b63\u5728\u52a0\u8f7d session\u2026"), style = MaterialTheme.typography.bodyMedium)
+        } else if (state.sessions.isEmpty()) {
           Text(t(language, "No active sessions.", "\u6ca1\u6709\u6d3b\u8dc3 session\u3002"), style = MaterialTheme.typography.bodyMedium)
         }
         state.sessions.forEach { session ->
@@ -4223,9 +4229,17 @@ private fun SessionsDialog(
             sessionId = session.id,
             title = session.title,
             subtitle = if (session.pinnedAtMillis == null) {
-              t(language, "${session.messages.size} messages", "${session.messages.size} \u6761\u6d88\u606f")
+              if (session.summaryOnly) {
+                t(language, "Tap to load conversation", "点击加载对话")
+              } else {
+                t(language, "${session.messages.size} messages", "${session.messages.size} \u6761\u6d88\u606f")
+              }
             } else {
-              t(language, "Pinned / ${session.messages.size} messages", "\u5df2\u7f6e\u9876 / ${session.messages.size} \u6761\u6d88\u606f")
+              if (session.summaryOnly) {
+                t(language, "Pinned / tap to load", "已置顶 / 点击加载")
+              } else {
+                t(language, "Pinned / ${session.messages.size} messages", "\u5df2\u7f6e\u9876 / ${session.messages.size} \u6761\u6d88\u606f")
+              }
             },
             active = session.id == state.session?.id,
             onOpen = {

@@ -79,6 +79,25 @@ class SessionManagementInstrumentedTest {
   }
 
   @Test
+  fun sessionCatalogListsMetadataWithoutLoadingConversationMessages() {
+    val harness = isolatedSessionStore("summary-catalog")
+    val store = harness.store
+    val emptyDraft = store.create("Empty draft")
+    val persisted = store.appendMessage(
+      store.create("Persisted ${System.currentTimeMillis()}"),
+      SessionMessage(role = "user", content = "catalog me"),
+    )
+
+    val summary = store.listSummaries().single()
+
+    assertEquals(persisted.id, summary.id)
+    assertEquals(persisted.title, summary.title)
+    assertTrue(summary.summaryOnly)
+    assertTrue(summary.messages.isEmpty())
+    assertFalse(File(harness.sessionsRoot, "${emptyDraft.id}.json").exists())
+  }
+
+  @Test
   fun sessionStoreWritesJsonWithoutLeavingAtomicTempFiles() {
     val harness = isolatedSessionStore("atomic")
     val store = harness.store

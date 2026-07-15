@@ -8,7 +8,10 @@ object AgentControllerProvider {
 
   fun get(context: Context): AgentController {
     return controller ?: synchronized(this) {
-      controller ?: AgentController(context.applicationContext).also { controller = it }
+      controller ?: AgentController(
+        context.applicationContext,
+        eagerWorkspaceInitialization = false,
+      ).also { controller = it }
     }
   }
 }

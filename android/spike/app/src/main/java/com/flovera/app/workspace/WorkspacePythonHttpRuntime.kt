@@ -83,10 +83,18 @@ class WorkspacePythonHttpRuntime(
   }
 
   fun stopManifest(manifestPath: String): Boolean {
-    val keys = servers.values
-      .filter { it.manifestPath == manifestPath }
-      .map { it.key }
-    return keys.map { stopByKey(it) }.any { it }
+    val runningServers = synchronized(servers) {
+      servers.values
+        .filter { it.manifestPath == manifestPath }
+        .also { matches ->
+          matches.forEach { running ->
+            servers.remove(running.key, running)
+            lastErrors.remove(running.key)
+          }
+        }
+    }
+    runningServers.forEach(::stopInBackground)
+    return runningServers.isNotEmpty()
   }
 
   fun stopAll(): Int {
@@ -158,7 +166,12 @@ class WorkspacePythonHttpRuntime(
           }
         },
       )
-      waitUntilOpen(port, running.thread, startupError)
+      try {
+        waitUntilOpen(port, running.thread, startupError)
+      } catch (error: Throwable) {
+        runCatching { stopRunningServer(running) }
+        throw error
+      }
       servers[key] = running
       return running
     }
@@ -166,6 +179,15 @@ class WorkspacePythonHttpRuntime(
 
   private fun stopByKey(key: String): Boolean {
     val running = servers[key] ?: return false
+    val finished = stopRunningServer(running)
+    if (finished) {
+      servers.remove(key, running)
+      lastErrors.remove(key)
+    }
+    return finished
+  }
+
+  private fun stopRunningServer(running: RunningServer): Boolean {
     var stopped = false
     repeat(STOP_ATTEMPTS) {
       if (stopped || !running.thread.isAlive) return@repeat
@@ -179,12 +201,17 @@ class WorkspacePythonHttpRuntime(
       if (!stopped) Thread.sleep(STOP_RETRY_DELAY_MS)
     }
     runCatching { running.thread.join(STOP_WAIT_MS) }
-    val finished = stopped || !running.thread.isAlive
-    if (finished) {
-      servers.remove(key, running)
-      lastErrors.remove(key)
+    return stopped || !running.thread.isAlive
+  }
+
+  private fun stopInBackground(running: RunningServer) {
+    thread(
+      start = true,
+      isDaemon = true,
+      name = "FloveraWorkspacePythonHttpStop-${running.port}",
+    ) {
+      runCatching { stopRunningServer(running) }
     }
-    return finished
   }
 
   private fun normalizeServerArgv(argv: List<String>, port: Int): List<String> {
@@ -219,6 +246,9 @@ class WorkspacePythonHttpRuntime(
 
   private fun waitUntilOpen(port: Int, thread: Thread, startupError: AtomicReference<Throwable?>) {
     repeat(HTTP_START_ATTEMPTS) {
+      if (Thread.currentThread().isInterrupted) {
+        throw InterruptedException("python_http startup cancelled")
+      }
       if (canConnect(port)) return
       startupError.get()?.let { error ->
         throw IllegalStateException("python_http server failed before opening $HOST:$port: ${error.message ?: error::class.java.simpleName}", error)

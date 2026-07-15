@@ -74,6 +74,14 @@ object FloveraPerformance {
 }
 
 object FloveraDispatchers {
+  val interactiveDispatcher: CoroutineDispatcher = foregroundDispatcher(
+    prefix = "flovera-interactive",
+    threads = 1,
+  )
+  val previewDispatcher: CoroutineDispatcher = foregroundDispatcher(
+    prefix = "flovera-preview",
+    threads = 1,
+  )
   val workspaceMutationDispatcher: CoroutineDispatcher = backgroundDispatcher(
     prefix = "flovera-workspace-mutation",
     threads = 1,
@@ -116,10 +124,18 @@ object FloveraDispatchers {
   }
 
   private fun backgroundDispatcher(prefix: String, threads: Int): CoroutineDispatcher {
+    return executorDispatcher(prefix, threads, Process.THREAD_PRIORITY_BACKGROUND)
+  }
+
+  private fun foregroundDispatcher(prefix: String, threads: Int): CoroutineDispatcher {
+    return executorDispatcher(prefix, threads, Process.THREAD_PRIORITY_DEFAULT)
+  }
+
+  private fun executorDispatcher(prefix: String, threads: Int, threadPriority: Int): CoroutineDispatcher {
     val nextThreadId = AtomicInteger()
     val factory = ThreadFactory { runnable ->
       Thread {
-        Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
+        Process.setThreadPriority(threadPriority)
         runnable.run()
       }.apply {
         name = "$prefix-${nextThreadId.incrementAndGet()}"

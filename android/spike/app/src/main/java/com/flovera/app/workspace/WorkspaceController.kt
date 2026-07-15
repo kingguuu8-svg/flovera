@@ -6,6 +6,7 @@ import com.flovera.app.config.AppSettings
 import com.flovera.app.koog.ModelContextSpec
 import com.flovera.app.koog.ModelProviderCatalog
 import com.flovera.app.koog.hookIds
+import com.flovera.app.performance.FloveraPerformance
 import java.io.File
 
 data class WorkspaceSnapshot(
@@ -207,21 +208,36 @@ class WorkspaceController(context: Context, workspaceId: String) {
   fun setFloveraSkillEnabled(id: String, enabled: Boolean): Boolean = workspace.setFloveraSkillEnabled(id, enabled)
 
   fun snapshot(currentSelectedHtmlPath: String): WorkspaceSnapshot {
-    val htmlFiles = workspace.listHtmlFiles()
+    val catalog = FloveraPerformance.beginTask("startup", "snapshot/catalog").use {
+      workspace.catalog()
+    }
+    val htmlFiles = catalog.htmlFiles
     val selectedHtmlPath = chooseHtmlPath(currentSelectedHtmlPath, htmlFiles)
     return WorkspaceSnapshot(
-      files = workspace.listFiles("."),
-      tree = workspace.fileTree(),
+      files = FloveraPerformance.beginTask("startup", "snapshot/files").use {
+        workspace.listFiles(".")
+      },
+      tree = catalog.tree,
       htmlFiles = htmlFiles,
       selectedHtmlPath = selectedHtmlPath,
       selectedHtmlUrl = workspace.displayUrl(selectedHtmlPath),
       workspaceRootUrl = workspace.rootUrl(),
-      workspaceArtifacts = workspace.listWorkspaceArtifacts(),
-      workspaceArtifactJobs = workspace.listWorkspaceArtifactJobs(),
-      snapshots = workspace.listSnapshots(),
-      settingsProposals = workspace.listSettingsProposals(),
-      controlledToolProposals = workspace.listControlledToolProposals(),
-      floveraSkills = workspace.listFloveraSkills(),
+      workspaceArtifacts = catalog.workspaceArtifacts,
+      workspaceArtifactJobs = FloveraPerformance.beginTask("startup", "snapshot/artifactJobs").use {
+        workspace.listWorkspaceArtifactJobs()
+      },
+      snapshots = FloveraPerformance.beginTask("startup", "snapshot/snapshots").use {
+        workspace.listSnapshots()
+      },
+      settingsProposals = FloveraPerformance.beginTask("startup", "snapshot/settingsProposals").use {
+        workspace.listSettingsProposals()
+      },
+      controlledToolProposals = FloveraPerformance.beginTask("startup", "snapshot/toolProposals").use {
+        workspace.listControlledToolProposals()
+      },
+      floveraSkills = FloveraPerformance.beginTask("startup", "snapshot/skills").use {
+        workspace.listFloveraSkills()
+      },
     )
   }
 

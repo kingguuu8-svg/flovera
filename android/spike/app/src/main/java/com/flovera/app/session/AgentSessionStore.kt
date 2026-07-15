@@ -5,6 +5,7 @@ import com.flovera.app.storage.readUtf8Text
 import com.flovera.app.storage.writeUtf8TextAtomically
 import java.io.File
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -22,6 +23,8 @@ data class AgentSession(
   val messages: List<SessionMessage> = emptyList(),
   val contextRecords: List<ContextUsageRecord> = emptyList(),
   val promptContextBlocks: List<PromptContextBlock> = emptyList(),
+  @kotlinx.serialization.Transient
+  val summaryOnly: Boolean = false,
 )
 
 @Serializable
@@ -123,6 +126,7 @@ class AgentSessionStore(
     ignoreUnknownKeys = true
     encodeDefaults = true
   }
+  private val sessionCache = ConcurrentHashMap<String, CachedSession>()
 
   fun create(title: String = "New session"): AgentSession {
     val session = draft(title)
@@ -142,15 +146,80 @@ class AgentSessionStore(
 
   fun load(id: String): AgentSession? {
     val file = fileFor(id)
-    if (!file.exists()) return null
-    return runCatching { json.decodeFromString<AgentSession>(readUtf8Text(file)) }.getOrNull()
+    if (!file.exists()) {
+      sessionCache.remove(id)
+      return null
+    }
+    val modifiedAtMillis = file.lastModified()
+    val lengthBytes = file.length()
+    sessionCache[id]?.takeIf {
+      it.modifiedAtMillis == modifiedAtMillis && it.lengthBytes == lengthBytes
+    }?.let { return it.session }
+    val session = runCatching { json.decodeFromString<AgentSession>(readUtf8Text(file)) }.getOrNull()
+    if (session != null) {
+      sessionCache[id] = CachedSession(
+        modifiedAtMillis = modifiedAtMillis,
+        lengthBytes = lengthBytes,
+        session = session,
+      )
+    }
+    return session
   }
 
   fun list(includeArchived: Boolean = false): List<AgentSession> {
-    pruneEmptySessions()
     if (!root.exists()) return emptyList()
     return root.listFiles { file -> file.extension == "json" }
-      ?.mapNotNull { runCatching { json.decodeFromString<AgentSession>(readUtf8Text(it)) }.getOrNull() }
+      ?.mapNotNull { file ->
+        val session = load(file.nameWithoutExtension) ?: return@mapNotNull null
+        if (session.messages.isEmpty()) {
+          delete(session.id)
+          return@mapNotNull null
+        }
+        session
+      }
+      ?.filter { includeArchived || it.archivedAtMillis == null }
+      ?.sortedWith(sessionSort)
+      ?: emptyList()
+  }
+
+  fun listSummaries(includeArchived: Boolean = false): List<AgentSession> {
+    if (!root.exists()) return emptyList()
+    return root.listFiles { file -> file.extension == "json" }
+      ?.mapNotNull { file ->
+        val cached = sessionCache[file.nameWithoutExtension]
+        if (cached != null &&
+          cached.modifiedAtMillis == file.lastModified() &&
+          cached.lengthBytes == file.length()
+        ) {
+          if (cached.session.messages.isEmpty()) {
+            delete(cached.session.id)
+            return@mapNotNull null
+          }
+          return@mapNotNull cached.session.copy(
+            messages = emptyList(),
+            contextRecords = emptyList(),
+            promptContextBlocks = emptyList(),
+            summaryOnly = true,
+          )
+        }
+        val content = runCatching { readUtf8Text(file) }.getOrNull() ?: return@mapNotNull null
+        if (!serializedMessagesArePresent(content)) {
+          sessionCache.remove(file.nameWithoutExtension)
+          file.delete()
+          return@mapNotNull null
+        }
+        val summary = runCatching { json.decodeFromString<AgentSessionSummaryPayload>(content) }.getOrNull()
+          ?: return@mapNotNull null
+        AgentSession(
+          id = summary.id.ifBlank { file.nameWithoutExtension },
+          title = summary.title,
+          createdAtMillis = summary.createdAtMillis,
+          updatedAtMillis = summary.updatedAtMillis,
+          archivedAtMillis = summary.archivedAtMillis,
+          pinnedAtMillis = summary.pinnedAtMillis,
+          summaryOnly = true,
+        )
+      }
       ?.filter { includeArchived || it.archivedAtMillis == null }
       ?.sortedWith(sessionSort)
       ?: emptyList()
@@ -304,21 +373,56 @@ class AgentSessionStore(
   }
 
   fun save(session: AgentSession) {
-    writeUtf8TextAtomically(fileFor(session.id), json.encodeToString(session))
+    val file = fileFor(session.id)
+    writeUtf8TextAtomically(file, json.encodeToString(session))
+    sessionCache[session.id] = CachedSession(
+      modifiedAtMillis = file.lastModified(),
+      lengthBytes = file.length(),
+      session = session,
+    )
   }
 
-  fun delete(id: String): Boolean = fileFor(id).delete()
+  fun delete(id: String): Boolean {
+    sessionCache.remove(id)
+    return fileFor(id).delete()
+  }
 
   fun pruneEmptySessions() {
     if (!root.exists()) return
     root.listFiles { file -> file.extension == "json" }
       ?.forEach { file ->
-        val session = runCatching { json.decodeFromString<AgentSession>(readUtf8Text(file)) }.getOrNull()
-        if (session?.messages?.isEmpty() == true) file.delete()
+        val session = load(file.nameWithoutExtension)
+        if (session?.messages?.isEmpty() == true) delete(session.id)
       }
   }
 
   private fun fileFor(id: String): File = File(root, "$id.json")
+
+  private data class CachedSession(
+    val modifiedAtMillis: Long,
+    val lengthBytes: Long,
+    val session: AgentSession,
+  )
+
+  @Serializable
+  private data class AgentSessionSummaryPayload(
+    val id: String = "",
+    val title: String = "",
+    val createdAtMillis: Long = 0L,
+    val updatedAtMillis: Long = 0L,
+    val archivedAtMillis: Long? = null,
+    val pinnedAtMillis: Long? = null,
+  )
+
+  private fun serializedMessagesArePresent(content: String): Boolean {
+    val keyStart = content.indexOf("\"messages\"")
+    if (keyStart < 0) return false
+    val arrayStart = content.indexOf('[', keyStart)
+    if (arrayStart < 0) return false
+    var valueStart = arrayStart + 1
+    while (valueStart < content.length && content[valueStart].isWhitespace()) valueStart += 1
+    return valueStart < content.length && content[valueStart] != ']'
+  }
 
   private companion object {
     const val CONTEXT_RECORD_LIMIT = 80
