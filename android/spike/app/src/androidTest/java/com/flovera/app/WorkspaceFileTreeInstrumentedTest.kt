@@ -45,9 +45,12 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
@@ -2838,6 +2841,65 @@ class WorkspaceFileTreeInstrumentedTest {
 
     assertTrue(result, result.contains("Python status=timeout exitCode=124"))
     assertFalse(result, result.contains("unreachable"))
+  }
+
+  @Test
+  fun pythonRunCancellationStopsLongRunningCode() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "python-cancel-${System.currentTimeMillis()}")
+    val tool = PythonRunTool(workspace, ToolEventRecorder())
+    val marker = File(workspace.root, "cancel-started.txt")
+    val job = launch(Dispatchers.Default) {
+      tool.execute(
+        PythonRunTool.Args(
+          code = """
+          with open("cancel-started.txt", "w") as marker_file:
+              marker_file.write("started")
+          while True:
+              pass
+          """.trimIndent(),
+          timeoutMs = 5_000,
+          snapshotBeforeRun = false,
+        ),
+      )
+    }
+
+    withTimeout(10_000) {
+      while (!marker.isFile) delay(50)
+    }
+    val cancelledAt = System.currentTimeMillis()
+    job.cancelAndJoin()
+
+    assertTrue("Python cancellation should return before the timeout", System.currentTimeMillis() - cancelledAt < 3_000)
+  }
+
+  @Test
+  fun workspaceCommandCancellationStopsLongRunningPython() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "workspace-command-cancel-${System.currentTimeMillis()}")
+    val tool = WorkspaceCommandRunTool(workspace, ToolEventRecorder())
+    val marker = File(workspace.root, "command-cancel-started.txt")
+    val job = launch(Dispatchers.Default) {
+      tool.execute(
+        WorkspaceCommandRunTool.Args(
+          argv = listOf(
+            "python",
+            "-c",
+            "with open('command-cancel-started.txt', 'w') as marker_file:\n    marker_file.write('started')\nwhile True:\n    pass",
+          ),
+          timeoutMs = 5_000,
+          snapshotBeforeRun = false,
+        ),
+      )
+    }
+
+    withTimeout(10_000) {
+      while (!marker.isFile) delay(50)
+    }
+    val cancelledAt = System.currentTimeMillis()
+    job.cancelAndJoin()
+
+    assertTrue("Workspace command cancellation should return before the timeout", System.currentTimeMillis() - cancelledAt < 3_000)
   }
 
   @Test

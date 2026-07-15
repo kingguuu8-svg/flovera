@@ -63,7 +63,6 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import org.codehaus.groovy.control.CompilationUnit
@@ -82,6 +81,11 @@ import org.eclipse.jgit.treewalk.CanonicalTreeParser
 import org.eclipse.jgit.treewalk.EmptyTreeIterator
 import org.w3c.dom.Element
 import java.time.Instant
+import java.util.UUID
+import kotlin.coroutines.coroutineContext
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.runInterruptible
 
 class WorkspaceCommandRunTool(
   private val workspace: WorkspaceManager,
@@ -113,16 +117,31 @@ class WorkspaceCommandRunTool(
   )
 
   override suspend fun execute(args: Args): String {
-    val result = withContext(Dispatchers.IO) {
-      runCatching {
-        WorkspaceCommandGateway(
-          workspace = workspace,
-          networkEnabled = networkEnabled,
-          authorityMode = authorityMode,
-          secretEnvironment = secretEnvironment,
-        ).run(args)
-      }.getOrElse { it.message ?: it.toString() }
+    val runtime = FloveraPythonRuntime(workspace, networkEnabled, secretEnvironment)
+    val runId = UUID.randomUUID().toString()
+    val cancellationHandle = coroutineContext[kotlinx.coroutines.Job]?.invokeOnCompletion { cause ->
+      if (cause is CancellationException) runtime.cancel(runId)
     }
+    val result = try {
+      coroutineContext.ensureActive()
+      runInterruptible(Dispatchers.IO) {
+        try {
+          WorkspaceCommandGateway(
+            workspace = workspace,
+            networkEnabled = networkEnabled,
+            authorityMode = authorityMode,
+            secretEnvironment = secretEnvironment,
+          ).run(args, runId)
+        } catch (error: CancellationException) {
+          throw error
+        } catch (error: Throwable) {
+          error.message ?: error.toString()
+        }
+      }
+    } finally {
+      cancellationHandle?.dispose()
+    }
+    coroutineContext.ensureActive()
     recorder.record(
       name,
       "argv=${args.argv.commandSummary()}, cwd=${args.cwd}, timeoutMs=${args.timeoutMs}",
@@ -146,7 +165,8 @@ class WorkspaceCommandGateway(
     FloveraCommandAdapter(workspace, networkEnabled, authorityMode, secretEnvironment),
   )
 
-  fun run(args: WorkspaceCommandRunTool.Args): String {
+  fun run(args: WorkspaceCommandRunTool.Args, runId: String = UUID.randomUUID().toString()): String {
+    throwIfInterrupted()
     val argv = args.argv.map { it.trim() }.filter { it.isNotEmpty() }
     if (argv.isEmpty()) {
       val risk = WorkspaceCommandRisk.unsupported("missing")
@@ -176,7 +196,8 @@ class WorkspaceCommandGateway(
       return denied(authorization.reason, args, argv, risk)
     }
 
-    val result = adapter.execute(argv, args)
+    val result = adapter.execute(argv, args, runId)
+    throwIfInterrupted()
     val cwdFile = runCatching { workspace.workspaceRuntimeDirectory(args.cwd) }.getOrNull()
     val cwd = cwdFile?.let { workspace.workspaceRelativePath(it) } ?: args.cwd
     appendAudit(argv, args, risk, authorization, result)
@@ -188,6 +209,12 @@ class WorkspaceCommandGateway(
       risk = risk,
       authorization = authorization,
     )
+  }
+
+  private fun throwIfInterrupted() {
+    if (Thread.currentThread().isInterrupted) {
+      throw CancellationException("Workspace command cancelled")
+    }
   }
 
   private fun authorize(risk: WorkspaceCommandRisk): WorkspaceCommandAuthorization {
@@ -284,7 +311,7 @@ class WorkspaceCommandGateway(
 private interface WorkspaceCommandAdapter {
   val commandNames: Set<String>
   fun classify(argv: List<String>): WorkspaceCommandRisk
-  fun execute(argv: List<String>, args: WorkspaceCommandRunTool.Args): PythonRunResult
+  fun execute(argv: List<String>, args: WorkspaceCommandRunTool.Args, runId: String): PythonRunResult
 }
 
 private class PythonCommandAdapter(
@@ -305,7 +332,7 @@ private class PythonCommandAdapter(
     }
   }
 
-  override fun execute(argv: List<String>, args: WorkspaceCommandRunTool.Args): PythonRunResult {
+  override fun execute(argv: List<String>, args: WorkspaceCommandRunTool.Args, runId: String): PythonRunResult {
     if (argv.size < 2) {
       return PythonRunResult(status = "error", exitCode = 1, stderr = "Python command requires a script path or -c code, for example: python tools/check.py\n")
     }
@@ -337,6 +364,7 @@ private class PythonCommandAdapter(
             snapshotBeforeRun = args.snapshotBeforeRun,
             environment = args.environment,
           ),
+          runId,
         )
       }
     } else if (argv[1].startsWith("-")) {
@@ -356,6 +384,7 @@ private class PythonCommandAdapter(
         scope = args.scope,
         snapshotBeforeRun = args.snapshotBeforeRun,
         environment = args.environment,
+        runId = runId,
       )
     }
   }
@@ -385,7 +414,7 @@ private class GitCommandAdapter(
     }
   }
 
-  override fun execute(argv: List<String>, args: WorkspaceCommandRunTool.Args): PythonRunResult {
+  override fun execute(argv: List<String>, args: WorkspaceCommandRunTool.Args, runId: String): PythonRunResult {
     val startedAt = System.currentTimeMillis()
     val maxOutputChars = args.maxOutputChars.coerceIn(FloveraPythonRuntime.MIN_OUTPUT_CHARS, FloveraPythonRuntime.MAX_OUTPUT_CHARS)
     val subcommand = argv.getOrNull(1)?.lowercase().orEmpty()
@@ -733,12 +762,12 @@ private class FloveraCommandAdapter(
     }
   }
 
-  override fun execute(argv: List<String>, args: WorkspaceCommandRunTool.Args): PythonRunResult {
+  override fun execute(argv: List<String>, args: WorkspaceCommandRunTool.Args, runId: String): PythonRunResult {
     val startedAt = System.currentTimeMillis()
     val profile = argv.getOrNull(1)?.lowercase().orEmpty()
     return runCatching {
       when (profile) {
-        "script" -> scriptCommand(argv, args, startedAt)
+        "script" -> scriptCommand(argv, args, startedAt, runId)
         "webview" -> webviewCommand(argv, startedAt)
         "app" -> appCommand(argv, startedAt)
         "skill" -> skillCommand(argv, startedAt)
@@ -751,6 +780,7 @@ private class FloveraCommandAdapter(
         )
       }
     }.getOrElse { error ->
+      if (error is CancellationException) throw error
       PythonRunResult(
         status = "error",
         exitCode = 1,
@@ -772,10 +802,10 @@ private class FloveraCommandAdapter(
     return lines.joinToString("\n") + "\n"
   }
 
-  private fun scriptCommand(argv: List<String>, args: WorkspaceCommandRunTool.Args, startedAt: Long): PythonRunResult {
+  private fun scriptCommand(argv: List<String>, args: WorkspaceCommandRunTool.Args, startedAt: Long, runId: String): PythonRunResult {
     return when (argv.getOrNull(2)?.lowercase().orEmpty().ifBlank { "list" }) {
       "list" -> scriptList(startedAt)
-      "run" -> scriptRun(argv, args, startedAt)
+      "run" -> scriptRun(argv, args, startedAt, runId)
       else -> PythonRunResult(
         status = "error",
         exitCode = 1,
@@ -815,7 +845,7 @@ private class FloveraCommandAdapter(
     )
   }
 
-  private fun scriptRun(argv: List<String>, args: WorkspaceCommandRunTool.Args, startedAt: Long): PythonRunResult {
+  private fun scriptRun(argv: List<String>, args: WorkspaceCommandRunTool.Args, startedAt: Long, runId: String): PythonRunResult {
     val name = argv.getOrNull(3).orEmpty().ifBlank { optionValue(argv, "name") }
     val scriptFile = resolveScriptFile(name)
     val script = JSONObject(scriptFile.readText(Charsets.UTF_8))
@@ -842,7 +872,7 @@ private class FloveraCommandAdapter(
         networkEnabled = networkEnabled,
         authorityMode = authorityMode,
         secretEnvironment = secretEnvironment,
-      ).run(stepArgs)
+      ).run(stepArgs, runId)
       val ok = output.contains("Workspace command status=ok")
       outputs.put(
         JSONObject()
@@ -1672,7 +1702,7 @@ private class AndroidCommandAdapter(
     }
   }
 
-  override fun execute(argv: List<String>, args: WorkspaceCommandRunTool.Args): PythonRunResult {
+  override fun execute(argv: List<String>, args: WorkspaceCommandRunTool.Args, runId: String): PythonRunResult {
     val startedAt = System.currentTimeMillis()
     val maxOutputChars = args.maxOutputChars.coerceIn(FloveraPythonRuntime.MIN_OUTPUT_CHARS, FloveraPythonRuntime.MAX_OUTPUT_CHARS)
     val result = AndroidSystemCommandApi(
@@ -1711,7 +1741,7 @@ private class GroovyCommandAdapter(
     }
   }
 
-  override fun execute(argv: List<String>, args: WorkspaceCommandRunTool.Args): PythonRunResult {
+  override fun execute(argv: List<String>, args: WorkspaceCommandRunTool.Args, runId: String): PythonRunResult {
     if (argv.size < 2) {
       return PythonRunResult(status = "error", exitCode = 1, stderr = "Groovy command requires a workspace script path, for example: groovy tools/hello.groovy\n")
     }
@@ -1947,7 +1977,7 @@ class JvmWorkerService : Service() {
         networkEnabled = networkEnabled,
         secretEnvironment = emptyMap(),
         useIsolatedWorker = false,
-      ).execute(argv, args)
+      ).execute(argv, args, UUID.randomUUID().toString())
       directResult.copy(stderr = workerHeader() + directResult.stderr)
     }.getOrElse { throwable ->
       PythonRunResult(

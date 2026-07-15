@@ -1207,6 +1207,9 @@ Implemented coverage:
   secret changes) now publish the new settings state without rescanning the
   workspace snapshot; app-owned metadata synchronization remains queued after
   the state update.
+- Rejecting a settings proposal, dismissing a controlled-tool proposal, and
+  toggling a Flovera skill now update only their affected metadata state; they
+  no longer wait for an unrelated workspace catalog/snapshot refresh.
 - AGENTS.md rule saves likewise publish completion after the file write without
   waiting for an unrelated full workspace snapshot.
 - Network/background toggles, workspace refresh, preview pinning, settings/tool
@@ -1266,6 +1269,15 @@ Implemented coverage:
   server statuses without rereading settings, sessions, snapshots, or
   proposals. Artifact cancellation also preserves cancellation instead of
   converting coroutine cancellation into a failed job.
+- Direct Python execution and the default workspace command path now carry a
+  per-run cancellation token. Coroutine cancellation interrupts the bounded
+  command lane, Python trace/sleep guards observe the token, and nested Flovera
+  automation steps reuse it instead of allowing a cancelled run to occupy the
+  runtime lane until its timeout. Artifact Python jobs use the same token.
+- Instrumentation coverage now includes cancellation of both `python_run` and
+  `workspace_command_run` while a long-running Python loop is active; the
+  cancellation assertions require return before the configured five-second
+  timeout.
 - Assistant draft updates are coalesced before entering Compose state, with
   run-boundary flushes for session updates, finish, interrupt, and guidance
   events so the final visible history remains complete.
@@ -1278,6 +1290,10 @@ Remaining work:
   0.87 s workspace initialization, and about 0.93 s asynchronous active-session
   load with a 146 MB workspace and 21 MB session store; the latest code still
   needs a real-device measurement after these changes.
+- Extend cooperative cancellation coverage to artifact inspection/package
+  installation and any future blocking tool adapters as their measured wait
+  becomes user-visible; the primary bounded Python, workspace-command, and
+  artifact-job paths now have cancellation propagation.
 - Reconnect the real device and rerun session-management, preview, queued-run,
   startup, and interruption flows; the current APK/test APK build is complete,
   but this verification is pending because serial `e9512097` is offline.

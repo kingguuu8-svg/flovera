@@ -51,10 +51,12 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runInterruptible
 import org.json.JSONObject
@@ -1191,7 +1193,13 @@ class AgentController(
     _state.update { it.copy(status = "Rejecting setting change...") }
     launchWorkspaceMutation("Settings proposal reject", "rejectSettingsProposal") {
       val deleted = workspaceController.deleteSettingsProposal(path)
-      refreshWorkspaceState(status = if (deleted) "Setting change rejected" else "Setting change not found")
+      val status = if (deleted) "Setting change rejected" else "Setting change not found"
+      _state.update {
+        it.copy(
+          settingsProposals = if (deleted) it.settingsProposals.filterNot { proposal -> proposal.path == path } else it.settingsProposals,
+          status = status,
+        )
+      }
     }
   }
 
@@ -1200,7 +1208,13 @@ class AgentController(
     _state.update { it.copy(status = "Dismissing extension request...") }
     launchWorkspaceMutation("Tool proposal dismiss", "dismissControlledToolProposal") {
       val deleted = workspaceController.deleteControlledToolProposal(path)
-      refreshWorkspaceState(status = if (deleted) "Extension request dismissed" else "Extension request not found")
+      val status = if (deleted) "Extension request dismissed" else "Extension request not found"
+      _state.update {
+        it.copy(
+          controlledToolProposals = if (deleted) it.controlledToolProposals.filterNot { proposal -> proposal.path == path } else it.controlledToolProposals,
+          status = status,
+        )
+      }
     }
   }
 
@@ -1210,7 +1224,12 @@ class AgentController(
     _state.update { it.copy(status = status) }
     launchWorkspaceMutation("Skill settings", "setFloveraSkillEnabled") {
       val updated = workspaceController.setFloveraSkillEnabled(id, enabled)
-      refreshWorkspaceState(status = if (updated) status else "Skill not found")
+      if (!updated) {
+        reportStatus("Skill not found")
+        return@launchWorkspaceMutation
+      }
+      val skills = workspaceController.runtimeWorkspace().listFloveraSkills()
+      _state.update { it.copy(floveraSkills = skills, status = status) }
     }
   }
 
@@ -1970,37 +1989,49 @@ class AgentController(
   private suspend fun executeWorkspaceArtifactJob(jobId: String, target: WorkspaceArtifactActionTarget, inputJson: String) {
     val started = artifactJobCache[jobId] ?: workspaceController.readWorkspaceArtifactJob(jobId) ?: return
     persistWorkspaceArtifactJob(started.copy(status = "running", error = ""))
-    val result = runCatching {
-      require(target.action.kind == WORKSPACE_ARTIFACT_ACTION_PYTHON_JOB) {
-        "Unsupported artifact action kind: ${target.action.kind}"
-      }
-      val tokens = splitWorkspaceArtifactCommand(target.action.command)
-      require(tokens.size >= 2) { "python_job command must look like: python path/to/script.py [args...]" }
-      require(tokens.first() == "python" || tokens.first() == "python3") {
-        "Unsupported python_job command launcher '${tokens.first()}'. Use python or python3."
-      }
-      val scriptPath = tokens[1]
-      val argv = tokens.drop(2)
-      val inputPath = declaredInputPath(target, inputJson, argv)
-      if (inputPath.isNotBlank()) {
-        val writtenInputPath = workspaceController.writeWorkspaceArtifactInput(jobId, target.artifact.rootPath, inputPath, inputJson)
-        (artifactJobCache[jobId] ?: workspaceController.readWorkspaceArtifactJob(jobId))?.let { currentJob ->
-          persistWorkspaceArtifactJob(currentJob.copy(inputPath = writtenInputPath))
-        }
-      }
-      ensureWorkspaceArtifactOutputDirectories(target)
-      FloveraPythonRuntime(
-        workspaceController.runtimeWorkspace(),
-        networkEnabled = target.action.networkEnabled,
-      ).runScript(
-        scriptPath = scriptPath,
-        argv = argv,
-        cwd = target.action.cwd,
-        timeoutMs = target.action.timeoutMs,
-        sessionId = "artifact-$jobId",
-        environment = workspaceArtifactActionEnvironment(target),
-      )
+    val runtime = FloveraPythonRuntime(
+      workspaceController.runtimeWorkspace(),
+      networkEnabled = target.action.networkEnabled,
+    )
+    val runId = UUID.randomUUID().toString()
+    val cancellationHandle = currentCoroutineContext()[Job]?.invokeOnCompletion { cause ->
+      if (cause is CancellationException) runtime.cancel(runId)
     }
+    val result = try {
+      currentCoroutineContext().ensureActive()
+      runCatching {
+        require(target.action.kind == WORKSPACE_ARTIFACT_ACTION_PYTHON_JOB) {
+          "Unsupported artifact action kind: ${target.action.kind}"
+        }
+        val tokens = splitWorkspaceArtifactCommand(target.action.command)
+        require(tokens.size >= 2) { "python_job command must look like: python path/to/script.py [args...]" }
+        require(tokens.first() == "python" || tokens.first() == "python3") {
+          "Unsupported python_job launcher '${tokens.first()}'. Use python or python3."
+        }
+        val scriptPath = tokens[1]
+        val argv = tokens.drop(2)
+        val inputPath = declaredInputPath(target, inputJson, argv)
+        if (inputPath.isNotBlank()) {
+          val writtenInputPath = workspaceController.writeWorkspaceArtifactInput(jobId, target.artifact.rootPath, inputPath, inputJson)
+          (artifactJobCache[jobId] ?: workspaceController.readWorkspaceArtifactJob(jobId))?.let { currentJob ->
+            persistWorkspaceArtifactJob(currentJob.copy(inputPath = writtenInputPath))
+          }
+        }
+        ensureWorkspaceArtifactOutputDirectories(target)
+        runtime.runScript(
+          scriptPath = scriptPath,
+          argv = argv,
+          cwd = target.action.cwd,
+          timeoutMs = target.action.timeoutMs,
+          sessionId = "artifact-$jobId",
+          environment = workspaceArtifactActionEnvironment(target),
+          runId = runId,
+        )
+      }
+    } finally {
+      cancellationHandle?.dispose()
+    }
+    currentCoroutineContext().ensureActive()
     val cancellation = result.exceptionOrNull() as? CancellationException
     if (cancellation != null) {
       artifactRunJobs.remove(jobId)
