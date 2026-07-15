@@ -102,7 +102,8 @@ class SessionController(private val store: AgentSessionStore) {
   }
 
   fun nextUsableSession(): AgentSession? {
-    return listState().active.firstOrNull()
+    val summary = listSummaryState().active.firstOrNull() ?: return null
+    return openSession(summary.id)
   }
 
   private fun firstPromptTitle(prompt: String): String {

@@ -1239,6 +1239,12 @@ Implemented coverage:
   workspace mutations. File rename/delete, snapshot create/restore/delete, session open/rename
   /duplicate/archive/restore/pin/revert, and most artifact lifecycle refreshes
   now run their workspace/session IO through the same background boundary.
+- Session-only discard, duplicate, archive, restore, and conversation revert
+  now publish the new conversation state without a full workspace snapshot;
+  active-session todo migration, encrypted active-session persistence, and
+  `.flovera` metadata synchronization continue asynchronously after the
+  visible session change. Fallback session selection reads metadata summaries
+  first and decodes only the selected session.
 - Preview selection/clearing updates the visible settings state immediately and
   persists the encrypted selected-path preference through the workspace mutation
   queue. Interrupting an agent run likewise publishes the stopped state first and

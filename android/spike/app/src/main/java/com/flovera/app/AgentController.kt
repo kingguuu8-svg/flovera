@@ -1347,12 +1347,9 @@ class AgentController(
       val fallback = draftOriginSessionId?.let(sessionController::openSession)
         ?: sessionController.nextUsableSession()
       draftOriginSessionId = null
-      workspaceController.setActiveSession(fallback?.id)
-      val settings = settingsController.setActiveSession(current.settings, fallback?.id)
-      refreshWorkspaceState(
-        settings = settings,
+      publishSessionState(
         session = fallback,
-        isRunning = false,
+        activeSessionId = fallback?.id,
         status = if (fallback == null) "No active session" else "Session loaded",
       )
     }
@@ -1382,7 +1379,8 @@ class AgentController(
         )
       }
       val persistenceFailure = runCatching {
-        settingsController.setActiveSession(current.settings, session.id)
+        val persisted = settingsController.setActiveSession(current.settings, session.id)
+        workspaceController.syncFloveraSettings(persisted)
       }.exceptionOrNull()
       if (persistenceFailure != null) {
         workspaceController.setActiveSession(current.session?.id)
@@ -1445,10 +1443,15 @@ class AgentController(
       if (current.session?.id == sessionId) {
         val next = sessionController.nextUsableSession()
         if (next == null) {
-          val settings = settingsController.setActiveSession(current.settings, null)
-          refreshWorkspaceState(settings = settings, session = null, isRunning = false, status = "Session archived")
+          publishSessionState(
+            session = null,
+            activeSessionId = null,
+            status = "Session archived",
+            removedSessionId = sessionId,
+            refreshSessionCatalog = true,
+          )
         } else {
-          activateSession(next, "Session archived")
+          activateSession(next, "Session archived", removedSessionId = sessionId)
         }
       } else {
         val sessionLists = if (sessionCatalogLoaded) sessionController.listSummaryState() else null
@@ -1470,7 +1473,7 @@ class AgentController(
     launchWorkspaceMutation("Session restore", "restoreSession") {
       val restored = sessionController.restoreSession(sessionId)
         ?: return@launchWorkspaceMutation reportStatus("Session not found")
-      activateSession(restored, "Session restored")
+      activateSession(restored, "Session restored", removedArchivedSessionId = sessionId)
     }
   }
 
@@ -1508,13 +1511,12 @@ class AgentController(
     launchWorkspaceMutation("Session revert", "revertSessionToMessage") {
       val restored = sessionController.revertToBeforeMessage(session.id, messageIndex)
       if (restored == null && messageIndex == 0) {
-        val settings = settingsController.setActiveSession(current.settings, null)
-        refreshWorkspaceState(
-          settings = settings,
+        publishSessionState(
           session = sessionController.createSession(),
+          activeSessionId = null,
           input = selectedMessage.content,
-          isRunning = false,
           status = "Conversation reverted",
+          removedSessionId = session.id,
         )
         return@launchWorkspaceMutation
       }
@@ -1522,10 +1524,9 @@ class AgentController(
         reportStatus("Conversation could not be reverted")
         return@launchWorkspaceMutation
       }
-      refreshWorkspaceState(
+      publishSessionState(
         session = restored,
         input = selectedMessage.content,
-        isRunning = false,
         status = "Conversation reverted",
       )
     }
@@ -2173,6 +2174,57 @@ class AgentController(
     workspaceController.syncFloveraSettings(settings)
   }
 
+  private fun publishSessionState(
+    session: AgentSession?,
+    activeSessionId: String? = session?.id,
+    settings: AppSettings = _state.value.settings,
+    input: String = _state.value.input,
+    status: String,
+    refreshSessionCatalog: Boolean = false,
+    removedSessionId: String? = null,
+    removedArchivedSessionId: String? = null,
+  ) {
+    val updatedSettings = settings.copy(activeSessionId = activeSessionId)
+    _state.update {
+      val activeSessions = session?.let { currentSession -> upsertSession(it.sessions, currentSession) } ?: it.sessions
+      val archivedSessions = it.archivedSessions
+      it.copy(
+        settings = updatedSettings,
+        session = session,
+        input = input,
+        sessions = activeSessions.filterNot { currentSession -> currentSession.id == removedSessionId },
+        archivedSessions = archivedSessions.filterNot { currentSession -> currentSession.id == removedArchivedSessionId },
+        isRunning = false,
+        isSwitchingSession = false,
+        assistantDraft = null,
+        status = status,
+      )
+    }
+    runCatching {
+      workspaceController.setActiveSession(activeSessionId)
+      if (settings.activeSessionId != activeSessionId) {
+        settingsController.setActiveSession(settings, activeSessionId)
+      }
+      workspaceController.syncFloveraSettings(updatedSettings)
+    }.onFailure { throwable ->
+      reportBackgroundMutationFailure("Session state", throwable)
+    }
+    if (refreshSessionCatalog && sessionCatalogLoaded) {
+      runCatching { sessionController.listSummaryState() }
+        .onSuccess { sessionLists ->
+          _state.update {
+            it.copy(
+              sessions = sessionLists.active,
+              archivedSessions = sessionLists.archived,
+            )
+          }
+        }
+        .onFailure { throwable ->
+          reportBackgroundMutationFailure("Session list", throwable)
+        }
+    }
+  }
+
   private fun refreshWorkspaceState(
     settings: AppSettings = _state.value.settings,
     session: AgentSession? = _state.value.session,
@@ -2444,11 +2496,21 @@ class AgentController(
     return path.substringAfterLast('.', missingDelimiterValue = "").lowercase() in setOf("docx", "pptx", "xlsx")
   }
 
-  private fun activateSession(session: AgentSession, status: String) {
+  private fun activateSession(
+    session: AgentSession,
+    status: String,
+    removedSessionId: String? = null,
+    removedArchivedSessionId: String? = null,
+  ) {
     draftOriginSessionId = null
-    workspaceController.setActiveSession(session.id)
-    val settings = settingsController.setActiveSession(_state.value.settings, session.id)
-    refreshWorkspaceState(settings = settings, session = session, isRunning = false, status = status)
+    publishSessionState(
+      session = session,
+      activeSessionId = session.id,
+      status = status,
+      refreshSessionCatalog = true,
+      removedSessionId = removedSessionId,
+      removedArchivedSessionId = removedArchivedSessionId,
+    )
   }
 
   private fun appendInputText(current: String, addition: String): String {
