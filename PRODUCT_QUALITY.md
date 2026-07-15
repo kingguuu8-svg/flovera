@@ -1254,9 +1254,12 @@ Implemented coverage:
   or session changes, while legacy runtime implementations keep their existing
   streaming behavior.
 - Artifact WebView bridge action calls resolve against the current in-memory
-  artifact state and return in-memory job JSON first; job persistence, UI
-  refresh, cancellation persistence, and runtime completion refreshes run off
-  the bridge/UI return path.
+  artifact state and return in-memory job JSON first. Start, cancel, and rerun
+  now publish only job state instead of waiting for a full workspace snapshot;
+  completion refreshes the catalog, root file summary, artifact jobs, and
+  server statuses without rereading settings, sessions, snapshots, or
+  proposals. Artifact cancellation also preserves cancellation instead of
+  converting coroutine cancellation into a failed job.
 - Assistant draft updates are coalesced before entering Compose state, with
   run-boundary flushes for session updates, finish, interrupt, and guidance
   events so the final visible history remains complete.

@@ -25,6 +25,7 @@ import com.flovera.app.web.FloveraWebBridge
 import com.flovera.app.config.SettingsStore
 import com.flovera.app.workspace.WorkspaceController
 import com.flovera.app.workspace.FloveraSettingsView
+import com.flovera.app.workspace.WorkspaceFileNode
 import com.flovera.app.workspace.WorkspaceManager
 import java.io.ByteArrayInputStream
 import java.io.File
@@ -79,6 +80,10 @@ private fun writeTestHelperJarWithResource(target: File, resourcePath: String, r
       output.closeEntry()
     }
   }
+}
+
+private fun WorkspaceFileNode.containsPath(path: String): Boolean {
+  return this.path == path || children.any { it.containsPath(path) }
 }
 
 class WorkspaceFileTreeInstrumentedTest {
@@ -762,8 +767,12 @@ class WorkspaceFileTreeInstrumentedTest {
       "env-demo/src/env_check.py",
       """
         import os
+        from pathlib import Path
+
         print(os.environ.get("DEEPSEEK_API_KEY", "missing"))
         print(os.environ.get("DEEPSEEK_MODEL", "missing"))
+        Path("outputs").mkdir(exist_ok=True)
+        Path("outputs/env.txt").write_text("ok", encoding="utf-8")
       """.trimIndent(),
       createAutoSnapshot = false,
     )
@@ -788,7 +797,8 @@ class WorkspaceFileTreeInstrumentedTest {
             "environment": {
               "DEEPSEEK_API_KEY": "provider:deepseek.apiKey",
               "DEEPSEEK_MODEL": "provider:deepseek.model"
-            }
+            },
+            "outputs": ["outputs/env.txt"]
           }
         ]
       }
@@ -814,6 +824,15 @@ class WorkspaceFileTreeInstrumentedTest {
     assertEquals("succeeded", finished.getString("status"))
     assertTrue(finished.getString("stdout").contains("test-deepseek-key"))
     assertTrue(finished.getString("stdout").contains("deepseek-v4-pro"))
+    withTimeout(2_000) {
+      while (controller.state.value.workspaceArtifactJobs
+          .firstOrNull { it.id == jobId }
+          ?.status != "succeeded" ||
+        controller.state.value.workspaceTree?.containsPath("env-demo/outputs/env.txt") != true
+      ) {
+        delay(50)
+      }
+    }
   }
 
   @Test

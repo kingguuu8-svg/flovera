@@ -141,6 +141,14 @@ private fun upsertSession(sessions: List<AgentSession>, session: AgentSession): 
   return sessions.map { current -> if (current.id == session.id) session else current }
 }
 
+private fun upsertWorkspaceArtifactJob(
+  jobs: List<WorkspaceArtifactJob>,
+  job: WorkspaceArtifactJob,
+): List<WorkspaceArtifactJob> {
+  return (jobs.filterNot { it.id == job.id } + job)
+    .sortedByDescending { it.updatedAtMillis }
+}
+
 private fun SessionMessage.withMergedTranscriptEvents(
   extraEvents: List<ConversationTranscriptEvent>,
 ): SessionMessage {
@@ -983,6 +991,16 @@ class AgentController(
     return globalMatches.singleOrNull()
   }
 
+  private fun resolveWorkspaceArtifactActionByManifestFromState(
+    manifestPath: String,
+    actionId: String,
+  ): WorkspaceArtifactActionTarget? {
+    val artifact = _state.value.workspaceArtifacts.firstOrNull { it.valid && it.manifestPath == manifestPath }
+      ?: return null
+    val action = artifact.actions.firstOrNull { it.id == actionId } ?: return null
+    return WorkspaceArtifactActionTarget(artifact, action)
+  }
+
   private fun startWorkspaceArtifactAction(target: WorkspaceArtifactActionTarget, inputJson: String): String {
     val inputPath = target.action.inputPath
     val now = System.currentTimeMillis()
@@ -999,13 +1017,16 @@ class AgentController(
       outputPaths = target.action.outputs,
     )
     artifactJobCache[job.id] = job
+    _state.update {
+      it.copy(
+        workspaceArtifactJobs = upsertWorkspaceArtifactJob(it.workspaceArtifactJobs, job),
+        status = "Workspace task started",
+      )
+    }
     val runJob = artifactJobScope.launch {
       executeWorkspaceArtifactJob(job.id, target, inputJson)
     }
     artifactRunJobs[job.id] = runJob
-    launchWorkspaceMutation("Artifact job refresh", "startWorkspaceArtifactAction") {
-      refreshWorkspaceState(status = "Workspace task started")
-    }
     return artifactJobJson.encodeToString(job)
   }
 
@@ -1028,9 +1049,8 @@ class AgentController(
         error = "Cancellation requested by WebView.",
       ),
     )
-    launchWorkspaceMutation("Artifact job refresh", "cancelWorkspaceArtifactJob") {
+    launchWorkspaceMutation("Artifact job save", "cancelWorkspaceArtifactJob") {
       persistWorkspaceArtifactJob(canceled)
-      refreshWorkspaceState(status = "Workspace task cancelled")
     }
     return artifactJobJson.encodeToString(canceled)
   }
@@ -1040,13 +1060,14 @@ class AgentController(
     _state.update { it.copy(status = "Rerunning workspace task...") }
     launchWorkspaceMutation("Artifact rerun", "rerunWorkspaceArtifactJob") {
       val job = workspaceController.readWorkspaceArtifactJob(jobId) ?: return@launchWorkspaceMutation reportStatus("Workspace task not found")
-      val target = workspaceController.resolveWorkspaceArtifactActionByManifest(job.artifactManifestPath, job.actionId)
+      val target = resolveWorkspaceArtifactActionByManifestFromState(job.artifactManifestPath, job.actionId)
+        ?: workspaceController.resolveWorkspaceArtifactActionByManifest(job.artifactManifestPath, job.actionId)
         ?: return@launchWorkspaceMutation reportStatus("Workspace task action not found")
       val inputJson = job.inputPath.takeIf { it.isNotBlank() }?.let { path ->
         workspaceController.previewTextFile(path).takeUnless { it.startsWith("File does not exist:") }
       }.orEmpty()
       startWorkspaceArtifactAction(target, inputJson)
-      refreshWorkspaceState(status = "Workspace task rerun started")
+      reportStatus("Workspace task rerun started")
     }
   }
 
@@ -1979,7 +2000,16 @@ class AgentController(
         environment = workspaceArtifactActionEnvironment(target),
       )
     }
+    val cancellation = result.exceptionOrNull() as? CancellationException
+    if (cancellation != null) {
+      artifactRunJobs.remove(jobId)
+      return
+    }
     val current = artifactJobCache[jobId] ?: workspaceController.readWorkspaceArtifactJob(jobId) ?: return
+    if (current.status == "cancelled") {
+      artifactRunJobs.remove(jobId)
+      return
+    }
     val finished = result.fold(
       onSuccess = { pythonResult ->
         current.copy(
@@ -2004,8 +2034,7 @@ class AgentController(
     persistWorkspaceArtifactJob(finished)
     artifactRunJobs.remove(jobId)
     launchWorkspaceMutation("Artifact job finish", "executeWorkspaceArtifactJob") {
-      workspaceController.runtimeWorkspace().invalidateCatalogCache()
-      refreshWorkspaceState(status = "Workspace task ${finished.status}")
+      refreshWorkspaceArtifactState(status = "Workspace task ${finished.status}")
     }
   }
 
@@ -2097,13 +2126,34 @@ class AgentController(
   private fun cacheWorkspaceArtifactJob(job: WorkspaceArtifactJob): WorkspaceArtifactJob {
     val cached = job.copy(updatedAtMillis = System.currentTimeMillis())
     artifactJobCache[cached.id] = cached
+    _state.update { it.copy(workspaceArtifactJobs = upsertWorkspaceArtifactJob(it.workspaceArtifactJobs, cached)) }
     return cached
   }
 
   private fun persistWorkspaceArtifactJob(job: WorkspaceArtifactJob): WorkspaceArtifactJob {
     val persisted = workspaceController.updateWorkspaceArtifactJob(job)
     artifactJobCache[persisted.id] = persisted
+    _state.update { it.copy(workspaceArtifactJobs = upsertWorkspaceArtifactJob(it.workspaceArtifactJobs, persisted)) }
     return persisted
+  }
+
+  private fun refreshWorkspaceArtifactState(status: String) {
+    val workspace = workspaceController.runtimeWorkspace()
+    workspace.invalidateCatalogCache()
+    val catalog = workspace.catalog()
+    val artifactJobs = workspaceController.listWorkspaceArtifactJobs()
+    val artifactServerStatuses = workspacePythonHttpRuntime.statusesFor(catalog.workspaceArtifacts)
+    _state.update {
+      it.copy(
+        workspaceFiles = workspace.listFiles("."),
+        workspaceTree = catalog.tree,
+        htmlFiles = catalog.htmlFiles,
+        workspaceArtifacts = catalog.workspaceArtifacts,
+        workspaceArtifactJobs = artifactJobs,
+        workspaceArtifactServerStatuses = artifactServerStatuses,
+        status = status,
+      )
+    }
   }
 
   private fun persistSettingsState(settings: AppSettings, status: String) {
