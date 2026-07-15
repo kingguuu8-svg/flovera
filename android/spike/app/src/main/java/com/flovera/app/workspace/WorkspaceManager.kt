@@ -218,11 +218,18 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
   @Volatile private var activeSessionId: String? = null
 
   fun setActiveSession(sessionId: String?) {
+    selectActiveSession(sessionId)
+    migrateActiveSessionTodo()
+  }
+
+  fun selectActiveSession(sessionId: String?) {
     val normalized = sessionId?.trim()?.takeIf { it.isNotBlank() }
     require(normalized == null || SESSION_ID_REGEX.matches(normalized)) { "Invalid session id." }
     activeSessionId = normalized
-    if (normalized == null) return
+  }
 
+  fun migrateActiveSessionTodo() {
+    val normalized = activeSessionId ?: return
     val target = sessionTodoFile(normalized)
     val legacy = File(root, FLOVERA_TODO_FILE).canonicalFile
     if (!target.exists() && legacy.isFile) {
@@ -1184,7 +1191,10 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
   }
 
   fun readFloveraTodo(maxChars: Int = MAX_FLOVERA_TODO_CHARS): String {
-    val file = safeFile(FLOVERA_TODO_FILE)
+    val file = activeSessionId
+      ?.let(::sessionTodoFile)
+      ?.takeIf { it.isFile }
+      ?: File(root, FLOVERA_TODO_FILE).canonicalFile
     if (!file.isFile) return ""
     val content = readUtf8Text(file).trim()
     if (content.length <= maxChars) return content

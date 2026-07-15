@@ -1173,10 +1173,15 @@ Implemented coverage:
 - A UI watchdog logs frame gaps above 300 ms and marks gaps above 1,000 ms as
   frozen, including active Flovera task names for root-cause analysis, without
   turning those diagnostics into normal conversation/status messages.
-- Session opening now uses a normal-priority interactive lane, reads only the
+- Session opening now uses the workspace-query lane, reads only the
   selected session, updates the visible state before active-session persistence,
   and no longer rereads the complete active and archived session catalog on
   every switch.
+- Session decoding and active-session preference persistence now use the
+  workspace-query lane instead of the foreground interactive lane. New-session
+  and agent-run activation only update the in-memory active-session selector on
+  the immediate path; legacy shared todo migration stays off that path, and a
+  read fallback preserves todo contents until migration completes.
 - HTML preview selection now resolves against the in-memory workspace artifact
   catalog, updates static displays without waiting for a full workspace refresh,
   and persists the selected path independently from the display path.

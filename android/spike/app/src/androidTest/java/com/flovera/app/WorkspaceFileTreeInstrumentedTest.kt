@@ -2964,6 +2964,17 @@ class WorkspaceFileTreeInstrumentedTest {
   }
 
   @Test
+  fun workspaceTodoReadsLegacyContentBeforeBackgroundMigrationFinishes() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "todo-fast-select-${System.currentTimeMillis()}")
+    workspace.writeFile(".flovera/todo.md", "legacy task", createAutoSnapshot = false)
+
+    workspace.selectActiveSession("session-fast")
+
+    assertEquals("legacy task", workspace.readFloveraTodo())
+  }
+
+  @Test
   fun workspaceFloveraMetadataExposesCapabilitiesAndSettingsProposals() {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val workspaceId = "metadata-${System.currentTimeMillis()}"

@@ -189,7 +189,6 @@ class AgentController(
   private var activeRunJob: Job? = null
   private val uiStateScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
   private val artifactJobScope = CoroutineScope(SupervisorJob() + FloveraDispatchers.runtimeDispatcher)
-  private val sessionMutationScope = CoroutineScope(SupervisorJob() + FloveraDispatchers.interactiveDispatcher)
   private val previewSelectionScope = CoroutineScope(SupervisorJob() + FloveraDispatchers.previewDispatcher)
   private val workspaceMutationScope = CoroutineScope(SupervisorJob() + FloveraDispatchers.workspaceMutationDispatcher)
   private val workspaceQueryScope = CoroutineScope(SupervisorJob() + FloveraDispatchers.workspaceQueryDispatcher)
@@ -954,12 +953,12 @@ class AgentController(
     }
   }
 
-  private fun launchSessionMutation(surface: String, taskName: String, block: () -> Unit) {
+  private fun launchSessionQuery(surface: String, taskName: String, block: () -> Unit) {
     val queuedAtMillis = SystemClock.uptimeMillis()
-    sessionMutationScope.launch {
+    workspaceQueryScope.launch {
       initializationJob?.join()
       runCatching {
-        FloveraPerformance.traceQueued("interactive", taskName, queuedAtMillis, block)
+        FloveraPerformance.traceQueued("workspace-query", taskName, queuedAtMillis, block)
       }.onFailure { throwable ->
         reportBackgroundMutationFailure(surface, throwable)
       }
@@ -1344,7 +1343,7 @@ class AgentController(
       draftOriginSessionId = current.session.id
     }
     val session = sessionController.createSession()
-    workspaceController.setActiveSession(session.id)
+    workspaceController.selectActiveSession(session.id)
     _state.update {
       it.copy(
         session = session,
@@ -1384,9 +1383,9 @@ class AgentController(
     if (_state.value.isSwitchingSession) return
     val current = _state.value
     _state.update { it.copy(isSwitchingSession = true, status = "Loading session...") }
-    launchSessionMutation("Session switching", "openSession") {
+    launchSessionQuery("Session switching", "openSession") {
       val session = sessionController.openSession(sessionId)
-        ?: return@launchSessionMutation _state.update {
+        ?: return@launchSessionQuery _state.update {
           it.copy(isSwitchingSession = false, status = "Session not found")
         }
       draftOriginSessionId = null
@@ -1633,7 +1632,7 @@ class AgentController(
   private fun startAgentRun(input: AgentRunInput, session: AgentSession) {
     val current = _state.value
     draftOriginSessionId = null
-    workspaceController.setActiveSession(session.id)
+    workspaceController.selectActiveSession(session.id)
     clearPendingActiveRunGuidance()
     val runTranscriptEvents = mutableListOf<ConversationTranscriptEvent>()
     activeRunTranscriptEvents = runTranscriptEvents
@@ -1674,6 +1673,7 @@ class AgentController(
           )
         }
         launchWorkspaceMutation("Agent run start", "persistActiveRunSession") {
+          workspaceController.setActiveSession(withUser.id)
           settingsController.setActiveSession(current.settings, withUser.id)
         }
       },

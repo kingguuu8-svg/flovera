@@ -74,10 +74,6 @@ object FloveraPerformance {
 }
 
 object FloveraDispatchers {
-  val interactiveDispatcher: CoroutineDispatcher = foregroundDispatcher(
-    prefix = "flovera-interactive",
-    threads = 1,
-  )
   val previewDispatcher: CoroutineDispatcher = foregroundDispatcher(
     prefix = "flovera-preview",
     threads = 1,

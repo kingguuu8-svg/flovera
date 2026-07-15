@@ -35,6 +35,10 @@ class WorkspaceController(context: Context, workspaceId: String) {
     workspace.setActiveSession(sessionId)
   }
 
+  fun selectActiveSession(sessionId: String?) {
+    workspace.selectActiveSession(sessionId)
+  }
+
   fun copySessionTodo(sourceSessionId: String, targetSessionId: String) {
     workspace.copySessionTodo(sourceSessionId, targetSessionId)
   }
