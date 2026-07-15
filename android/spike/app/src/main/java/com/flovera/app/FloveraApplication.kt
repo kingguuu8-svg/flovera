@@ -22,7 +22,6 @@ object FloveraCrashReporter {
   private const val LAST_EXIT_KEY = "last_exit_timestamp"
 
   fun install(app: Application) {
-    recordHistoricalExitReasons(app)
     val previous = Thread.getDefaultUncaughtExceptionHandler()
     Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
       writeCrashRecord(
@@ -37,14 +36,21 @@ object FloveraCrashReporter {
       )
       previous?.uncaughtException(thread, throwable)
     }
-    writeCrashRecord(
-      app = app,
-      kind = "process_start",
-      fields = mapOf(
-        "pid" to Process.myPid().toString(),
-        "uid" to Process.myUid().toString(),
-      ),
-    )
+    Thread {
+      runCatching { Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND) }
+      runCatching { recordHistoricalExitReasons(app) }
+      writeCrashRecord(
+        app = app,
+        kind = "process_start",
+        fields = mapOf(
+          "pid" to Process.myPid().toString(),
+          "uid" to Process.myUid().toString(),
+        ),
+      )
+    }.apply {
+      name = "flovera-crash-reporter"
+      isDaemon = true
+    }.start()
   }
 
   private fun recordHistoricalExitReasons(app: Application) {

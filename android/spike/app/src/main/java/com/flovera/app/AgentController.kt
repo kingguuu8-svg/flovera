@@ -209,9 +209,9 @@ class AgentController(
   private val activeRunPendingGuidance = mutableListOf<String>()
   private var lastRunNotificationAtMillis: Long = 0
   private var lastRunNotificationBody: String = ""
-  private var workspaceController: WorkspaceController
-  private var workspaceLocalAppServer: WorkspaceLocalAppServer
-  private var workspacePythonHttpRuntime: WorkspacePythonHttpRuntime
+  private lateinit var workspaceController: WorkspaceController
+  private lateinit var workspaceLocalAppServer: WorkspaceLocalAppServer
+  private lateinit var workspacePythonHttpRuntime: WorkspacePythonHttpRuntime
   private var initializationJob: Job? = null
   private var activeSessionLoadJob: Job? = null
   private var sessionCatalogJob: Job? = null
@@ -222,21 +222,23 @@ class AgentController(
   val state: StateFlow<AgentScreenState> = _state
 
   init {
-    val settingsLoad = settingsController.loadResult()
-    val loadedSettings = settingsLoad.settings
-    workspaceController = WorkspaceController(appContext, loadedSettings.activeWorkspaceId)
-    workspaceLocalAppServer = WorkspaceLocalAppServer(workspaceController.runtimeWorkspace()) { _state.value.settings }
-    workspacePythonHttpRuntime = WorkspacePythonHttpRuntime(workspaceController.runtimeWorkspace())
-    val initialModelDraft = settingsController.draftFor(loadedSettings)
     if (eagerWorkspaceInitialization) {
-          initializeWorkspaceState(
-            settingsLoad = settingsLoad,
-            loadedSettings = loadedSettings,
-            deferSessionCatalog = true,
-          )
+      val settingsLoad = traceStartupPhase("settingsLoad") {
+        settingsController.loadResult()
+      }
+      val loadedSettings = settingsLoad.settings
+      configureWorkspace(loadedSettings.activeWorkspaceId)
+      initializeWorkspaceState(
+        settingsLoad = settingsLoad,
+        loadedSettings = loadedSettings,
+        deferSessionCatalog = true,
+      )
     } else {
+      val initialSettings = AppSettings()
+      configureWorkspace(initialSettings.activeWorkspaceId)
+      val initialModelDraft = settingsController.draftFor(initialSettings)
       _state.value = AgentScreenState(
-        settings = loadedSettings,
+        settings = initialSettings,
         providerDraft = initialModelDraft.providerId,
         modelDraft = initialModelDraft.model,
         apiKeyDraft = initialModelDraft.apiKey,
@@ -244,12 +246,35 @@ class AgentController(
         customOpenAIChatCompletionsPathDraft = initialModelDraft.customOpenAIChatCompletionsPath,
         customOpenAICompatibilityModeDraft = initialModelDraft.customOpenAICompatibilityMode,
         workspaceRootUrl = workspaceController.runtimeWorkspace().rootUrl(),
-        status = settingsLoad.warning ?: "Loading workspace...",
+        status = "Loading settings...",
       )
       val queuedAtMillis = SystemClock.uptimeMillis()
       initializationJob = workspaceMutationScope.launch {
         runCatching {
-          FloveraPerformance.traceQueued("workspace-mutation", "initializeWorkspace", queuedAtMillis) {
+          val settingsLoad = FloveraPerformance.traceQueued(
+            "workspace-mutation",
+            "loadSettings",
+            queuedAtMillis,
+          ) {
+            settingsController.loadResult()
+          }
+          val loadedSettings = settingsLoad.settings
+          configureWorkspace(loadedSettings.activeWorkspaceId)
+          val modelDraft = settingsController.draftFor(loadedSettings)
+          _state.update {
+            it.copy(
+              settings = loadedSettings,
+              providerDraft = modelDraft.providerId,
+              modelDraft = modelDraft.model,
+              apiKeyDraft = modelDraft.apiKey,
+              customOpenAIBaseUrlDraft = modelDraft.customOpenAIBaseUrl,
+              customOpenAIChatCompletionsPathDraft = modelDraft.customOpenAIChatCompletionsPath,
+              customOpenAICompatibilityModeDraft = modelDraft.customOpenAICompatibilityMode,
+              workspaceRootUrl = workspaceController.runtimeWorkspace().rootUrl(),
+              status = settingsLoad.warning ?: "Loading workspace...",
+            )
+          }
+          FloveraPerformance.trace("workspace-mutation", "initializeWorkspace") {
             initializeWorkspaceState(
               settingsLoad = settingsLoad,
               loadedSettings = loadedSettings,
@@ -264,6 +289,12 @@ class AgentController(
         }
       }
     }
+  }
+
+  private fun configureWorkspace(workspaceId: String) {
+    workspaceController = WorkspaceController(appContext, workspaceId)
+    workspaceLocalAppServer = WorkspaceLocalAppServer(workspaceController.runtimeWorkspace()) { _state.value.settings }
+    workspacePythonHttpRuntime = WorkspacePythonHttpRuntime(workspaceController.runtimeWorkspace())
   }
 
   private fun initializeWorkspaceState(
@@ -733,7 +764,7 @@ class AgentController(
     selectedHtmlLoadJob?.cancel()
     val current = _state.value
     val persistedSettings = runCatching {
-      settingsController.setSelectedHtml(current.settings, normalizedPath)
+      settingsController.withSelectedHtml(current.settings, normalizedPath)
     }.getOrElse {
       current.settings
     }
@@ -758,6 +789,9 @@ class AgentController(
         workspaceRootUrl = workspaceRootUrl(immediateUrl, workspaceController.runtimeWorkspace().rootUrl()),
         status = "Displaying $normalizedPath",
       )
+    }
+    launchWorkspaceMutation("Preview preference", "persistSelectedHtml") {
+      settingsController.setSelectedHtml(current.settings, normalizedPath)
     }
     previewSelectionJob = previewSelectionScope.launch {
       if (generation != selectedHtmlLoadGeneration) return@launch
@@ -790,10 +824,11 @@ class AgentController(
     selectedHtmlLoadGeneration += 1
     previewSelectionJob?.cancel()
     selectedHtmlLoadJob?.cancel()
+    val currentSettings = _state.value.settings
     val persistedSettings = runCatching {
-      settingsController.setSelectedHtml(_state.value.settings, "")
+      settingsController.withSelectedHtml(currentSettings, "")
     }.getOrElse {
-      _state.value.settings
+      currentSettings
     }
     _state.update {
       it.copy(
@@ -810,6 +845,9 @@ class AgentController(
         workspaceRootUrl = workspaceController.runtimeWorkspace().rootUrl(),
         status = status,
       )
+    }
+    launchWorkspaceMutation("Preview preference", "persistSelectedHtml") {
+      settingsController.setSelectedHtml(currentSettings, "")
     }
   }
 
@@ -1903,36 +1941,47 @@ class AgentController(
       interruptTranscriptEvent)
       .distinctBy { it.transcriptIdentityKey() }
       .sortedWith(conversationTranscriptEventComparator())
-    val interrupted = current.session?.let { session ->
-      sessionController.appendMessage(
-        session,
-        SessionMessage(
-          role = "assistant",
-          content = "",
-          toolEvents = current.assistantDraft?.toolEvents.orEmpty(),
-          runEvents = current.assistantDraft?.runEvents.orEmpty() + interruptTimelineEvent,
-          transcriptEvents = interruptedTranscriptEvents.ifEmpty { listOf(interruptTranscriptEvent) },
-        ),
-      )
-    }
+    val interruptedSource = current.session
+    val interruptedMessage = SessionMessage(
+      role = "assistant",
+      content = "",
+      toolEvents = current.assistantDraft?.toolEvents.orEmpty(),
+      runEvents = current.assistantDraft?.runEvents.orEmpty() + interruptTimelineEvent,
+      transcriptEvents = interruptedTranscriptEvents.ifEmpty { listOf(interruptTranscriptEvent) },
+    )
     agentRunStatusNotifier.interrupted()
     if (_state.value.settings.backgroundKeepAliveEnabled) {
       startBackgroundKeepAliveService()
     }
     _state.update {
       it.copy(
-        session = interrupted ?: current.session,
+        session = current.session,
         isRunning = false,
         assistantDraft = null,
         status = "Agent loop interrupted",
       )
     }
     launchWorkspaceMutation("Agent interrupt", "interruptAgentRun") {
-      refreshWorkspaceState(
-        session = interrupted ?: current.session,
-        isRunning = false,
-        status = "Agent loop interrupted",
-      )
+      val interrupted = interruptedSource?.let { session ->
+        sessionController.appendMessage(session, interruptedMessage)
+      }
+      if (interruptedSource == null || _state.value.session?.id == interruptedSource.id) {
+        _state.update {
+          if (it.isRunning || (interruptedSource != null && it.session?.id != interruptedSource.id)) {
+            it
+          } else {
+            it.copy(
+              session = interrupted ?: it.session,
+              sessions = interrupted?.let { updated -> upsertSession(it.sessions, updated) } ?: it.sessions,
+            )
+          }
+        }
+        refreshWorkspaceState(
+          session = interrupted ?: interruptedSource,
+          isRunning = false,
+          status = "Agent loop interrupted",
+        )
+      }
     }
   }
 

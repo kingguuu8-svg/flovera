@@ -196,6 +196,9 @@ class AgentScreenInteractionInstrumentedTest {
     assertEquals("", controller.state.value.selectedHtmlPath)
     assertEquals("", controller.state.value.selectedPreviewPath)
     assertEquals(null, controller.state.value.selectedHtmlUrl)
+    composeRule.waitUntil(timeoutMillis = 3_000) {
+      settingsStore.load().selectedHtmlPath.isBlank()
+    }
     assertEquals("", settingsStore.load().selectedHtmlPath)
     root.deleteRecursively()
   }

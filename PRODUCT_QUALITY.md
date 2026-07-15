@@ -1209,6 +1209,10 @@ Implemented coverage:
   mutation lane with explicit `Loading workspace...` status and startup phase
   traces; a saved conversation is loaded asynchronously with `Loading
   conversation...` semantics.
+- Production controller construction now publishes that shell before settings
+  decryption/normalization, then loads settings and selects the active workspace
+  on the mutation lane. Crash-reporter historical-exit and process-start logging
+  also no longer runs synchronously in `Application.onCreate()`.
 - Startup no longer parses the complete session catalog or the active session
   before the first workspace state. The Sessions panel loads metadata-only
   summaries on demand, while opening a row loads the full conversation. Session
@@ -1221,6 +1225,10 @@ Implemented coverage:
   workspace mutations. File rename/delete, snapshot create/restore/delete, session open/rename
   /duplicate/archive/restore/pin/revert, and most artifact lifecycle refreshes
   now run their workspace/session IO through the same background boundary.
+- Preview selection/clearing updates the visible settings state immediately and
+  persists the encrypted selected-path preference through the workspace mutation
+  queue. Interrupting an agent run likewise publishes the stopped state first and
+  appends the interruption message off the UI path.
 - Agent run start/session update paths update session lists in memory instead
   of rereading session storage, and agent run finish/queued-run finalization
   launches the next queued run before sending the full workspace refresh
@@ -1235,12 +1243,15 @@ Implemented coverage:
 
 Remaining work:
 
-- Continue profiling the Android cold-process/Compose first-frame path and the
-  full conversation decode for very large sessions. On the connected device,
-  the latest measured baseline was about 2.18 s cold launch, about 0.87 s
-  workspace initialization, and about 0.93 s asynchronous active-session load
-  with a 146 MB workspace and 21 MB session store; the UI shell is available
-  before the latter background work completes.
+- Continue profiling the Android Compose first-frame path and the full
+  conversation decode for very large sessions. Before the latest shell/settings
+  split, the connected-device baseline was about 2.18 s cold launch, about
+  0.87 s workspace initialization, and about 0.93 s asynchronous active-session
+  load with a 146 MB workspace and 21 MB session store; the latest code still
+  needs a real-device measurement after these changes.
+- Reconnect the real device and rerun session-management, preview, queued-run,
+  startup, and interruption flows; the current APK/test APK build is complete,
+  but this verification is pending because serial `e9512097` is offline.
 - Promote repeated UI freeze events from transient status into a richer
   diagnostics surface or session log entry when the app grows a diagnostics
   panel.

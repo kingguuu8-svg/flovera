@@ -258,13 +258,17 @@ class SettingsController(private val store: SettingsStore) {
   }
 
   fun setSelectedHtml(settings: AppSettings, path: String): AppSettings {
+    val updated = withSelectedHtml(settings, path)
+    store.save(updated)
+    return updated
+  }
+
+  fun withSelectedHtml(settings: AppSettings, path: String): AppSettings {
     val normalized = path.trim()
-    val updated = settings.copy(
+    return settings.copy(
       selectedHtmlPath = normalized,
       recentHtmlPaths = promoteRecentHtmlPath(settings.recentHtmlPaths, normalized),
     )
-    store.save(updated)
-    return updated
   }
 
   fun setPinnedHtmlPath(settings: AppSettings, path: String, pinned: Boolean): AppSettings {
