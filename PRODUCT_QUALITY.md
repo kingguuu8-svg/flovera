@@ -1207,6 +1207,8 @@ Implemented coverage:
   secret changes) now publish the new settings state without rescanning the
   workspace snapshot; app-owned metadata synchronization remains queued after
   the state update.
+- AGENTS.md rule saves likewise publish completion after the file write without
+  waiting for an unrelated full workspace snapshot.
 - Network/background toggles, workspace refresh, preview pinning, settings/tool
   proposals, skill toggles, secret management, and shared/attachment imports
   now enter the same workspace mutation queue.

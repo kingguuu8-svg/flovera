@@ -1178,6 +1178,32 @@ class AgentScreenInteractionInstrumentedTest {
     }
   }
 
+  @Test
+  fun agentRulesSavePublishesCompletionWithoutWorkspaceRescan() {
+    val context = composeRule.activity.applicationContext
+    val root = File(context.cacheDir, "rule-save-${System.currentTimeMillis()}").apply {
+      deleteRecursively()
+      mkdirs()
+    }
+    val workspaceId = "rule-save-${System.currentTimeMillis()}"
+    val settingsStore = SettingsStore(context, File(root, "settings.json"))
+    settingsStore.save(AppSettings(activeWorkspaceId = workspaceId))
+    val workspace = WorkspaceManager(context, workspaceId).also { it.ensureSeedFiles() }
+    val controller = AgentController(context, settingsStore = settingsStore)
+
+    composeRule.setContent {
+      AgentScreen(controller)
+    }
+
+    controller.saveAgentRules("rule save should be visible immediately")
+
+    composeRule.waitUntil(timeoutMillis = 5_000) {
+      controller.state.value.status == "Rule saved"
+    }
+    assertEquals("rule save should be visible immediately", controller.state.value.agentRulesDraft)
+    assertEquals("rule save should be visible immediately", workspace.readFile("AGENTS.md"))
+  }
+
   private fun testPngBytes(): ByteArray {
     val bitmap = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
     return ByteArrayOutputStream().use { output ->

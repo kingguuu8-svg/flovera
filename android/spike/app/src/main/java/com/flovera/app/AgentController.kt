@@ -708,8 +708,8 @@ class AgentController(
     _state.update { it.copy(agentRulesDraft = content, status = "Saving rule...") }
     launchWorkspaceMutation("Rule save", "saveAgentRules") {
       workspaceController.writeAgentRules(content)
-      refreshWorkspaceState(status = "Rule saved")
       _state.update { it.copy(agentRulesDraft = content) }
+      reportStatus("Rule saved")
     }
   }
 
