@@ -1203,6 +1203,10 @@ Implemented coverage:
 - The full settings form now computes one normalized settings value and writes
   encrypted settings once per save, avoiding a chain of independent setter
   writes before the UI can report completion.
+- Settings-only mutations (network/background toggles, preview pinning, and
+  secret changes) now publish the new settings state without rescanning the
+  workspace snapshot; app-owned metadata synchronization remains queued after
+  the state update.
 - Network/background toggles, workspace refresh, preview pinning, settings/tool
   proposals, skill toggles, secret management, and shared/attachment imports
   now enter the same workspace mutation queue.

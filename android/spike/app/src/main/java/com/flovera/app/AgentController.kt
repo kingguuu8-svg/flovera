@@ -578,7 +578,7 @@ class AgentController(
     }
     launchWorkspaceMutation("Network settings", "setNetworkEnabled") {
       val settings = settingsController.setNetworkEnabled(current.settings, enabled)
-      refreshWorkspaceState(settings = settings, status = status)
+      persistSettingsState(settings, status)
     }
   }
 
@@ -601,7 +601,7 @@ class AgentController(
     }
     launchWorkspaceMutation("Background settings", "setBackgroundKeepAliveEnabled") {
       val settings = settingsController.setBackgroundKeepAlive(current.settings, enabled)
-      refreshWorkspaceState(settings = settings, status = status)
+      persistSettingsState(settings, status)
     }
   }
 
@@ -699,20 +699,7 @@ class AgentController(
     } else if (!current.isRunning) {
       stopBackgroundKeepAliveService()
     }
-    val draft = settingsController.draftFor(finalSettings)
-    workspaceController.syncFloveraSettings(finalSettings)
-    _state.update {
-      it.copy(
-        settings = finalSettings,
-        providerDraft = draft.providerId,
-        modelDraft = draft.model,
-        apiKeyDraft = draft.apiKey,
-        customOpenAIBaseUrlDraft = draft.customOpenAIBaseUrl,
-        customOpenAIChatCompletionsPathDraft = draft.customOpenAIChatCompletionsPath,
-        customOpenAICompatibilityModeDraft = draft.customOpenAICompatibilityMode,
-        status = "Settings saved",
-      )
-    }
+    persistSettingsState(finalSettings, "Settings saved")
   }
 
   fun saveAgentRules(content: String = _state.value.agentRulesDraft) {
@@ -883,7 +870,7 @@ class AgentController(
     val current = _state.value
     launchWorkspaceMutation("Preview pinning", "setHtmlPinned") {
       val settings = settingsController.setPinnedHtmlPath(current.settings, path, pinned)
-      refreshWorkspaceState(settings = settings, status = status)
+      persistSettingsState(settings, status)
     }
   }
 
@@ -1227,7 +1214,7 @@ class AgentController(
         value = value,
         agentAllowed = agentAllowed,
       )
-      refreshWorkspaceState(settings = settings, status = "Secret saved: ${name.trim()}")
+      persistSettingsState(settings, "Secret saved: ${name.trim()}")
     }
   }
 
@@ -1237,7 +1224,7 @@ class AgentController(
     _state.update { it.copy(status = "Deleting secret...") }
     launchWorkspaceMutation("Secret delete", "deleteWorkspaceSecret") {
       val settings = settingsController.deleteWorkspaceSecret(current.settings, name)
-      refreshWorkspaceState(settings = settings, status = "Secret deleted: ${name.trim()}")
+      persistSettingsState(settings, "Secret deleted: ${name.trim()}")
     }
   }
 
@@ -1248,7 +1235,7 @@ class AgentController(
     _state.update { it.copy(status = status) }
     launchWorkspaceMutation("Secret settings", "setWorkspaceSecretAgentAllowed") {
       val settings = settingsController.setWorkspaceSecretAgentAllowed(current.settings, name, allowed)
-      refreshWorkspaceState(settings = settings, status = status)
+      persistSettingsState(settings, status)
     }
   }
 
@@ -2117,6 +2104,23 @@ class AgentController(
     val persisted = workspaceController.updateWorkspaceArtifactJob(job)
     artifactJobCache[persisted.id] = persisted
     return persisted
+  }
+
+  private fun persistSettingsState(settings: AppSettings, status: String) {
+    val draft = settingsController.draftFor(settings)
+    _state.update {
+      it.copy(
+        settings = settings,
+        providerDraft = draft.providerId,
+        modelDraft = draft.model,
+        apiKeyDraft = draft.apiKey,
+        customOpenAIBaseUrlDraft = draft.customOpenAIBaseUrl,
+        customOpenAIChatCompletionsPathDraft = draft.customOpenAIChatCompletionsPath,
+        customOpenAICompatibilityModeDraft = draft.customOpenAICompatibilityMode,
+        status = status,
+      )
+    }
+    workspaceController.syncFloveraSettings(settings)
   }
 
   private fun refreshWorkspaceState(
