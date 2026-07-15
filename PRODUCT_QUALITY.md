@@ -1233,6 +1233,12 @@ Implemented coverage:
   of rereading session storage, and agent run finish/queued-run finalization
   launches the next queued run before sending the full workspace refresh
   through the mutation queue.
+- A normal agent run now reuses the request context already assembled for
+  context accounting when the runtime sends the first request, avoiding a
+  second read of workspace rules, memory, todo, skills, and session history;
+  guidance runs and compression recovery rebuild the context when their input
+  or session changes, while legacy runtime implementations keep their existing
+  streaming behavior.
 - Artifact WebView bridge action calls resolve against the current in-memory
   artifact state and return in-memory job JSON first; job persistence, UI
   refresh, cancellation persistence, and runtime completion refreshes run off

@@ -58,6 +58,29 @@ interface AgentRuntime {
       recorder = recorder,
     )
   }
+
+  suspend fun runStreamingWithContext(
+    input: String,
+    agentRunId: String,
+    settings: AppSettings,
+    session: AgentSession,
+    workspace: WorkspaceManager,
+    recorder: ToolEventRecorder,
+    eventSink: AgentRunEventSink,
+    guidanceProvider: AgentRunGuidanceProvider = AgentRunGuidanceProvider.None,
+    preparedContext: AgentRequestContext? = null,
+  ): String {
+    return runStreaming(
+      input = input,
+      agentRunId = agentRunId,
+      settings = settings,
+      session = session,
+      workspace = workspace,
+      recorder = recorder,
+      eventSink = eventSink,
+      guidanceProvider = guidanceProvider,
+    )
+  }
 }
 
 class KoogAgentRuntime(
@@ -105,6 +128,50 @@ class KoogAgentRuntime(
         frameForwarder = frameForwarder,
         guidanceProvider = guidanceProvider,
         streaming = true,
+        preparedContext = null,
+      )
+    } catch (error: CancellationException) {
+      throw error
+    } catch (error: Throwable) {
+      if (frameForwarder.modelTextDeltaCount == 0 && isStreamingUnsupported(error)) {
+        run(
+          input = input,
+          agentRunId = agentRunId,
+          settings = settings,
+          session = session,
+          workspace = workspace,
+          recorder = recorder,
+        )
+      } else {
+        throw error
+      }
+    }
+  }
+
+  override suspend fun runStreamingWithContext(
+    input: String,
+    agentRunId: String,
+    settings: AppSettings,
+    session: AgentSession,
+    workspace: WorkspaceManager,
+    recorder: ToolEventRecorder,
+    eventSink: AgentRunEventSink,
+    guidanceProvider: AgentRunGuidanceProvider,
+    preparedContext: AgentRequestContext?,
+  ): String {
+    val frameForwarder = AgentRunStreamFrameForwarder(eventSink)
+    return try {
+      runAgent(
+        input = input,
+        agentRunId = agentRunId,
+        settings = settings,
+        session = session,
+        workspace = workspace,
+        recorder = recorder,
+        frameForwarder = frameForwarder,
+        guidanceProvider = guidanceProvider,
+        streaming = true,
+        preparedContext = preparedContext,
       )
     } catch (error: CancellationException) {
       throw error
@@ -134,6 +201,7 @@ class KoogAgentRuntime(
     frameForwarder: AgentRunStreamFrameForwarder?,
     guidanceProvider: AgentRunGuidanceProvider = AgentRunGuidanceProvider.None,
     streaming: Boolean,
+    preparedContext: AgentRequestContext? = null,
   ): String {
     val provider = ModelProviderCatalog.requireProvider(settings.provider)
     val apiKey = settings.apiKeyFor(provider.id)
@@ -142,7 +210,7 @@ class KoogAgentRuntime(
     val secretEnvironment = settings.agentAllowedSecretEnvironment()
     val modelContext = ModelProviderCatalog.contextFor(settings)
     val client = clientFactory(provider, apiKey, settings)
-    val requestContext = AgentRequestContextAssembler.build(
+    val requestContext = preparedContext ?: AgentRequestContextAssembler.build(
       input = input,
       settings = settings,
       session = session,

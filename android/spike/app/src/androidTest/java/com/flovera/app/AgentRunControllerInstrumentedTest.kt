@@ -16,6 +16,7 @@ import com.flovera.app.agent.SessionHandoffCompressor
 import com.flovera.app.config.AppSettings
 import com.flovera.app.config.SettingsStore
 import com.flovera.app.koog.AgentRuntime
+import com.flovera.app.koog.AgentRequestContext
 import com.flovera.app.koog.KoogAgentRuntime
 import com.flovera.app.koog.ToolEventRecorder
 import com.flovera.app.session.AgentSession
@@ -130,6 +131,39 @@ class AgentRunControllerInstrumentedTest {
     val checkpoint = workspace.readFile(".flovera/runs/latest.json")
     assertTrue(checkpoint, checkpoint.contains("\"status\": \"completed\""))
     assertTrue(checkpoint, checkpoint.contains("\"fake_tool\""))
+  }
+
+  @Test
+  fun runControllerReusesPreparedContextForNormalRun() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val store = AgentSessionStore(context)
+    val sessions = SessionController(store)
+    val session = store.create("Prepared context ${System.currentTimeMillis()}")
+    val workspace = WorkspaceManager(context, "prepared-context-${System.currentTimeMillis()}").also { it.ensureSeedFiles() }
+    val runtime = PreparedContextAgentRuntime()
+    val controller = AgentRunController(runtime = runtime, scope = this)
+
+    val job = controller.submit(
+      input = "reuse the prepared context",
+      settings = AppSettings(),
+      session = session,
+      workspace = workspace,
+      appendUserPrompt = sessions::appendUserPrompt,
+      appendContextRecord = sessions::appendContextRecord,
+      appendCompressionDivider = sessions::appendCompressionDivider,
+      appendPromptContextBlocks = sessions::appendPromptContextBlocks,
+      appendMessage = sessions::appendMessage,
+      onStarted = { _, _ -> },
+      onDraft = {},
+      onSessionUpdated = { _, _ -> },
+      onFinished = { _, _ -> },
+    )
+
+    assertNotNull(job)
+    job!!.join()
+
+    assertNotNull(runtime.preparedContextSeen)
+    assertTrue(runtime.preparedContextSeen?.userPrompt?.contains("reuse the prepared context") == true)
   }
 
   @Test
@@ -677,6 +711,36 @@ class AgentRunControllerInstrumentedTest {
       sessionSeen = session
       recorder.record("fake_tool", "{}", "ok")
       return "assistant output"
+    }
+  }
+
+  private class PreparedContextAgentRuntime : AgentRuntime {
+    var preparedContextSeen: AgentRequestContext? = null
+
+    override suspend fun run(
+      input: String,
+      agentRunId: String,
+      settings: AppSettings,
+      session: AgentSession,
+      workspace: WorkspaceManager,
+      recorder: ToolEventRecorder,
+    ): String {
+      return "legacy output"
+    }
+
+    override suspend fun runStreamingWithContext(
+      input: String,
+      agentRunId: String,
+      settings: AppSettings,
+      session: AgentSession,
+      workspace: WorkspaceManager,
+      recorder: ToolEventRecorder,
+      eventSink: AgentRunEventSink,
+      guidanceProvider: AgentRunGuidanceProvider,
+      preparedContext: AgentRequestContext?,
+    ): String {
+      preparedContextSeen = preparedContext
+      return "prepared output"
     }
   }
 

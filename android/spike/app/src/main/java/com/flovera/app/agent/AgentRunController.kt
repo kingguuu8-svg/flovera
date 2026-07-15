@@ -2,7 +2,10 @@ package com.flovera.app.agent
 
 import com.flovera.app.config.AppSettings
 import com.flovera.app.koog.AgentPayloadTokenEstimator
+import com.flovera.app.koog.AgentRequestContext
+import com.flovera.app.koog.AgentRequestContextAssembler
 import com.flovera.app.koog.AgentRequestFootprintBuilder
+import com.flovera.app.koog.AgentRequestFootprint
 import com.flovera.app.koog.AgentRuntime
 import com.flovera.app.koog.KoogContextOverflowDetector
 import com.flovera.app.koog.KoogAgentRuntime
@@ -16,7 +19,6 @@ import com.flovera.app.session.ContextUsageRecord
 import com.flovera.app.session.ConversationTranscriptEvent
 import com.flovera.app.session.PromptContextBlock
 import com.flovera.app.session.PromptContextLedger
-import com.flovera.app.session.RuntimeSessionHistory
 import com.flovera.app.session.SessionMessage
 import com.flovera.app.session.ToolEvent
 import com.flovera.app.workspace.WorkspaceManager
@@ -79,8 +81,12 @@ class AgentRunController(
         val withUser = appendUserPrompt(session, visibleTrimmed)
         val agentRunId = "${withUser.id}-${UUID.randomUUID()}"
         val startedAtMillis = System.currentTimeMillis()
-        val contextRecord = estimateContextUsage(trimmed, visibleTrimmed, settings, withUser, workspace)
+        val contextPreparation = prepareContextUsage(trimmed, visibleTrimmed, settings, withUser, workspace)
+        val contextRecord = contextPreparation.record
         val contextCompressed = shouldCompressContext(contextRecord)
+        var preparedRequestContext = contextPreparation.requestContext.takeIf {
+          !contextCompressed && visibleTrimmed == trimmed
+        }
         val runStartedEvent = lifecycleRunEvent(
           type = AgentRunEventType.RUN_STARTED,
           title = "Run started",
@@ -254,7 +260,7 @@ class AgentRunController(
         suspend fun runRuntime(sessionForRun: AgentSession, recorderForRun: ToolEventRecorder): Result<String> {
           return try {
             Result.success(
-              runtime.runStreaming(
+              runtime.runStreamingWithContext(
                 input = trimmed,
                 agentRunId = agentRunId,
                 settings = settings,
@@ -263,6 +269,7 @@ class AgentRunController(
                 recorder = recorderForRun,
                 eventSink = eventSink,
                 guidanceProvider = guidanceProvider,
+                preparedContext = preparedRequestContext,
               ),
             )
           } catch (error: CancellationException) {
@@ -317,6 +324,7 @@ class AgentRunController(
               interruptedRun = interruptedRun,
             )
             currentSession = preparedSession
+            preparedRequestContext = null
             val compressionCompletedEvent = lifecycleRunEvent(
               type = AgentRunEventType.COMPRESSION_COMPLETED,
               title = "Context overflow compressed",
@@ -809,6 +817,45 @@ class AgentRunController(
     }
   }
 
+  private data class PreparedContextUsage(
+    val record: ContextUsageRecord,
+    val requestContext: AgentRequestContext,
+  )
+
+  private fun prepareContextUsage(
+    input: String,
+    visibleInput: String,
+    settings: AppSettings,
+    session: AgentSession,
+    workspace: WorkspaceManager,
+  ): PreparedContextUsage {
+    val requestContext = AgentRequestContextAssembler.build(
+      input = input,
+      currentVisibleInput = visibleInput,
+      settings = settings,
+      session = session,
+      workspace = workspace,
+    )
+    val footprint = AgentRequestFootprintBuilder.build(
+      input = input,
+      currentVisibleInput = visibleInput,
+      settings = settings,
+      session = session,
+      workspace = workspace,
+      preparedContext = requestContext,
+    )
+    return PreparedContextUsage(
+      record = contextUsageRecord(
+        input = input,
+        settings = settings,
+        session = session,
+        historyChars = requestContext.historyChars,
+        footprint = footprint,
+      ),
+      requestContext = requestContext,
+    )
+  }
+
   private fun estimateContextUsage(
     input: String,
     visibleInput: String,
@@ -816,21 +863,16 @@ class AgentRunController(
     session: AgentSession,
     workspace: WorkspaceManager,
   ): ContextUsageRecord {
-    val recentHistory = RuntimeSessionHistory.entries(
-      session = session,
-      currentInput = input,
-      currentVisibleInput = visibleInput,
-    )
-    val historyChars = recentHistory.sumOf { message ->
-      message.role.length + message.content.length + 2
-    }
-    val footprint = AgentRequestFootprintBuilder.build(
-      input = input,
-      currentVisibleInput = visibleInput,
-      settings = settings,
-      session = session,
-      workspace = workspace,
-    )
+    return prepareContextUsage(input, visibleInput, settings, session, workspace).record
+  }
+
+  private fun contextUsageRecord(
+    input: String,
+    settings: AppSettings,
+    session: AgentSession,
+    historyChars: Int,
+    footprint: AgentRequestFootprint,
+  ): ContextUsageRecord {
     val estimatedRequestChars = footprint.requestChars
     val providerOverheadChars = (
       estimatedRequestChars -

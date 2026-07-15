@@ -33,11 +33,12 @@ object AgentRequestFootprintBuilder {
     settings: AppSettings,
     session: AgentSession,
     workspace: WorkspaceManager,
+    preparedContext: AgentRequestContext? = null,
   ): AgentRequestFootprint {
     val webSearchAvailable = settings.networkEnabled && settings.webSearchEnabled && settings.braveSearchApiKey.isNotBlank()
     val provider = ModelProviderCatalog.findProvider(settings.provider)
     val modelContext = ModelProviderCatalog.contextFor(settings)
-    val requestContext = AgentRequestContextAssembler.build(
+    val requestContext = preparedContext ?: AgentRequestContextAssembler.build(
       input = input,
       currentVisibleInput = currentVisibleInput,
       settings = settings,
