@@ -1200,6 +1200,9 @@ Implemented coverage:
 - Settings save and AGENTS.md rule save enter the single workspace mutation
   queue, update visible status immediately, and report background failures
   instead of blocking the touch path.
+- The full settings form now computes one normalized settings value and writes
+  encrypted settings once per save, avoiding a chain of independent setter
+  writes before the UI can report completion.
 - Network/background toggles, workspace refresh, preview pinning, settings/tool
   proposals, skill toggles, secret management, and shared/attachment imports
   now enter the same workspace mutation queue.

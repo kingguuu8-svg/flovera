@@ -672,9 +672,9 @@ class AgentController(
     workspaceMemoryEnabled: Boolean,
     inputBarVisible: Boolean,
   ) {
-    val modelSettings = settingsController.saveModelSettings(
-      current.settings,
-      ModelSettingsDraft(
+    val finalSettings = settingsController.saveModelSettingsBatch(
+      settings = current.settings,
+      draft = ModelSettingsDraft(
         providerId = providerId,
         model = model,
         apiKey = apiKey,
@@ -682,19 +682,18 @@ class AgentController(
         customOpenAIChatCompletionsPath = customOpenAIChatCompletionsPath,
         customOpenAICompatibilityMode = customOpenAICompatibilityMode,
       ),
+      language = language,
+      themeMode = themeMode,
+      themeColor = themeColor,
+      authorityMode = authorityMode,
+      deepSeekThinkingEffort = deepSeekThinkingEffort,
+      networkEnabled = networkEnabled,
+      webSearchEnabled = webSearchEnabled,
+      braveSearchApiKey = braveSearchApiKey,
+      backgroundKeepAliveEnabled = backgroundKeepAliveEnabled,
+      workspaceMemoryEnabled = workspaceMemoryEnabled,
+      inputBarVisible = inputBarVisible,
     )
-    val settings = settingsController.setAppearance(
-      settingsController.setLanguage(modelSettings, language),
-      themeMode,
-      themeColor,
-    )
-    val settingsWithAuthority = settingsController.setAuthorityMode(settings, authorityMode)
-    val settingsWithThinking = settingsController.setDeepSeekThinkingEffort(settingsWithAuthority, deepSeekThinkingEffort)
-    val settingsWithNetwork = settingsController.setNetworkEnabled(settingsWithThinking, networkEnabled)
-    val settingsWithSearch = settingsController.setWebSearch(settingsWithNetwork, webSearchEnabled, braveSearchApiKey)
-    val settingsWithBackground = settingsController.setBackgroundKeepAlive(settingsWithSearch, backgroundKeepAliveEnabled)
-    val settingsWithMemory = settingsController.setWorkspaceMemoryEnabled(settingsWithBackground, workspaceMemoryEnabled)
-    val finalSettings = settingsController.setInputBarVisible(settingsWithMemory, inputBarVisible)
     if (backgroundKeepAliveEnabled) {
       if (!current.isRunning) startBackgroundKeepAliveService()
     } else if (!current.isRunning) {
@@ -702,14 +701,6 @@ class AgentController(
     }
     val draft = settingsController.draftFor(finalSettings)
     workspaceController.syncFloveraSettings(finalSettings)
-    val workspaceSnapshot = workspaceController.snapshot(finalSettings.selectedHtmlPath)
-    val selectedHtmlTarget = selectedHtmlTarget(workspaceSnapshot)
-    val workspaceRootUrl = workspaceRootUrl(selectedHtmlTarget.url, workspaceSnapshot)
-    val artifactServerStatuses = workspacePythonHttpRuntime.statusesFor(workspaceSnapshot.workspaceArtifacts)
-    val selectedHtmlLoading = selectedHtmlTarget.requiresBackend &&
-      selectedHtmlTarget.url == null &&
-      selectedHtmlTarget.error.isBlank() &&
-      current.selectedHtmlLoading
     _state.update {
       it.copy(
         settings = finalSettings,
@@ -719,24 +710,6 @@ class AgentController(
         customOpenAIBaseUrlDraft = draft.customOpenAIBaseUrl,
         customOpenAIChatCompletionsPathDraft = draft.customOpenAIChatCompletionsPath,
         customOpenAICompatibilityModeDraft = draft.customOpenAICompatibilityMode,
-        workspaceFiles = workspaceSnapshot.files,
-        workspaceTree = workspaceSnapshot.tree,
-        htmlFiles = workspaceSnapshot.htmlFiles,
-        workspaceArtifacts = workspaceSnapshot.workspaceArtifacts,
-        workspaceArtifactJobs = workspaceSnapshot.workspaceArtifactJobs,
-        workspaceArtifactServerStatuses = artifactServerStatuses,
-        selectedHtmlPath = workspaceSnapshot.selectedHtmlPath,
-        selectedHtmlUrl = selectedHtmlTarget.url,
-        selectedHtmlLoading = selectedHtmlLoading,
-        selectedHtmlError = selectedHtmlTarget.error,
-        selectedPreviewPath = workspaceSnapshot.selectedHtmlPath,
-        selectedPreviewContent = "",
-        selectedPreviewMimeType = if (workspaceSnapshot.selectedHtmlPath.isBlank()) "" else "text/html",
-        selectedPreviewUri = "",
-        workspaceRootUrl = workspaceRootUrl,
-        workspaceSnapshots = workspaceSnapshot.snapshots,
-        settingsProposals = workspaceSnapshot.settingsProposals,
-        controlledToolProposals = workspaceSnapshot.controlledToolProposals,
         status = "Settings saved",
       )
     }

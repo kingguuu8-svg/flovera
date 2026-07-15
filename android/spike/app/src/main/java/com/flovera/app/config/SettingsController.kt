@@ -68,6 +68,46 @@ class SettingsController(private val store: SettingsStore) {
   }
 
   fun saveModelSettings(settings: AppSettings, draft: ModelSettingsDraft): AppSettings {
+    val updated = buildModelSettings(settings, draft)
+    store.save(updated)
+    return updated
+  }
+
+  fun saveModelSettingsBatch(
+    settings: AppSettings,
+    draft: ModelSettingsDraft,
+    language: String,
+    themeMode: String,
+    themeColor: String,
+    authorityMode: String,
+    deepSeekThinkingEffort: String,
+    networkEnabled: Boolean,
+    webSearchEnabled: Boolean,
+    braveSearchApiKey: String,
+    backgroundKeepAliveEnabled: Boolean,
+    workspaceMemoryEnabled: Boolean,
+    inputBarVisible: Boolean,
+  ): AppSettings {
+    val updated = buildModelSettings(settings, draft).copy(
+      language = normalizeLanguageId(language),
+      themeMode = normalizeThemeMode(themeMode),
+      themeColor = normalizeThemeColor(themeColor),
+      agentAuthorityMode = normalizeAuthorityModeId(authorityMode),
+      deepSeekThinkingEffort = normalizeDeepSeekThinkingEffortId(deepSeekThinkingEffort),
+      networkEnabled = networkEnabled,
+      networkUserConfigured = true,
+      webSearchEnabled = webSearchEnabled,
+      webSearchUserConfigured = true,
+      braveSearchApiKey = normalizeBraveSearchApiKey(braveSearchApiKey),
+      backgroundKeepAliveEnabled = backgroundKeepAliveEnabled,
+      workspaceMemoryEnabled = workspaceMemoryEnabled,
+      inputBarVisible = inputBarVisible,
+    )
+    store.save(updated)
+    return updated
+  }
+
+  private fun buildModelSettings(settings: AppSettings, draft: ModelSettingsDraft): AppSettings {
     val provider = ModelProviderCatalog.findSelectableProvider(draft.providerId) ?: ModelProviderCatalog.defaultProvider
     val model = if (provider.id == draft.providerId.trim().lowercase()) {
       draft.model.trim().ifBlank { provider.defaultModel }
@@ -85,7 +125,6 @@ class SettingsController(private val store: SettingsStore) {
         ),
       )
       .withApiKey(provider.id, draft.apiKey)
-    store.save(updated)
     return updated
   }
 

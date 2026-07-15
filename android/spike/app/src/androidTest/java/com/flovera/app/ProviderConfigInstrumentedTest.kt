@@ -1965,6 +1965,52 @@ class ProviderConfigInstrumentedTest {
   }
 
   @Test
+  fun settingsControllerPersistsFullSettingsBatchAsOneConsistentState() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val root = File(context.cacheDir, "settings-batch-${System.currentTimeMillis()}").apply {
+      deleteRecursively()
+      mkdirs()
+    }
+    val store = SettingsStore(context, File(root, "settings.json"))
+    val controller = SettingsController(store)
+
+    val saved = controller.saveModelSettingsBatch(
+      settings = AppSettings(),
+      draft = ModelSettingsDraft(
+        providerId = "deepseek",
+        model = " deepseek-chat ",
+        apiKey = " batch-key ",
+      ),
+      language = "zh",
+      themeMode = "dark",
+      themeColor = "#c989b8",
+      authorityMode = "assisted",
+      deepSeekThinkingEffort = "low",
+      networkEnabled = false,
+      webSearchEnabled = false,
+      braveSearchApiKey = " brave-key ",
+      backgroundKeepAliveEnabled = true,
+      workspaceMemoryEnabled = false,
+      inputBarVisible = false,
+    )
+
+    assertEquals("deepseek-chat", saved.model)
+    assertEquals("batch-key", saved.apiKeyFor("deepseek"))
+    assertEquals("zh", saved.language)
+    assertEquals("dark", saved.themeMode)
+    assertEquals("#C989B8", saved.themeColor)
+    assertEquals("assisted", saved.agentAuthorityMode)
+    assertEquals("low", saved.deepSeekThinkingEffort)
+    assertFalse(saved.networkEnabled)
+    assertFalse(saved.webSearchEnabled)
+    assertEquals("brave-key", saved.braveSearchApiKey)
+    assertTrue(saved.backgroundKeepAliveEnabled)
+    assertFalse(saved.workspaceMemoryEnabled)
+    assertFalse(saved.inputBarVisible)
+    assertEquals(saved, store.load())
+  }
+
+  @Test
   fun settingsStoreEncryptsSettingsWithoutLeavingAtomicTempFiles() {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val store = SettingsStore(context)
