@@ -455,6 +455,7 @@ class SettingsController(private val store: SettingsStore) {
   private fun normalizeDeepSeekThinkingEffortId(effort: String): String {
     return when (effort) {
       "off" -> "off"
+      "low" -> "low"
       "max" -> "max"
       else -> "high"
     }

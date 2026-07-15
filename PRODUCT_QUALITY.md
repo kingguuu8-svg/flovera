@@ -1159,7 +1159,9 @@ Remaining work is richer artifact validation and broader UX polish.
 
 ### UI Responsiveness Boundary
 
-Status: Partial implementation in progress. Flovera now treats foreground UI
+Status: Implemented for the measured Android interaction lanes, with large-
+session profiling and future blocking adapters remaining as explicit scope.
+Flovera now treats foreground UI
 responsiveness as a product boundary instead of an incidental optimization. The
 Android process starts a lightweight frame watchdog that logs slow UI frame gaps
 with the currently active Flovera background tasks. App-owned background work
@@ -1235,6 +1237,13 @@ Implemented coverage:
   summaries on demand, while opening a row loads the full conversation. Session
   reads are cached by file stamp inside the process, and empty-session pruning is
   folded into the one list pass instead of decoding the catalog twice.
+- A cold session-summary scan now reads only a bounded JSON header to extract
+  identity, ordering, archive/pin metadata, and whether messages exist. It
+  falls back to the legacy full-file parser for unusual or malformed layouts;
+  opening a selected session still performs the full decode. On device
+  `e9512097`, the observed `loadSessionCatalog` wait fell from 1.35–1.67 s to
+  about 313 ms after this change, while `loadActiveSession` measured about
+  303 ms.
 - Workspace tree, HTML, and artifact discovery now share one recursive catalog
   traversal with propagated relative paths, cache the result until a workspace
   mutation invalidates it, and skip unchanged Flovera metadata/demo seed writes.
@@ -1278,6 +1287,12 @@ Implemented coverage:
   `workspace_command_run` while a long-running Python loop is active; the
   cancellation assertions require return before the configured five-second
   timeout.
+- Real-device update-only verification on `e9512097` passed the full
+  `ProviderConfigInstrumentedTest` (62 tests), `SessionManagementInstrumentedTest`
+  (29 tests), `AgentRunControllerInstrumentedTest` (20 executed tests; one
+  opt-in live-provider test skipped), and all three direct/runtime/workspace
+  cancellation tests. The main and test APK first-install timestamps remained
+  unchanged, preserving app data and permissions.
 - Assistant draft updates are coalesced before entering Compose state, with
   run-boundary flushes for session updates, finish, interrupt, and guidance
   events so the final visible history remains complete.
@@ -1285,18 +1300,16 @@ Implemented coverage:
 Remaining work:
 
 - Continue profiling the Android Compose first-frame path and the full
-  conversation decode for very large sessions. Before the latest shell/settings
-  split, the connected-device baseline was about 2.18 s cold launch, about
-  0.87 s workspace initialization, and about 0.93 s asynchronous active-session
-  load with a 146 MB workspace and 21 MB session store; the latest code still
-  needs a real-device measurement after these changes.
+  conversation decode for very large sessions. The latest measured device
+  traces cover controller startup, session-summary loading, and active-session
+  loading; first-frame and full-conversation decode need a dedicated trace.
 - Extend cooperative cancellation coverage to artifact inspection/package
   installation and any future blocking tool adapters as their measured wait
   becomes user-visible; the primary bounded Python, workspace-command, and
   artifact-job paths now have cancellation propagation.
-- Reconnect the real device and rerun session-management, preview, queued-run,
-  startup, and interruption flows; the current APK/test APK build is complete,
-  but this verification is pending because serial `e9512097` is offline.
+- Complete the remaining preview/queued-run visual assertions against the
+  current bottom-bar design; the focused performance, session, provider, and
+  cancellation gates already run on the connected device.
 - Promote repeated UI freeze events from transient status into a richer
   diagnostics surface or session log entry when the app grows a diagnostics
   panel.

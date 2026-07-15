@@ -51,6 +51,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -1644,7 +1645,7 @@ class ProviderConfigInstrumentedTest {
         createAutoSnapshot = false,
       )
 
-      controller.refreshWorkspaceFiles()
+      runBlocking { controller.refreshWorkspaceFiles().join() }
       val state = controller.state.value
       val audit = workspace.readFile(".flovera/logs/full-authority.jsonl")
 
@@ -2080,7 +2081,7 @@ class ProviderConfigInstrumentedTest {
       assertTrue(result.warning.orEmpty().contains("invalid"))
 
       val controller = AgentController(context)
-      assertTrue(controller.state.value.status.contains("invalid"))
+      assertTrue("status=${controller.state.value.status}", controller.state.value.status.contains("invalid"))
     } finally {
       store.save(original)
     }
@@ -2112,10 +2113,10 @@ class ProviderConfigInstrumentedTest {
         createAutoSnapshot = false,
       )
 
-      controller.refreshWorkspaceFiles()
+      runBlocking { controller.refreshWorkspaceFiles().join() }
       assertEquals(1, controller.state.value.settingsProposals.size)
 
-      controller.approveSettingsProposal(".flovera/proposals/theme.json")
+      runBlocking { controller.approveSettingsProposal(".flovera/proposals/theme.json")?.join() }
 
       assertEquals("#9AA7FF", controller.state.value.settings.themeColor)
       assertEquals("index.html", controller.state.value.settings.selectedHtmlPath)

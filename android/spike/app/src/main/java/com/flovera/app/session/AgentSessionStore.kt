@@ -202,6 +202,13 @@ class AgentSessionStore(
             summaryOnly = true,
           )
         }
+        readSummaryHeader(file)?.let { header ->
+          if (!header.hasMessages) {
+            delete(header.summary.id.ifBlank { file.nameWithoutExtension })
+            return@mapNotNull null
+          }
+          return@mapNotNull summarySession(file, header.summary)
+        }
         val content = runCatching { readUtf8Text(file) }.getOrNull() ?: return@mapNotNull null
         if (!serializedMessagesArePresent(content)) {
           sessionCache.remove(file.nameWithoutExtension)
@@ -210,15 +217,7 @@ class AgentSessionStore(
         }
         val summary = runCatching { json.decodeFromString<AgentSessionSummaryPayload>(content) }.getOrNull()
           ?: return@mapNotNull null
-        AgentSession(
-          id = summary.id.ifBlank { file.nameWithoutExtension },
-          title = summary.title,
-          createdAtMillis = summary.createdAtMillis,
-          updatedAtMillis = summary.updatedAtMillis,
-          archivedAtMillis = summary.archivedAtMillis,
-          pinnedAtMillis = summary.pinnedAtMillis,
-          summaryOnly = true,
-        )
+        summarySession(file, summary)
       }
       ?.filter { includeArchived || it.archivedAtMillis == null }
       ?.sortedWith(sessionSort)
@@ -424,10 +423,52 @@ class AgentSessionStore(
     return valueStart < content.length && content[valueStart] != ']'
   }
 
+  private fun readSummaryHeader(file: File): SummaryHeader? {
+    val prefix = runCatching {
+      file.inputStream().buffered().use { input ->
+        val bytes = ByteArray(SESSION_SUMMARY_PREFIX_BYTES)
+        val count = input.read(bytes)
+        if (count <= 0) "" else String(bytes, 0, count, Charsets.UTF_8)
+      }
+    }.getOrNull() ?: return null
+    val messagesKey = prefix.indexOf("\"messages\":")
+    if (messagesKey < 0) return null
+    val arrayStart = prefix.indexOf('[', messagesKey)
+    if (arrayStart < 0) return null
+    var valueStart = arrayStart + 1
+    while (valueStart < prefix.length && prefix[valueStart].isWhitespace()) valueStart += 1
+    if (valueStart >= prefix.length) return null
+    val metadata = prefix.substring(0, messagesKey)
+      .trimEnd()
+      .removeSuffix(",")
+      .plus("\n}")
+    val summary = runCatching { json.decodeFromString<AgentSessionSummaryPayload>(metadata) }.getOrNull()
+      ?: return null
+    return SummaryHeader(summary = summary, hasMessages = prefix[valueStart] != ']')
+  }
+
+  private fun summarySession(file: File, summary: AgentSessionSummaryPayload): AgentSession {
+    return AgentSession(
+      id = summary.id.ifBlank { file.nameWithoutExtension },
+      title = summary.title,
+      createdAtMillis = summary.createdAtMillis,
+      updatedAtMillis = summary.updatedAtMillis,
+      archivedAtMillis = summary.archivedAtMillis,
+      pinnedAtMillis = summary.pinnedAtMillis,
+      summaryOnly = true,
+    )
+  }
+
   private companion object {
     const val CONTEXT_RECORD_LIMIT = 80
+    const val SESSION_SUMMARY_PREFIX_BYTES = 64 * 1024
 
     val sessionSort = compareByDescending<AgentSession> { it.pinnedAtMillis != null }
       .thenByDescending { it.updatedAtMillis }
   }
+
+  private data class SummaryHeader(
+    val summary: AgentSessionSummaryPayload,
+    val hasMessages: Boolean,
+  )
 }

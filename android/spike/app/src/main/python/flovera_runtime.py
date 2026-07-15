@@ -17,6 +17,8 @@ _sessions = {}
 _run_lock = threading.RLock()
 _cancelled_runs = set()
 _cancelled_runs_lock = threading.RLock()
+_java_cancellation_registry = None
+_java_cancellation_registry_loaded = False
 
 
 class FloveraPythonBoundaryError(PermissionError):
@@ -46,20 +48,45 @@ def _clear_cancelled_run(run_id):
         return
     with _cancelled_runs_lock:
         _cancelled_runs.discard(key)
+    if _java_cancellation_registry is not None:
+        try:
+            _java_cancellation_registry.clear(key)
+        except Exception:
+            pass
 
 
-def _is_run_cancelled(run_id):
+def _is_run_cancelled(run_id, cancellation_token=None):
+    if cancellation_token is not None:
+        try:
+            if cancellation_token.get():
+                return True
+        except Exception:
+            pass
     key = str(run_id or "")
     if not key:
         return False
+    global _java_cancellation_registry, _java_cancellation_registry_loaded
+    if not _java_cancellation_registry_loaded:
+        _java_cancellation_registry_loaded = True
+        try:
+            from com.flovera.app.koog import FloveraPythonCancellationRegistry
+            _java_cancellation_registry = FloveraPythonCancellationRegistry
+        except Exception:
+            _java_cancellation_registry = None
+    if _java_cancellation_registry is not None:
+        try:
+            if _java_cancellation_registry.isCancelled(key):
+                return True
+        except Exception:
+            pass
     with _cancelled_runs_lock:
         return key in _cancelled_runs
 
 
-def run_code(code, workspace_root, cwd, timeout_ms, max_output_chars, session_id, reset_session, scope, network_enabled, environment_json="{}", run_id=""):
+def run_code(code, workspace_root, cwd, timeout_ms, max_output_chars, session_id, reset_session, scope, network_enabled, environment_json="{}", run_id="", cancellation_token=None):
     with _run_lock:
         started_at = time.monotonic()
-        if _is_run_cancelled(run_id):
+        if _is_run_cancelled(run_id, cancellation_token):
             _clear_cancelled_run(run_id)
             return json.dumps(
                 {
@@ -93,16 +120,16 @@ def run_code(code, workspace_root, cwd, timeout_ms, max_output_chars, session_id
         old_dont_write_bytecode = sys.dont_write_bytecode
         old_environ = os.environ.copy()
         deadline = time.monotonic() + timeout_s
-        patches = _install_boundaries(root, start_cwd, scope, bool(network_enabled), deadline, run_id)
+        patches = _install_boundaries(root, start_cwd, scope, bool(network_enabled), deadline, run_id, cancellation_token)
         old_trace = sys.gettrace()
         try:
-            if _is_run_cancelled(run_id):
+            if _is_run_cancelled(run_id, cancellation_token):
                 raise FloveraPythonCancelled()
             os.chdir(start_cwd)
             tempfile.tempdir = start_cwd
             sys.dont_write_bytecode = True
             os.environ.update(_safe_environment(environment_json))
-            sys.settrace(_timeout_trace(deadline, run_id))
+            sys.settrace(_timeout_trace(deadline, run_id, cancellation_token))
             with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
                 exec(compile(code, "<flovera-python-run>", "exec"), globals_dict)
         except FloveraPythonCancelled:
@@ -189,9 +216,9 @@ def _install_workspace_site_packages(root):
         sys.path.insert(0, site_packages)
 
 
-def _timeout_trace(deadline, run_id):
+def _timeout_trace(deadline, run_id, cancellation_token=None):
     def trace(frame, event, arg):
-        if _is_run_cancelled(run_id):
+        if _is_run_cancelled(run_id, cancellation_token):
             raise FloveraPythonCancelled()
         if time.monotonic() > deadline:
             raise FloveraPythonTimeout()
@@ -315,7 +342,7 @@ def _check_flovera_scope(root, path, scope, write):
         raise FloveraPythonBoundaryError("Path is outside python_run metadata scope: " + rel)
 
 
-def _install_boundaries(root, start_cwd, scope, network_enabled, deadline, run_id):
+def _install_boundaries(root, start_cwd, scope, network_enabled, deadline, run_id, cancellation_token=None):
     current_cwd = [start_cwd]
     patches = []
     original_open = builtins.open
@@ -364,7 +391,7 @@ def _install_boundaries(root, start_cwd, scope, network_enabled, deadline, run_i
         target = time.monotonic() + max(0.0, float(seconds))
         while True:
             now = time.monotonic()
-            if _is_run_cancelled(run_id):
+            if _is_run_cancelled(run_id, cancellation_token):
                 raise FloveraPythonCancelled()
             if now >= deadline:
                 raise FloveraPythonTimeout()

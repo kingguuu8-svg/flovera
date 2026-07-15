@@ -85,10 +85,14 @@ class SessionManagementInstrumentedTest {
     val emptyDraft = store.create("Empty draft")
     val persisted = store.appendMessage(
       store.create("Persisted ${System.currentTimeMillis()}"),
-      SessionMessage(role = "user", content = "catalog me"),
+      SessionMessage(role = "user", content = "catalog me ${"x".repeat(128_000)}"),
     )
 
-    val summary = store.listSummaries().single()
+    val coldStore = AgentSessionStore(
+      InstrumentationRegistry.getInstrumentation().targetContext,
+      harness.sessionsRoot,
+    )
+    val summary = coldStore.listSummaries().single()
 
     assertEquals(persisted.id, summary.id)
     assertEquals(persisted.title, summary.title)

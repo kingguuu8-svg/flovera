@@ -8,8 +8,10 @@ import com.chaquo.python.android.AndroidPlatform
 import com.flovera.app.workspace.WorkspaceManager
 import java.io.File
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.InternalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.Serializable
@@ -48,16 +50,21 @@ class PythonRunTool(
     val environment: Map<String, String> = emptyMap(),
   )
 
+  @OptIn(InternalCoroutinesApi::class)
   override suspend fun execute(args: Args): String {
     val runtime = FloveraPythonRuntime(workspace, networkEnabled, secretEnvironment)
     val runId = UUID.randomUUID().toString()
-    val cancellationHandle = coroutineContext[Job]?.invokeOnCompletion { cause ->
-      if (cause is CancellationException) runtime.cancel(runId)
+    val cancellationToken = AtomicBoolean(false)
+    val cancellationHandle = coroutineContext[Job]?.invokeOnCompletion(
+      onCancelling = true,
+      invokeImmediately = true,
+    ) { cause ->
+      if (cause is CancellationException) runtime.cancel(runId, cancellationToken)
     }
     return try {
       coroutineContext.ensureActive()
       val result = try {
-        runtime.run(args, runId)
+        runtime.run(args, runId, cancellationToken)
       } catch (error: CancellationException) {
         throw error
       } catch (error: Throwable) {
@@ -149,9 +156,13 @@ class FloveraPythonRuntime(
     return run(args, UUID.randomUUID().toString())
   }
 
-  fun run(args: PythonRunTool.Args, runId: String): String {
+  fun run(
+    args: PythonRunTool.Args,
+    runId: String,
+    cancellationToken: AtomicBoolean? = null,
+  ): String {
     val cwd = workspace.workspaceRuntimeDirectory(args.cwd)
-    val result = runRaw(args, runId)
+    val result = runRaw(args, runId, cancellationToken)
     return formatResult(result, workspace.workspaceRelativePath(cwd), args.timeoutMs.coerceIn(MIN_TIMEOUT_MS, MAX_TIMEOUT_MS))
   }
 
@@ -159,7 +170,11 @@ class FloveraPythonRuntime(
     return runRaw(args, UUID.randomUUID().toString())
   }
 
-  fun runRaw(args: PythonRunTool.Args, runId: String): PythonRunResult {
+  fun runRaw(
+    args: PythonRunTool.Args,
+    runId: String,
+    cancellationToken: AtomicBoolean? = null,
+  ): PythonRunResult {
     val cwd = workspace.workspaceRuntimeDirectory(args.cwd)
     if (!cwd.exists()) {
       return PythonRunResult(status = "error", exitCode = 1, stderr = "Python cwd does not exist: ${args.cwd}\n")
@@ -188,6 +203,7 @@ class FloveraPythonRuntime(
       networkEnabled,
       json.encodeToString(secretEnvironment + args.environment),
       runId,
+      cancellationToken,
     ).toString()
     return json.decodeFromString<PythonRunResult>(jsonText)
   }
@@ -203,6 +219,7 @@ class FloveraPythonRuntime(
     snapshotBeforeRun: Boolean = false,
     environment: Map<String, String> = emptyMap(),
     runId: String = UUID.randomUUID().toString(),
+    cancellationToken: AtomicBoolean? = null,
   ): PythonRunResult {
     val cwdFile = workspace.workspaceRuntimeDirectory(cwd)
     if (!cwdFile.exists()) {
@@ -241,11 +258,14 @@ class FloveraPythonRuntime(
         environment = environment,
       ),
       runId,
+      cancellationToken,
     )
   }
 
-  fun cancel(runId: String) {
-    if (runId.isBlank() || !Python.isStarted()) return
+  fun cancel(runId: String, cancellationToken: AtomicBoolean? = null) {
+    FloveraPythonCancellationRegistry.cancel(runId)
+    cancellationToken?.set(true)
+    if (cancellationToken != null || runId.isBlank() || !Python.isStarted()) return
     runCatching {
       Python.getInstance().getModule("flovera_runtime").callAttr("cancel_run", runId)
     }

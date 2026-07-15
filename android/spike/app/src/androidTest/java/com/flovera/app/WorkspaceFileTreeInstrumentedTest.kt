@@ -43,6 +43,7 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
 import kotlinx.coroutines.Dispatchers
@@ -2871,6 +2872,38 @@ class WorkspaceFileTreeInstrumentedTest {
     job.cancelAndJoin()
 
     assertTrue("Python cancellation should return before the timeout", System.currentTimeMillis() - cancelledAt < 3_000)
+  }
+
+  @Test
+  fun pythonRuntimeCancellationTokenStopsLongRunningCode() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val workspace = WorkspaceManager(context, "python-runtime-cancel-${System.currentTimeMillis()}")
+    val runtime = FloveraPythonRuntime(workspace, networkEnabled = false)
+    val cancellationToken = AtomicBoolean(false)
+    val marker = File(workspace.root, "runtime-cancel-started.txt")
+    val worker = thread(start = true, name = "flovera-python-cancel-test") {
+      runtime.runRaw(
+        PythonRunTool.Args(
+          code = """
+          with open("runtime-cancel-started.txt", "w") as marker_file:
+              marker_file.write("started")
+          while True:
+              pass
+          """.trimIndent(),
+          timeoutMs = 5_000,
+          snapshotBeforeRun = false,
+        ),
+        runId = "runtime-cancel-test-${System.currentTimeMillis()}",
+        cancellationToken = cancellationToken,
+      )
+    }
+
+    val startedAt = System.currentTimeMillis()
+    while (!marker.isFile && System.currentTimeMillis() - startedAt < 10_000) Thread.sleep(50)
+    cancellationToken.set(true)
+    worker.join(3_000)
+
+    assertFalse("The JVM cancellation token should stop Python before the timeout", worker.isAlive)
   }
 
   @Test

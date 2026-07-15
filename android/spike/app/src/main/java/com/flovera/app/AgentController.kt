@@ -44,11 +44,13 @@ import com.flovera.app.workspace.WorkspaceSnapshotRecord
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.InternalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.currentCoroutineContext
@@ -226,6 +228,7 @@ class AgentController(
   private var sessionCatalogJob: Job? = null
   @Volatile private var sessionCatalogLoaded = false
   @Volatile private var workspaceInitialized = false
+  private var settingsLoadWarning: String? = null
 
   private val _state = MutableStateFlow(AgentScreenState())
   val state: StateFlow<AgentScreenState> = _state
@@ -312,6 +315,7 @@ class AgentController(
     deferSessionCatalog: Boolean = false,
     deferSessionLoad: Boolean = false,
   ) {
+    settingsLoadWarning = settingsLoad.warning
     val session = if (deferSessionLoad) {
       null
     } else {
@@ -473,7 +477,12 @@ class AgentController(
       return
     }
     if (sessionCatalogLoaded || sessionCatalogJob?.isActive == true) return
-    _state.update { it.copy(sessionsLoading = true, status = "Loading sessions...") }
+    _state.update {
+      it.copy(
+        sessionsLoading = true,
+        status = settingsLoadWarning ?: "Loading sessions...",
+      )
+    }
     val queuedAtMillis = SystemClock.uptimeMillis()
     sessionCatalogJob = workspaceQueryScope.launch {
       runCatching {
@@ -497,6 +506,7 @@ class AgentController(
         } else {
           current.settings
         }
+        val warning = settingsLoadWarning
         _state.update {
           it.copy(
             settings = selectedSettings,
@@ -505,7 +515,7 @@ class AgentController(
             archivedSessions = sessionLists.archived,
             sessionsLoading = false,
             isSwitchingSession = it.isSwitchingSession || needsSessionLoad,
-            status = when {
+            status = warning ?: when {
               needsSessionLoad -> "Loading conversation..."
               it.status == "Loading sessions..." -> "Ready"
               else -> it.status
@@ -884,9 +894,9 @@ class AgentController(
     }
   }
 
-  fun refreshWorkspaceFiles() {
+  fun refreshWorkspaceFiles(): Job {
     _state.update { it.copy(status = "Refreshing workspace...") }
-    launchWorkspaceMutation("Workspace refresh", "refreshWorkspaceFiles") {
+    return launchWorkspaceMutation("Workspace refresh", "refreshWorkspaceFiles") {
       refreshWorkspaceState(status = "Workspace refreshed")
     }
   }
@@ -911,9 +921,9 @@ class AgentController(
     lastUiFrameWarningAtMillis = now
   }
 
-  private fun launchWorkspaceMutation(surface: String, taskName: String, block: () -> Unit) {
+  private fun launchWorkspaceMutation(surface: String, taskName: String, block: () -> Unit): Job {
     val queuedAtMillis = SystemClock.uptimeMillis()
-    workspaceMutationScope.launch {
+    return workspaceMutationScope.launch {
       initializationJob?.join()
       runCatching {
         FloveraPerformance.traceQueued("workspace-mutation", taskName, queuedAtMillis, block)
@@ -1172,11 +1182,11 @@ class AgentController(
     }
   }
 
-  fun approveSettingsProposal(path: String) {
-    if (rejectMutationWhileRunning("Settings proposals")) return
+  fun approveSettingsProposal(path: String): Job? {
+    if (rejectMutationWhileRunning("Settings proposals")) return null
     val current = _state.value
     _state.update { it.copy(status = "Applying setting change...") }
-    launchWorkspaceMutation("Settings proposal apply", "approveSettingsProposal") {
+    return launchWorkspaceMutation("Settings proposal apply", "approveSettingsProposal") {
       val proposal = workspaceController.listSettingsProposals().firstOrNull { it.path == path }
       if (proposal == null) {
         _state.update { it.copy(status = "Setting change not found") }
@@ -1986,6 +1996,7 @@ class AgentController(
     }
   }
 
+  @OptIn(InternalCoroutinesApi::class)
   private suspend fun executeWorkspaceArtifactJob(jobId: String, target: WorkspaceArtifactActionTarget, inputJson: String) {
     val started = artifactJobCache[jobId] ?: workspaceController.readWorkspaceArtifactJob(jobId) ?: return
     persistWorkspaceArtifactJob(started.copy(status = "running", error = ""))
@@ -1994,8 +2005,12 @@ class AgentController(
       networkEnabled = target.action.networkEnabled,
     )
     val runId = UUID.randomUUID().toString()
-    val cancellationHandle = currentCoroutineContext()[Job]?.invokeOnCompletion { cause ->
-      if (cause is CancellationException) runtime.cancel(runId)
+    val cancellationToken = AtomicBoolean(false)
+    val cancellationHandle = currentCoroutineContext()[Job]?.invokeOnCompletion(
+      onCancelling = true,
+      invokeImmediately = true,
+    ) { cause ->
+      if (cause is CancellationException) runtime.cancel(runId, cancellationToken)
     }
     val result = try {
       currentCoroutineContext().ensureActive()
@@ -2026,6 +2041,7 @@ class AgentController(
           sessionId = "artifact-$jobId",
           environment = workspaceArtifactActionEnvironment(target),
           runId = runId,
+          cancellationToken = cancellationToken,
         )
       }
     } finally {
