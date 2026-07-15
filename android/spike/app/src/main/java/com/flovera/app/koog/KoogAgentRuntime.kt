@@ -177,13 +177,16 @@ class KoogAgentRuntime(
       throw error
     } catch (error: Throwable) {
       if (frameForwarder.modelTextDeltaCount == 0 && isStreamingUnsupported(error)) {
-        run(
+        runAgent(
           input = input,
           agentRunId = agentRunId,
           settings = settings,
           session = session,
           workspace = workspace,
           recorder = recorder,
+          frameForwarder = null,
+          streaming = false,
+          preparedContext = preparedContext,
         )
       } else {
         throw error

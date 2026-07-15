@@ -15,6 +15,7 @@ import com.flovera.app.agent.AgentRunEvent
 import com.flovera.app.agent.AgentRunEventSink
 import com.flovera.app.agent.AgentRunEventType
 import com.flovera.app.config.AppSettings
+import com.flovera.app.koog.AgentRequestContext
 import com.flovera.app.koog.KoogAgentRuntime
 import com.flovera.app.koog.ToolEventRecorder
 import com.flovera.app.session.AgentSessionStore
@@ -254,7 +255,7 @@ class KoogAgentRuntimeStreamingInstrumentedTest {
     val runtime = KoogAgentRuntime(clientFactory = { _, _, _ -> fakeClient })
     val events = mutableListOf<AgentRunEvent>()
 
-    val output = runtime.runStreaming(
+    val output = runtime.runStreamingWithContext(
       input = "Use fallback.",
       agentRunId = "${session.id}-streaming-fallback",
       settings = AppSettings(apiKey = "fake-key", activeWorkspaceId = workspaceId, activeSessionId = session.id),
@@ -262,6 +263,16 @@ class KoogAgentRuntimeStreamingInstrumentedTest {
       workspace = workspace,
       recorder = ToolEventRecorder(),
       eventSink = AgentRunEventSink { event -> events += event },
+      preparedContext = AgentRequestContext(
+        systemPrompt = "prepared system",
+        userPrompt = "prepared user",
+        workspaceUserRules = "",
+        historyEntries = emptyList(),
+        workspaceMemory = "",
+        workspaceTodo = "",
+        skillDescriptors = "",
+        secretRefs = "",
+      ),
     )
 
     assertEquals("non-streaming fallback", output)
