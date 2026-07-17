@@ -30,6 +30,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -138,6 +140,7 @@ class AgentRunController(
           onRunEvent(event)
           runState.emit(event)
         }
+        currentCoroutineContext().ensureActive()
         onRunEvent(runStartedEvent)
         onStarted(startedSession, startDraft)
 
@@ -210,6 +213,7 @@ class AgentRunController(
           compressedSession.also {
             activeRunEvents = buildCompressedRunTimeline(activeRunEvents, compressedRecord)
             runState.replaceBaseTimeline(activeRunEvents, statusContent = "Working...")
+            currentCoroutineContext().ensureActive()
             onSessionUpdated(
               compressedSession,
               runState.draftMessage(),
@@ -344,6 +348,7 @@ class AgentRunController(
               baseTimelineEvents = retryBaseEvents,
               statusContent = "Retrying after updating context...",
             )
+            currentCoroutineContext().ensureActive()
             onSessionUpdated(currentSession, runState.draftMessage())
             recorder = newRecorder(currentSession)
             saveRunningCheckpoint(currentSession, recorder)
@@ -456,6 +461,7 @@ class AgentRunController(
           },
         )
         val updated = appendMessage(currentSession, assistantMessage)
+        currentCoroutineContext().ensureActive()
         onFinished(updated, result.isSuccess)
       } catch (error: CancellationException) {
         throw error

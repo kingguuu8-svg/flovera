@@ -245,6 +245,10 @@ class WorkspaceController(context: Context, workspaceId: String) {
     )
   }
 
+  fun invalidateCatalogCache() {
+    workspace.invalidateCatalogCache()
+  }
+
   private fun chooseHtmlPath(current: String, htmlFiles: List<String>): String {
     return when {
       current in htmlFiles -> current

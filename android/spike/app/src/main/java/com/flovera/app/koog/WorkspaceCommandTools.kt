@@ -147,6 +147,8 @@ class WorkspaceCommandRunTool(
       }
     } finally {
       cancellationHandle?.dispose()
+      FloveraPythonCancellationRegistry.clear(runId)
+      workspace.invalidateCatalogCache()
     }
     coroutineContext.ensureActive()
     recorder.record(

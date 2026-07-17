@@ -45,6 +45,7 @@ import java.io.File
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.coroutines.CancellationException
@@ -206,6 +207,7 @@ class AgentController(
   private val workspaceQueryScope = CoroutineScope(SupervisorJob() + FloveraDispatchers.workspaceQueryDispatcher)
   private val artifactRunJobs = ConcurrentHashMap<String, Job>()
   private val artifactJobCache = ConcurrentHashMap<String, WorkspaceArtifactJob>()
+  private val activeRunGeneration = AtomicLong(0L)
   private var selectedHtmlLoadJob: Job? = null
   private var previewSelectionJob: Job? = null
   @Volatile private var selectedHtmlLoadGeneration: Long = 0
@@ -472,10 +474,6 @@ class AgentController(
   }
 
   fun loadSessionCatalog() {
-    if (!workspaceInitialized) {
-      _state.update { it.copy(status = "Loading workspace; please wait before opening sessions") }
-      return
-    }
     if (sessionCatalogLoaded || sessionCatalogJob?.isActive == true) return
     _state.update {
       it.copy(
@@ -485,6 +483,7 @@ class AgentController(
     }
     val queuedAtMillis = SystemClock.uptimeMillis()
     sessionCatalogJob = workspaceQueryScope.launch {
+      initializationJob?.join()
       runCatching {
         FloveraPerformance.traceQueued("workspace-query", "loadSessionCatalog", queuedAtMillis) {
           sessionController.listSummaryState()
@@ -897,7 +896,7 @@ class AgentController(
   fun refreshWorkspaceFiles(): Job {
     _state.update { it.copy(status = "Refreshing workspace...") }
     return launchWorkspaceMutation("Workspace refresh", "refreshWorkspaceFiles") {
-      refreshWorkspaceState(status = "Workspace refreshed")
+      refreshWorkspaceState(status = "Workspace refreshed", invalidateWorkspaceCatalog = true)
     }
   }
 
@@ -1642,6 +1641,7 @@ class AgentController(
 
   private fun startAgentRun(input: AgentRunInput, session: AgentSession) {
     val current = _state.value
+    val runGeneration = activeRunGeneration.incrementAndGet()
     draftOriginSessionId = null
     workspaceController.selectActiveSession(session.id)
     clearPendingActiveRunGuidance()
@@ -1667,101 +1667,117 @@ class AgentController(
       appendCompressionDivider = sessionController::appendCompressionDivider,
       appendPromptContextBlocks = sessionController::appendPromptContextBlocks,
       appendMessage = sessionController::appendMessage,
-      additionalTranscriptEvents = { runTranscriptEvents.toList() },
-      guidanceProvider = { consumeGuidanceForActiveRun() },
+      additionalTranscriptEvents = { synchronized(runTranscriptEvents) { runTranscriptEvents.toList() } },
+      guidanceProvider = { consumeGuidanceForActiveRun(runGeneration, runTranscriptEvents) },
       onStarted = { withUser, draft ->
-        val settings = current.settings.copy(activeSessionId = withUser.id)
-        notifyAgentRunRunning(draft.content, force = true)
-        _state.update {
-          it.copy(
-            settings = settings,
-            input = "",
-            isRunning = true,
-            status = "Running agent loop...",
-            assistantDraft = draft,
-            session = withUser,
-            sessions = upsertSession(it.sessions, withUser),
-          )
-        }
-        launchWorkspaceMutation("Agent run start", "persistActiveRunSession") {
-          workspaceController.setActiveSession(withUser.id)
-          settingsController.setActiveSession(current.settings, withUser.id)
+        dispatchAgentRunCallback(runGeneration) {
+          val settings = current.settings.copy(activeSessionId = withUser.id)
+          notifyAgentRunRunning(draft.content, force = true)
+          _state.update {
+            it.copy(
+              settings = settings,
+              input = "",
+              isRunning = true,
+              status = "Running agent loop...",
+              assistantDraft = draft,
+              session = withUser,
+              sessions = upsertSession(it.sessions, withUser),
+            )
+          }
+          launchWorkspaceMutation("Agent run start", "persistActiveRunSession") {
+            workspaceController.setActiveSession(withUser.id)
+            settingsController.setActiveSession(current.settings, withUser.id)
+          }
         }
       },
       onDraft = { draft ->
-        notifyAgentRunRunning(draft.content.lineSequence().firstOrNull().orEmpty().ifBlank { "Working..." })
-        publishAssistantDraftThrottled(draft)
+        dispatchAgentRunCallback(runGeneration) {
+          notifyAgentRunRunning(draft.content.lineSequence().firstOrNull().orEmpty().ifBlank { "Working..." })
+          publishAssistantDraftThrottled(draft)
+        }
       },
       onSessionUpdated = { updatedSession, draft ->
-        flushPendingAssistantDraftNow()
-        notifyAgentRunRunning(draft.content)
-        _state.update {
-          it.copy(
-            session = updatedSession,
-            sessions = upsertSession(it.sessions, updatedSession),
-            assistantDraft = draft,
-          )
+        dispatchAgentRunCallback(runGeneration) {
+          flushPendingAssistantDraftNow()
+          notifyAgentRunRunning(draft.content)
+          _state.update {
+            it.copy(
+              session = updatedSession,
+              sessions = upsertSession(it.sessions, updatedSession),
+              assistantDraft = draft,
+            )
+          }
         }
       },
       onFinished = { updated, succeeded ->
-        flushPendingAssistantDraftNow()
-        activeRunJob = null
-        val unappliedGuidance = drainPendingActiveRunGuidance()
-        if (activeRunTranscriptEvents === runTranscriptEvents) {
-          activeRunTranscriptEvents = null
-        }
-        val status = if (succeeded) "Agent loop completed" else "Agent loop failed"
-        val queuedInputs = _state.value.queuedInputs
-        val nextInput = if (unappliedGuidance.isNotEmpty()) {
-          QueuedAgentInput(content = unappliedGuidance.joinToString("\n\n"), mode = QUEUED_INPUT_GUIDANCE)
-        } else {
-          queuedInputs.firstOrNull()
-        }
-        if (nextInput == null) {
-          resetAgentRunNotificationThrottle()
-          agentRunStatusNotifier.finished(succeeded)
-          if (_state.value.settings.backgroundKeepAliveEnabled) {
-            startBackgroundKeepAliveService()
+        dispatchAgentRunCallback(runGeneration) {
+          flushPendingAssistantDraftNow()
+          activeRunJob = null
+          val unappliedGuidance = drainPendingActiveRunGuidance()
+          if (activeRunTranscriptEvents === runTranscriptEvents) {
+            activeRunTranscriptEvents = null
           }
-          _state.update {
-            it.copy(
-              session = updated,
-              sessions = upsertSession(it.sessions, updated),
-              isRunning = false,
-              assistantDraft = null,
-              status = "Finalizing workspace...",
-            )
+          val status = if (succeeded) "Agent loop completed" else "Agent loop failed"
+          val queuedInputs = _state.value.queuedInputs
+          val nextInput = if (unappliedGuidance.isNotEmpty()) {
+            QueuedAgentInput(content = unappliedGuidance.joinToString("\n\n"), mode = QUEUED_INPUT_GUIDANCE)
+          } else {
+            queuedInputs.firstOrNull()
           }
-          launchWorkspaceMutation("Agent run finish", "finishAgentRun") {
-            refreshWorkspaceState(
-              session = updated,
-              isRunning = false,
-              status = status,
-            )
-          }
-        } else {
-          _state.update {
-            it.copy(
-              queuedInputs = if (unappliedGuidance.isNotEmpty()) it.queuedInputs else it.queuedInputs.drop(1),
-              session = updated,
-              sessions = upsertSession(it.sessions, updated),
-              isRunning = false,
-              assistantDraft = null,
-              status = "Starting queued message...",
-            )
-          }
-          notifyAgentRunRunning("Running queued message...", force = true)
-          startAgentRun(nextInput.toRunInput(), updated)
-          launchWorkspaceMutation("Agent run queue", "finishQueuedAgentRun") {
-            refreshWorkspaceState(
-              session = updated,
-              isRunning = false,
-              status = "Running queued message...",
-            )
+          if (nextInput == null) {
+            resetAgentRunNotificationThrottle()
+            agentRunStatusNotifier.finished(succeeded)
+            if (_state.value.settings.backgroundKeepAliveEnabled) {
+              startBackgroundKeepAliveService()
+            }
+            _state.update {
+              it.copy(
+                session = updated,
+                sessions = upsertSession(it.sessions, updated),
+                isRunning = false,
+                assistantDraft = null,
+                status = "Finalizing workspace...",
+              )
+            }
+            launchWorkspaceMutation("Agent run finish", "finishAgentRun") {
+              refreshWorkspaceState(
+                session = updated,
+                isRunning = false,
+                status = status,
+                invalidateWorkspaceCatalog = true,
+              )
+            }
+          } else {
+            _state.update {
+              it.copy(
+                queuedInputs = if (unappliedGuidance.isNotEmpty()) it.queuedInputs else it.queuedInputs.drop(1),
+                session = updated,
+                sessions = upsertSession(it.sessions, updated),
+                isRunning = false,
+                assistantDraft = null,
+                status = "Starting queued message...",
+              )
+            }
+            notifyAgentRunRunning("Running queued message...", force = true)
+            startAgentRun(nextInput.toRunInput(), updated)
+            launchWorkspaceMutation("Agent run queue", "finishQueuedAgentRun") {
+              refreshWorkspaceState(
+                session = updated,
+                isRunning = false,
+                status = "Running queued message...",
+                invalidateWorkspaceCatalog = true,
+              )
+            }
           }
         }
       },
     )
+  }
+
+  private fun dispatchAgentRunCallback(generation: Long, block: () -> Unit) {
+    uiStateScope.launch {
+      if (activeRunGeneration.get() == generation) block()
+    }
   }
 
   private fun queueGuidanceForActiveRun(guidance: String) {
@@ -1857,38 +1873,50 @@ class AgentController(
     }
   }
 
-  private fun consumeGuidanceForActiveRun(): List<String> {
+  private fun consumeGuidanceForActiveRun(
+    generation: Long,
+    transcriptEvents: MutableList<ConversationTranscriptEvent>,
+  ): List<String> {
+    if (activeRunGeneration.get() != generation) return emptyList()
     val guidance = drainPendingActiveRunGuidance()
     if (guidance.isNotEmpty()) {
-      recordGuidanceAppliedForActiveRun(guidance)
+      recordGuidanceAppliedForActiveRun(generation, transcriptEvents, guidance)
     }
     return guidance
   }
 
-  private fun recordGuidanceAppliedForActiveRun(guidanceItems: List<String>) {
-    flushPendingAssistantDraftNow()
-    val events = activeRunTranscriptEvents ?: return
+  private fun recordGuidanceAppliedForActiveRun(
+    generation: Long,
+    events: MutableList<ConversationTranscriptEvent>,
+    guidanceItems: List<String>,
+  ) {
     val now = System.currentTimeMillis()
-    guidanceItems.forEach { guidance ->
-      events += ConversationTranscriptEvent(
-        type = "user_guidance",
-        role = "user",
-        content = guidance,
-        timestampMillis = now,
-      )
-      events += ConversationTranscriptEvent(
-        type = "guidance",
-        title = "Guidance applied",
-        detail = "Inserted after a completed tool result and before the next model request.",
-        timestampMillis = now,
-        status = "applied",
-      )
+    val snapshot = synchronized(events) {
+      guidanceItems.forEach { guidance ->
+        events += ConversationTranscriptEvent(
+          type = "user_guidance",
+          role = "user",
+          content = guidance,
+          timestampMillis = now,
+        )
+        events += ConversationTranscriptEvent(
+          type = "guidance",
+          title = "Guidance applied",
+          detail = "Inserted after a completed tool result and before the next model request.",
+          timestampMillis = now,
+          status = "applied",
+        )
+      }
+      events.toList()
     }
-    _state.update {
-      it.copy(
-        assistantDraft = it.assistantDraft?.withMergedTranscriptEvents(events),
-        status = "Guidance applied",
-      )
+    dispatchAgentRunCallback(generation) {
+      flushPendingAssistantDraftNow()
+      _state.update {
+        it.copy(
+          assistantDraft = it.assistantDraft?.withMergedTranscriptEvents(snapshot),
+          status = "Guidance applied",
+        )
+      }
     }
   }
 
@@ -1896,17 +1924,20 @@ class AgentController(
     flushPendingAssistantDraftNow()
     val events = activeRunTranscriptEvents ?: return
     val now = System.currentTimeMillis()
-    events += ConversationTranscriptEvent(
-      type = "guidance",
-      title = "Guidance waiting",
-      detail = "Will be inserted after the next completed tool result.",
-      timestampMillis = now,
-      status = "queued",
-      compact = true,
-    )
+    val snapshot = synchronized(events) {
+      events += ConversationTranscriptEvent(
+        type = "guidance",
+        title = "Guidance waiting",
+        detail = "Will be inserted after the next completed tool result.",
+        timestampMillis = now,
+        status = "queued",
+        compact = true,
+      )
+      events.toList()
+    }
     _state.update {
       it.copy(
-        assistantDraft = it.assistantDraft?.withMergedTranscriptEvents(events),
+        assistantDraft = it.assistantDraft?.withMergedTranscriptEvents(snapshot),
         status = "Guidance waiting for next tool result",
       )
     }
@@ -1925,6 +1956,7 @@ class AgentController(
     flushPendingAssistantDraftNow()
     val current = _state.value
     if (!current.isRunning) return
+    activeRunGeneration.incrementAndGet()
     activeRunJob?.cancel()
     activeRunJob = null
     clearPendingActiveRunGuidance()
@@ -1945,7 +1977,9 @@ class AgentController(
       status = "interrupted",
       compact = false,
     )
-    val activeTranscriptEvents = activeRunTranscriptEvents?.toList().orEmpty()
+    val activeTranscriptEvents = activeRunTranscriptEvents
+      ?.let { events -> synchronized(events) { events.toList() } }
+      .orEmpty()
     activeRunTranscriptEvents = null
     val interruptedTranscriptEvents = (current.assistantDraft?.transcriptEvents.orEmpty() +
       activeTranscriptEvents +
@@ -1991,6 +2025,7 @@ class AgentController(
           session = interrupted ?: interruptedSource,
           isRunning = false,
           status = "Agent loop interrupted",
+          invalidateWorkspaceCatalog = true,
         )
       }
     }
@@ -2046,6 +2081,7 @@ class AgentController(
       }
     } finally {
       cancellationHandle?.dispose()
+      com.flovera.app.koog.FloveraPythonCancellationRegistry.clear(runId)
     }
     currentCoroutineContext().ensureActive()
     val cancellation = result.exceptionOrNull() as? CancellationException
@@ -2280,6 +2316,7 @@ class AgentController(
     status: String = _state.value.status,
     resetPreviewToSelectedHtml: Boolean = false,
     startSelectedHtmlBackend: Boolean = false,
+    invalidateWorkspaceCatalog: Boolean = false,
   ) {
     workspaceController.setActiveSession(session?.id)
     val fullAuthorityResult = applyFullAuthoritySettingsProposals(settings)
@@ -2290,6 +2327,7 @@ class AgentController(
       status
     }
     workspaceController.syncFloveraSettings(settingsAfterAuthority)
+    if (invalidateWorkspaceCatalog) workspaceController.invalidateCatalogCache()
     var workspaceSnapshot = workspaceController.snapshot(settingsAfterAuthority.selectedHtmlPath)
     val normalizedSettings = settingsController.normalizeSelectedHtml(settingsAfterAuthority, workspaceSnapshot.selectedHtmlPath)
     if (normalizedSettings != settingsAfterAuthority) {

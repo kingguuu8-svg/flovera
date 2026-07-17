@@ -28,7 +28,13 @@ import com.flovera.app.session.SessionMessage
 import com.flovera.app.session.ToolEvent
 import com.flovera.app.workspace.WorkspaceManager
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -636,6 +642,52 @@ class AgentRunControllerInstrumentedTest {
     assertFalse(finishedCalled)
     assertEquals(1, store.load(session.id)?.messages?.size)
     assertEquals("user", store.load(session.id)?.messages?.single()?.role)
+  }
+
+  @Test
+  fun cancellationDuringSynchronousSetupDoesNotPublishStartedOrRunRuntime() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val store = AgentSessionStore(context)
+    val sessions = SessionController(store)
+    val session = store.create("Cancel setup ${System.currentTimeMillis()}")
+    val workspace = WorkspaceManager(context, "cancel-setup-${System.currentTimeMillis()}").also { it.ensureSeedFiles() }
+    val runtime = FakeAgentRuntime()
+    val productionLikeScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    val setupEntered = CountDownLatch(1)
+    val releaseSetup = CountDownLatch(1)
+    var startedCalled = false
+    var finishedCalled = false
+
+    val job = AgentRunController(runtime = runtime, scope = productionLikeScope).submit(
+      input = "cancel during setup",
+      settings = AppSettings(),
+      session = session,
+      workspace = workspace,
+      appendUserPrompt = { source, prompt ->
+        setupEntered.countDown()
+        releaseSetup.await(5, TimeUnit.SECONDS)
+        sessions.appendUserPrompt(source, prompt)
+      },
+      appendContextRecord = sessions::appendContextRecord,
+      appendCompressionDivider = sessions::appendCompressionDivider,
+      appendPromptContextBlocks = sessions::appendPromptContextBlocks,
+      appendMessage = sessions::appendMessage,
+      onStarted = { _, _ -> startedCalled = true },
+      onDraft = {},
+      onSessionUpdated = { _, _ -> },
+      onFinished = { _, _ -> finishedCalled = true },
+    )
+
+    assertNotNull(job)
+    assertTrue(setupEntered.await(5, TimeUnit.SECONDS))
+    job!!.cancel()
+    releaseSetup.countDown()
+    job.join()
+    productionLikeScope.cancel()
+
+    assertFalse(startedCalled)
+    assertFalse(finishedCalled)
+    assertEquals("", runtime.inputSeen)
   }
 
   private class BlockingAgentRuntime : AgentRuntime {

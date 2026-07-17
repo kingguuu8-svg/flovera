@@ -2,6 +2,7 @@ package com.flovera.app
 
 import androidx.test.platform.app.InstrumentationRegistry
 import com.flovera.app.config.AppSettings
+import com.flovera.app.config.SettingsController
 import com.flovera.app.config.SettingsStore
 import com.flovera.app.session.AgentRunTimelineEvent
 import com.flovera.app.session.AgentSessionStore
@@ -16,6 +17,10 @@ import com.flovera.app.session.ToolEvent
 import com.flovera.app.session.ToolContextRetentionPolicy
 import java.io.File
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import kotlin.concurrent.thread
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -741,6 +746,95 @@ class SessionManagementInstrumentedTest {
     assertTrue(history.contains("tool=write_file"))
     assertTrue(history.contains("wrote index.html"))
     assertFalse(history.contains("user: continue"))
+  }
+
+  @Test
+  fun concurrentSessionAppendsPreserveEveryMessage() {
+    val store = isolatedSessionStore("concurrent-append").store
+    val session = store.create("Concurrent append ${System.currentTimeMillis()}")
+    val workerCount = 24
+    val ready = CountDownLatch(workerCount)
+    val start = CountDownLatch(1)
+    val workers = (0 until workerCount).map { index ->
+      thread(start = true, name = "session-append-$index") {
+        ready.countDown()
+        start.await(5, TimeUnit.SECONDS)
+        store.appendMessage(session, SessionMessage(role = "assistant", content = "message-$index"))
+      }
+    }
+
+    assertTrue(ready.await(5, TimeUnit.SECONDS))
+    start.countDown()
+    workers.forEach { it.join(5_000) }
+
+    val contents = store.load(session.id)?.messages.orEmpty().map { it.content }.toSet()
+    assertEquals(workerCount, contents.size)
+    assertEquals((0 until workerCount).map { "message-$it" }.toSet(), contents)
+  }
+
+  @Test
+  fun sessionSummaryScanPreservesMalformedFiles() {
+    val harness = isolatedSessionStore("malformed-summary")
+    harness.sessionsRoot.mkdirs()
+    val malformed = File(harness.sessionsRoot, "recoverable.json")
+    malformed.writeText("{\"id\":\"recoverable\",\"title\":\"unfinished\"")
+
+    assertTrue(harness.store.listSummaries().isEmpty())
+    assertTrue("Malformed session data must be preserved for recovery", malformed.exists())
+  }
+
+  @Test
+  fun fullSessionCacheRemainsBounded() {
+    val store = isolatedSessionStore("bounded-cache").store
+    repeat(6) { index ->
+      val session = store.create("Cached $index")
+      store.appendMessage(session, SessionMessage(role = "user", content = "message-$index"))
+      store.load(session.id)
+    }
+
+    assertTrue(store.cachedSessionCountForTest() <= 2)
+  }
+
+  @Test
+  fun settingsUpdatesMergeAgainstLatestPersistedState() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val root = File(context.cacheDir, "settings-update-${UUID.randomUUID()}")
+    val store = SettingsStore(context, File(root, "settings.json"))
+    val controller = SettingsController(store)
+    val stale = AppSettings(networkEnabled = false, selectedHtmlPath = "")
+    store.save(stale)
+
+    val network = thread { controller.setNetworkEnabled(stale, true) }
+    val preview = thread { controller.setSelectedHtml(stale, "index.html") }
+    network.join(5_000)
+    preview.join(5_000)
+
+    val loaded = store.load()
+    assertTrue(loaded.networkEnabled)
+    assertEquals("index.html", loaded.selectedHtmlPath)
+  }
+
+  @Test
+  fun explicitWorkspaceRefreshSeesDirectRuntimeWrites() {
+    runBlocking {
+      val context = InstrumentationRegistry.getInstrumentation().targetContext
+      val root = File(context.cacheDir, "workspace-refresh-${UUID.randomUUID()}")
+      val workspaceId = "refresh-${UUID.randomUUID()}"
+      val settingsStore = SettingsStore(context, File(root, "settings.json"))
+      val sessionStore = AgentSessionStore(context, File(root, "sessions"))
+      settingsStore.save(AppSettings(activeWorkspaceId = workspaceId))
+      val controller = AgentController(context, settingsStore, sessionStore)
+      val directFile = File(context.filesDir, "workspaces/$workspaceId/direct-runtime.html")
+      directFile.parentFile?.mkdirs()
+      directFile.writeText("<html><body>direct</body></html>")
+
+      controller.refreshWorkspaceFiles().join()
+
+      assertTrue(controller.state.value.htmlFiles.contains("direct-runtime.html"))
+      root.deleteRecursively()
+      File(context.filesDir, "workspaces/$workspaceId").deleteRecursively()
+      File(context.filesDir, "workspace-snapshots/$workspaceId").deleteRecursively()
+    }
   }
 
   @Test

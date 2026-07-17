@@ -1296,6 +1296,34 @@ Implemented coverage:
 - Assistant draft updates are coalesced before entering Compose state, with
   run-boundary flushes for session updates, finish, interrupt, and guidance
   events so the final visible history remains complete.
+- Agent lifecycle callbacks now return to a single UI owner behind a monotonic
+  run generation. Cancellation during synchronous setup is checked before
+  `started` is published, and callbacks from an interrupted generation cannot
+  revive or overwrite a newer run.
+- Session read-modify-write operations are serialized per bounded lock stripe,
+  the full-session cache is a two-entry LRU, and summary scans preserve malformed
+  files unless a successful decode proves that the session is empty.
+- Settings mutations now apply field changes to the latest persisted settings
+  inside one synchronized store transaction, preventing queued active-session,
+  preview, provider, and toggle writes from replacing unrelated newer fields.
+- Explicit workspace refresh and agent finish/interruption invalidate the shared
+  catalog before scanning, so direct Python/runtime filesystem changes become
+  visible without discarding the catalog optimization for settings-only work.
+- Python cancellation IDs are cleared from Kotlin `finally` paths, session
+  catalog requests wait for workspace initialization, and asynchronous
+  `python_http` shutdown keeps servers tracked until stop succeeds.
+- Real-device update-only verification on `e9512097` passed
+  `AgentRunControllerInstrumentedTest` (21 tests),
+  `SessionManagementInstrumentedTest` (34 tests), and
+  `ProviderConfigInstrumentedTest` (62 tests) while preserving both APK first
+  install timestamps.
+- All five `WorkspaceAppRuntimeBaseInstrumentedTest` methods also pass when run
+  in isolated instrumentation processes, including static local HTTP,
+  WebView viewport hardening, and workspace-owned `python_http` SSE. The tests
+  now join asynchronous workspace refresh before selecting an artifact, so the
+  assertions verify the refreshed catalog instead of racing the background
+  mutation lane. Running the whole WebView-heavy class in one process can still
+  trigger vendor process reclamation; the deterministic gate is method-isolated.
 
 Remaining work:
 

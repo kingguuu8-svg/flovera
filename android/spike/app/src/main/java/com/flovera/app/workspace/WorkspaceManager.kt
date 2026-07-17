@@ -1402,6 +1402,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
       .toList()
   }
 
+  @Synchronized
   fun catalog(): WorkspaceCatalog {
     catalogCache?.let { return it }
     val htmlFiles = mutableListOf<String>()
@@ -1414,6 +1415,7 @@ class WorkspaceManager(context: Context, workspaceId: String = "default") {
     ).also { catalogCache = it }
   }
 
+  @Synchronized
   fun invalidateCatalogCache() {
     catalogCache = null
   }

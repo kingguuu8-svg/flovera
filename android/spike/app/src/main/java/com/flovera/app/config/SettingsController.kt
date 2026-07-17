@@ -21,16 +21,18 @@ class SettingsController(private val store: SettingsStore) {
   }
 
   fun loadResult(): SettingsLoadResult {
-    val result = store.loadResult()
-    val loaded = result.settings
-    val normalized = normalizeNetworkAndSearchDefaults(
+    return store.loadAndUpdate(::normalizeSettings)
+  }
+
+  private fun normalizeSettings(settings: AppSettings): AppSettings {
+    return normalizeNetworkAndSearchDefaults(
       normalizeReasoningEffort(
         normalizeDeepSeekThinkingEffort(
           normalizeAuthorityMode(
             normalizeRunLimits(
               normalizeAppearance(
                 normalizeLanguage(
-                  normalizeCustomOpenAIProvider(normalizeProviderAndModel(normalizeHtmlLists(loaded))),
+                  normalizeCustomOpenAIProvider(normalizeProviderAndModel(normalizeHtmlLists(settings))),
                 ),
               ),
             ),
@@ -38,8 +40,6 @@ class SettingsController(private val store: SettingsStore) {
         ),
       ).let { normalizeOpenRouterProvider(it) },
     )
-    if (normalized != loaded) store.save(normalized)
-    return result.copy(settings = normalized)
   }
 
   fun draftFor(settings: AppSettings): ModelSettingsDraft {
@@ -68,9 +68,7 @@ class SettingsController(private val store: SettingsStore) {
   }
 
   fun saveModelSettings(settings: AppSettings, draft: ModelSettingsDraft): AppSettings {
-    val updated = buildModelSettings(settings, draft)
-    store.save(updated)
-    return updated
+    return store.update(settings) { latest -> buildModelSettings(latest, draft) }
   }
 
   fun saveModelSettingsBatch(
@@ -88,23 +86,23 @@ class SettingsController(private val store: SettingsStore) {
     workspaceMemoryEnabled: Boolean,
     inputBarVisible: Boolean,
   ): AppSettings {
-    val updated = buildModelSettings(settings, draft).copy(
-      language = normalizeLanguageId(language),
-      themeMode = normalizeThemeMode(themeMode),
-      themeColor = normalizeThemeColor(themeColor),
-      agentAuthorityMode = normalizeAuthorityModeId(authorityMode),
-      deepSeekThinkingEffort = normalizeDeepSeekThinkingEffortId(deepSeekThinkingEffort),
-      networkEnabled = networkEnabled,
-      networkUserConfigured = true,
-      webSearchEnabled = webSearchEnabled,
-      webSearchUserConfigured = true,
-      braveSearchApiKey = normalizeBraveSearchApiKey(braveSearchApiKey),
-      backgroundKeepAliveEnabled = backgroundKeepAliveEnabled,
-      workspaceMemoryEnabled = workspaceMemoryEnabled,
-      inputBarVisible = inputBarVisible,
-    )
-    store.save(updated)
-    return updated
+    return store.update(settings) { latest ->
+      buildModelSettings(latest, draft).copy(
+        language = normalizeLanguageId(language),
+        themeMode = normalizeThemeMode(themeMode),
+        themeColor = normalizeThemeColor(themeColor),
+        agentAuthorityMode = normalizeAuthorityModeId(authorityMode),
+        deepSeekThinkingEffort = normalizeDeepSeekThinkingEffortId(deepSeekThinkingEffort),
+        networkEnabled = networkEnabled,
+        networkUserConfigured = true,
+        webSearchEnabled = webSearchEnabled,
+        webSearchUserConfigured = true,
+        braveSearchApiKey = normalizeBraveSearchApiKey(braveSearchApiKey),
+        backgroundKeepAliveEnabled = backgroundKeepAliveEnabled,
+        workspaceMemoryEnabled = workspaceMemoryEnabled,
+        inputBarVisible = inputBarVisible,
+      )
+    }
   }
 
   private fun buildModelSettings(settings: AppSettings, draft: ModelSettingsDraft): AppSettings {
@@ -129,64 +127,50 @@ class SettingsController(private val store: SettingsStore) {
   }
 
   fun setNetworkEnabled(settings: AppSettings, enabled: Boolean): AppSettings {
-    val updated = settings.copy(networkEnabled = enabled, networkUserConfigured = true)
-    store.save(updated)
-    return updated
+    return store.update(settings) { it.copy(networkEnabled = enabled, networkUserConfigured = true) }
   }
 
   fun setWebSearch(settings: AppSettings, enabled: Boolean, braveApiKey: String): AppSettings {
-    val updated = settings.copy(
-      webSearchEnabled = enabled,
-      webSearchUserConfigured = true,
-      braveSearchApiKey = normalizeBraveSearchApiKey(braveApiKey),
-    )
-    store.save(updated)
-    return updated
+    return store.update(settings) {
+      it.copy(
+        webSearchEnabled = enabled,
+        webSearchUserConfigured = true,
+        braveSearchApiKey = normalizeBraveSearchApiKey(braveApiKey),
+      )
+    }
   }
 
   fun setBackgroundKeepAlive(settings: AppSettings, enabled: Boolean): AppSettings {
-    val updated = settings.copy(backgroundKeepAliveEnabled = enabled)
-    store.save(updated)
-    return updated
+    return store.update(settings) { it.copy(backgroundKeepAliveEnabled = enabled) }
   }
 
   fun setInputBarVisible(settings: AppSettings, visible: Boolean): AppSettings {
-    val updated = settings.copy(inputBarVisible = visible)
-    store.save(updated)
-    return updated
+    return store.update(settings) { it.copy(inputBarVisible = visible) }
   }
 
   fun setWorkspaceMemoryEnabled(settings: AppSettings, enabled: Boolean): AppSettings {
-    val updated = settings.copy(workspaceMemoryEnabled = enabled)
-    store.save(updated)
-    return updated
+    return store.update(settings) { it.copy(workspaceMemoryEnabled = enabled) }
   }
 
   fun setLanguage(settings: AppSettings, language: String): AppSettings {
-    val updated = settings.copy(language = normalizeLanguageId(language))
-    store.save(updated)
-    return updated
+    return store.update(settings) { it.copy(language = normalizeLanguageId(language)) }
   }
 
   fun setAppearance(settings: AppSettings, themeMode: String, themeColor: String): AppSettings {
-    val updated = settings.copy(
-      themeMode = normalizeThemeMode(themeMode),
-      themeColor = normalizeThemeColor(themeColor),
-    )
-    store.save(updated)
-    return updated
+    return store.update(settings) {
+      it.copy(
+        themeMode = normalizeThemeMode(themeMode),
+        themeColor = normalizeThemeColor(themeColor),
+      )
+    }
   }
 
   fun setAuthorityMode(settings: AppSettings, authorityMode: String): AppSettings {
-    val updated = settings.copy(agentAuthorityMode = normalizeAuthorityModeId(authorityMode))
-    store.save(updated)
-    return updated
+    return store.update(settings) { it.copy(agentAuthorityMode = normalizeAuthorityModeId(authorityMode)) }
   }
 
   fun setDeepSeekThinkingEffort(settings: AppSettings, effort: String): AppSettings {
-    val updated = settings.copy(deepSeekThinkingEffort = normalizeDeepSeekThinkingEffortId(effort))
-    store.save(updated)
-    return updated
+    return store.update(settings) { it.copy(deepSeekThinkingEffort = normalizeDeepSeekThinkingEffortId(effort)) }
   }
 
   fun saveWorkspaceSecret(
@@ -201,105 +185,101 @@ class SettingsController(private val store: SettingsStore) {
     val displayName = name.trim().ifBlank { label.trim() }
     if (displayName.isBlank()) return settings
     val normalizedOriginal = normalizeSecretName(originalName)
-    val current = normalizeWorkspaceSecrets(settings.workspaceSecrets)
-    val normalizedName = normalizedOriginal.ifBlank { nextWorkspaceSecretName(current) }
-    val entry = WorkspaceSecret(
-      name = normalizedName,
-      label = displayName,
-      description = "",
-      value = value.trim(),
-      agentAllowed = agentAllowed,
-    )
-    val updated = settings.copy(
-      workspaceSecrets = (current.filterNot { it.normalizedName == normalizedName } + entry)
-        .sortedBy { it.normalizedName },
-    )
-    store.save(updated)
-    return updated
+    return store.update(settings) { latest ->
+      val current = normalizeWorkspaceSecrets(latest.workspaceSecrets)
+      val normalizedName = normalizedOriginal.ifBlank { nextWorkspaceSecretName(current) }
+      val entry = WorkspaceSecret(
+        name = normalizedName,
+        label = displayName,
+        description = "",
+        value = value.trim(),
+        agentAllowed = agentAllowed,
+      )
+      latest.copy(
+        workspaceSecrets = (current.filterNot { it.normalizedName == normalizedName } + entry)
+          .sortedBy { it.normalizedName },
+      )
+    }
   }
 
   fun deleteWorkspaceSecret(settings: AppSettings, name: String): AppSettings {
     val normalizedName = normalizeSecretName(name)
-    val updated = settings.copy(
-      workspaceSecrets = normalizeWorkspaceSecrets(settings.workspaceSecrets)
-        .filterNot { it.normalizedName == normalizedName },
-    )
-    store.save(updated)
-    return updated
+    return store.update(settings) { latest ->
+      latest.copy(
+        workspaceSecrets = normalizeWorkspaceSecrets(latest.workspaceSecrets)
+          .filterNot { it.normalizedName == normalizedName },
+      )
+    }
   }
 
   fun setWorkspaceSecretAgentAllowed(settings: AppSettings, name: String, allowed: Boolean): AppSettings {
     val normalizedName = normalizeSecretName(name)
-    val updated = settings.copy(
-      workspaceSecrets = normalizeWorkspaceSecrets(settings.workspaceSecrets).map { secret ->
-        if (secret.normalizedName == normalizedName) secret.copy(agentAllowed = allowed) else secret
-      },
-    )
-    store.save(updated)
-    return updated
+    return store.update(settings) { latest ->
+      latest.copy(
+        workspaceSecrets = normalizeWorkspaceSecrets(latest.workspaceSecrets).map { secret ->
+          if (secret.normalizedName == normalizedName) secret.copy(agentAllowed = allowed) else secret
+        },
+      )
+    }
   }
 
   fun applySettingsProposal(settings: AppSettings, changes: SettingsProposalChanges): AppSettings {
-    val proposedProviderId = changes.provider?.trim()?.takeIf { it.isNotBlank() }
-    val proposedProvider = proposedProviderId?.let { ModelProviderCatalog.findSelectableProvider(it) }
-    val provider = proposedProvider
-      ?: ModelProviderCatalog.findSelectableProvider(settings.provider)
-      ?: ModelProviderCatalog.defaultProvider
-    val model = if (proposedProviderId != null && proposedProvider == null) {
-      provider.defaultModel
-    } else {
-      changes.model?.trim()?.takeIf { it.isNotBlank() } ?: settings.model.ifBlank { provider.defaultModel }
+    return store.update(settings) { latest ->
+      val proposedProviderId = changes.provider?.trim()?.takeIf { it.isNotBlank() }
+      val proposedProvider = proposedProviderId?.let { ModelProviderCatalog.findSelectableProvider(it) }
+      val provider = proposedProvider
+        ?: ModelProviderCatalog.findSelectableProvider(latest.provider)
+        ?: ModelProviderCatalog.defaultProvider
+      val model = if (proposedProviderId != null && proposedProvider == null) {
+        provider.defaultModel
+      } else {
+        changes.model?.trim()?.takeIf { it.isNotBlank() } ?: latest.model.ifBlank { provider.defaultModel }
+      }
+      val maxIterations = changes.maxAgentIterations
+        ?.let { normalizeMaxAgentIterations(it) }
+        ?: latest.maxAgentIterations
+      latest.copy(
+        provider = provider.id,
+        model = model,
+        selectedHtmlPath = changes.selectedHtmlPath?.trim() ?: latest.selectedHtmlPath,
+        maxAgentIterations = maxIterations,
+        networkEnabled = changes.networkEnabled ?: latest.networkEnabled,
+        networkUserConfigured = if (changes.networkEnabled != null) true else latest.networkUserConfigured,
+        webSearchEnabled = changes.webSearchEnabled ?: latest.webSearchEnabled,
+        webSearchUserConfigured = if (changes.webSearchEnabled != null) true else latest.webSearchUserConfigured,
+        backgroundKeepAliveEnabled = changes.backgroundKeepAliveEnabled ?: latest.backgroundKeepAliveEnabled,
+        pythonRunToolFallbackEnabled = changes.pythonRunToolFallbackEnabled ?: latest.pythonRunToolFallbackEnabled,
+        workspaceMemoryEnabled = changes.workspaceMemoryEnabled ?: latest.workspaceMemoryEnabled,
+        language = changes.language?.let { normalizeLanguageId(it) } ?: latest.language,
+        themeMode = changes.themeMode?.let { normalizeThemeMode(it) } ?: latest.themeMode,
+        themeColor = changes.themeColor?.let { normalizeThemeColor(it) } ?: latest.themeColor,
+        agentAuthorityMode = changes.agentAuthorityMode?.let { normalizeAuthorityModeId(it) } ?: latest.agentAuthorityMode,
+        deepSeekThinkingEffort = changes.deepSeekThinkingEffort?.let { normalizeDeepSeekThinkingEffortId(it) }
+          ?: latest.deepSeekThinkingEffort,
+        reasoningEffort = changes.reasoningEffort?.let { normalizeReasoningEffortId(it) } ?: latest.reasoningEffort,
+        customOpenAIProvider = latest.customOpenAIProvider.copy(
+          baseUrl = changes.customOpenAIBaseUrl?.let { normalizeCustomOpenAIBaseUrl(it) }
+            ?: latest.customOpenAIProvider.baseUrl,
+          chatCompletionsPath = changes.customOpenAIChatCompletionsPath?.let { normalizeCustomOpenAIPath(it) }
+            ?: latest.customOpenAIProvider.chatCompletionsPath,
+          compatibilityMode = changes.customOpenAICompatibilityMode?.let { normalizeCustomOpenAICompatibilityMode(it) }
+            ?: latest.customOpenAIProvider.compatibilityMode,
+        ),
+        openRouterProvider = latest.openRouterProvider.copy(
+          providerPreferences = changes.openRouterProviderPreferences ?: latest.openRouterProvider.providerPreferences,
+          minCodingScore = changes.openRouterMinCodingScore?.let { normalizeOpenRouterMinCodingScore(it) }
+            ?: latest.openRouterProvider.minCodingScore,
+        ),
+      ).withMergedModelContextOverride(provider.id, model, changes)
     }
-    val maxIterations = changes.maxAgentIterations
-      ?.let { normalizeMaxAgentIterations(it) }
-      ?: settings.maxAgentIterations
-    val updated = settings.copy(
-      provider = provider.id,
-      model = model,
-      selectedHtmlPath = changes.selectedHtmlPath?.trim() ?: settings.selectedHtmlPath,
-      maxAgentIterations = maxIterations,
-      networkEnabled = changes.networkEnabled ?: settings.networkEnabled,
-      networkUserConfigured = if (changes.networkEnabled != null) true else settings.networkUserConfigured,
-      webSearchEnabled = changes.webSearchEnabled ?: settings.webSearchEnabled,
-      webSearchUserConfigured = if (changes.webSearchEnabled != null) true else settings.webSearchUserConfigured,
-      backgroundKeepAliveEnabled = changes.backgroundKeepAliveEnabled ?: settings.backgroundKeepAliveEnabled,
-      pythonRunToolFallbackEnabled = changes.pythonRunToolFallbackEnabled ?: settings.pythonRunToolFallbackEnabled,
-      workspaceMemoryEnabled = changes.workspaceMemoryEnabled ?: settings.workspaceMemoryEnabled,
-      language = changes.language?.let { normalizeLanguageId(it) } ?: settings.language,
-      themeMode = changes.themeMode?.let { normalizeThemeMode(it) } ?: settings.themeMode,
-      themeColor = changes.themeColor?.let { normalizeThemeColor(it) } ?: settings.themeColor,
-      agentAuthorityMode = changes.agentAuthorityMode?.let { normalizeAuthorityModeId(it) } ?: settings.agentAuthorityMode,
-      deepSeekThinkingEffort = changes.deepSeekThinkingEffort?.let { normalizeDeepSeekThinkingEffortId(it) }
-        ?: settings.deepSeekThinkingEffort,
-      reasoningEffort = changes.reasoningEffort?.let { normalizeReasoningEffortId(it) } ?: settings.reasoningEffort,
-      customOpenAIProvider = settings.customOpenAIProvider.copy(
-        baseUrl = changes.customOpenAIBaseUrl?.let { normalizeCustomOpenAIBaseUrl(it) }
-          ?: settings.customOpenAIProvider.baseUrl,
-        chatCompletionsPath = changes.customOpenAIChatCompletionsPath?.let { normalizeCustomOpenAIPath(it) }
-          ?: settings.customOpenAIProvider.chatCompletionsPath,
-        compatibilityMode = changes.customOpenAICompatibilityMode?.let { normalizeCustomOpenAICompatibilityMode(it) }
-          ?: settings.customOpenAIProvider.compatibilityMode,
-      ),
-      openRouterProvider = settings.openRouterProvider.copy(
-        providerPreferences = changes.openRouterProviderPreferences ?: settings.openRouterProvider.providerPreferences,
-        minCodingScore = changes.openRouterMinCodingScore?.let { normalizeOpenRouterMinCodingScore(it) }
-          ?: settings.openRouterProvider.minCodingScore,
-      ),
-    ).withMergedModelContextOverride(provider.id, model, changes)
-    store.save(updated)
-    return updated
   }
 
   fun setActiveSession(settings: AppSettings, sessionId: String?): AppSettings {
-    val updated = settings.copy(activeSessionId = sessionId)
-    store.save(updated)
-    return updated
+    return store.update(settings) { it.copy(activeSessionId = sessionId) }
   }
 
   fun setSelectedHtml(settings: AppSettings, path: String): AppSettings {
-    val updated = withSelectedHtml(settings, path)
-    store.save(updated)
-    return updated
+    return store.update(settings) { latest -> withSelectedHtml(latest, path) }
   }
 
   fun withSelectedHtml(settings: AppSettings, path: String): AppSettings {
@@ -312,24 +292,24 @@ class SettingsController(private val store: SettingsStore) {
 
   fun setPinnedHtmlPath(settings: AppSettings, path: String, pinned: Boolean): AppSettings {
     val normalized = path.trim()
-    val current = normalizeHtmlPathList(settings.pinnedHtmlPaths).filterNot { it == normalized }
-    val updatedPins = if (pinned && normalized.isNotBlank()) {
-      listOf(normalized) + current
-    } else {
-      current
+    return store.update(settings) { latest ->
+      val current = normalizeHtmlPathList(latest.pinnedHtmlPaths).filterNot { it == normalized }
+      val updatedPins = if (pinned && normalized.isNotBlank()) {
+        listOf(normalized) + current
+      } else {
+        current
+      }
+      latest.copy(pinnedHtmlPaths = updatedPins.distinct())
     }
-    val updated = settings.copy(pinnedHtmlPaths = updatedPins.distinct())
-    store.save(updated)
-    return updated
   }
 
   fun normalizeSelectedHtml(settings: AppSettings, selectedHtmlPath: String): AppSettings {
-    val updated = settings.copy(
-      selectedHtmlPath = selectedHtmlPath,
-      recentHtmlPaths = normalizeHtmlPathList(settings.recentHtmlPaths).take(RECENT_HTML_LIMIT),
-    )
-    if (updated != settings) store.save(updated)
-    return updated
+    return store.update(settings) { latest ->
+      latest.copy(
+        selectedHtmlPath = selectedHtmlPath,
+        recentHtmlPaths = normalizeHtmlPathList(latest.recentHtmlPaths).take(RECENT_HTML_LIMIT),
+      )
+    }
   }
 
   private fun normalizeProviderAndModel(settings: AppSettings): AppSettings {

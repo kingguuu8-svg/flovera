@@ -36,6 +36,7 @@ class SettingsStore(
     return loadResult().settings
   }
 
+  @Synchronized
   fun loadResult(): SettingsLoadResult {
     if (!settingsFile.exists()) return SettingsLoadResult(AppSettings())
     val stored = runCatching { readUtf8Text(settingsFile) }.getOrElse {
@@ -61,9 +62,26 @@ class SettingsStore(
     return SettingsLoadResult(AppSettings(), "Settings file is invalid; defaults were loaded.")
   }
 
+  @Synchronized
   fun save(settings: AppSettings) {
     val encrypted = settingsCipher.encrypt(json.encodeToString(settings))
     writeUtf8TextAtomically(settingsFile, json.encodeToString(encrypted))
+  }
+
+  @Synchronized
+  fun update(fallback: AppSettings, transform: (AppSettings) -> AppSettings): AppSettings {
+    val current = if (settingsFile.exists()) loadResult().settings else fallback
+    val updated = transform(current)
+    if (updated != current) save(updated)
+    return updated
+  }
+
+  @Synchronized
+  fun loadAndUpdate(transform: (AppSettings) -> AppSettings): SettingsLoadResult {
+    val result = loadResult()
+    val updated = transform(result.settings)
+    if (updated != result.settings) save(updated)
+    return result.copy(settings = updated)
   }
 
   private fun decodeEncryptedSettings(stored: String): Result<AppSettings>? {

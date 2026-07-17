@@ -4,8 +4,8 @@ import android.content.Context
 import com.flovera.app.storage.readUtf8Text
 import com.flovera.app.storage.writeUtf8TextAtomically
 import java.io.File
+import java.util.LinkedHashMap
 import java.util.UUID
-import java.util.concurrent.ConcurrentHashMap
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -126,7 +126,13 @@ class AgentSessionStore(
     ignoreUnknownKeys = true
     encodeDefaults = true
   }
-  private val sessionCache = ConcurrentHashMap<String, CachedSession>()
+  private val cacheLock = Any()
+  private val sessionLocks = Array(SESSION_LOCK_STRIPES) { Any() }
+  private val sessionCache = object : LinkedHashMap<String, CachedSession>(SESSION_CACHE_LIMIT + 1, 0.75f, true) {
+    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, CachedSession>?): Boolean {
+      return size > SESSION_CACHE_LIMIT
+    }
+  }
 
   fun create(title: String = "New session"): AgentSession {
     val session = draft(title)
@@ -145,22 +151,29 @@ class AgentSessionStore(
   }
 
   fun load(id: String): AgentSession? {
+    return withSessionLock(id) { loadLocked(id) }
+  }
+
+  private fun loadLocked(id: String): AgentSession? {
     val file = fileFor(id)
     if (!file.exists()) {
-      sessionCache.remove(id)
+      removeCached(id)
       return null
     }
     val modifiedAtMillis = file.lastModified()
     val lengthBytes = file.length()
-    sessionCache[id]?.takeIf {
+    cached(id)?.takeIf {
       it.modifiedAtMillis == modifiedAtMillis && it.lengthBytes == lengthBytes
     }?.let { return it.session }
     val session = runCatching { json.decodeFromString<AgentSession>(readUtf8Text(file)) }.getOrNull()
     if (session != null) {
-      sessionCache[id] = CachedSession(
+      cache(
+        id,
+        CachedSession(
         modifiedAtMillis = modifiedAtMillis,
         lengthBytes = lengthBytes,
         session = session,
+        ),
       )
     }
     return session
@@ -169,14 +182,7 @@ class AgentSessionStore(
   fun list(includeArchived: Boolean = false): List<AgentSession> {
     if (!root.exists()) return emptyList()
     return root.listFiles { file -> file.extension == "json" }
-      ?.mapNotNull { file ->
-        val session = load(file.nameWithoutExtension) ?: return@mapNotNull null
-        if (session.messages.isEmpty()) {
-          delete(session.id)
-          return@mapNotNull null
-        }
-        session
-      }
+      ?.mapNotNull(::loadNonEmptySession)
       ?.filter { includeArchived || it.archivedAtMillis == null }
       ?.sortedWith(sessionSort)
       ?: emptyList()
@@ -185,43 +191,73 @@ class AgentSessionStore(
   fun listSummaries(includeArchived: Boolean = false): List<AgentSession> {
     if (!root.exists()) return emptyList()
     return root.listFiles { file -> file.extension == "json" }
-      ?.mapNotNull { file ->
-        val cached = sessionCache[file.nameWithoutExtension]
-        if (cached != null &&
-          cached.modifiedAtMillis == file.lastModified() &&
-          cached.lengthBytes == file.length()
-        ) {
-          if (cached.session.messages.isEmpty()) {
-            delete(cached.session.id)
-            return@mapNotNull null
-          }
-          return@mapNotNull cached.session.copy(
-            messages = emptyList(),
-            contextRecords = emptyList(),
-            promptContextBlocks = emptyList(),
-            summaryOnly = true,
-          )
-        }
-        readSummaryHeader(file)?.let { header ->
-          if (!header.hasMessages) {
-            delete(header.summary.id.ifBlank { file.nameWithoutExtension })
-            return@mapNotNull null
-          }
-          return@mapNotNull summarySession(file, header.summary)
-        }
-        val content = runCatching { readUtf8Text(file) }.getOrNull() ?: return@mapNotNull null
-        if (!serializedMessagesArePresent(content)) {
-          sessionCache.remove(file.nameWithoutExtension)
-          file.delete()
-          return@mapNotNull null
-        }
-        val summary = runCatching { json.decodeFromString<AgentSessionSummaryPayload>(content) }.getOrNull()
-          ?: return@mapNotNull null
-        summarySession(file, summary)
-      }
+      ?.mapNotNull(::loadSessionSummary)
       ?.filter { includeArchived || it.archivedAtMillis == null }
       ?.sortedWith(sessionSort)
       ?: emptyList()
+  }
+
+  private fun loadNonEmptySession(file: File): AgentSession? {
+    val id = file.nameWithoutExtension
+    return withSessionLock(id) {
+      val session = loadLocked(id) ?: return@withSessionLock null
+      if (session.messages.isEmpty()) {
+        deleteLocked(id)
+        null
+      } else {
+        session
+      }
+    }
+  }
+
+  private fun loadSessionSummary(file: File): AgentSession? {
+    val id = file.nameWithoutExtension
+    return withSessionLock(id) {
+      val cached = cached(id)
+      if (cached != null &&
+        cached.modifiedAtMillis == file.lastModified() &&
+        cached.lengthBytes == file.length()
+      ) {
+        if (cached.session.messages.isEmpty()) {
+          deleteLocked(id)
+          return@withSessionLock null
+        }
+        return@withSessionLock cached.session.asSummary()
+      }
+      readSummaryHeader(file)?.let { header ->
+        if (!header.hasMessages) {
+          deleteLocked(id)
+          return@withSessionLock null
+        }
+        return@withSessionLock summarySession(file, header.summary)
+      }
+      val content = runCatching { readUtf8Text(file) }.getOrNull() ?: return@withSessionLock null
+      if (!serializedMessagesArePresent(content)) {
+        val decoded = runCatching { json.decodeFromString<AgentSession>(content) }.getOrNull()
+          ?: return@withSessionLock null
+        if (decoded.messages.isEmpty()) {
+          deleteLocked(id)
+          return@withSessionLock null
+        }
+        cache(
+          id,
+          CachedSession(file.lastModified(), file.length(), decoded),
+        )
+        return@withSessionLock decoded.asSummary()
+      }
+      val summary = runCatching { json.decodeFromString<AgentSessionSummaryPayload>(content) }.getOrNull()
+        ?: return@withSessionLock null
+      summarySession(file, summary)
+    }
+  }
+
+  private fun AgentSession.asSummary(): AgentSession {
+    return copy(
+      messages = emptyList(),
+      contextRecords = emptyList(),
+      promptContextBlocks = emptyList(),
+      summaryOnly = true,
+    )
   }
 
   fun listArchived(): List<AgentSession> = list(includeArchived = true)
@@ -231,13 +267,15 @@ class AgentSessionStore(
   fun rename(id: String, title: String): AgentSession? {
     val normalized = title.trim()
     if (normalized.isBlank()) return load(id)
-    val session = load(id) ?: return null
-    val updated = session.copy(
-      title = normalized,
-      updatedAtMillis = System.currentTimeMillis(),
-    )
-    save(updated)
-    return updated
+    return withSessionLock(id) {
+      val session = loadLocked(id) ?: return@withSessionLock null
+      val updated = session.copy(
+        title = normalized,
+        updatedAtMillis = System.currentTimeMillis(),
+      )
+      saveLocked(updated)
+      updated
+    }
   }
 
   fun duplicate(id: String): AgentSession? {
@@ -257,73 +295,85 @@ class AgentSessionStore(
   }
 
   fun archive(id: String): AgentSession? {
-    val session = load(id) ?: return null
-    val now = System.currentTimeMillis()
-    val updated = session.copy(
-      archivedAtMillis = now,
-      pinnedAtMillis = null,
-      updatedAtMillis = now,
-    )
-    save(updated)
-    return updated
+    return withSessionLock(id) {
+      val session = loadLocked(id) ?: return@withSessionLock null
+      val now = System.currentTimeMillis()
+      val updated = session.copy(
+        archivedAtMillis = now,
+        pinnedAtMillis = null,
+        updatedAtMillis = now,
+      )
+      saveLocked(updated)
+      updated
+    }
   }
 
   fun setPinned(id: String, pinned: Boolean): AgentSession? {
-    val session = load(id) ?: return null
-    if (session.archivedAtMillis != null) return session
-    val now = System.currentTimeMillis()
-    val updated = session.copy(
-      pinnedAtMillis = if (pinned) now else null,
-      updatedAtMillis = now,
-    )
-    save(updated)
-    return updated
+    return withSessionLock(id) {
+      val session = loadLocked(id) ?: return@withSessionLock null
+      if (session.archivedAtMillis != null) return@withSessionLock session
+      val now = System.currentTimeMillis()
+      val updated = session.copy(
+        pinnedAtMillis = if (pinned) now else null,
+        updatedAtMillis = now,
+      )
+      saveLocked(updated)
+      updated
+    }
   }
 
   fun restore(id: String): AgentSession? {
-    val session = load(id) ?: return null
-    val updated = session.copy(
-      archivedAtMillis = null,
-      updatedAtMillis = System.currentTimeMillis(),
-    )
-    save(updated)
-    return updated
+    return withSessionLock(id) {
+      val session = loadLocked(id) ?: return@withSessionLock null
+      val updated = session.copy(
+        archivedAtMillis = null,
+        updatedAtMillis = System.currentTimeMillis(),
+      )
+      saveLocked(updated)
+      updated
+    }
   }
 
   fun appendMessage(session: AgentSession, message: SessionMessage): AgentSession {
-    val latest = load(session.id) ?: session
-    val backfilledBlocks = PromptContextLedger.withBackfilledBlocks(latest)
-    val messageIndex = latest.messages.size
-    val runIndex = PromptContextLedger.runIndexForMessage(latest.messages, message)
-    val updated = latest.copy(
-      updatedAtMillis = System.currentTimeMillis(),
-      messages = latest.messages + message,
-      promptContextBlocks = backfilledBlocks +
-        PromptContextLedger.blocksForMessage(message, messageIndex, runIndex),
-    )
-    save(updated)
-    return updated
+    return withSessionLock(session.id) {
+      val latest = loadLocked(session.id) ?: session
+      val backfilledBlocks = PromptContextLedger.withBackfilledBlocks(latest)
+      val messageIndex = latest.messages.size
+      val runIndex = PromptContextLedger.runIndexForMessage(latest.messages, message)
+      val updated = latest.copy(
+        updatedAtMillis = System.currentTimeMillis(),
+        messages = latest.messages + message,
+        promptContextBlocks = backfilledBlocks +
+          PromptContextLedger.blocksForMessage(message, messageIndex, runIndex),
+      )
+      saveLocked(updated)
+      updated
+    }
   }
 
   fun appendPromptContextBlocks(session: AgentSession, blocks: List<PromptContextBlock>): AgentSession {
     if (blocks.isEmpty()) return load(session.id) ?: session
-    val latest = load(session.id) ?: session
-    val updated = latest.copy(
-      updatedAtMillis = System.currentTimeMillis(),
-      promptContextBlocks = latest.promptContextBlocks + blocks,
-    )
-    save(updated)
-    return updated
+    return withSessionLock(session.id) {
+      val latest = loadLocked(session.id) ?: session
+      val updated = latest.copy(
+        updatedAtMillis = System.currentTimeMillis(),
+        promptContextBlocks = latest.promptContextBlocks + blocks,
+      )
+      saveLocked(updated)
+      updated
+    }
   }
 
   fun appendContextRecord(session: AgentSession, record: ContextUsageRecord): AgentSession {
-    val latest = load(session.id) ?: session
-    val updated = latest.copy(
-      updatedAtMillis = System.currentTimeMillis(),
-      contextRecords = (latest.contextRecords + record).takeLast(CONTEXT_RECORD_LIMIT),
-    )
-    save(updated)
-    return updated
+    return withSessionLock(session.id) {
+      val latest = loadLocked(session.id) ?: session
+      val updated = latest.copy(
+        updatedAtMillis = System.currentTimeMillis(),
+        contextRecords = (latest.contextRecords + record).takeLast(CONTEXT_RECORD_LIMIT),
+      )
+      saveLocked(updated)
+      updated
+    }
   }
 
   fun appendCompressionDivider(session: AgentSession, record: ContextUsageRecord): AgentSession {
@@ -355,34 +405,47 @@ class AgentSessionStore(
   }
 
   fun truncateMessages(id: String, messageCount: Int): AgentSession? {
-    val session = load(id) ?: return null
-    val normalizedCount = messageCount.coerceIn(0, session.messages.size)
-    if (normalizedCount == 0) {
-      delete(id)
-      return null
+    return withSessionLock(id) {
+      val session = loadLocked(id) ?: return@withSessionLock null
+      val normalizedCount = messageCount.coerceIn(0, session.messages.size)
+      if (normalizedCount == 0) {
+        deleteLocked(id)
+        return@withSessionLock null
+      }
+      val updated = session.copy(
+        updatedAtMillis = System.currentTimeMillis(),
+        messages = session.messages.take(normalizedCount),
+        promptContextBlocks = session.promptContextBlocks
+          .filter { it.sourceMessageIndex < normalizedCount },
+      )
+      saveLocked(updated)
+      updated
     }
-    val updated = session.copy(
-      updatedAtMillis = System.currentTimeMillis(),
-      messages = session.messages.take(normalizedCount),
-      promptContextBlocks = session.promptContextBlocks
-        .filter { it.sourceMessageIndex < normalizedCount },
-    )
-    save(updated)
-    return updated
   }
 
   fun save(session: AgentSession) {
+    withSessionLock(session.id) { saveLocked(session) }
+  }
+
+  private fun saveLocked(session: AgentSession) {
     val file = fileFor(session.id)
     writeUtf8TextAtomically(file, json.encodeToString(session))
-    sessionCache[session.id] = CachedSession(
-      modifiedAtMillis = file.lastModified(),
-      lengthBytes = file.length(),
-      session = session,
+    cache(
+      session.id,
+      CachedSession(
+        modifiedAtMillis = file.lastModified(),
+        lengthBytes = file.length(),
+        session = session,
+      ),
     )
   }
 
   fun delete(id: String): Boolean {
-    sessionCache.remove(id)
+    return withSessionLock(id) { deleteLocked(id) }
+  }
+
+  private fun deleteLocked(id: String): Boolean {
+    removeCached(id)
     return fileFor(id).delete()
   }
 
@@ -390,12 +453,40 @@ class AgentSessionStore(
     if (!root.exists()) return
     root.listFiles { file -> file.extension == "json" }
       ?.forEach { file ->
-        val session = load(file.nameWithoutExtension)
-        if (session?.messages?.isEmpty() == true) delete(session.id)
+        val id = file.nameWithoutExtension
+        withSessionLock(id) {
+          val session = loadLocked(id)
+          if (session?.messages?.isEmpty() == true) deleteLocked(id)
+        }
       }
   }
 
   private fun fileFor(id: String): File = File(root, "$id.json")
+
+  private inline fun <T> withSessionLock(id: String, block: () -> T): T {
+    val index = (id.hashCode() and Int.MAX_VALUE) % sessionLocks.size
+    return synchronized(sessionLocks[index], block)
+  }
+
+  private fun cached(id: String): CachedSession? = synchronized(cacheLock) {
+    sessionCache[id]
+  }
+
+  private fun cache(id: String, session: CachedSession) {
+    synchronized(cacheLock) {
+      sessionCache[id] = session
+    }
+  }
+
+  private fun removeCached(id: String) {
+    synchronized(cacheLock) {
+      sessionCache.remove(id)
+    }
+  }
+
+  internal fun cachedSessionCountForTest(): Int = synchronized(cacheLock) {
+    sessionCache.size
+  }
 
   private data class CachedSession(
     val modifiedAtMillis: Long,
@@ -461,6 +552,8 @@ class AgentSessionStore(
 
   private companion object {
     const val CONTEXT_RECORD_LIMIT = 80
+    const val SESSION_CACHE_LIMIT = 2
+    const val SESSION_LOCK_STRIPES = 16
     const val SESSION_SUMMARY_PREFIX_BYTES = 64 * 1024
 
     val sessionSort = compareByDescending<AgentSession> { it.pinnedAtMillis != null }

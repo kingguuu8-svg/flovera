@@ -79,6 +79,8 @@ class PythonRunTool(
       result
     } finally {
       cancellationHandle?.dispose()
+      FloveraPythonCancellationRegistry.clear(runId)
+      workspace.invalidateCatalogCache()
     }
   }
 }

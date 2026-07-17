@@ -29,6 +29,7 @@ class WorkspacePythonHttpRuntime(
 ) {
   private val servers = ConcurrentHashMap<String, RunningServer>()
   private val lastErrors = ConcurrentHashMap<String, String>()
+  private val stoppingKeys = ConcurrentHashMap.newKeySet<String>()
 
   fun previewUrl(artifact: WorkspaceArtifact): String? {
     val preview = artifact.preview ?: return null
@@ -50,9 +51,20 @@ class WorkspacePythonHttpRuntime(
     val key = runtimeKey(artifact, preview)
     val running = servers[key]
     if (running?.isOpen() == true) {
-      return running.toStatus("running")
+      val error = lastErrors[key]
+      return running.toStatus(
+        state = when {
+          key in stoppingKeys -> "stopping"
+          error.isNullOrBlank() -> "running"
+          else -> "error"
+        },
+        detail = error.orEmpty(),
+      )
     }
-    if (running != null) servers.remove(key, running)
+    if (running != null) {
+      servers.remove(key, running)
+      stoppingKeys.remove(key)
+    }
     val error = lastErrors[key]
     if (!error.isNullOrBlank()) {
       return WorkspacePythonHttpRuntimeStatus(
@@ -86,12 +98,7 @@ class WorkspacePythonHttpRuntime(
     val runningServers = synchronized(servers) {
       servers.values
         .filter { it.manifestPath == manifestPath }
-        .also { matches ->
-          matches.forEach { running ->
-            servers.remove(running.key, running)
-            lastErrors.remove(running.key)
-          }
-        }
+        .filter { stoppingKeys.add(it.key) }
     }
     runningServers.forEach(::stopInBackground)
     return runningServers.isNotEmpty()
@@ -103,9 +110,17 @@ class WorkspacePythonHttpRuntime(
 
   private fun ensureServer(artifact: WorkspaceArtifact, preview: WorkspaceArtifactEntrypoint): RunningServer {
     val key = runtimeKey(artifact, preview)
-    servers[key]?.takeIf { it.isOpen() }?.let { return it }
+    servers[key]?.takeIf { it.isOpen() }?.let { running ->
+      check(key !in stoppingKeys) { "python_http server is still stopping" }
+      lastErrors[key]?.takeIf { it.isNotBlank() }?.let(::error)
+      return running
+    }
     synchronized(servers) {
-      servers[key]?.takeIf { it.isOpen() }?.let { return it }
+      servers[key]?.takeIf { it.isOpen() }?.let { running ->
+        check(key !in stoppingKeys) { "python_http server is still stopping" }
+        lastErrors[key]?.takeIf { it.isNotBlank() }?.let(::error)
+        return running
+      }
       val port = reservePort()
       val tokens = splitCommand(preview.command)
       require(tokens.size >= 2) { "python_http command must look like: python path/to/server.py [args...]" }
@@ -169,7 +184,11 @@ class WorkspacePythonHttpRuntime(
       try {
         waitUntilOpen(port, running.thread, startupError)
       } catch (error: Throwable) {
-        runCatching { stopRunningServer(running) }
+        val stopped = runCatching { stopRunningServer(running) }.getOrDefault(false)
+        if (!stopped) {
+          servers[key] = running
+          lastErrors[key] = "python_http startup failed and the server could not be stopped"
+        }
         throw error
       }
       servers[key] = running
@@ -179,12 +198,19 @@ class WorkspacePythonHttpRuntime(
 
   private fun stopByKey(key: String): Boolean {
     val running = servers[key] ?: return false
-    val finished = stopRunningServer(running)
-    if (finished) {
-      servers.remove(key, running)
-      lastErrors.remove(key)
+    if (!stoppingKeys.add(key)) return false
+    return try {
+      val finished = stopRunningServer(running)
+      if (finished) {
+        servers.remove(key, running)
+        lastErrors.remove(key)
+      } else {
+        lastErrors[key] = "python_http server did not stop after $STOP_ATTEMPTS attempts"
+      }
+      finished
+    } finally {
+      stoppingKeys.remove(key)
     }
-    return finished
   }
 
   private fun stopRunningServer(running: RunningServer): Boolean {
@@ -210,7 +236,14 @@ class WorkspacePythonHttpRuntime(
       isDaemon = true,
       name = "FloveraWorkspacePythonHttpStop-${running.port}",
     ) {
-      runCatching { stopRunningServer(running) }
+      val finished = runCatching { stopRunningServer(running) }.getOrDefault(false)
+      if (finished) {
+        servers.remove(running.key, running)
+        lastErrors.remove(running.key)
+      } else {
+        lastErrors[running.key] = "python_http server did not stop after $STOP_ATTEMPTS attempts"
+      }
+      stoppingKeys.remove(running.key)
     }
   }
 
@@ -330,7 +363,7 @@ class WorkspacePythonHttpRuntime(
   ) {
     fun isOpen(): Boolean = thread.isAlive
 
-    fun toStatus(state: String): WorkspacePythonHttpRuntimeStatus {
+    fun toStatus(state: String, detail: String = ""): WorkspacePythonHttpRuntimeStatus {
       return WorkspacePythonHttpRuntimeStatus(
         manifestPath = manifestPath,
         rootPath = rootPath,
@@ -340,6 +373,7 @@ class WorkspacePythonHttpRuntime(
         command = command,
         cwd = cwd,
         startedAtMillis = startedAtMillis,
+        detail = detail,
       )
     }
   }

@@ -14,6 +14,7 @@ import java.net.URL
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -45,12 +46,11 @@ class WorkspaceAppRuntimeBaseInstrumentedTest {
         """.trimIndent(),
         createAutoSnapshot = false,
       )
-      val controller = AgentController(context, settingsStore = settingsStore).also {
-        it.refreshWorkspaceFiles()
-        it.selectHtmlFile("static-demo/index.html")
-      }
+      val controller = AgentController(context, settingsStore = settingsStore)
+      runBlocking { controller.refreshWorkspaceFiles().join() }
+      controller.selectHtmlFile("static-demo/index.html")
 
-      val selectedUrl = controller.state.value.selectedHtmlUrl.orEmpty()
+      val selectedUrl = waitForSelectedHtmlUrl(controller)
       assertTrue(selectedUrl.startsWith("http://127.0.0.1:"))
       assertTrue(URL(selectedUrl).readText().contains("Static Runtime"))
 
@@ -99,11 +99,10 @@ class WorkspaceAppRuntimeBaseInstrumentedTest {
         """.trimIndent(),
         createAutoSnapshot = false,
       )
-      val controller = AgentController(context, settingsStore = settingsStore).also {
-        it.refreshWorkspaceFiles()
-        it.selectHtmlFile("static-demo/index.html")
-      }
-      val selectedUrl = controller.state.value.selectedHtmlUrl.orEmpty()
+      val controller = AgentController(context, settingsStore = settingsStore)
+      runBlocking { controller.refreshWorkspaceFiles().join() }
+      controller.selectHtmlFile("static-demo/index.html")
+      val selectedUrl = waitForSelectedHtmlUrl(controller)
       assertTrue(selectedUrl.startsWith("http://127.0.0.1:"))
 
       val latch = CountDownLatch(1)
@@ -260,10 +259,9 @@ class WorkspaceAppRuntimeBaseInstrumentedTest {
         """.trimIndent(),
         createAutoSnapshot = false,
       )
-      val controller = AgentController(context, settingsStore = settingsStore).also {
-        it.refreshWorkspaceFiles()
-        it.selectHtmlFile("own-api/src/web/index.html")
-      }
+      val controller = AgentController(context, settingsStore = settingsStore)
+      runBlocking { controller.refreshWorkspaceFiles().join() }
+      controller.selectHtmlFile("own-api/src/web/index.html")
       val selectedUrl = waitForSelectedHtmlUrl(controller)
       assertTrue(selectedUrl.startsWith("http://127.0.0.1:"))
       assertFalse(selectedUrl.contains("/__flovera__/"))
